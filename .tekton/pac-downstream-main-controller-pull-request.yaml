@@ -14,7 +14,6 @@ metadata:
       ".konflux/dockerfiles/controller.Dockerfile".pathChanged() ||
       ".tekton/pac-downstream-main-controller-pull-request.yaml".pathChanged() ||
       ".tekton/docker-build-ta.yaml".pathChanged())
-  creationTimestamp: null
   labels:
     appstudio.openshift.io/application: pac-downstream-main
     appstudio.openshift.io/component: pac-downstream-main-controller
