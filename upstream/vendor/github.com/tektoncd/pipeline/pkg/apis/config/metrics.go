@@ -29,9 +29,6 @@ const (
 	// metricsPipelinerunLevel determines to what level to aggregate metrics
 	// for pipelinerun
 	metricsPipelinerunLevelKey = "metrics.pipelinerun.level"
-	// metricsRunningPipelinerunLevelKey determines to what level to aggregate metrics
-	// for running pipelineruns
-	metricsRunningPipelinerunLevelKey = "metrics.running-pipelinerun.level"
 	// metricsDurationTaskrunType determines what type of
 	// metrics to use for aggregating duration for taskrun
 	metricsDurationTaskrunType = "metrics.taskrun.duration-type"
@@ -58,9 +55,6 @@ const (
 	// DefaultPipelinerunLevel determines to what level to aggregate metrics
 	// when it isn't specified in configmap
 	DefaultPipelinerunLevel = PipelinerunLevelAtPipeline
-	// DefaultRunningPipelinerunLevel determines to what level to aggregate metrics
-	// when it isn't specified in configmap
-	DefaultRunningPipelinerunLevel = ""
 	// PipelinerunLevelAtPipelinerun specify that aggregation will be done at
 	// pipelinerun level
 	PipelinerunLevelAtPipelinerun = "pipelinerun"
@@ -102,7 +96,6 @@ var DefaultMetrics, _ = newMetricsFromMap(map[string]string{})
 type Metrics struct {
 	TaskrunLevel            string
 	PipelinerunLevel        string
-	RunningPipelinerunLevel string
 	DurationTaskrunType     string
 	DurationPipelinerunType string
 	CountWithReason         bool
@@ -137,7 +130,6 @@ func newMetricsFromMap(cfgMap map[string]string) (*Metrics, error) {
 	tc := Metrics{
 		TaskrunLevel:            DefaultTaskrunLevel,
 		PipelinerunLevel:        DefaultPipelinerunLevel,
-		RunningPipelinerunLevel: DefaultRunningPipelinerunLevel,
 		DurationTaskrunType:     DefaultDurationTaskrunType,
 		DurationPipelinerunType: DefaultDurationPipelinerunType,
 		CountWithReason:         false,
@@ -150,9 +142,6 @@ func newMetricsFromMap(cfgMap map[string]string) (*Metrics, error) {
 
 	if pipelinerunLevel, ok := cfgMap[metricsPipelinerunLevelKey]; ok {
 		tc.PipelinerunLevel = pipelinerunLevel
-	}
-	if runningPipelinerunLevel, ok := cfgMap[metricsRunningPipelinerunLevelKey]; ok {
-		tc.RunningPipelinerunLevel = runningPipelinerunLevel
 	}
 	if durationTaskrun, ok := cfgMap[metricsDurationTaskrunType]; ok {
 		tc.DurationTaskrunType = durationTaskrun

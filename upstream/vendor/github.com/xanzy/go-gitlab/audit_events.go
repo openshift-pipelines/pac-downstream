@@ -14,7 +14,6 @@ type AuditEvent struct {
 	AuthorID   int               `json:"author_id"`
 	EntityID   int               `json:"entity_id"`
 	EntityType string            `json:"entity_type"`
-	EventName  string            `json:"event_name"`
 	Details    AuditEventDetails `json:"details"`
 	CreatedAt  *time.Time        `json:"created_at"`
 	EventType  string            `json:"event_type"`
@@ -43,7 +42,6 @@ type AuditEventDetails struct {
 	IPAddress     string      `json:"ip_address"`
 	EntityPath    string      `json:"entity_path"`
 	FailedLogin   string      `json:"failed_login"`
-	EventName     string      `json:"event_name"`
 }
 
 // AuditEventsService handles communication with the project/group/instance

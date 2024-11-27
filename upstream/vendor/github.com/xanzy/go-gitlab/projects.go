@@ -66,7 +66,6 @@ type Project struct {
 	ContainerRegistryAccessLevel              AccessControlValue         `json:"container_registry_access_level"`
 	ContainerRegistryImagePrefix              string                     `json:"container_registry_image_prefix,omitempty"`
 	CreatedAt                                 *time.Time                 `json:"created_at,omitempty"`
-	UpdatedAt                                 *time.Time                 `json:"updated_at,omitempty"`
 	LastActivityAt                            *time.Time                 `json:"last_activity_at,omitempty"`
 	CreatorID                                 int                        `json:"creator_id"`
 	Namespace                                 *ProjectNamespace          `json:"namespace"`
@@ -84,7 +83,6 @@ type Project struct {
 	StarCount                                 int                        `json:"star_count"`
 	RunnersToken                              string                     `json:"runners_token"`
 	AllowMergeOnSkippedPipeline               bool                       `json:"allow_merge_on_skipped_pipeline"`
-	AllowPipelineTriggerApproveDeployment     bool                       `json:"allow_pipeline_trigger_approve_deployment"`
 	OnlyAllowMergeIfPipelineSucceeds          bool                       `json:"only_allow_merge_if_pipeline_succeeds"`
 	OnlyAllowMergeIfAllDiscussionsAreResolved bool                       `json:"only_allow_merge_if_all_discussions_are_resolved"`
 	RemoveSourceBranchAfterMerge              bool                       `json:"remove_source_branch_after_merge"`
@@ -311,7 +309,6 @@ type ProjectApprovalRule struct {
 	ID                            int                `json:"id"`
 	Name                          string             `json:"name"`
 	RuleType                      string             `json:"rule_type"`
-	ReportType                    string             `json:"report_type"`
 	EligibleApprovers             []*BasicUser       `json:"eligible_approvers"`
 	ApprovalsRequired             int                `json:"approvals_required"`
 	Users                         []*BasicUser       `json:"users"`
@@ -1046,44 +1043,6 @@ func (s *ProjectsService) StarProject(pid interface{}, options ...RequestOptionF
 	return p, resp, nil
 }
 
-// ListProjectInvidedGroupOptions represents the available
-// ListProjectsInvitedGroups() options.
-//
-// GitLab API docs:
-// https://docs.gitlab.com/ee/api/projects.html#list-a-projects-invited-groups
-type ListProjectInvidedGroupOptions struct {
-	ListOptions
-	Search               *string           `url:"search,omitempty" json:"search,omitempty"`
-	MinAccessLevel       *AccessLevelValue `url:"min_access_level,omitempty" json:"min_access_level,omitempty"`
-	Relation             *[]string         `url:"relation,omitempty" json:"relation,omitempty"`
-	WithCustomAttributes *bool             `url:"with_custom_attributes,omitempty" json:"with_custom_attributes,omitempty"`
-}
-
-// ListProjectsInvitedGroups lists invited groups of a project
-//
-// GitLab API docs:
-// https://docs.gitlab.com/ee/api/projects.html#list-a-projects-invited-groups
-func (s *ProjectsService) ListProjectsInvitedGroups(pid interface{}, opt *ListProjectInvidedGroupOptions, options ...RequestOptionFunc) ([]*ProjectGroup, *Response, error) {
-	project, err := parseID(pid)
-	if err != nil {
-		return nil, nil, err
-	}
-	u := fmt.Sprintf("projects/%s/invited_groups", PathEscape(project))
-
-	req, err := s.client.NewRequest(http.MethodGet, u, opt, options)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	var pg []*ProjectGroup
-	resp, err := s.client.Do(req, &pg)
-	if err != nil {
-		return nil, resp, err
-	}
-
-	return pg, resp, nil
-}
-
 // UnstarProject unstars a given project.
 //
 // GitLab API docs:
@@ -1161,28 +1120,18 @@ func (s *ProjectsService) UnarchiveProject(pid interface{}, options ...RequestOp
 	return p, resp, nil
 }
 
-// DeleteProjectOptions represents the available DeleteProject() options.
-//
-// GitLab API docs:
-// https://docs.gitlab.com/ee/api/projects.html#delete-project
-type DeleteProjectOptions struct {
-	FullPath          *string `url:"full_path" json:"full_path"`
-	PermanentlyRemove *bool   `url:"permanently_remove" json:"permanently_remove"`
-}
-
 // DeleteProject removes a project including all associated resources
 // (issues, merge requests etc.)
 //
-// GitLab API docs:
-// https://docs.gitlab.com/ee/api/projects.html#delete-project
-func (s *ProjectsService) DeleteProject(pid interface{}, opt *DeleteProjectOptions, options ...RequestOptionFunc) (*Response, error) {
+// GitLab API docs: https://docs.gitlab.com/ee/api/projects.html#delete-project
+func (s *ProjectsService) DeleteProject(pid interface{}, options ...RequestOptionFunc) (*Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, err
 	}
 	u := fmt.Sprintf("projects/%s", PathEscape(project))
 
-	req, err := s.client.NewRequest(http.MethodDelete, u, opt, options)
+	req, err := s.client.NewRequest(http.MethodDelete, u, nil, options)
 	if err != nil {
 		return nil, err
 	}
@@ -1190,7 +1139,7 @@ func (s *ProjectsService) DeleteProject(pid interface{}, opt *DeleteProjectOptio
 	return s.client.Do(req, nil)
 }
 
-// ShareWithGroupOptions represents the available SharedWithGroup() options.
+// ShareWithGroupOptions represents options to share project with groups
 //
 // GitLab API docs: https://docs.gitlab.com/ee/api/projects.html#share-project-with-group
 type ShareWithGroupOptions struct {
@@ -1283,7 +1232,6 @@ type ProjectHook struct {
 	DeploymentEvents          bool                `json:"deployment_events"`
 	ReleasesEvents            bool                `json:"releases_events"`
 	EnableSSLVerification     bool                `json:"enable_ssl_verification"`
-	AlertStatus               string              `json:"alert_status"`
 	CreatedAt                 *time.Time          `json:"created_at"`
 	ResourceAccessTokenEvents bool                `json:"resource_access_token_events"`
 	CustomWebhookTemplate     string              `json:"custom_webhook_template"`
@@ -1494,8 +1442,8 @@ func (s *ProjectsService) TriggerTestProjectHook(pid interface{}, hook int, even
 	return s.client.Do(req, nil)
 }
 
-// SetHookCustomHeaderOptions represents the available SetProjectCustomHeader()
-// options.
+// SetHookCustomHeaderOptions represents a project or group hook custom header.
+// If the header isn't present, it will be created.
 //
 // GitLab API docs:
 // https://docs.gitlab.com/ee/api/projects.html#set-a-custom-header
@@ -1940,11 +1888,9 @@ func (s *ProjectsService) ChangeApprovalConfiguration(pid interface{}, opt *Chan
 	return pa, resp, nil
 }
 
-// GetProjectApprovalRulesListsOptions represents the available
-// GetProjectApprovalRules() options.
+// GetProjectApprovalRulesListsOptions represents the available GetProjectApprovalRules() options.
 //
-// GitLab API docs:
-// https://docs.gitlab.com/ee/api/merge_request_approvals.html#get-project-level-rules
+// GitLab API docs: https://docs.gitlab.com/ee/api/merge_request_approvals.html#get-project-level-rules
 type GetProjectApprovalRulesListsOptions ListOptions
 
 // GetProjectApprovalRules looks up the list of project level approver rules.
@@ -2197,8 +2143,7 @@ func (s *ProjectsService) StartMirroringProject(pid interface{}, options ...Requ
 
 // TransferProjectOptions represents the available TransferProject() options.
 //
-// GitLab API docs:
-// https://docs.gitlab.com/ee/api/projects.html#transfer-a-project-to-a-new-namespace
+// GitLab API docs: https://docs.gitlab.com/ee/api/projects.html#transfer-a-project-to-a-new-namespace
 type TransferProjectOptions struct {
 	Namespace interface{} `url:"namespace,omitempty" json:"namespace,omitempty"`
 }
