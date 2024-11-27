@@ -132,6 +132,100 @@ too, it will only be matched when a `Pull Request` is opened or updated or on a
 `Push` to a branch
 {{< /hint >}}
 
+### Matching a PipelineRun to Specific Path Changes
+
+{{< tech_preview "Matching a PipelineRun to specific path changes via annotation" >}}
+
+To trigger a `PipelineRun` based on specific path changes in an event, use the
+annotation `pipelinesascode.tekton.dev/on-path-change`.
+
+Multiple paths can be specified, separated by commas. The first glob matching
+the files changes in the PR will trigger the `PipelineRun`.
+
+You still need to specify the event type and target branch. If you have a [CEL
+expression](#matching-pipelinerun-by-path-change) the `on-path-change`
+annotation will be ignored
+
+Example:
+
+```yaml
+metadata:
+  name: pipeline-docs-and-manual
+  annotations:
+    pipelinesascode.tekton.dev/on-target-branch: "[main]"
+    pipelinesascode.tekton.dev/on-event: "[pull_request]"
+    pipelinesascode.tekton.dev/on-path-change: "[docs/***.md, manual/***.rst]"
+```
+
+This configuration will match and trigger the `PipelineRun` named
+`pipeline-docs-and-manual` when a `pull_request` event targets the `main` branch
+and includes changes to files with a `.md` suffix in the `docs` directory (and
+its subdirectories) or files with a `.rst` suffix in the `manual` directory.
+
+{{< hint info >}}
+The patterns used are [glob](https://en.wikipedia.org/wiki/Glob_(programming))
+patterns, not regexp. Here are some
+[examples](https://github.com/gobwas/glob?tab=readme-ov-file#example) from the
+library used for matching.
+{{< /hint >}}
+
+### Matching a PipelineRun by Ignoring Specific Path Changes
+
+{{< tech_preview "Matching a PipelineRun to ignore specific path changes via annotation" >}}
+
+Following the same principle as the `on-path-change` annotation, you can use the
+reverse annotation `pipelinesascode.tekton.dev/on-path-change-ignore` to trigger
+a `PipelineRun` when the specified paths have not changed.
+
+You still need to specify the event type and target branch. If you have a [CEL
+expression](#matching-pipelinerun-by-path-change) the `on-path-change-ignore`
+annotation will be ignored
+
+This example triggers a `PipelineRun` when there are no changes in the `docs`
+directory:
+
+```yaml
+metadata:
+  name: pipeline-not-on-docs-change
+  annotations:
+    pipelinesascode.tekton.dev/on-target-branch: "[main]"
+    pipelinesascode.tekton.dev/on-event: "[pull_request]"
+    pipelinesascode.tekton.dev/on-path-change-ignore: "[docs/***]"
+```
+
+Furthermore, you can combine `on-path-change` and `on-path-change-ignore`
+annotations:
+
+```yaml
+metadata:
+  name: pipeline-docs-not-generated
+  annotations:
+    pipelinesascode.tekton.dev/on-target-branch: "[main]"
+    pipelinesascode.tekton.dev/on-event: "[pull_request]"
+    pipelinesascode.tekton.dev/on-path-change: "[docs/***]"
+    pipelinesascode.tekton.dev/on-path-change-ignore: "[docs/generated/***]"
+```
+
+This configuration triggers the `PipelineRun` when there are changes in the
+`docs` directory but not in the `docs/generated` directory.
+
+The `on-path-change-ignore` annotation will always take precedence over the
+`on-path-change` annotation, It means if you have these annotations:
+
+```yaml
+metadata:
+  name: pipelinerun-go-only-no-markdown-or-yaml
+    pipelinesascode.tekton.dev/on-target-branch: "[main]"
+    pipelinesascode.tekton.dev/on-event: "[pull_request]"
+    pipelinesascode.tekton.dev/on-path-change: "[***.go]"
+    pipelinesascode.tekton.dev/on-path-change-ignore: "[***.md, ***.yaml]"
+```
+
+and you have a `Pull Request` changing the files `.tekton/pipelinerun.yaml`,
+`README.md`, and `main.go` the `PipelineRun` will not be triggered since the
+`on-path-change-ignore` annotation will ignore the `***.md` and `***.yaml`
+files.
+
 ## Advanced event matching
 
 If you need to do some advanced matching, `Pipelines-as-Code` supports CEL
@@ -178,6 +272,17 @@ pipelinesascode.tekton.dev/on-cel-expression: |
   event == "pull_request" && target_branch != experimental"
 ```
 
+## Matching a PipelineRun on a regexp in CEL language
+
+In CEL expression, you can match a field name using a regular expression.
+For example, you want to trigger a `PipelineRun` when event is `pull_request` and the `source_branch` name contains the substring `feat/`.
+you can use the following expression:
+
+```yaml
+pipelinesascode.tekton.dev/on-cel-expression: |
+  event == "pull_request" && source_branch.matches(".*feat/.*")
+```
+
 You can find more information about the CEL language spec here :
 
 <https://github.com/google/cel-spec/blob/master/doc/langdef.md>
@@ -190,7 +295,7 @@ You can match a PipelineRun on a comment on a Pull Request with the annotation
 `pipelinesascode.tekton.dev/on-comment`.
 
 The comment is a regexp and if a newly created comment has this regexp it will
-automatically matches the PipelineRun and starts it.
+automatically match the PipelineRun and starts it.
 
 For example:
 
@@ -377,11 +482,11 @@ The expression are CEL expressions so you can as well make some conditional:
 if the PR is open the condition then return `true` and the shell script see this
 as a valid boolean.
 
-Headers from the payload body can be accessed from the `headers` keyword, for
-example
+Headers from the payload body can be accessed from the `headers` keyword, note that headers are case sensitive,
+for example this will show the GitHub event type for a GitHub event:
 
 ```yaml
-{{ headers['x-github-event'] }}
+{{ headers['X-Github-Event'] }}
 ```
 
 and then you can do the same conditional or access as described above for the `body` keyword.
