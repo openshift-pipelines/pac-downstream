@@ -3,9 +3,10 @@ ARG RUNTIME=registry.access.redhat.com/ubi9/ubi-minimal:latest@sha256:c0e7038766
 
 FROM $GO_BUILDER AS builder
 
-ARG TKN_PAC_VERSION=nightly
+ARG TKN_PAC_VERSION=0.29.0
 WORKDIR /go/src/github.com/openshift-pipelines/pipelines-as-code
-COPY . .
+COPY upstream .
+COPY .konflux/patches patches/
 RUN set -e; for f in patches/*.patch; do echo ${f}; [[ -f ${f} ]] || continue; git apply ${f}; done
 ENV GODEBUG="http2server=0"
 RUN go build -mod=vendor -tags disable_gcp -v  \
@@ -13,7 +14,7 @@ RUN go build -mod=vendor -tags disable_gcp -v  \
     -o /tmp/tkn-pac ./cmd/tkn-pac
 
 FROM $RUNTIME
-ARG VERSION=pipelines-as-code-cli-main
+ARG VERSION=pipelines-as-code-cli-next
 
 COPY --from=builder /tmp/tkn-pac /usr/bin
 
