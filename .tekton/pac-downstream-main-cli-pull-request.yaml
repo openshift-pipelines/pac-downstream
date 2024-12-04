@@ -41,6 +41,12 @@ spec:
       {"type": "rpm", "path": ".konflux/rpms"}
   pipelineRef:
     name: docker-build-ta
+  taskRunSpecs:
+    - pipelineTaskName: build-images
+      computeResources:
+        limits:
+          memory: 8Gi
+          cpu: 4
   workspaces:
   - name: git-auth
     secret:
