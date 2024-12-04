@@ -45,7 +45,8 @@ spec:
     - pipelineTaskName: build-images
       computeResources:
         requests:
-          memory: 3Gi
+          memory: 16Gi
+          cpu: 4
   workspaces:
   - name: git-auth
     secret:
