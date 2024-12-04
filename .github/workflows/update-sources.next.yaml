@@ -25,8 +25,9 @@ jobs:
         rm -fR upstream
         git clone https://github.com/openshift-pipelines/pipelines-as-code upstream
         pushd upstream
-        git checkout -B release-v0.29.x origin/release-v0.29.x
+        git checkout -B release-v0.30.x origin/release-v0.30.x
         popd
+
 
     - name: Commit new changes
       run: |
@@ -52,7 +53,7 @@ jobs:
         fi
 
         git commit -F- <<EOF
-        [bot] Update from openshift-pipelines/pipelines-as-code to ${NEW_COMMIT}
+        [bot] Update next from openshift-pipelines/pipelines-as-code to ${NEW_COMMIT}
 
             $ git diff --stat ${NEW_COMMIT}..${OLD_COMMIT}
         $(cat /tmp/diff.txt | sed 's/^/    /')
@@ -67,7 +68,7 @@ jobs:
           gh pr create -B next -H actions/update/sources-next --label=automated --label=upstream --fill
         else
           echo "a PR already exists, editing..."
-          gh pr edit --title "[bot] Update from openshift-pipelines/pipelines-as-code to ${NEW_COMMIT}" --body "$(cat /tmp/diff.txt | sed 's/^/    /')"
+          gh pr edit --title "[bot] Update next from openshift-pipelines/pipelines-as-code to ${NEW_COMMIT}" --body "$(cat /tmp/diff.txt | sed 's/^/    /')"
         fi
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

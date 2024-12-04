@@ -47,6 +47,8 @@ spec:
         limits:
           memory: 8Gi
           cpu: 4
+        requests:
+          memory: 3Gi
   workspaces:
   - name: git-auth
     secret:

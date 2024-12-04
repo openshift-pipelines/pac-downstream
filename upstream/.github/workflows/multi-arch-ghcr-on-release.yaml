@@ -51,7 +51,7 @@ jobs:
 
       - name: Extract metadata (tags, labels) for Docker (Controller)
         id: meta
-        uses: docker/metadata-action@8e5442c4ef9f78752691e2d8f8d19755c6f78e81
+        uses: docker/metadata-action@369eb591f429131d6889c46b94e711f089e6ca96
         with:
           images: ${{ env.REGISTRY }}/${{ env.CONTROLLER_IMAGE_NAME }}
           tags: |
@@ -59,7 +59,7 @@ jobs:
             type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', 'stable') }}
 
       - name: Build and push controller docker image
-        uses: docker/build-push-action@v6.9.0
+        uses: docker/build-push-action@v6.10.0
         with:
           context: .
           build-args: |
@@ -71,7 +71,7 @@ jobs:
 
       - name: Extract metadata (tags, labels) for Docker (Watcher)
         id: meta-watcher
-        uses: docker/metadata-action@8e5442c4ef9f78752691e2d8f8d19755c6f78e81
+        uses: docker/metadata-action@369eb591f429131d6889c46b94e711f089e6ca96
         with:
           images: ${{ env.REGISTRY }}/${{ env.WATCHER_IMAGE_NAME }}
           tags: |
@@ -79,7 +79,7 @@ jobs:
             type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', 'stable') }}
 
       - name: Build and push watcher docker image
-        uses: docker/build-push-action@v6.9.0
+        uses: docker/build-push-action@v6.10.0
         with:
           context: .
           build-args: |
@@ -91,7 +91,7 @@ jobs:
 
       - name: Extract metadata (tags, labels) for Docker (Webhook)
         id: meta-webhook
-        uses: docker/metadata-action@8e5442c4ef9f78752691e2d8f8d19755c6f78e81
+        uses: docker/metadata-action@369eb591f429131d6889c46b94e711f089e6ca96
         with:
           images: ${{ env.REGISTRY }}/${{ env.WEBHOOK_IMAGE_NAME }}
           tags: |
@@ -99,7 +99,7 @@ jobs:
             type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', 'stable') }}
 
       - name: Build and push webhook docker image
-        uses: docker/build-push-action@v6.9.0
+        uses: docker/build-push-action@v6.10.0
         with:
           context: .
           build-args: |
@@ -111,7 +111,7 @@ jobs:
 
       - name: Extract metadata (tags, labels) for tkn-pac
         id: meta-cli
-        uses: docker/metadata-action@8e5442c4ef9f78752691e2d8f8d19755c6f78e81
+        uses: docker/metadata-action@369eb591f429131d6889c46b94e711f089e6ca96
         with:
           images: ${{ env.REGISTRY }}/${{ env.TKN_PAC_IMAGE_NAME }}
           tags: |
@@ -119,7 +119,7 @@ jobs:
             type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', 'stable') }}
 
       - name: Build and push cli docker image
-        uses: docker/build-push-action@v6.9.0
+        uses: docker/build-push-action@v6.10.0
         with:
           context: .
           build-args: |
