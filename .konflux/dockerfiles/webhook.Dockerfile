@@ -4,21 +4,22 @@ ARG RUNTIME=registry.access.redhat.com/ubi9/ubi-minimal:latest@sha256:c0e7038766
 FROM $GO_BUILDER AS builder
 
 WORKDIR /go/src/github.com/openshift-pipelines/pipelines-as-code
-COPY . .
+COPY upstream .
+COPY .konflux/patches patches/
 RUN set -e; for f in patches/*.patch; do echo ${f}; [[ -f ${f} ]] || continue; git apply ${f}; done
+COPY head HEAD
 ENV GODEBUG="http2server=0"
-RUN git rev-parse HEAD > /tmp/HEAD
-RUN go build -ldflags="-s -w" -mod=vendor -tags disable_gcp -v -o /tmp/pipelines-as-code-webhook \
+RUN go build -ldflags="-X 'knative.dev/pkg/changeset.rev=$(cat HEAD)'" -mod=vendor -tags disable_gcp -v -o /tmp/pipelines-as-code-webhook \
     ./cmd/pipelines-as-code-webhook
 
 FROM $RUNTIME
-ARG VERSION=pipelines-as-code-webhook-main
+ARG VERSION=pipelines-as-code-webhook-next
 
 ENV KO_APP=/ko-app \
     KO_DATA_PATH=/kodata
 
 COPY --from=builder /tmp/pipelines-as-code-webhook ${KO_APP}/pipelines-as-code-webhook
-COPY --from=builder /tmp/HEAD ${KO_DATA_PATH}/HEAD
+COPY head ${KO_DATA_PATH}/HEAD
 
 LABEL \
       com.redhat.component="openshift-pipelines-pipelines-as-code-webhook-container" \
