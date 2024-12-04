@@ -44,7 +44,7 @@ spec:
   taskRunSpecs:
     - pipelineTaskName: build-images
       computeResources:
-        requests:
+        limits:
           memory: 16Gi
           cpu: 4
   workspaces:
