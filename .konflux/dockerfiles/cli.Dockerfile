@@ -8,7 +8,7 @@ WORKDIR /go/src/github.com/openshift-pipelines/pipelines-as-code
 COPY upstream .
 RUN set -e; for f in patches/*.patch; do echo ${f}; [[ -f ${f} ]] || continue; git apply ${f}; done
 ENV GODEBUG="http2server=0"
-RUN go build -mod=vendor -tags disable_gcp -v  \
+RUN go build -mod=vendor -tags disable_gcp  \
     -ldflags "-X github.com/openshift-pipelines/pipelines-as-code/pkg/params/version.Version=${TKN_PAC_VERSION}" \
     -o /tmp/tkn-pac ./cmd/tkn-pac
 
