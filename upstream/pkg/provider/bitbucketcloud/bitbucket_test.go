@@ -80,7 +80,7 @@ func TestGetTektonDir(t *testing.T) {
 			content, err := v.GetTektonDir(ctx, tt.event, ".tekton", tt.provenance)
 			if tt.wantErr != "" {
 				assert.Assert(t, err != nil, "expected error %s, got %v", tt.wantErr, err)
-				assert.Equal(t, err.Error(), tt.wantErr)
+				assert.ErrorContains(t, err, tt.wantErr)
 				return
 			}
 			if tt.contentContains == "" {

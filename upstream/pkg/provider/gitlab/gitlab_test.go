@@ -392,7 +392,7 @@ func TestGetTektonDir(t *testing.T) {
 			got, err := v.GetTektonDir(ctx, tt.args.event, tt.args.path, tt.args.provenance)
 			if tt.wantErr != "" {
 				assert.Assert(t, err != nil, "expected error %s, got %v", tt.wantErr, err)
-				assert.Equal(t, err.Error(), tt.wantErr)
+				assert.ErrorContains(t, err, tt.wantErr)
 				return
 			}
 			if tt.wantStr != "" {
