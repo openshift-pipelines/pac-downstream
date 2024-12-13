@@ -9,7 +9,6 @@ metadata:
   name: pac-downstream-next-rp
 spec:
   application: pac-downstream-next
-  target: tekton-ecosystem-tenant
   tenantPipeline:
     serviceAccountName: release-registry-openshift-pipelines-next
     pipelineRef:
