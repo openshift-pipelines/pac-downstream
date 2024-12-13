@@ -56,7 +56,7 @@ jobs:
         [bot] Update main from openshift-pipelines/pipelines-as-code to ${NEW_COMMIT}
 
             $ git diff --stat ${NEW_COMMIT}..${OLD_COMMIT}
-        $(cat /tmp/diff.txt | sed 's/^/    /')
+        $(cat /tmp/diff.txt | sed 's/^/    /' | head -c 55555)
         
         https://github.com/openshift-pipelines/pipelines-as-code/compare/${NEW_COMMIT}..${OLD_COMMIT}
         EOF
