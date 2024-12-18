@@ -11,16 +11,20 @@ on:
         required: false
         default: false
   pull_request_target:
-    types: [ opened, synchronize, reopened ]
+    types: [opened, synchronize, reopened]
     paths:
       - "**.go"
+
 jobs:
   e2e-tests:
     concurrency:
-      group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+      group: ${{ github.workflow }}-${{ matrix.provider }}-${{ github.event.pull_request.number || github.ref }}
       cancel-in-progress: true
     name: e2e tests
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        provider: [githubgitlab, others]
     env:
       KO_DOCKER_REPO: localhost:5000
       CONTROLLER_DOMAIN_URL: controller.paac-127-0-0-1.nip.io
@@ -78,6 +82,7 @@ jobs:
         if: ${{ github.event_name != 'schedule' }}
         run: |
           ./hack/gh-workflow-ci.sh run_e2e_tests \
+           ${{ matrix.provider }} \
            "${{ secrets.BITBUCKET_CLOUD_TOKEN }}" \
            "${{ secrets.WEBHOOK_SECRET }}" \
            "${{ secrets.TEST_GITEA_SMEEURL }}" \
@@ -94,6 +99,7 @@ jobs:
         run: |
           export NIGHTLY_E2E_TEST="true"
           ./hack/gh-workflow-ci.sh run_e2e_tests \
+           ${{ matrix.provider }} \
            "${{ secrets.BITBUCKET_CLOUD_TOKEN }}" \
            "${{ secrets.WEBHOOK_SECRET }}" \
            "${{ secrets.TEST_GITEA_SMEEURL }}" \
