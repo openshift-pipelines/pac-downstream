@@ -67,10 +67,10 @@ create_second_github_app_controller_on_ghe() {
 get_tests() {
   target=$1
   mapfile -t testfiles < <(find test/ -maxdepth 1 -name '*.go')
-  ghglabre="Github|Gitlab"
-  if [[ ${target} == "githubgitlab" ]]; then
+  ghglabre="Github|Gitlab|Bitbucket"
+  if [[ ${target} == "providers" ]]; then
     grep -hioP "^func Test.*(${ghglabre})(\w+)\(" "${testfiles[@]}" | sed -e 's/func[ ]*//' -e 's/($//'
-  elif [[ ${target} == "others" ]]; then
+  elif [[ ${target} == "gitea_others" ]]; then
     grep -hioP '^func Test(\w+)\(' "${testfiles[@]}" | grep -iPv "(${ghglabre})" | sed -e 's/func[ ]*//' -e 's/($//'
   else
     echo "Invalid target: ${target}"
@@ -141,10 +141,8 @@ run_e2e_tests() {
 
   mapfile -t tests < <(get_tests "${target}")
   echo "About to run ${#tests[@]} tests: ${tests[*]}"
-  env GO_TEST_FLAGS="-run '$(
-    IFS='|'
-    echo "${tests[*]}"
-  )'" make test-e2e
+  # shellcheck disable=SC2001
+  GO_TEST_FLAGS="-run \"$(echo "${tests[*]}" | sed 's/ /|/g')\"" make test-e2e
 }
 
 collect_logs() {
