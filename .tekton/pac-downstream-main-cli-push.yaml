@@ -13,8 +13,7 @@ metadata:
       == "main" &&
       ("upstream/***".pathChanged() || ".konflux/patches/***".pathChanged() || ".konflux/rpms/***".pathChanged() ||
       ".konflux/dockerfiles/cli.Dockerfile".pathChanged() ||
-      ".tekton/pac-downstream-main-cli-push.yaml".pathChanged() ||
-      ".tekton/docker-build-ta.yaml".pathChanged())
+      ".tekton/pac-downstream-main-cli-push.yaml".pathChanged())
   creationTimestamp: null
   labels:
     appstudio.openshift.io/application: pac-downstream-main
