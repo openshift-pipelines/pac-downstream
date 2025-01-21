@@ -32,6 +32,7 @@ import (
 )
 
 type TestOpts struct {
+	TargetRepoName        string
 	StatusOnlyLatest      bool
 	OnOrg                 bool
 	NoPullRequestCreation bool
@@ -60,6 +61,7 @@ type TestOpts struct {
 	ExpectEvents          bool
 	InternalGiteaURL      string
 	Token                 string
+	SHA                   string
 	FileChanges           []scm.FileChange
 }
 
@@ -69,6 +71,22 @@ func PostCommentOnPullRequest(t *testing.T, topt *TestOpts, body string) {
 		gitea.CreateIssueCommentOption{Body: body})
 	topt.ParamsRun.Clients.Log.Infof("Posted comment \"%s\" in %s", body, topt.PullRequest.HTMLURL)
 	assert.NilError(t, err)
+}
+
+func AddLabelToIssue(t *testing.T, topt *TestOpts, label string) {
+	var targetID int64
+	allLabels, _, err := topt.GiteaCNX.Client.ListRepoLabels(topt.Opts.Organization, topt.Opts.Repo, gitea.ListLabelsOptions{})
+	assert.NilError(t, err)
+	for _, l := range allLabels {
+		if l.Name == label {
+			targetID = l.ID
+		}
+	}
+
+	opt := gitea.IssueLabelsOption{Labels: []int64{targetID}}
+	_, _, err = topt.GiteaCNX.Client.AddIssueLabels(topt.Opts.Organization, topt.Opts.Repo, topt.PullRequest.Index, opt)
+	assert.NilError(t, err)
+	topt.ParamsRun.Clients.Log.Infof("Added label \"%s\" to %s", label, topt.PullRequest.HTMLURL)
 }
 
 // TestPR will test the pull request event and grab comments from the PR.
@@ -102,10 +120,20 @@ func TestPR(t *testing.T, topts *TestOpts) (context.Context, func()) {
 	if topts.TargetRefName == "" {
 		topts.TargetRefName = names.SimpleNameGenerator.RestrictLengthWithRandomSuffix("pac-e2e-test")
 		topts.TargetNS = topts.TargetRefName
-		assert.NilError(t, pacrepo.CreateNS(ctx, topts.TargetNS, topts.ParamsRun))
+	}
+	if err := pacrepo.CreateNS(ctx, topts.TargetNS, topts.ParamsRun); err != nil {
+		t.Logf("error creating namespace %s: %v", topts.TargetNS, err)
 	}
 
-	repoInfo, err := CreateGiteaRepo(topts.GiteaCNX.Client, topts.Opts.Organization, topts.TargetRefName, hookURL, topts.OnOrg, topts.ParamsRun.Clients.Log)
+	if topts.TargetRepoName == "" {
+		topts.TargetRepoName = topts.TargetRefName
+	}
+
+	if topts.DefaultBranch == "" {
+		topts.DefaultBranch = options.MainBranch
+	}
+
+	repoInfo, err := CreateGiteaRepo(topts.GiteaCNX.Client, topts.Opts.Organization, topts.TargetRepoName, topts.DefaultBranch, hookURL, topts.OnOrg, topts.ParamsRun.Clients.Log)
 	assert.NilError(t, err)
 	topts.Opts.Repo = repoInfo.Name
 	topts.Opts.Organization = repoInfo.Owner.UserName
@@ -172,14 +200,14 @@ func TestPR(t *testing.T, topts *TestOpts) (context.Context, func()) {
 		TargetRefName: topts.TargetRefName,
 		BaseRefName:   topts.DefaultBranch,
 	}
-	scm.PushFilesToRefGit(t, scmOpts, entries)
+	topts.SHA = scm.PushFilesToRefGit(t, scmOpts, entries)
 
 	topts.ParamsRun.Clients.Log.Infof("Creating PullRequest")
 	for i := 0; i < 5; i++ {
 		if topts.PullRequest, _, err = topts.GiteaCNX.Client.CreatePullRequest(topts.Opts.Organization, repoInfo.Name, gitea.CreatePullRequestOption{
 			Title: "Test Pull Request - " + topts.TargetRefName,
 			Head:  topts.TargetRefName,
-			Base:  options.MainBranch,
+			Base:  topts.DefaultBranch,
 		}); err == nil {
 			break
 		}
@@ -256,8 +284,11 @@ func NewPR(t *testing.T, topts *TestOpts) func() {
 		topts.TargetNS = topts.TargetRefName
 		assert.NilError(t, pacrepo.CreateNS(ctx, topts.TargetNS, topts.ParamsRun))
 	}
+	if topts.TargetRepoName == "" {
+		topts.TargetRepoName = topts.TargetRefName
+	}
 
-	repoInfo, err := GetGiteaRepo(topts.GiteaCNX.Client, topts.Opts.Organization, topts.TargetRefName, topts.ParamsRun.Clients.Log)
+	repoInfo, err := GetGiteaRepo(topts.GiteaCNX.Client, topts.Opts.Organization, topts.TargetRepoName, topts.ParamsRun.Clients.Log)
 	assert.NilError(t, err)
 	topts.Opts.Repo = repoInfo.Name
 	topts.Opts.Organization = repoInfo.Owner.UserName
@@ -374,7 +405,7 @@ func WaitForStatus(t *testing.T, topts *TestOpts, ref, forcontext string, onlyla
 		}
 		for _, cstatus := range statuses {
 			if topts.CheckForStatus == "Skipped" {
-				if strings.HasSuffix(cstatus.Description, "Pending approval") {
+				if strings.HasSuffix(cstatus.Description, "Pending approval, needs /ok-to-test") {
 					numstatus++
 					break
 				}

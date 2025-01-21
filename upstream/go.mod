@@ -20,6 +20,7 @@ require (
 	github.com/google/go-github/v64 v64.0.0
 	github.com/google/go-github/v66 v66.0.0
 	github.com/hako/durafmt v0.0.0-20210608085754-5c1018a4e16b
+	github.com/jenkins-x/go-scm v1.14.53
 	github.com/jonboulle/clockwork v0.4.0
 	github.com/juju/ansiterm v1.0.0
 	github.com/ktrysmt/go-bitbucket v0.9.81
@@ -31,7 +32,7 @@ require (
 	github.com/spf13/cobra v1.8.1
 	github.com/stretchr/testify v1.9.0
 	github.com/tektoncd/pipeline v0.65.1
-	github.com/xanzy/go-gitlab v0.113.0
+	gitlab.com/gitlab-org/api/client-go v0.116.0
 	go.opencensus.io v0.24.0
 	go.uber.org/zap v1.27.0
 	golang.org/x/exp v0.0.0-20241009180824-f66d83c29e7c
@@ -131,7 +132,7 @@ require (
 	go.uber.org/automaxprocs v1.6.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/crypto v0.31.0 // indirect
-	golang.org/x/net v0.30.0 // indirect
+	golang.org/x/net v0.33.0 // indirect
 	golang.org/x/sys v0.28.0 // indirect
 	golang.org/x/term v0.27.0 // indirect
 	golang.org/x/time v0.7.0 // indirect

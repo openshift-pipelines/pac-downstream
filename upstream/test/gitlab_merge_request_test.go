@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"regexp"
 	"testing"
+	"time"
 
 	"github.com/google/go-github/v66/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
@@ -20,10 +21,11 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/test/pkg/scm"
 	twait "github.com/openshift-pipelines/pipelines-as-code/test/pkg/wait"
 	"github.com/tektoncd/pipeline/pkg/names"
-	clientGitlab "github.com/xanzy/go-gitlab"
+	clientGitlab "gitlab.com/gitlab-org/api/client-go"
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"knative.dev/pkg/apis"
 )
 
 func TestGitlabMergeRequest(t *testing.T) {
@@ -64,7 +66,7 @@ func TestGitlabMergeRequest(t *testing.T) {
 		TargetRefName: targetRefName,
 		BaseRefName:   projectinfo.DefaultBranch,
 	}
-	scm.PushFilesToRefGit(t, scmOpts, entries)
+	_ = scm.PushFilesToRefGit(t, scmOpts, entries)
 
 	runcnx.Clients.Log.Infof("Branch %s has been created and pushed with files", targetRefName)
 	mrTitle := "TestMergeRequest - " + targetRefName
@@ -73,12 +75,6 @@ func TestGitlabMergeRequest(t *testing.T) {
 	runcnx.Clients.Log.Infof("MergeRequest %s/-/merge_requests/%d has been created", projectinfo.WebURL, mrID)
 	defer tgitlab.TearDown(ctx, t, runcnx, glprovider, mrID, targetRefName, targetNS, opts.ProjectID)
 
-	// updating labels to test if we skip them, this used to create multiple PRs
-	_, _, err = glprovider.Client.MergeRequests.UpdateMergeRequest(opts.ProjectID, mrID, &clientGitlab.UpdateMergeRequestOptions{
-		Labels: &clientGitlab.LabelOptions{"hello-label"},
-	})
-	assert.NilError(t, err)
-
 	// Send another Push to make an update and make sure we react to it
 	entries, err = payload.GetEntries(map[string]string{
 		"hello-world.yaml": "testdata/pipelinerun.yaml",
@@ -86,7 +82,7 @@ func TestGitlabMergeRequest(t *testing.T) {
 		triggertype.PullRequest.String(), map[string]string{})
 	assert.NilError(t, err)
 	scmOpts.BaseRefName = targetRefName
-	scm.PushFilesToRefGit(t, scmOpts, entries)
+	_ = scm.PushFilesToRefGit(t, scmOpts, entries)
 
 	sopt := twait.SuccessOpt{
 		Title:           mrTitle,
@@ -109,6 +105,7 @@ func TestGitlabMergeRequest(t *testing.T) {
 		Body: clientGitlab.Ptr("/retest"),
 	})
 	assert.NilError(t, err)
+
 	sopt = twait.SuccessOpt{
 		Title:           commitTitle,
 		OnEvent:         opscomments.RetestAllCommentEventType.String(),
@@ -129,6 +126,76 @@ func TestGitlabMergeRequest(t *testing.T) {
 	}
 	// we get 2 PRS initially, 2 prs from the push update and 2 prs from the /retest == 6
 	assert.Equal(t, 6, successCommentsPost)
+}
+
+func TestGitlabOnLabel(t *testing.T) {
+	prName := "on-label"
+	targetNS := names.SimpleNameGenerator.RestrictLengthWithRandomSuffix("pac-e2e-ns")
+	ctx := context.Background()
+	runcnx, opts, glprovider, err := tgitlab.Setup(ctx)
+	assert.NilError(t, err)
+	ctx, err = cctx.GetControllerCtxInfo(ctx, runcnx)
+	assert.NilError(t, err)
+	runcnx.Clients.Log.Info("Testing with Gitlab")
+
+	projectinfo, resp, err := glprovider.Client.Projects.GetProject(opts.ProjectID, nil)
+	assert.NilError(t, err)
+	if resp != nil && resp.StatusCode == http.StatusNotFound {
+		t.Errorf("Repository %s not found in %s", opts.Organization, opts.Repo)
+	}
+
+	err = tgitlab.CreateCRD(ctx, projectinfo, runcnx, targetNS, nil)
+	assert.NilError(t, err)
+
+	entries, err := payload.GetEntries(map[string]string{
+		fmt.Sprintf(".tekton/%s.yaml", prName): "testdata/pipelinerun-on-label.yaml",
+	}, targetNS, projectinfo.DefaultBranch,
+		triggertype.PullRequest.String(), map[string]string{})
+	assert.NilError(t, err)
+	targetRefName := names.SimpleNameGenerator.RestrictLengthWithRandomSuffix("pac-e2e-test")
+	gitCloneURL, err := scm.MakeGitCloneURL(projectinfo.WebURL, opts.UserName, opts.Password)
+	assert.NilError(t, err)
+	commitTitle := "Committing files from test on " + targetRefName
+	scmOpts := &scm.Opts{
+		GitURL:        gitCloneURL,
+		CommitTitle:   commitTitle,
+		Log:           runcnx.Clients.Log,
+		WebURL:        projectinfo.WebURL,
+		TargetRefName: targetRefName,
+		BaseRefName:   projectinfo.DefaultBranch,
+	}
+	scm.PushFilesToRefGit(t, scmOpts, entries)
+	runcnx.Clients.Log.Infof("Branch %s has been created and pushed with files", targetRefName)
+
+	mrTitle := "TestMergeRequest - " + targetRefName
+	mrID, err := tgitlab.CreateMR(glprovider.Client, opts.ProjectID, targetRefName, projectinfo.DefaultBranch, mrTitle)
+	assert.NilError(t, err)
+	runcnx.Clients.Log.Infof("MergeRequest %s/-/merge_requests/%d has been created", projectinfo.WebURL, mrID)
+	defer tgitlab.TearDown(ctx, t, runcnx, glprovider, mrID, targetRefName, targetNS, opts.ProjectID)
+
+	runcnx.Clients.Log.Infof("waiting 5 seconds until we make sure nothing happened")
+	time.Sleep(5 * time.Second)
+	prsNew, err := runcnx.Clients.Tekton.TektonV1().PipelineRuns(targetNS).List(ctx, metav1.ListOptions{})
+	assert.NilError(t, err)
+	assert.Assert(t, len(prsNew.Items) == 0)
+
+	// now add a Label
+	mr, _, err := glprovider.Client.MergeRequests.UpdateMergeRequest(opts.ProjectID, mrID, &clientGitlab.UpdateMergeRequestOptions{
+		Labels: &clientGitlab.LabelOptions{"bug"},
+	})
+	assert.NilError(t, err)
+
+	waitOpts := twait.Opts{
+		RepoName:        targetNS,
+		Namespace:       targetNS,
+		MinNumberStatus: 1,
+		PollTimeout:     twait.DefaultTimeout,
+		TargetSHA:       mr.SHA,
+	}
+	repo, err := twait.UntilRepositoryUpdated(ctx, runcnx.Clients, waitOpts)
+	assert.NilError(t, err)
+	assert.Assert(t, len(repo.Status) > 0)
+	assert.Equal(t, *repo.Status[0].EventType, triggertype.LabelUpdate.String())
 }
 
 func TestGitlabOnComment(t *testing.T) {
@@ -166,7 +233,7 @@ func TestGitlabOnComment(t *testing.T) {
 		TargetRefName: targetRefName,
 		BaseRefName:   projectinfo.DefaultBranch,
 	}
-	scm.PushFilesToRefGit(t, scmOpts, entries)
+	_ = scm.PushFilesToRefGit(t, scmOpts, entries)
 
 	runcnx.Clients.Log.Infof("Branch %s has been created and pushed with files", targetRefName)
 	mrTitle := "TestMergeRequest - " + targetRefName
@@ -210,6 +277,79 @@ func TestGitlabOnComment(t *testing.T) {
 	assert.NilError(t, err)
 }
 
+func TestGitlabCancelInProgressOnPRClose(t *testing.T) {
+	targetNS := names.SimpleNameGenerator.RestrictLengthWithRandomSuffix("pac-e2e-ns")
+	ctx := context.Background()
+	runcnx, opts, glprovider, err := tgitlab.Setup(ctx)
+	assert.NilError(t, err)
+	ctx, err = cctx.GetControllerCtxInfo(ctx, runcnx)
+	assert.NilError(t, err)
+	runcnx.Clients.Log.Info("Testing Gitlab cancel in progress on pr close")
+	projectinfo, resp, err := glprovider.Client.Projects.GetProject(opts.ProjectID, nil)
+	assert.NilError(t, err)
+	if resp != nil && resp.StatusCode == http.StatusNotFound {
+		t.Errorf("Repository %s not found in %s", opts.Organization, opts.Repo)
+	}
+
+	err = tgitlab.CreateCRD(ctx, projectinfo, runcnx, targetNS, nil)
+	assert.NilError(t, err)
+
+	entries, err := payload.GetEntries(map[string]string{
+		".tekton/in-progress.yaml": "testdata/pipelinerun-cancel-in-progress.yaml",
+	}, targetNS, projectinfo.DefaultBranch,
+		triggertype.PullRequest.String(), map[string]string{})
+	assert.NilError(t, err)
+	targetRefName := names.SimpleNameGenerator.RestrictLengthWithRandomSuffix("pac-e2e-test")
+
+	gitCloneURL, err := scm.MakeGitCloneURL(projectinfo.WebURL, opts.UserName, opts.Password)
+	assert.NilError(t, err)
+	mrTitle := "TestCancelInProgress - " + targetRefName
+	scmOpts := &scm.Opts{
+		GitURL:        gitCloneURL,
+		Log:           runcnx.Clients.Log,
+		WebURL:        projectinfo.WebURL,
+		TargetRefName: targetRefName,
+		BaseRefName:   projectinfo.DefaultBranch,
+		CommitTitle:   mrTitle,
+	}
+
+	sha := scm.PushFilesToRefGit(t, scmOpts, entries)
+	runcnx.Clients.Log.Infof("Branch %s has been created and pushed with files", targetRefName)
+	mrID, err := tgitlab.CreateMR(glprovider.Client, opts.ProjectID, targetRefName, projectinfo.DefaultBranch, mrTitle)
+	assert.NilError(t, err)
+	runcnx.Clients.Log.Infof("MergeRequest %s/-/merge_requests/%d has been created", projectinfo.WebURL, mrID)
+	defer tgitlab.TearDown(ctx, t, runcnx, glprovider, mrID, targetRefName, targetNS, opts.ProjectID)
+
+	runcnx.Clients.Log.Infof("Waiting for the two pipelinerun to be created")
+	waitOpts := twait.Opts{
+		RepoName:        targetNS,
+		Namespace:       targetNS,
+		MinNumberStatus: 1,
+		PollTimeout:     twait.DefaultTimeout,
+		TargetSHA:       sha,
+	}
+	err = twait.UntilPipelineRunCreated(ctx, runcnx.Clients, waitOpts)
+	assert.NilError(t, err)
+	_, _, err = glprovider.Client.MergeRequests.UpdateMergeRequest(opts.ProjectID, mrID, &clientGitlab.UpdateMergeRequestOptions{
+		StateEvent: clientGitlab.Ptr("close"),
+	})
+	assert.NilError(t, err)
+
+	runcnx.Clients.Log.Infof("Sleeping for 10 seconds to let the pipelinerun to be canceled")
+	time.Sleep(10 * time.Second)
+
+	prs, err := runcnx.Clients.Tekton.TektonV1().PipelineRuns(targetNS).List(context.Background(), metav1.ListOptions{})
+	assert.NilError(t, err)
+	assert.Equal(t, len(prs.Items), 1, "should have only one pipelinerun, but we have: %d", len(prs.Items))
+	assert.Equal(t, prs.Items[0].GetStatusCondition().GetCondition(apis.ConditionSucceeded).GetReason(), "Cancelled", "should have been canceled")
+
+	repo, err := runcnx.Clients.PipelineAsCode.PipelinesascodeV1alpha1().Repositories(targetNS).Get(ctx, targetNS, metav1.GetOptions{})
+	assert.NilError(t, err)
+
+	laststatus := repo.Status[len(repo.Status)-1]
+	assert.Equal(t, "Cancelled", laststatus.Conditions[0].Reason)
+}
+
 func TestGitlabIssueGitopsComment(t *testing.T) {
 	targetNS := names.SimpleNameGenerator.RestrictLengthWithRandomSuffix("pac-e2e-ns")
 	ctx := context.Background()
@@ -246,7 +386,7 @@ func TestGitlabIssueGitopsComment(t *testing.T) {
 		BaseRefName:   projectinfo.DefaultBranch,
 		CommitTitle:   mrTitle,
 	}
-	scm.PushFilesToRefGit(t, scmOpts, entries)
+	_ = scm.PushFilesToRefGit(t, scmOpts, entries)
 
 	runcnx.Clients.Log.Infof("Branch %s has been created and pushed with files", targetRefName)
 	mrID, err := tgitlab.CreateMR(glprovider.Client, opts.ProjectID, targetRefName, projectinfo.DefaultBranch, mrTitle)
