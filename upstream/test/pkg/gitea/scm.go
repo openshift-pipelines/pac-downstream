@@ -106,7 +106,7 @@ func GetIssueTimeline(ctx context.Context, topts *TestOpts) (Timelines, error) {
 	return tls, nil
 }
 
-func CreateGiteaRepo(giteaClient *gitea.Client, user, name, hookURL string, onOrg bool, logger *zap.SugaredLogger) (*gitea.Repository, error) {
+func CreateGiteaRepo(giteaClient *gitea.Client, user, name, defaultBranch, hookURL string, onOrg bool, logger *zap.SugaredLogger) (*gitea.Repository, error) {
 	var repo *gitea.Repository
 	var err error
 	// Create a new repo
@@ -131,9 +131,11 @@ func CreateGiteaRepo(giteaClient *gitea.Client, user, name, hookURL string, onOr
 	} else {
 		logger.Infof("Creating gitea repository %s for user %s", name, user)
 		repo, _, err = giteaClient.AdminCreateRepo(user, gitea.CreateRepoOption{
-			Name:        name,
-			Description: "This is a repo it's a wonderful thing",
-			AutoInit:    true,
+			Name:          name,
+			Description:   "This is a repo it's a wonderful thing",
+			AutoInit:      true,
+			IssueLabels:   "Default",
+			DefaultBranch: defaultBranch,
 		})
 	}
 	if err != nil {
@@ -262,7 +264,7 @@ func PushToPullRequest(t *testing.T, topts *TestOpts, secondcnx pgitea.Provider,
 		TargetRefName: topts.TargetRefName,
 		BaseRefName:   topts.DefaultBranch,
 	}
-	scm.PushFilesToRefGit(t, scmOpts, entries)
+	_ = scm.PushFilesToRefGit(t, scmOpts, entries)
 }
 
 func CreateAccess(topts *TestOpts, touser, accessMode string) error {

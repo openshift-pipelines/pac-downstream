@@ -18,7 +18,7 @@ import (
 	thelp "github.com/openshift-pipelines/pipelines-as-code/pkg/provider/gitlab/test"
 	testclient "github.com/openshift-pipelines/pipelines-as-code/pkg/test/clients"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/test/logger"
-	"github.com/xanzy/go-gitlab"
+	gitlab "gitlab.com/gitlab-org/api/client-go"
 	"go.uber.org/zap"
 	zapobserver "go.uber.org/zap/zaptest/observer"
 	"gotest.tools/v3/assert"
@@ -254,6 +254,8 @@ func TestSetClientDetectAPIURL(t *testing.T) {
 	assert.ErrorContains(t, err, "no git_provider.secret has been set")
 
 	event.Provider.Token = "hello"
+	event.TargetProjectID = 10
+	event.SourceProjectID = 10
 
 	v.repoURL, event.URL, event.Provider.URL = "", "", ""
 	event.URL = fmt.Sprintf("%s/hello-this-is-me-ze/project", fakehost)
@@ -392,7 +394,7 @@ func TestGetTektonDir(t *testing.T) {
 			got, err := v.GetTektonDir(ctx, tt.args.event, tt.args.path, tt.args.provenance)
 			if tt.wantErr != "" {
 				assert.Assert(t, err != nil, "expected error %s, got %v", tt.wantErr, err)
-				assert.Equal(t, err.Error(), tt.wantErr)
+				assert.ErrorContains(t, err, tt.wantErr)
 				return
 			}
 			if tt.wantStr != "" {

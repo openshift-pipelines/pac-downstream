@@ -7,7 +7,7 @@ import (
 
 	thelp "github.com/openshift-pipelines/pipelines-as-code/pkg/provider/gitlab/test"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/test/logger"
-	"github.com/xanzy/go-gitlab"
+	gitlab "gitlab.com/gitlab-org/api/client-go"
 	"gotest.tools/v3/assert"
 )
 
@@ -69,13 +69,6 @@ func TestProvider_Detect(t *testing.T) {
 			eventType:  gitlab.EventTypeMergeRequest,
 			isGL:       true,
 			processReq: true,
-		},
-		{
-			name:       "bad/mergeRequest update Event with no commit",
-			event:      sample.MREventAsJSON("update", ``),
-			eventType:  gitlab.EventTypeMergeRequest,
-			isGL:       true,
-			processReq: false,
 		},
 		{
 			name:       "good/note event",

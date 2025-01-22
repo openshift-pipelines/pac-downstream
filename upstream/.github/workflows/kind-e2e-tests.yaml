@@ -11,16 +11,20 @@ on:
         required: false
         default: false
   pull_request_target:
-    types: [ opened, synchronize, reopened ]
+    types: [opened, synchronize, reopened]
     paths:
       - "**.go"
+
 jobs:
   e2e-tests:
     concurrency:
-      group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+      group: ${{ github.workflow }}-${{ matrix.provider }}-${{ github.event.pull_request.number || github.ref }}
       cancel-in-progress: true
     name: e2e tests
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        provider: [providers, gitea_others]
     env:
       KO_DOCKER_REPO: localhost:5000
       CONTROLLER_DOMAIN_URL: controller.paac-127-0-0-1.nip.io
@@ -36,10 +40,10 @@ jobs:
         with:
           go-version-file: "go.mod"
 
-      - uses: ko-build/setup-ko@v0.7
+      - uses: ko-build/setup-ko@v0.8
 
       - name: Install gosmee
-        uses: jaxxstorm/action-install-gh-release@v1.13.0
+        uses: jaxxstorm/action-install-gh-release@v1.14.0
         with:
           repo: chmouel/gosmee
 
@@ -78,6 +82,7 @@ jobs:
         if: ${{ github.event_name != 'schedule' }}
         run: |
           ./hack/gh-workflow-ci.sh run_e2e_tests \
+           ${{ matrix.provider }} \
            "${{ secrets.BITBUCKET_CLOUD_TOKEN }}" \
            "${{ secrets.WEBHOOK_SECRET }}" \
            "${{ secrets.TEST_GITEA_SMEEURL }}" \
@@ -94,6 +99,7 @@ jobs:
         run: |
           export NIGHTLY_E2E_TEST="true"
           ./hack/gh-workflow-ci.sh run_e2e_tests \
+           ${{ matrix.provider }} \
            "${{ secrets.BITBUCKET_CLOUD_TOKEN }}" \
            "${{ secrets.WEBHOOK_SECRET }}" \
            "${{ secrets.TEST_GITEA_SMEEURL }}" \
@@ -116,7 +122,7 @@ jobs:
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
-          name: logs
+          name: logs-e2e-tests-${{ matrix.provider }}
           path: /tmp/logs
 
       - name: Report Status
