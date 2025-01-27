@@ -290,9 +290,15 @@ func (v *Provider) processEvent(ctx context.Context, event *info.Event, eventInt
 		processedEvent.HeadURL = gitEvent.GetPullRequest().Head.GetRepo().GetHTMLURL()
 		processedEvent.Sender = gitEvent.GetPullRequest().GetUser().GetLogin()
 		processedEvent.EventType = event.EventType
+
 		if gitEvent.Action != nil && provider.Valid(*gitEvent.Action, pullRequestLabelEvent) {
 			processedEvent.EventType = string(triggertype.LabelUpdate)
 		}
+
+		if gitEvent.GetAction() == "closed" {
+			processedEvent.TriggerTarget = triggertype.PullRequestClosed
+		}
+
 		processedEvent.PullRequestNumber = gitEvent.GetPullRequest().GetNumber()
 		processedEvent.PullRequestTitle = gitEvent.GetPullRequest().GetTitle()
 		// getting the repository ids of the base and head of the pull request
@@ -421,9 +427,8 @@ func (v *Provider) handleCommitCommentEvent(ctx context.Context, event *github.C
 	runevent.SHA = event.GetComment().GetCommitID()
 	runevent.HeadURL = runevent.URL
 	runevent.BaseURL = runevent.HeadURL
-	runevent.EventType = "push"
-	runevent.TriggerTarget = "push"
-	runevent.TriggerComment = event.GetComment().GetBody()
+	runevent.TriggerTarget = triggertype.Push
+	opscomments.SetEventTypeAndTargetPR(runevent, event.GetComment().GetBody())
 
 	// Set main as default branch to runevent.HeadBranch, runevent.BaseBranch
 	runevent.HeadBranch, runevent.BaseBranch = "main", "main"

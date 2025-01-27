@@ -64,6 +64,10 @@ func (v *Provider) detectTriggerTypeFromPayload(ghEventType string, eventInt any
 		}
 		return "", "no pusher in payload"
 	case *github.PullRequestEvent:
+		if event.GetAction() == "closed" {
+			return triggertype.PullRequestClosed, ""
+		}
+
 		if provider.Valid(event.GetAction(), pullRequestOpenSyncEvent) || provider.Valid(event.GetAction(), pullRequestLabelEvent) {
 			return triggertype.PullRequest, ""
 		}
@@ -105,7 +109,7 @@ func (v *Provider) detectTriggerTypeFromPayload(ghEventType string, eventInt any
 				return triggertype.Cancel, ""
 			}
 		}
-		return "", fmt.Sprintf("commit_comment: unsupported action \"%s\"", event.GetAction())
+		return triggertype.Comment, ""
 	}
 	return "", fmt.Sprintf("github: event \"%v\" is not supported", ghEventType)
 }

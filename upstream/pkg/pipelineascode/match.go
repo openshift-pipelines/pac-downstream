@@ -30,7 +30,7 @@ func (p *PacRun) matchRepoPR(ctx context.Context) ([]matcher.Match, *v1alpha1.Re
 	}
 
 	if p.event.CancelPipelineRuns {
-		return nil, repo, p.cancelPipelineRuns(ctx, repo)
+		return nil, repo, p.cancelPipelineRunsOpsComment(ctx, repo)
 	}
 
 	matchedPRs, err := p.getPipelineRunsFromRepo(ctx, repo)
@@ -217,7 +217,6 @@ func (p *PacRun) getPipelineRunsFromRepo(ctx context.Context, repo *v1alpha1.Rep
 		p.eventEmitter.EmitMessage(nil, zap.InfoLevel, "RepositoryCannotLocatePipelineRun", msg)
 		return nil, nil
 	}
-
 	pipelineRuns, err = resolve.MetadataResolve(pipelineRuns)
 	if err != nil && len(pipelineRuns) == 0 {
 		p.eventEmitter.EmitMessage(repo, zap.ErrorLevel, "FailedToResolvePipelineRunMetadata", err.Error())
