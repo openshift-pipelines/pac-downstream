@@ -4,22 +4,22 @@ kind: PipelineRun
 metadata:
   annotations:
     pipelinesascode.tekton.dev/cancel-in-progress: "true" # Cancel in-progress pipelines
-    pipelinesascode.tekton.dev/pipeline: "https://raw.githubusercontent.com/openshift-pipelines/operator/refs/heads/next/.tekton/docker-build-ta.yaml"
+    pipelinesascode.tekton.dev/pipeline: "https://raw.githubusercontent.com/openshift-pipelines/operator/refs/heads/release-v1.18.x/.tekton/docker-build-ta.yaml"
     build.appstudio.openshift.io/repo: https://github.com/openshift-pipelines/pac-downstream?rev={{revision}}
     build.appstudio.redhat.com/commit_sha: '{{revision}}'
     build.appstudio.redhat.com/target_branch: '{{target_branch}}'
     pipelinesascode.tekton.dev/max-keep-runs: "3"
     pipelinesascode.tekton.dev/on-cel-expression: event == "push" && target_branch
-      == "next" &&
+      == "release-v1.18.x" &&
       ("upstream/***".pathChanged() || ".konflux/patches/***".pathChanged() || ".konflux/rpms/***".pathChanged() ||
-      ".konflux/dockerfiles/webhook.Dockerfile".pathChanged() ||
-      ".tekton/pac-downstream-next-webhook-push.yaml".pathChanged())
+      ".konflux/dockerfiles/cli.Dockerfile".pathChanged() ||
+      ".tekton/pac-downstream-release-v1-18-x-cli-push.yaml".pathChanged())
   creationTimestamp: null
   labels:
-    appstudio.openshift.io/application: pac-downstream-next
-    appstudio.openshift.io/component: pac-downstream-next-webhook
+    appstudio.openshift.io/application: pac-downstream-release-v1.18.x
+    appstudio.openshift.io/component: pac-downstream-release-v1-18-x-cli
     pipelines.appstudio.openshift.io/type: build
-  name: pac-downstream-next-webhook-on-push
+  name: pac-downstream-release-v1-18-x-cli-on-push
   namespace: tekton-ecosystem-tenant
 spec:
   params:
@@ -28,9 +28,9 @@ spec:
   - name: revision
     value: '{{revision}}'
   - name: output-image
-    value: quay.io/redhat-user-workloads/tekton-ecosystem-tenant/pac-downstream-next/webhook:{{revision}}
+    value: quay.io/redhat-user-workloads/tekton-ecosystem-tenant/pac-downstream-release-v1-18-x/cli:{{revision}}
   - name: dockerfile
-    value: .konflux/dockerfiles/webhook.Dockerfile
+    value: .konflux/dockerfiles/cli.Dockerfile
   - name: build-platforms
     value:
     - linux/x86_64
