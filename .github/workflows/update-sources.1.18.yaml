@@ -18,7 +18,7 @@ jobs:
     - name: Checkout the current repo
       uses: actions/checkout@v4
       with:
-        ref: 1.18
+        ref: release-v1.18.x
 
     - name: Clone openshift-pipelines/pipelines-as-code
       run: |
