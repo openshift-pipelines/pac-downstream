@@ -65,7 +65,7 @@ jobs:
 
         if [ "$(gh pr list --base 1.18 --head actions/update/sources-1.18 --json url --jq 'length')" = "0" ]; then
           echo "creating PR..."
-          gh pr create -B 1.18 -H actions/update/sources-1.18 --label=automated --label=upstream --fill
+          gh pr create -B release-v1.18.x -H actions/update/sources-1.18 --label=automated --label=upstream --fill
         else
           echo "a PR already exists, editing..."
           gh pr edit --title "[bot] Update 1.18 from openshift-pipelines/pipelines-as-code to ${NEW_COMMIT}" --body "$(cat /tmp/diff.txt | sed 's/^/    /' | head -c 55555)"
