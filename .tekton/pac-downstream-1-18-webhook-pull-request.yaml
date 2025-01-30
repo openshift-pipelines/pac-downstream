@@ -4,23 +4,23 @@ kind: PipelineRun
 metadata:
   annotations:
     pipelinesascode.tekton.dev/cancel-in-progress: "true" # Cancel in-progress pipelines
-    pipelinesascode.tekton.dev/pipeline: "https://raw.githubusercontent.com/openshift-pipelines/operator/refs/heads/next/.tekton/docker-build-ta.yaml"
+    pipelinesascode.tekton.dev/pipeline: "https://raw.githubusercontent.com/openshift-pipelines/operator/refs/heads/release-v1.18.x/.tekton/docker-build-ta.yaml"
     build.appstudio.openshift.io/repo: https://github.com/openshift-pipelines/pac-downstream?rev={{revision}}
     build.appstudio.redhat.com/commit_sha: '{{revision}}'
     build.appstudio.redhat.com/pull_request_number: '{{pull_request_number}}'
     build.appstudio.redhat.com/target_branch: '{{target_branch}}'
     pipelinesascode.tekton.dev/max-keep-runs: "3"
     pipelinesascode.tekton.dev/on-cel-expression: event == "pull_request" && target_branch
-      == "next" &&
+      == "release-v1.18.x" &&
       ("upstream/***".pathChanged() || ".konflux/patches/***".pathChanged() || ".konflux/rpms/***".pathChanged() ||
-      ".konflux/dockerfiles/cli.Dockerfile".pathChanged() ||
-      ".tekton/pac-downstream-next-cli-pull-request.yaml".pathChanged())
+      ".konflux/dockerfiles/webhook.Dockerfile".pathChanged() ||
+      ".tekton/pac-downstream-1-18-webhook-pull-request.yaml".pathChanged())
   creationTimestamp: null
   labels:
-    appstudio.openshift.io/application: pac-downstream-next
-    appstudio.openshift.io/component: pac-downstream-next-cli
+    appstudio.openshift.io/application: pac-downstream-1.18
+    appstudio.openshift.io/component: pac-downstream-1-18-webhook
     pipelines.appstudio.openshift.io/type: build
-  name: pac-downstream-next-cli-on-pull-request
+  name: pac-downstream-1-18-webhook-on-pull-request
   namespace: tekton-ecosystem-tenant
 spec:
   params:
@@ -29,11 +29,11 @@ spec:
   - name: revision
     value: '{{revision}}'
   - name: output-image
-    value: quay.io/redhat-user-workloads/tekton-ecosystem-tenant/pac-downstream-next/cli:on-pr-{{revision}}
+    value: quay.io/redhat-user-workloads/tekton-ecosystem-tenant/pac-downstream-1-18/webhook:on-pr-{{revision}}
   - name: image-expires-after
     value: 5d
   - name: dockerfile
-    value: .konflux/dockerfiles/cli.Dockerfile
+    value: .konflux/dockerfiles/webhook.Dockerfile
   - name: build-platforms
     value:
     - linux/x86_64

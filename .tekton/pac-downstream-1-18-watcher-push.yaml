@@ -4,22 +4,22 @@ kind: PipelineRun
 metadata:
   annotations:
     pipelinesascode.tekton.dev/cancel-in-progress: "true" # Cancel in-progress pipelines
-    pipelinesascode.tekton.dev/pipeline: "https://raw.githubusercontent.com/openshift-pipelines/operator/refs/heads/next/.tekton/docker-build-ta.yaml"
+    pipelinesascode.tekton.dev/pipeline: "https://raw.githubusercontent.com/openshift-pipelines/operator/refs/heads/release-v1.18.x/.tekton/docker-build-ta.yaml"
     build.appstudio.openshift.io/repo: https://github.com/openshift-pipelines/pac-downstream?rev={{revision}}
     build.appstudio.redhat.com/commit_sha: '{{revision}}'
     build.appstudio.redhat.com/target_branch: '{{target_branch}}'
     pipelinesascode.tekton.dev/max-keep-runs: "3"
     pipelinesascode.tekton.dev/on-cel-expression: event == "push" && target_branch
-      == "next" &&
+      == "release-v1.18.x" &&
       ("upstream/***".pathChanged() || ".konflux/patches/***".pathChanged() || ".konflux/rpms/***".pathChanged() ||
-      ".konflux/dockerfiles/controller.Dockerfile".pathChanged() ||
-      ".tekton/pac-downstream-next-controller-push.yaml".pathChanged())
+      ".konflux/dockerfiles/watcher.Dockerfile".pathChanged() ||
+      ".tekton/pac-downstream-1-18-watcher-push.yaml".pathChanged())
   creationTimestamp: null
   labels:
-    appstudio.openshift.io/application: pac-downstream-next
-    appstudio.openshift.io/component: pac-downstream-next-controller
+    appstudio.openshift.io/application: pac-downstream-1.18
+    appstudio.openshift.io/component: pac-downstream-1-18-watcher
     pipelines.appstudio.openshift.io/type: build
-  name: pac-downstream-next-controller-on-push
+  name: pac-downstream-1-18-watcher-on-push
   namespace: tekton-ecosystem-tenant
 spec:
   params:
@@ -28,9 +28,9 @@ spec:
   - name: revision
     value: '{{revision}}'
   - name: output-image
-    value: quay.io/redhat-user-workloads/tekton-ecosystem-tenant/pac-downstream-next/controller:{{revision}}
+    value: quay.io/redhat-user-workloads/tekton-ecosystem-tenant/pac-downstream-1-18/watcher:{{revision}}
   - name: dockerfile
-    value: .konflux/dockerfiles/controller.Dockerfile
+    value: .konflux/dockerfiles/watcher.Dockerfile
   - name: build-platforms
     value:
     - linux/x86_64
