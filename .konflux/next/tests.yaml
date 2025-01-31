@@ -3,17 +3,25 @@
 apiVersion: appstudio.redhat.com/v1beta2
 kind: IntegrationTestScenario
 metadata:
-  name: pac-downstream-next-enterprise-contract-group
+  name: pac-downstream-next-enterprise-contract
 spec:
   application: pac-downstream-next
   contexts:
-    - description: Application testing
-      name: group
+    - description: Application testing for pac-downstream-next-controller
+      name: component_pac-downstream-next-controller
+    - description: Application testing for pac-downstream-next-webhook
+      name: component_pac-downstream-next-webhook
+    - description: Application testing for pac-downstream-next-watcher
+      name: component_pac-downstream-next-watcher
+    - description: Application testing for pac-downstream-next-cli
+      name: component_pac-downstream-next-cli
   params:
     - name: POLICY_CONFIGURATION
       value: tekton-ecosystem-tenant/tekton-ecosystem-tenant-containers
     - name: TIMEOUT
       value: "15m0s"
+    - name: SINGLE_COMPONENT
+      value: "true"
   resolverRef:
     params:
       - name: url
