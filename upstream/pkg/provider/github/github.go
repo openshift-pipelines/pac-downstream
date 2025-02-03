@@ -22,7 +22,6 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
 	"go.uber.org/zap"
 	"golang.org/x/oauth2"
-	"k8s.io/apimachinery/pkg/util/yaml"
 	"k8s.io/client-go/kubernetes"
 )
 
@@ -410,10 +409,8 @@ func (v *Provider) concatAllYamlFiles(ctx context.Context, objects []*github.Tre
 			if err != nil {
 				return "", err
 			}
-			// validate yaml
-			var i any
-			if err := yaml.Unmarshal(data, &i); err != nil {
-				return "", fmt.Errorf("error unmarshalling yaml file %s: %w", value.GetPath(), err)
+			if err := provider.ValidateYaml(data, value.GetPath()); err != nil {
+				return "", err
 			}
 			if allTemplates != "" && !strings.HasPrefix(string(data), "---") {
 				allTemplates += "---"
@@ -447,6 +444,10 @@ func (v *Provider) getPullRequest(ctx context.Context, runevent *info.Event) (*i
 	runevent.BaseURL = pr.GetBase().GetRepo().GetHTMLURL()
 	if runevent.EventType == "" {
 		runevent.EventType = triggertype.PullRequest.String()
+	}
+
+	for _, label := range pr.Labels {
+		runevent.PullRequestLabel = append(runevent.PullRequestLabel, label.GetName())
 	}
 
 	v.RepositoryIDs = []int64{

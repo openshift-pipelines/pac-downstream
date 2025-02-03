@@ -169,12 +169,12 @@ func TestGetExistingPendingApprovalCheckRunID(t *testing.T) {
 					"id": %v,
 					"external_id": "%s",
 					"output": {
-						"title": "Pending approval",
+						"title": "%s",
 						"summary": "My CI is waiting for approval"
 					}
 				}
 			]
-		}`, chosenID, chosenOne)
+		}`, chosenID, chosenOne, pendingApproval)
 	})
 
 	id, err := cnx.getExistingCheckRunID(ctx, event, provider.StatusOpts{
@@ -414,7 +414,7 @@ func TestGithubProviderCreateStatus(t *testing.T) {
                                 "status": "queued",
                                 "conclusion": "pending", 
 								"output": {
-									"title": "Pending approval",
+									"title": "Pending approval, needs /ok-to-test",
 									"summary": "My CI is waiting for approval"
 								}
 							}
@@ -556,56 +556,6 @@ func TestGithubProvidercreateStatusCommit(t *testing.T) {
 
 			if err := provider.createStatusCommit(ctx, tt.event, tt.status); (err != nil) != tt.wantErr {
 				t.Errorf("GetCommitInfo() error = %v, wantErr %v", err, tt.wantErr)
-			}
-		})
-	}
-}
-
-func TestGetCheckName(t *testing.T) {
-	type args struct {
-		status  provider.StatusOpts
-		pacopts *info.PacOpts
-	}
-	tests := []struct {
-		name string
-		args args
-		want string
-	}{
-		{
-			name: "no application name",
-			args: args{
-				status: provider.StatusOpts{
-					OriginalPipelineRunName: "HELLO",
-				},
-				pacopts: &info.PacOpts{Settings: settings.Settings{ApplicationName: ""}},
-			},
-			want: "HELLO",
-		},
-		{
-			name: "application and pipelinerun name",
-			args: args{
-				status: provider.StatusOpts{
-					OriginalPipelineRunName: "MOTO",
-				},
-				pacopts: &info.PacOpts{Settings: settings.Settings{ApplicationName: "HELLO"}},
-			},
-			want: "HELLO / MOTO",
-		},
-		{
-			name: "application no pipelinerun name",
-			args: args{
-				status: provider.StatusOpts{
-					OriginalPipelineRunName: "",
-				},
-				pacopts: &info.PacOpts{Settings: settings.Settings{ApplicationName: "PAC"}},
-			},
-			want: "PAC",
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := getCheckName(tt.args.status, tt.args.pacopts); got != tt.want {
-				t.Errorf("getCheckName() = %v, want %v", got, tt.want)
 			}
 		})
 	}

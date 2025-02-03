@@ -13,6 +13,7 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/kubeinteraction"
 	kstatus "github.com/openshift-pipelines/pipelines-as-code/pkg/kubeinteraction/status"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/opscomments"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
@@ -34,15 +35,7 @@ const taskStatusTemplate = `
 {{- end }}
 </table>`
 
-func getCheckName(status provider.StatusOpts, pacopts *info.PacOpts) string {
-	if pacopts.ApplicationName != "" {
-		if status.OriginalPipelineRunName == "" {
-			return pacopts.ApplicationName
-		}
-		return fmt.Sprintf("%s / %s", pacopts.ApplicationName, status.OriginalPipelineRunName)
-	}
-	return status.OriginalPipelineRunName
-}
+const pendingApproval = "Pending approval, needs /ok-to-test"
 
 func (v *Provider) getExistingCheckRunID(ctx context.Context, runevent *info.Event, status provider.StatusOpts) (*int64, error) {
 	opt := github.ListOptions{PerPage: v.PaginedNumber}
@@ -114,7 +107,7 @@ func (v *Provider) canIUseCheckrunID(checkrunid *int64) bool {
 func (v *Provider) createCheckRunStatus(ctx context.Context, runevent *info.Event, status provider.StatusOpts) (*int64, error) {
 	now := github.Timestamp{Time: time.Now()}
 	checkrunoption := github.CreateCheckRunOptions{
-		Name:       getCheckName(status, v.pacInfo),
+		Name:       provider.GetCheckName(status, v.pacInfo),
 		HeadSHA:    runevent.SHA,
 		Status:     github.String("in_progress"),
 		DetailsURL: github.String(status.DetailsURL),
@@ -254,7 +247,7 @@ func (v *Provider) getOrUpdateCheckRunStatus(ctx context.Context, runevent *info
 	checkRunOutput.Text = github.String(text)
 
 	opts := github.UpdateCheckRunOptions{
-		Name:   getCheckName(statusOpts, pacopts),
+		Name:   provider.GetCheckName(statusOpts, pacopts),
 		Status: github.String(statusOpts.Status),
 		Output: checkRunOutput,
 	}
@@ -323,7 +316,7 @@ func (v *Provider) createStatusCommit(ctx context.Context, runevent *info.Event,
 		State:       github.String(status.Conclusion),
 		TargetURL:   github.String(status.DetailsURL),
 		Description: github.String(status.Title),
-		Context:     github.String(getCheckName(status, v.pacInfo)),
+		Context:     github.String(provider.GetCheckName(status, v.pacInfo)),
 		CreatedAt:   &github.Timestamp{Time: now},
 	}
 
@@ -331,7 +324,13 @@ func (v *Provider) createStatusCommit(ctx context.Context, runevent *info.Event,
 		runevent.Organization, runevent.Repository, runevent.SHA, ghstatus); err != nil {
 		return err
 	}
-	if (status.Status == "completed" || (status.Status == "queued" && status.Title == "Pending approval")) && status.Text != "" && runevent.EventType == triggertype.PullRequest.String() {
+	eventType := triggertype.IsPullRequestType(runevent.EventType)
+	if opscomments.IsAnyOpsEventType(eventType.String()) {
+		eventType = triggertype.PullRequest
+	}
+
+	if (status.Status == "completed" || (status.Status == "queued" && status.Title == pendingApproval)) &&
+		status.Text != "" && eventType == triggertype.PullRequest {
 		_, _, err = v.Client.Issues.CreateComment(ctx, runevent.Organization, runevent.Repository,
 			runevent.PullRequestNumber,
 			&github.IssueComment{
@@ -367,6 +366,9 @@ func (v *Provider) CreateStatus(ctx context.Context, runevent *info.Event, statu
 			// for unauthorized user set title as Pending approval
 			statusOpts.Summary = "is waiting for approval."
 		}
+	case "cancelled":
+		statusOpts.Title = "Cancelled"
+		statusOpts.Summary = "has been <b>cancelled</b>."
 	case "neutral":
 		statusOpts.Title = "Unknown"
 		statusOpts.Summary = "doesn't know what happened with this commit."

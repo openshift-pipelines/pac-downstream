@@ -11,7 +11,7 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
-	"github.com/xanzy/go-gitlab"
+	gitlab "gitlab.com/gitlab-org/api/client-go"
 )
 
 func (v *Provider) ParsePayload(_ context.Context, _ *params.Run, request *http.Request,
@@ -56,10 +56,22 @@ func (v *Provider) ParsePayload(_ context.Context, _ *params.Run, request *http.
 
 		v.pathWithNamespace = gitEvent.ObjectAttributes.Target.PathWithNamespace
 		processedEvent.Organization, processedEvent.Repository = getOrgRepo(v.pathWithNamespace)
-		processedEvent.TriggerTarget = triggertype.PullRequest
 		processedEvent.SourceProjectID = gitEvent.ObjectAttributes.SourceProjectID
 		processedEvent.TargetProjectID = gitEvent.Project.ID
+
+		processedEvent.TriggerTarget = triggertype.PullRequest
 		processedEvent.EventType = strings.ReplaceAll(event, " Hook", "")
+
+		// This is a label update, like adding or removing a label from a MR.
+		if gitEvent.Changes.Labels.Current != nil {
+			processedEvent.EventType = triggertype.LabelUpdate.String()
+		}
+		for _, label := range gitEvent.Labels {
+			processedEvent.PullRequestLabel = append(processedEvent.PullRequestLabel, label.Title)
+		}
+		if gitEvent.ObjectAttributes.Action == "close" {
+			processedEvent.TriggerTarget = triggertype.PullRequestClosed
+		}
 	case *gitlab.TagEvent:
 		// GitLab sends same event for both Tag creation and deletion i.e. "Tag Push Hook".
 		// if gitEvent.After is containing all zeros and gitEvent.CheckoutSHA is empty

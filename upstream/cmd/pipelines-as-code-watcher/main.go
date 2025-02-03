@@ -68,5 +68,11 @@ func main() {
 		}
 	}
 
+	if val, ok := os.LookupEnv("PAC_DISABLE_HEALTH_PROBE"); ok {
+		if strings.ToLower(val) == "true" {
+			ctx = sharedmain.WithHealthProbesDisabled(ctx)
+		}
+	}
+
 	sharedmain.MainWithConfig(ctx, "pac-watcher", cfg, reconciler.NewController())
 }

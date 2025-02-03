@@ -5,6 +5,9 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
+	"gopkg.in/yaml.v2"
 )
 
 var (
@@ -122,4 +125,28 @@ func CompareHostOfURLS(uri1, uri2 string) bool {
 		return false
 	}
 	return u1.Host == u2.Host
+}
+
+func ValidateYaml(content []byte, filename string) error {
+	var validYaml any
+	if err := yaml.Unmarshal(content, &validYaml); err != nil {
+		return fmt.Errorf("error unmarshalling yaml file %s: %w", filename, err)
+	}
+	return nil
+}
+
+// GetCheckName returns the name of the check to be created based on the status
+// and the pacopts.
+// If the pacopts.ApplicationName is set, it will be used as the check name.
+// Otherwise, the OriginalPipelineRunName will be used.
+// If the OriginalPipelineRunName is not set, an empty string will be returned.
+// The check name will be in the format "ApplicationName / OriginalPipelineRunName".
+func GetCheckName(status StatusOpts, pacopts *info.PacOpts) string {
+	if pacopts.ApplicationName != "" {
+		if status.OriginalPipelineRunName == "" {
+			return pacopts.ApplicationName
+		}
+		return fmt.Sprintf("%s / %s", pacopts.ApplicationName, status.OriginalPipelineRunName)
+	}
+	return status.OriginalPipelineRunName
 }

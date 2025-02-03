@@ -150,6 +150,10 @@ func (v *Provider) concatAllYamlFiles(objects []string, runevent *info.Event) (s
 				return "", err
 			}
 
+			if err := provider.ValidateYaml([]byte(data), value); err != nil {
+				return "", err
+			}
+
 			if allTemplates != "" && !strings.HasPrefix(data, "---") {
 				allTemplates += "---"
 			}
