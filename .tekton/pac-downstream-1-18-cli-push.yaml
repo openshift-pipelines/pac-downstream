@@ -16,7 +16,7 @@ metadata:
       ".tekton/pac-downstream-1-18-cli-push.yaml".pathChanged())
   creationTimestamp: null
   labels:
-    appstudio.openshift.io/application: pac-downstream-1.18
+    appstudio.openshift.io/application: pac-downstream-1-18
     appstudio.openshift.io/component: pac-downstream-1-18-cli
     pipelines.appstudio.openshift.io/type: build
   name: pac-downstream-1-18-cli-on-push
