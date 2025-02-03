@@ -7,14 +7,14 @@ metadata:
 spec:
   application: pac-downstream-1-18
   contexts:
-    - description: Application testing for pac-downstream-1.18-controller
-      name: component_pac-downstream-1.18-controller
-    - description: Application testing for pac-downstream-1.18-webhook
-      name: component_pac-downstream-1.18-webhook
-    - description: Application testing for pac-downstream-1.18-watcher
-      name: component_pac-downstream-1.18-watcher
-    - description: Application testing for pac-downstream-1.18-cli
-      name: component_pac-downstream-1.18-cli
+    - description: Application testing for pac-downstream-1-18-controller
+      name: component_pac-downstream-1-18-controller
+    - description: Application testing for pac-downstream-1-18-webhook
+      name: component_pac-downstream-1-18-webhook
+    - description: Application testing for pac-downstream-1-18-watcher
+      name: component_pac-downstream-1-18-watcher
+    - description: Application testing for pac-downstream-1-18-cli
+      name: component_pac-downstream-1-18-cli
   params:
     - name: POLICY_CONFIGURATION
       value: tekton-ecosystem-tenant/tekton-ecosystem-tenant-containers
