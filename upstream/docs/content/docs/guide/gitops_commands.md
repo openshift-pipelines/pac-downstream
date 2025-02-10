@@ -106,6 +106,10 @@ Using the [on-comment]({{< relref "/docs/guide/matchingevents.md#matching-a-pipe
 
 See the [on-comment]({{< relref "/docs/guide/matchingevents.md#matching-a-pipelinerun-on-a-regexp-in-a-comment" >}}) guide for more detailed information.
 
+For a complete example, you can see how Pipelines-as-Code's own repo implemented some prow comments via the `on-comment` annotation:
+
+<https://github.com/openshift-pipelines/pipelines-as-code/blob/main/.tekton/prow.yaml>
+
 ## Cancelling a PipelineRun
 
 You can cancel a running PipelineRun by commenting on the Pull Request.
@@ -209,6 +213,15 @@ Here are the possible event types:
 * `cancel-all-comment`: The event is a single `/cancel` that would cancel every matched PipelineRun.
 * `cancel-comment`: The event is a `/cancel <PipelineRun>` that would cancel a specific PipelineRun.
 * `ok-to-test-comment`: The event is a `/ok-to-test` that would allow running the CI for an unauthorized user.
+
+When a repository owner issues the `/ok-to-test` command on a pull request raised by an unauthorized user, and no PipelineRun exists in the .tekton directory for `pull_request` event,
+Pipelines-as-Code will create a neutral check-run status. This status serves to indicate that no PipelineRun has been matched, preventing any workflows from being blocked such as auto-merge, will proceed as expected.
+
+{{< hint info >}}
+
+Note: This neutral check-run status functionality is only supported on GitHub.
+
+{{< /hint >}}
 
 When using the `{{ event_type }}` [dynamic variable]({{< relref "/docs/guide/authoringprs.md#dynamic-variables" >}}) for the following event types:
 
