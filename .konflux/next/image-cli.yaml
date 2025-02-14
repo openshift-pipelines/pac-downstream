@@ -11,5 +11,5 @@ metadata:
     appstudio.redhat.com/application: pac-downstream-next
 spec:
   image:
-   name: pac-downstream-next/cli
+   name: next/pipelines-as-code-cli-rhel9
    visibility: public
