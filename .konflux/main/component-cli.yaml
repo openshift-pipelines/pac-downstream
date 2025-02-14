@@ -11,6 +11,7 @@ spec:
   application: pac-downstream-main
   build-nudges-ref:
   - operator-main-bundle
+  - tektoncd-cli-main-tkn
   source:
     git:
       url: https://github.com/openshift-pipelines/pac-downstream
