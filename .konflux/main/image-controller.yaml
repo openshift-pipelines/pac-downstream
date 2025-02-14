@@ -11,5 +11,5 @@ metadata:
     appstudio.redhat.com/application: pac-downstream-main
 spec:
   image:
-   name: pac-downstream-main/controller
+   name: main/pipelines-as-code-controller-rhel9
    visibility: public

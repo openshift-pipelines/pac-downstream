@@ -11,5 +11,5 @@ metadata:
     appstudio.redhat.com/application: pac-downstream-main
 spec:
   image:
-   name: pac-downstream-main/webhook
+   name: main/pipelines-as-code-webhook-rhel9
    visibility: public
