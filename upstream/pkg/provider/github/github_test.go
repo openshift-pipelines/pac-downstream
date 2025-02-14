@@ -16,7 +16,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/go-github/v66/github"
+	"github.com/google/go-github/v68/github"
 	"github.com/jonboulle/clockwork"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
@@ -846,7 +846,7 @@ func TestProvider_checkWebhookSecretValidity(t *testing.T) {
 		},
 		{
 			name:         "no remaining scim calls",
-			wantSubErr:   "token is ratelimited",
+			wantSubErr:   "api rate limit exceeded. Access will be restored at Mon, 01 Jan 0001 00:00:00 UTC",
 			remaining:    0,
 			expHeaderSet: true,
 			expTime:      cw.Now().Add(1 * time.Minute),
@@ -864,7 +864,7 @@ func TestProvider_checkWebhookSecretValidity(t *testing.T) {
 		{
 			name:       "no header but no remaining scim calls",
 			remaining:  0,
-			wantSubErr: "token is ratelimited",
+			wantSubErr: "api rate limit exceeded. Access will be restored at Mon, 01 Jan 0001 00:00:00 UTC",
 		},
 		{
 			name:       "api error",

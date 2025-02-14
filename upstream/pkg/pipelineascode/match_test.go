@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/google/go-github/v66/github"
+	"github.com/google/go-github/v68/github"
 	apipac "github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/consoleui"
@@ -95,6 +95,17 @@ func TestGetPipelineRunsFromRepo(t *testing.T) {
 		BaseBranch:    "main",
 		Sender:        "fantasio",
 		EventType:     "pull_request",
+		TriggerTarget: "pull_request",
+	}
+	okToTestEvent := &info.Event{
+		SHA:           "principale",
+		Organization:  "organizationes",
+		Repository:    "lagaffe",
+		URL:           "https://service/documentation",
+		HeadBranch:    "main",
+		BaseBranch:    "main",
+		Sender:        "fantasio",
+		EventType:     "ok-to-test-comment",
 		TriggerTarget: "pull_request",
 	}
 	testExplicitNoMatchPREvent := &info.Event{
@@ -188,6 +199,22 @@ func TestGetPipelineRunsFromRepo(t *testing.T) {
 			expectedNumberOfPruns: 1,
 			event:                 testExplicitNoMatchPREvent,
 		},
+		{
+			name: "no-match pipelineruns in .tekton dir, on ok-to-test command for an external user",
+			repositories: &v1alpha1.Repository{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "testrepo",
+					Namespace: "test",
+				},
+				Spec: v1alpha1.RepositorySpec{},
+			},
+			// if `testdata/no_yaml` dir is supplied here p.getPipelineRunsFromRepo func will return after
+			// GetTektonDir so providing `testdat/push_branch` so that it should call MatchPipelineRunsByAnnotation
+			// first and then create a neutral check-run.
+			tektondir:             "testdata/push_branch",
+			expectedNumberOfPruns: 0,
+			event:                 okToTestEvent,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -216,15 +243,17 @@ func TestGetPipelineRunsFromRepo(t *testing.T) {
 			}
 			vcx := &ghprovider.Provider{
 				Client: fakeclient,
-				Token:  github.String("None"),
+				Token:  github.Ptr("None"),
 				Logger: logger,
 			}
 			pacInfo := &info.PacOpts{
 				Settings: settings.Settings{
+					ApplicationName:    "Pipelines as Code CI",
 					SecretAutoCreation: true,
 					RemoteTasks:        true,
 				},
 			}
+			vcx.SetPacInfo(pacInfo)
 			p := NewPacs(tt.event, vcx, cs, pacInfo, k8int, logger, nil)
 			p.eventEmitter = events.NewEventEmitter(stdata.Kube, logger)
 			matchedPRs, err := p.getPipelineRunsFromRepo(ctx, tt.repositories)

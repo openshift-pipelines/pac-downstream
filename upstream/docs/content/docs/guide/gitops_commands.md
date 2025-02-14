@@ -29,6 +29,12 @@ Roses are red, violets are blue. Pipelines are bound to flake by design.
 /test <pipelinerun-name>
 ```
 
+{{< hint info >}}
+
+Please be aware that GitOps commands such as `/test` and others will not function on closed Pull Requests or Merge Requests.  
+
+{{< /hint >}}
+
 ## GitOps Commands on Pushed Commits
 
 If you want to trigger a GitOps command on a pushed commit, you can include the `GitOps` comments within your commit messages. These comments can be used to restart either all pipelines or specific ones. Here's how it works:
@@ -40,13 +46,15 @@ For restarting all pipeline runs:
 For restarting a specific pipeline run:
 2. Use `/retest <pipelinerun-name>` or `/test <pipelinerun-name>` within your commit message. Replace `<pipelinerun-name>` with the specific name of the pipeline run you want to restart.
 
+The GitOps command triggers a PipelineRun only on the latest commit (HEAD) of the branch and does not work on older commits.
+
 **Note:**
 
 When executing `GitOps` commands on a commit that exists in multiple branches within a push request, the branch with the latest commit will be used.
 
 This means:
 
-1. If a user specifies commands like `/retest` or `/test` without any argument in a comment on a branch, the test will automatically be performed on the **main** branch.
+1. When a user comments with commands like `/retest` or `/test` on a branch without specifying a branch name, the test will automatically run on the **default branch** (e.g. main, master) of the repository.
 
    Examples:
    1. `/retest`
@@ -96,9 +104,13 @@ grep "string" /tmp/comment
 
 ## Custom GitOps Commands
 
-Using the [on-comment]({{< relref "/docs/guide/matchingevents.md#matching-a-pipelinerun-on-a-regexp-in-a-comment" >}}) annotation on your `PipelineRun`, you can define custom GitOps commands that will be triggered by comments on the Pull Request.
+Using the [on-comment]({{< relref "/docs/guide/matchingevents.md#matching-a-pipelinerun-on-a-regex-in-a-comment" >}}) annotation on your `PipelineRun`, you can define custom GitOps commands that will be triggered by comments on the Pull Request.
 
-See the [on-comment]({{< relref "/docs/guide/matchingevents.md#matching-a-pipelinerun-on-a-regexp-in-a-comment" >}}) guide for more detailed information.
+See the [on-comment]({{< relref "/docs/guide/matchingevents.md#matching-a-pipelinerun-on-a-regex-in-a-comment" >}}) guide for more detailed information.
+
+For a complete example, you can see how Pipelines-as-Code's own repo implemented some prow comments via the `on-comment` annotation:
+
+<https://github.com/openshift-pipelines/pipelines-as-code/blob/main/.tekton/prow.yaml>
 
 ## Cancelling a PipelineRun
 
@@ -203,6 +215,15 @@ Here are the possible event types:
 * `cancel-all-comment`: The event is a single `/cancel` that would cancel every matched PipelineRun.
 * `cancel-comment`: The event is a `/cancel <PipelineRun>` that would cancel a specific PipelineRun.
 * `ok-to-test-comment`: The event is a `/ok-to-test` that would allow running the CI for an unauthorized user.
+
+When a repository owner issues the `/ok-to-test` command on a pull request raised by an unauthorized user, and no PipelineRun exists in the .tekton directory for `pull_request` event,
+Pipelines-as-Code will create a neutral check-run status. This status serves to indicate that no PipelineRun has been matched, preventing any workflows from being blocked such as auto-merge, will proceed as expected.
+
+{{< hint info >}}
+
+Note: This neutral check-run status functionality is only supported on GitHub.
+
+{{< /hint >}}
 
 When using the `{{ event_type }}` [dynamic variable]({{< relref "/docs/guide/authoringprs.md#dynamic-variables" >}}) for the following event types:
 
