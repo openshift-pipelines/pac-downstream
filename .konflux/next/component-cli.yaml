@@ -11,6 +11,7 @@ spec:
   application: pac-downstream-next
   build-nudges-ref:
   - operator-next-bundle
+  - tektoncd-cli-next-tkn
   source:
     git:
       url: https://github.com/openshift-pipelines/pac-downstream
