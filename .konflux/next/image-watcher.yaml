@@ -11,5 +11,5 @@ metadata:
     appstudio.redhat.com/application: pac-downstream-next
 spec:
   image:
-   name: pac-downstream-next/watcher
+   name: next/pipelines-as-code-watcher-rhel9
    visibility: public
