@@ -31,7 +31,7 @@ Roses are red, violets are blue. Pipelines are bound to flake by design.
 
 {{< hint info >}}
 
-Please be aware that GitOps commands such as `/test` and others will not function on closed Pull Requests or Merge Requests.  
+Please be aware that GitOps commands such as `/test` and others will not function on closed Pull Requests or Merge Requests.
 
 {{< /hint >}}
 
@@ -46,13 +46,15 @@ For restarting all pipeline runs:
 For restarting a specific pipeline run:
 2. Use `/retest <pipelinerun-name>` or `/test <pipelinerun-name>` within your commit message. Replace `<pipelinerun-name>` with the specific name of the pipeline run you want to restart.
 
+The GitOps command triggers a PipelineRun only on the latest commit (HEAD) of the branch and does not work on older commits.
+
 **Note:**
 
 When executing `GitOps` commands on a commit that exists in multiple branches within a push request, the branch with the latest commit will be used.
 
 This means:
 
-1. If a user specifies commands like `/retest` or `/test` without any argument in a comment on a branch, the test will automatically be performed on the **main** branch.
+1. When a user comments with commands like `/retest` or `/test` on a branch without specifying a branch name, the test will automatically run on the **default branch** (e.g. main, master) of the repository.
 
    Examples:
    1. `/retest`
@@ -85,26 +87,50 @@ The PipelineRun will be restarted regardless of the annotations if the comment `
 
 ## Accessing the Comment Triggering the PipelineRun
 
-When you trigger a PipelineRun via a GitOps Command, the template variable `{{ trigger_comment }}` is set to the actual comment that triggered it.
+When you trigger a PipelineRun via a GitOps Command, the template variable `{{
+trigger_comment }}` is set to the actual comment that triggered it.
 
-You can then perform actions based on the comment content with a shell script or other methods.
+You can then perform actions based on the comment content with a shell script
+or other methods.
 
-There is a restriction with the `trigger_comment` variable: we modify it to replace newlines with `\n` since multi-line comments can cause issues when replaced inside the YAML.
+Expanding `{{ trigger_comment }}` in YAML can break parsing if the comment
+contains newlines. For example, a GitHub comment like:
 
-It is up to you to replace it back with newlines. For example, with shell scripts, you can use `echo -e` to expand the newline back.
+```console
+/help
 
-Example of a shell script:
+This is a test.
+```
+
+Expands to:
+
+```yaml
+params:
+  - name: trigger_comment
+    value: "/help
+
+This is a test."
+```
+
+The empty line makes the YAML invalid. To prevent this, we replace `\r\n` with
+`\n` to ensure proper formatting.
+
+You can restore the newlines in your task as needed.
+
+For example, in a shell script, use `echo -e` to expand `\n` back into actual newlines:
 
 ```shell
 echo -e "{{ trigger_comment }}" > /tmp/comment
-grep "string" /tmp/comment
+grep "/help" /tmp/comment # will output only /help
 ```
+
+This ensures the comment is correctly formatted when processed.
 
 ## Custom GitOps Commands
 
-Using the [on-comment]({{< relref "/docs/guide/matchingevents.md#matching-a-pipelinerun-on-a-regexp-in-a-comment" >}}) annotation on your `PipelineRun`, you can define custom GitOps commands that will be triggered by comments on the Pull Request.
+Using the [on-comment]({{< relref "/docs/guide/matchingevents.md#matching-a-pipelinerun-on-a-regex-in-a-comment" >}}) annotation on your `PipelineRun`, you can define custom GitOps commands that will be triggered by comments on the Pull Request.
 
-See the [on-comment]({{< relref "/docs/guide/matchingevents.md#matching-a-pipelinerun-on-a-regexp-in-a-comment" >}}) guide for more detailed information.
+See the [on-comment]({{< relref "/docs/guide/matchingevents.md#matching-a-pipelinerun-on-a-regex-in-a-comment" >}}) guide for more detailed information.
 
 For a complete example, you can see how Pipelines-as-Code's own repo implemented some prow comments via the `on-comment` annotation:
 
