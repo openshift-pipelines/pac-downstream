@@ -48,7 +48,7 @@ var sampleRepo = &github.Repository{
 		Login: github.Ptr("owner"),
 	},
 	Name:          github.Ptr("reponame"),
-	DefaultBranch: github.Ptr("defaultbranch"),
+	DefaultBranch: github.Ptr("main"),
 	HTMLURL:       github.Ptr("https://github.com/owner/repo"),
 }
 
@@ -539,7 +539,7 @@ func TestParsePayLoad(t *testing.T) {
 			shaRet:            "samplePRshanew",
 			targetPipelinerun: "dummy",
 			wantedBranchName:  "main",
-			wantErrString:     "provided branch main does not contains sha samplePRshanew",
+			wantErrString:     "provided SHA samplePRshanew is not the HEAD commit of the branch main",
 		},
 	}
 	for _, tt := range tests {
