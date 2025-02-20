@@ -14,13 +14,13 @@ RUN go build -mod=vendor -tags disable_gcp -v  \
     -o /tmp/tkn-pac ./cmd/tkn-pac
 
 FROM $RUNTIME
-ARG VERSION=pipelines-as-code-cli-main
+ARG VERSION=pipelines-as-code-cli-next
 
 COPY --from=builder /tmp/tkn-pac /usr/bin
 
 LABEL \
       com.redhat.component="openshift-pipelines-cli-tkn-pac-container" \
-      name="openshift-pipelines/pipelines-cli-tkn-pac-rhel8" \
+      name="openshift-pipelines/pipelines-cli-tkn-pac-rhel9" \
       version=$VERSION \
       summary="Red Hat OpenShift pipelines tkn pac CLI" \
       maintainer="pipelines-extcomm@redhat.com" \
@@ -29,7 +29,6 @@ LABEL \
       io.k8s.description="Red Hat OpenShift Pipelines tkn pac CLI" \
       io.openshift.tags="pipelines,tekton,openshift"
 
-RUN microdnf install -y shadow-utils && \
-    groupadd -r -g 65532 nonroot && \
+RUN groupadd -r -g 65532 nonroot && \
     useradd --no-log-init -r -u 65532 -g nonroot nonroot
 USER 65532

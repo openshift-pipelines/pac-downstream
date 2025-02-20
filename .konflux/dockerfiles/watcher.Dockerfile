@@ -13,7 +13,7 @@ RUN go build -ldflags="-X 'knative.dev/pkg/changeset.rev=$(cat HEAD)'" -mod=vend
     ./cmd/pipelines-as-code-watcher
 
 FROM $RUNTIME
-ARG VERSION=pipelines-as-code-watcher-main
+ARG VERSION=pipelines-as-code-watcher-next
 
 ENV KO_APP=/ko-app \
     KO_DATA_PATH=/kodata
@@ -23,7 +23,7 @@ COPY head ${KO_DATA_PATH}/HEAD
 
 LABEL \
       com.redhat.component="openshift-pipelines-pipelines-as-code-watcher-container" \
-      name="openshift-pipelines/pipelines-as-code-watcher-rhel8" \
+      name="openshift-pipelines/pipelines-as-code-watcher-rhel9" \
       version=$VERSION \
       summary="Red Hat OpenShift Pipelines Pipelines as Code Watcher" \
       maintainer="pipelines-extcomm@redhat.com" \
@@ -32,8 +32,7 @@ LABEL \
       io.k8s.description="Red Hat OpenShift Pipelines Pipelines as Code Watcher" \
       io.openshift.tags="pipelines,tekton,openshift"
 
-RUN microdnf install -y shadow-utils && \
-    groupadd -r -g 65532 nonroot && \
+RUN groupadd -r -g 65532 nonroot && \
     useradd --no-log-init -r -u 65532 -g nonroot nonroot
 USER 65532
 
