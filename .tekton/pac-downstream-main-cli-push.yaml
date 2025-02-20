@@ -28,7 +28,7 @@ spec:
   - name: revision
     value: '{{revision}}'
   - name: output-image
-    value: quay.io/redhat-user-workloads/tekton-ecosystem-tenant/pac-downstream-main/cli:{{revision}}
+    value: quay.io/redhat-user-workloads/tekton-ecosystem-tenant/main/pipelines-as-code-cli-rhel9:{{revision}}
   - name: dockerfile
     value: .konflux/dockerfiles/cli.Dockerfile
   - name: prefetch-input
