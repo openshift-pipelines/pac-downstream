@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"code.gitea.io/sdk/gitea"
-	"github.com/google/go-github/v66/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
@@ -405,7 +404,7 @@ func WaitForStatus(t *testing.T, topts *TestOpts, ref, forcontext string, onlyla
 		}
 		for _, cstatus := range statuses {
 			if topts.CheckForStatus == "Skipped" {
-				if strings.HasSuffix(cstatus.Description, "Pending approval, needs /ok-to-test") {
+				if strings.HasSuffix(cstatus.Description, "Pending approval, waiting for an /ok-to-test") {
 					numstatus++
 					break
 				}
@@ -558,11 +557,12 @@ func GetStandardParams(t *testing.T, topts *TestOpts, eventType string) (repoURL
 			t.Fatalf("pipelinerun has not finished, something is fishy")
 		}
 	}
+	numLines := int64(10)
 	out, err := tlogs.GetPodLog(context.Background(),
 		topts.ParamsRun.Clients.Kube.CoreV1(),
 		topts.TargetNS, fmt.Sprintf("tekton.dev/pipelineRun=%s",
 			prs.Items[0].Name), "step-test-standard-params-value",
-		github.Int64(10))
+		&numLines)
 	assert.NilError(t, err)
 	assert.Assert(t, out != "")
 	out = strings.TrimSpace(out)

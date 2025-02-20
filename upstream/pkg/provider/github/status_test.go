@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/google/go-github/v66/github"
+	"github.com/google/go-github/v68/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/clients"
@@ -414,7 +414,7 @@ func TestGithubProviderCreateStatus(t *testing.T) {
                                 "status": "queued",
                                 "conclusion": "pending", 
 								"output": {
-									"title": "Pending approval, needs /ok-to-test",
+									"title": "Pending approval, waiting for an /ok-to-test",
 									"summary": "My CI is waiting for approval"
 								}
 							}
@@ -476,7 +476,7 @@ func TestGithubProviderCreateStatus(t *testing.T) {
 func TestGithubProvidercreateStatusCommit(t *testing.T) {
 	issuenumber := 666
 	anevent := &info.Event{
-		Event:             &github.PullRequestEvent{PullRequest: &github.PullRequest{Number: github.Int(issuenumber)}},
+		Event:             &github.PullRequestEvent{PullRequest: &github.PullRequest{Number: github.Ptr(issuenumber)}},
 		Organization:      "owner",
 		Repository:        "repository",
 		SHA:               "createStatusCommitSHA",
@@ -562,6 +562,7 @@ func TestGithubProvidercreateStatusCommit(t *testing.T) {
 }
 
 func TestProviderGetExistingCheckRunID(t *testing.T) {
+	idd := int64(55555)
 	tests := []struct {
 		name       string
 		jsonret    string
@@ -580,7 +581,7 @@ func TestProviderGetExistingCheckRunID(t *testing.T) {
 				}
 			]
 		}`,
-			expectedID: github.Int64(55555),
+			expectedID: &idd,
 			prname:     "blahpr",
 		},
 		{
