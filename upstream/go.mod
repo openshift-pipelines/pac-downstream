@@ -1,6 +1,6 @@
 module github.com/openshift-pipelines/pipelines-as-code
 
-go 1.22.7
+go 1.23
 
 toolchain go1.23.2
 
@@ -64,7 +64,7 @@ require (
 replace (
 	github.com/PuerkitoBio/goquery => github.com/PuerkitoBio/goquery v1.9.2
 	github.com/imdario/mergo => dario.cat/mergo v1.0.1
-	sigs.k8s.io/json => sigs.k8s.io/json v0.0.0-20221116044647-bc3834ca7abd
+	sigs.k8s.io/json => sigs.k8s.io/json v0.0.0-20241014173422-cfa47c3a1cc8
 	sigs.k8s.io/structured-merge-diff/v4 => sigs.k8s.io/structured-merge-diff/v4 v4.4.1
 )
 
