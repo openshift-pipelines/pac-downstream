@@ -24,8 +24,23 @@ For example, if a PipelineRun has this annotation:
 pipelinesascode.tekton.dev/on-event: "[pull_request]"
 ```
 
-it will be matched when a pull request is created and run on the cluster, as
-long as the submitter is allowed to run it.
+it will be automatically triggered and executed when a user with appropriate permissions submits a Pull Request. See ACL Permissions for triggering PipelineRuns below.
+
+When using GitHub as a provider, Pipelines-as-Code runs on draft Pull Requests by default. However, you can prevent pipelines from triggering on draft Pull Requests by using the following annotation:
+
+```yaml
+pipelinesascode.tekton.dev/on-cel-expression: event == "pull_request" && !body.pull_request.draft
+```
+
+With this configuration, your pipeline will only be triggered when the Pull Request is converted to "Ready for Review." For additional examples, see [Advanced event matching using CEL](https://pipelinesascode.com/docs/guide/matchingevents/#advanced-event-matching-using-cel).
+
+And if you are using the GitHub provider with GitHub Apps and have installed it
+on an organization, Pipelines-as-Code will only be triggered if it detects a
+Repo CR that matches one of the repositories in a URL on a repository that
+belongs to the organization where the GitHub App has been installed. Otherwise,
+Pipelines-as-Code will not be triggered.
+
+## ACL Permissions for triggering PipelineRuns
 
 The rules for determining whether a submitter is allowed to run a PipelineRun
 on CI are as follows. Any of the following conditions will allow a submitter to
@@ -40,43 +55,40 @@ run a PipelineRun on CI:
 
 - The author of the pull request is listed in the `OWNERS` file located in the main
   directory of the default branch on GitHub or your other service provider.
-
-  The OWNERS file adheres to a specific format, similar to the Prow OWNERS
-  file format (available at <https://www.kubernetes.dev/docs/guide/owners/>). We
-  support simple OWNERS configuration including `approvers` and `reviewers` lists
-  and they are treated equally in terms of permissions for executing a PipelineRun.
-  If the OWNERS file includes `filters` instead of a simple OWNERS configuration,
-  we only look for the everything matching `.*` filter and take the `approvers`
-  and `reviewers` lists from there. All other filters (matching specific files or
-  directories) are ignored.
-
-  OWNERS_ALIASES is also supported and can be used for mapping of an alias name
-  to a list of usernames.
-
-  When you include contributors to the lists of `approvers` or `reviewers` in your
-  OWNERS files, Pipelines-as-Code enables those contributors to execute a PipelineRun.
-
-  For instance, if the `approvers` section of your OWNERS file in the main or
-  master branch of your repository appears as follows:
-
-  ```yaml
-  approvers:
-    - approved
-  ```
-
-  then the user with the username "approved" will be granted permission.
+(see below for the OWNERS file format).
 
 If the pull request author does not have the necessary permissions to run a
 PipelineRun, another user who does have the necessary permissions can comment
 `/ok-to-test` on the pull request to run the PipelineRun.
 
-{{< hint info >}}
-If you are using the GitHub Apps and have installed it on an organization,
-Pipelines-as-Code will only be triggered if it detects a Repo CR that matches
-one of the repositories in a URL on a repository that belongs to the
-organization where the GitHub App has been installed. Otherwise, Pipelines as
-Code will not be triggered.
-{{< /hint >}}
+## OWNERS file
+
+The `OWNERS` file follows a specific format similar to the Prow `OWNERS` file
+format (detailed at <https://www.kubernetes.dev/docs/guide/owners/>). We
+support a basic `OWNERS` configuration with `approvers` and `reviewers` lists,
+both of which have equal permissions for executing a `PipelineRun`.  
+
+If the `OWNERS` file uses `filters` instead of a simple configuration, we only
+consider the `.*` filter and extract the `approvers` and `reviewers` lists from
+it. Any other filters targeting specific files or directories are ignored.  
+
+Additionally, `OWNERS_ALIASES` is supported and allows mapping alias names to
+lists of usernames.  
+
+Including contributors in the `approvers` or `reviewers` lists within your
+`OWNERS` file grants them the ability to execute a `PipelineRun` via
+Pipelines-as-Code.  
+
+For example, if your repository’s `main` or `master` branch contains the
+following `approvers` section:  
+
+```yaml
+approvers:
+  - approved
+```  
+
+The user with the username `"approved"` will have the necessary
+permissions.
 
 ## PipelineRun Execution
 
