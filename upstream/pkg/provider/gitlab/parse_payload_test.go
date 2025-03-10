@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/google/go-github/v68/github"
+	"github.com/google/go-github/v69/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/opscomments"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
@@ -106,7 +106,7 @@ func TestParsePayload(t *testing.T) {
 				payload: sample.PushEventAsJSON(true),
 			},
 			want: &info.Event{
-				EventType:     "Push",
+				EventType:     "push",
 				TriggerTarget: "push",
 				Organization:  "hello/this/is/me/ze",
 				Repository:    "project",
