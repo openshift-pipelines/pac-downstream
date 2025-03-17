@@ -276,6 +276,7 @@ func (v *Provider) processEvent(ctx context.Context, event *info.Event, eventInt
 		processedEvent.HeadBranch = processedEvent.BaseBranch // in push events Head Branch is the same as Basebranch
 		processedEvent.BaseURL = gitEvent.GetRepo().GetHTMLURL()
 		processedEvent.HeadURL = processedEvent.BaseURL // in push events Head URL is the same as BaseURL
+		v.userType = gitEvent.GetSender().GetType()
 	case *github.PullRequestEvent:
 		processedEvent.Repository = gitEvent.GetRepo().GetName()
 		if gitEvent.GetRepo() == nil {
@@ -291,6 +292,7 @@ func (v *Provider) processEvent(ctx context.Context, event *info.Event, eventInt
 		processedEvent.HeadURL = gitEvent.GetPullRequest().Head.GetRepo().GetHTMLURL()
 		processedEvent.Sender = gitEvent.GetPullRequest().GetUser().GetLogin()
 		processedEvent.EventType = event.EventType
+		v.userType = gitEvent.GetPullRequest().GetUser().GetType()
 
 		if gitEvent.Action != nil && provider.Valid(*gitEvent.Action, pullRequestLabelEvent) {
 			processedEvent.EventType = string(triggertype.LabelUpdate)
@@ -343,6 +345,7 @@ func (v *Provider) handleReRequestEvent(ctx context.Context, event *github.Check
 		// we allow the rerequest user here, not the push user, i guess it's
 		// fine because you can't do a rereq without being a github owner?
 		runevent.Sender = event.GetSender().GetLogin()
+		v.userType = event.GetSender().GetType()
 		return runevent, nil
 	}
 	runevent.PullRequestNumber = event.GetCheckRun().GetCheckSuite().PullRequests[0].GetNumber()
@@ -373,6 +376,7 @@ func (v *Provider) handleCheckSuites(ctx context.Context, event *github.CheckSui
 		// we allow the rerequest user here, not the push user, i guess it's
 		// fine because you can't do a rereq without being a github owner?
 		runevent.Sender = event.GetSender().GetLogin()
+		v.userType = event.GetSender().GetType()
 		return runevent, nil
 		// return nil, fmt.Errorf("check suite event is not supported for push events")
 	}
@@ -401,6 +405,7 @@ func (v *Provider) handleIssueCommentEvent(ctx context.Context, event *github.Is
 	if !event.GetIssue().IsPullRequest() {
 		return info.NewEvent(), fmt.Errorf("issue comment is not coming from a pull_request")
 	}
+	v.userType = event.GetSender().GetType()
 	opscomments.SetEventTypeAndTargetPR(runevent, event.GetComment().GetBody())
 	// We are getting the full URL so we have to get the last part to get the PR number,
 	// we don't have to care about URL query string/hash and other stuff because
@@ -424,6 +429,7 @@ func (v *Provider) handleCommitCommentEvent(ctx context.Context, event *github.C
 	runevent.Organization = event.GetRepo().GetOwner().GetLogin()
 	runevent.Repository = event.GetRepo().GetName()
 	runevent.Sender = event.GetSender().GetLogin()
+	v.userType = event.GetSender().GetType()
 	runevent.URL = event.GetRepo().GetHTMLURL()
 	runevent.SHA = event.GetComment().GetCommitID()
 	runevent.HeadURL = runevent.URL
@@ -466,7 +472,7 @@ func (v *Provider) handleCommitCommentEvent(ctx context.Context, event *github.C
 	}
 
 	// Check if the specified branch contains the commit
-	if err = v.isBranchContainsCommit(ctx, runevent, branchName); err != nil {
+	if err = v.isHeadCommitOfBranch(ctx, runevent, branchName); err != nil {
 		if provider.IsCancelComment(event.GetComment().GetBody()) {
 			runevent.CancelPipelineRuns = false
 		}
@@ -476,6 +482,6 @@ func (v *Provider) handleCommitCommentEvent(ctx context.Context, event *github.C
 	runevent.HeadBranch = branchName
 	runevent.BaseBranch = branchName
 
-	v.Logger.Infof("commit_comment: pipelinerun %s on %s/%s#%s has been requested", action, runevent.Organization, runevent.Repository, runevent.SHA)
+	v.Logger.Infof("github commit_comment: pipelinerun %s on %s/%s#%s has been requested", action, runevent.Organization, runevent.Repository, runevent.SHA)
 	return runevent, nil
 }
