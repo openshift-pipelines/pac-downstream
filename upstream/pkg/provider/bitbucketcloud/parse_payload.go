@@ -78,11 +78,13 @@ func parsePayloadType(event, rawPayload string) (interface{}, error) {
 
 	var localEvent string
 	if strings.HasPrefix(event, "pullrequest:") {
-		if !provider.Valid(event, PullRequestAllEvents) {
+		if !provider.Valid(event, []string{
+			"pullrequest:created", "pullrequest:updated", "pullrequest:comment_created",
+		}) {
 			return nil, fmt.Errorf("event %s is not supported", event)
 		}
 		localEvent = triggertype.PullRequest.String()
-	} else if provider.Valid(event, pushRepo) {
+	} else if event == "repo:push" {
 		localEvent = "push"
 	}
 
@@ -123,20 +125,18 @@ func (v *Provider) ParsePayload(ctx context.Context, run *params.Run, request *h
 	}
 
 	processedEvent.Event = eventInt
+
 	switch e := eventInt.(type) {
 	case *types.PullRequestEvent:
-		processedEvent.TriggerTarget = triggertype.PullRequest
-		switch {
-		case provider.Valid(event, pullRequestsCreated):
+		if provider.Valid(event, []string{"pullrequest:created", "pullrequest:updated"}) {
+			processedEvent.TriggerTarget = triggertype.PullRequest
 			processedEvent.EventType = triggertype.PullRequest.String()
-		case provider.Valid(event, pullRequestsCommentCreated):
+		} else if provider.Valid(event, []string{"pullrequest:comment_created"}) {
+			processedEvent.TriggerTarget = triggertype.PullRequest
 			opscomments.SetEventTypeAndTargetPR(processedEvent, e.Comment.Content.Raw)
-		case provider.Valid(event, pullRequestsClosed):
-			processedEvent.EventType = string(triggertype.PullRequestClosed)
-			processedEvent.TriggerTarget = triggertype.PullRequestClosed
 		}
 		processedEvent.Organization = e.Repository.Workspace.Slug
-		processedEvent.Repository = strings.Split(e.Repository.FullName, "/")[1]
+		processedEvent.Repository = e.Repository.Name
 		processedEvent.SHA = e.PullRequest.Source.Commit.Hash
 		processedEvent.URL = e.Repository.Links.HTML.HRef
 		processedEvent.BaseBranch = e.PullRequest.Destination.Branch.Name
@@ -152,7 +152,7 @@ func (v *Provider) ParsePayload(ctx context.Context, run *params.Run, request *h
 		processedEvent.TriggerTarget = "push"
 		processedEvent.EventType = "push"
 		processedEvent.Organization = e.Repository.Workspace.Slug
-		processedEvent.Repository = strings.Split(e.Repository.FullName, "/")[1]
+		processedEvent.Repository = e.Repository.Name
 		processedEvent.SHA = e.Push.Changes[0].New.Target.Hash
 		processedEvent.URL = e.Repository.Links.HTML.HRef
 		processedEvent.HeadBranch = e.Push.Changes[0].Old.Name

@@ -17,8 +17,9 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
-	gitlab "gitlab.com/gitlab-org/api/client-go"
+	"github.com/xanzy/go-gitlab"
 	"go.uber.org/zap"
+	"gopkg.in/yaml.v2"
 )
 
 const (
@@ -39,8 +40,6 @@ const (
 </table>`
 	noClientErrStr = `no gitlab client has been initialized, exiting... (hint: did you forget setting a secret on your repo?)`
 )
-
-var anyMergeRequestEventType = []string{"Merge Request", "MergeRequest"}
 
 var _ provider.Interface = (*Provider)(nil)
 
@@ -95,6 +94,7 @@ func (v *Provider) Validate(_ context.Context, _ *params.Run, event *info.Event)
 // stuff.
 func getOrgRepo(pathWithNamespace string) (string, string) {
 	org := filepath.Dir(pathWithNamespace)
+	org = strings.ReplaceAll(org, "/", "-")
 	return org, filepath.Base(pathWithNamespace)
 }
 
@@ -137,15 +137,6 @@ func (v *Provider) SetClient(_ context.Context, run *params.Run, runevent *info.
 		return err
 	}
 	v.Token = &runevent.Provider.Token
-
-	// In a scenario where the source repository is forked and a merge request (MR) is created on the upstream
-	// repository, runevent.SourceProjectID will not be 0 when SetClient is called from the pac-watcher code.
-	// This is because, in the controller, SourceProjectID is set in the annotation of the pull request,
-	// and runevent.SourceProjectID is set before SetClient is called. Therefore, we need to take
-	// the ID from runevent.SourceProjectID.
-	if runevent.SourceProjectID > 0 {
-		v.sourceProjectID = runevent.SourceProjectID
-	}
 
 	// if we don't have sourceProjectID (ie: incoming-webhook) then try to set
 	// it ASAP if we can.
@@ -206,13 +197,11 @@ func (v *Provider) CreateStatus(_ context.Context, event *info.Event, statusOpts
 	body := fmt.Sprintf("**%s%s** has %s\n\n%s\n\n<small>Full log available [here](%s)</small>",
 		v.pacInfo.ApplicationName, onPr, statusOpts.Title, statusOpts.Text, detailsURL)
 
-	contextName := provider.GetCheckName(statusOpts, v.pacInfo)
 	opt := &gitlab.SetCommitStatusOptions{
 		State:       gitlab.BuildStateValue(statusOpts.Conclusion),
-		Name:        gitlab.Ptr(contextName),
+		Name:        gitlab.Ptr(v.pacInfo.ApplicationName),
 		TargetURL:   gitlab.Ptr(detailsURL),
 		Description: gitlab.Ptr(statusOpts.Title),
-		Context:     gitlab.Ptr(contextName),
 	}
 
 	// In case we have access, set the status. Typically, on a Merge Request (MR)
@@ -227,12 +216,10 @@ func (v *Provider) CreateStatus(_ context.Context, event *info.Event, statusOpts
 			"cannot set status with the GitLab token because of: "+err.Error())
 	}
 
-	eventType := triggertype.IsPullRequestType(event.EventType)
-	if opscomments.IsAnyOpsEventType(eventType.String()) {
-		eventType = triggertype.PullRequest
-	}
 	// only add a note when we are on a MR
-	if eventType == triggertype.PullRequest || provider.Valid(event.EventType, anyMergeRequestEventType) {
+	if event.EventType == triggertype.PullRequest.String() ||
+		event.EventType == "Merge_Request" || event.EventType == "Merge Request" ||
+		opscomments.IsAnyOpsEventType(event.EventType) {
 		mopt := &gitlab.CreateMergeRequestNoteOptions{Body: gitlab.Ptr(body)}
 		_, _, err := v.Client.Notes.CreateMergeRequestNote(event.TargetProjectID, event.PullRequestNumber, mopt)
 		return err
@@ -304,8 +291,10 @@ func (v *Provider) concatAllYamlFiles(objects []*gitlab.TreeNode, runevent *info
 			if err != nil {
 				return "", err
 			}
-			if err := provider.ValidateYaml(data, value.Path); err != nil {
-				return "", err
+			// validate yaml
+			var i any
+			if err := yaml.Unmarshal(data, &i); err != nil {
+				return "", fmt.Errorf("error unmarshalling yaml file %s: %w", value.Path, err)
 			}
 			if allTemplates != "" && !strings.HasPrefix(string(data), "---") {
 				allTemplates += "---"

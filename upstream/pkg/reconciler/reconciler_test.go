@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/google/go-github/v68/github"
+	"github.com/google/go-github/v64/github"
 	"github.com/jonboulle/clockwork"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
@@ -67,7 +67,7 @@ func TestReconciler_ReconcileKind(t *testing.T) {
 
 	vcx := &ghprovider.Provider{
 		Client: fakeclient,
-		Token:  github.Ptr("None"),
+		Token:  github.String("None"),
 	}
 
 	tests := []struct {
@@ -134,8 +134,6 @@ func TestReconciler_ReconcileKind(t *testing.T) {
 				keys.Repository:     pr.GetName(),
 				keys.OriginalPRName: pr.GetName(),
 				keys.CheckRunID:     tt.checkRunID,
-				keys.URLOrg:         "random",
-				keys.URLRepository:  "app",
 			}
 			pr.Labels = map[string]string{
 				keys.Repository: pr.GetName(),

@@ -9,8 +9,7 @@ OUTPUT_DIR=bin
 GO           = go
 TIMEOUT_UNIT = 20m
 TIMEOUT_E2E  = 45m
-DEFAULT_GO_TEST_FLAGS := -v -race -failfast
-GO_TEST_FLAGS :=
+GO_TEST_FLAGS +=
 
 SHELL := bash
 TOPDIR := $(shell git rev-parse --show-toplevel)
@@ -38,7 +37,7 @@ help: ## print this help
 
 FORCE:
 .PHONY: vendor
-vendor: ## generate vendor directory
+vendor:
 	@echo Generating vendor directory
 	@go mod tidy -compat=1.17 && go mod vendor
 
@@ -52,15 +51,21 @@ windows: ## compile windows binaries
 	env GOOS=windows GOARCH=amd64 go build -mod=vendor $(FLAGS)  -v -o ./bin/tkn-pac.exe ./cmd/tkn-pac/main.go
 
 ##@ Testing
-test: test-unit ## Run test-unit
+TEST_UNIT_TARGETS := test-unit-verbose test-unit-race test-unit-failfast
+test-unit-verbose: ARGS=-v
+test-unit-failfast: ARGS=-failfast
+test-unit-race:    ARGS=-race
+$(TEST_UNIT_TARGETS): test-unit
 test-clean:  ## Clean testcache
 	@echo "Cleaning test cache"
 	@go clean -testcache
-.PHONY: test test-unit
+.PHONY: $(TEST_UNIT_TARGETS) test test-unit
 test-no-cache: test-clean test-unit ## Run test-unit without caching
+test: test-unit ## Run test-unit
 test-unit: ## Run unit tests
 	@echo "Running unit tests..."
-	$(GO) test $(DEFAULT_GO_TEST_FLAGS) $(GO_TEST_FLAGS) -timeout $(TIMEOUT_UNIT) ./pkg/...
+	@set -o pipefail ; \
+		$(GO) test $(GO_TEST_FLAGS) -timeout $(TIMEOUT_UNIT) $(ARGS) ./pkg/... | { grep -v 'no test files'; true; }
 
 .PHONY: test-e2e-cleanup
 test-e2e-cleanup: ## cleanup test e2e namespace/pr left open
@@ -68,8 +73,7 @@ test-e2e-cleanup: ## cleanup test e2e namespace/pr left open
 
 .PHONY: test-e2e
 test-e2e:  test-e2e-cleanup ## run e2e tests
-	env GODEBUG=asynctimerchan=1 \
-		$(GO) test $(DEFAULT_GO_TEST_FLAGS) $(GO_TEST_FLAGS) -timeout $(TIMEOUT_E2E)  -failfast -count=1 -tags=e2e ./test
+	@go test $(GO_TEST_FLAGS) -timeout $(TIMEOUT_E2E)  -failfast -count=1 -tags=e2e $(GO_TEST_FLAGS) ./test
 
 .PHONY: html-coverage
 html-coverage: ## generate html coverage
@@ -114,10 +118,6 @@ lint-shell: ${SH_FILES} ## runs shellcheck on all python files
 	@echo "Linting shell script files..."
 	@shellcheck $(SH_FILES)
 
-.PHONY: gitlint
-gitlint: ## Run gitlint
-	@gitlint --commit "`git log --format=format:%H --no-merges -1`" --ignore "Merge branch"
-
 .PHONY: pre-commit
 pre-commit: ## Run pre-commit hooks script manually
 	@pre-commit run --all-files
@@ -153,12 +153,12 @@ fix-golangci-lint: ## run golangci-lint and fix on all go files
 							--fix
 	@[[ -n `git status --porcelain` ]] && { echo "Go files has been cleaned 🧹. Cleaned Files: ";git status --porcelain ;} || echo "Go files are clean ✨"
 
-.PHONY: fmt 
-fmt: ## formats the GO code(excludes vendors dir)
+.PHONY: fmt ## formats the GO code(excludes vendors dir)
+fmt:
 	@go fmt `go list ./... | grep -v /vendor/`
 
-.PHONY: fumpt 
-fumpt: ## formats the GO code with gofumpt(excludes vendors dir)
+.PHONY: fumpt ## formats the GO code with gofumpt(excludes vendors dir)
+fumpt:
 	@find test pkg -name '*.go'|xargs -P4 $(GOFUMPT) -w -extra
 
 ##@ Local Development
@@ -169,6 +169,15 @@ dev: ## deploys dev setup locally
 .PHONY: dev-redeploy
 dev-redeploy: ## redeploy pac in local setup
 	./hack/dev/kind/install.sh -p
+
+.PHONY: dev-docs
+dev-docs: download-hugo ## preview live your docs with hugo
+	@$(HUGO_BIN) server -s docs/ &
+	if type -p xdg-open 2>/dev/null >/dev/null; then \
+		xdg-open http://localhost:1313; \
+	elif type -p open 2>/dev/null >/dev/null; then \
+		open http://localhost:1313; \
+	fi
 
 ##@ Generated files
 check-generated: # check if all files that needs to be generated are generated
@@ -184,23 +193,10 @@ update-golden: ## run unit tests (updating golden files)
 .PHONY: generated
 generated: update-golden fumpt ## generate all files that needs to be generated
 
-##@ Docs
-
 .PHONY: download-hugo
-download-hugo: ## Download hugo software
+download-hugo: 
 	./hack/download-hugo.sh $(HUGO_VERSION) $(TMPDIR)/hugo
-
-.PHONY: dev-docs
-dev-docs: download-hugo ## preview live your docs with hugo
-	@$(HUGO_BIN) server -s docs/ &
-	if type -p xdg-open 2>/dev/null >/dev/null; then \
-		xdg-open http://localhost:1313; \
-	elif type -p open 2>/dev/null >/dev/null; then \
-		open http://localhost:1313; \
-	fi
-
-##@ Misc
-
+	
 .PHONY: clean
 clean: ## clean build artifacts
 	rm -fR bin

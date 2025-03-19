@@ -14,17 +14,13 @@ on:
     types: [opened, synchronize, reopened]
     paths:
       - "**.go"
-
 jobs:
   e2e-tests:
     concurrency:
-      group: ${{ github.workflow }}-${{ matrix.provider }}-${{ github.event.pull_request.number || github.ref }}
+      group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
       cancel-in-progress: true
     name: e2e tests
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        provider: [providers, gitea_others]
     env:
       KO_DOCKER_REPO: localhost:5000
       CONTROLLER_DOMAIN_URL: controller.paac-127-0-0-1.nip.io
@@ -40,10 +36,10 @@ jobs:
         with:
           go-version-file: "go.mod"
 
-      - uses: ko-build/setup-ko@v0.8
+      - uses: ko-build/setup-ko@v0.7
 
       - name: Install gosmee
-        uses: jaxxstorm/action-install-gh-release@v1.14.0
+        uses: jaxxstorm/action-install-gh-release@v1.12.0
         with:
           repo: chmouel/gosmee
 
@@ -82,47 +78,37 @@ jobs:
         if: ${{ github.event_name != 'schedule' }}
         run: |
           ./hack/gh-workflow-ci.sh run_e2e_tests \
-           ${{ matrix.provider }} \
            "${{ secrets.BITBUCKET_CLOUD_TOKEN }}" \
            "${{ secrets.WEBHOOK_SECRET }}" \
            "${{ secrets.TEST_GITEA_SMEEURL }}" \
            "${{ secrets.INSTALLATION_ID }}" \
            "${{ secrets.GH_APPS_TOKEN }}" \
            "${{ secrets.TEST_GITHUB_SECOND_TOKEN }}" \
-           "${{ secrets.GITLAB_TOKEN }}" \
-           "${{ secrets.BITBUCKET_SERVER_TOKEN }}" \
-           "${{ secrets.BITBUCKET_SERVER_API_URL }}" \
-           "${{ secrets.BITBUCKET_SERVER_WEBHOOK_SECRET }}"
+           "${{ secrets.GITLAB_TOKEN }}"
 
       - name: Run E2E Tests on nightly
         if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
         run: |
           export NIGHTLY_E2E_TEST="true"
           ./hack/gh-workflow-ci.sh run_e2e_tests \
-           ${{ matrix.provider }} \
            "${{ secrets.BITBUCKET_CLOUD_TOKEN }}" \
            "${{ secrets.WEBHOOK_SECRET }}" \
            "${{ secrets.TEST_GITEA_SMEEURL }}" \
            "${{ secrets.INSTALLATION_ID }}" \
            "${{ secrets.GH_APPS_TOKEN }}" \
            "${{ secrets.TEST_GITHUB_SECOND_TOKEN }}" \
-           "${{ secrets.GITLAB_TOKEN }}" \
-           "${{ secrets.BITBUCKET_SERVER_TOKEN }}" \
-           "${{ secrets.BITBUCKET_SERVER_API_URL }}" \
-           "${{ secrets.BITBUCKET_SERVER_WEBHOOK_SECRET }}"
+           "${{ secrets.GITLAB_TOKEN }}"
 
       - name: Collect logs
         if: ${{ always() }}
         run: |
-          ./hack/gh-workflow-ci.sh collect_logs \
-          "${{ secrets.TEST_GITEA_SMEEURL }}" \
-          "${{ secrets.TEST_GITHUB_SECOND_SMEE_URL }}"
+          ./hack/gh-workflow-ci.sh collect_logs
 
       - name: Upload artifacts
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
-          name: logs-e2e-tests-${{ matrix.provider }}
+          name: logs
           path: /tmp/logs
 
       - name: Report Status

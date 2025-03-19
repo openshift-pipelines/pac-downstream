@@ -6,13 +6,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/google/go-github/v68/github"
+	"github.com/google/go-github/v64/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/test/logger"
 	"gotest.tools/v3/assert"
 )
 
 func TestProvider_Detect(t *testing.T) {
-	idd := int64(123)
 	tests := []struct {
 		name          string
 		wantErrString string
@@ -38,9 +37,9 @@ func TestProvider_Detect(t *testing.T) {
 		{
 			name: "valid check suite Event",
 			event: github.CheckSuiteEvent{
-				Action: github.Ptr("rerequested"),
+				Action: github.String("rerequested"),
 				CheckSuite: &github.CheckSuite{
-					ID: &idd,
+					ID: github.Int64(123),
 				},
 			},
 			eventType:  "check_suite",
@@ -50,9 +49,9 @@ func TestProvider_Detect(t *testing.T) {
 		{
 			name: "valid check run Event",
 			event: github.CheckRunEvent{
-				Action: github.Ptr("rerequested"),
+				Action: github.String("rerequested"),
 				CheckRun: &github.CheckRun{
-					ID: &idd,
+					ID: github.Int64(123),
 				},
 			},
 			eventType:  "check_run",
@@ -62,7 +61,7 @@ func TestProvider_Detect(t *testing.T) {
 		{
 			name: "unsupported Event",
 			event: github.CommitCommentEvent{
-				Action: github.Ptr("something"),
+				Action: github.String("something"),
 			},
 			eventType:  "release",
 			wantReason: "event \"release\" is not supported",
@@ -70,18 +69,18 @@ func TestProvider_Detect(t *testing.T) {
 			processReq: false,
 		},
 		{
-			name: "non standard commit_comment Event",
+			name: "invalid commit_comment Event",
 			event: github.CommitCommentEvent{
-				Action: github.Ptr("something"),
+				Action: github.String("something"),
 			},
 			eventType:  "commit_comment",
 			isGH:       true,
-			processReq: true,
+			processReq: false,
 		},
 		{
 			name: "invalid check run Event",
 			event: github.CheckRunEvent{
-				Action: github.Ptr("not rerequested"),
+				Action: github.String("not rerequested"),
 			},
 			eventType:  "check_run",
 			isGH:       true,
@@ -90,7 +89,7 @@ func TestProvider_Detect(t *testing.T) {
 		{
 			name: "invalid issue comment Event",
 			event: github.IssueCommentEvent{
-				Action: github.Ptr("deleted"),
+				Action: github.String("deleted"),
 			},
 			eventType:  "issue_comment",
 			isGH:       true,
@@ -99,17 +98,17 @@ func TestProvider_Detect(t *testing.T) {
 		{
 			name: "issue comment Event with no valid comment",
 			event: github.IssueCommentEvent{
-				Action: github.Ptr("created"),
+				Action: github.String("created"),
 				Issue: &github.Issue{
 					PullRequestLinks: &github.PullRequestLinks{
-						URL: github.Ptr("url"),
+						URL: github.String("url"),
 					},
-					State: github.Ptr("open"),
+					State: github.String("open"),
 				},
 				Installation: &github.Installation{
-					ID: &idd,
+					ID: github.Int64(123),
 				},
-				Comment: &github.IssueComment{Body: github.Ptr("abc")},
+				Comment: &github.IssueComment{Body: github.String("abc")},
 			},
 			eventType:  "issue_comment",
 			isGH:       true,
@@ -118,17 +117,17 @@ func TestProvider_Detect(t *testing.T) {
 		{
 			name: "issue comment Event with ok-to-test comment",
 			event: github.IssueCommentEvent{
-				Action: github.Ptr("created"),
+				Action: github.String("created"),
 				Issue: &github.Issue{
 					PullRequestLinks: &github.PullRequestLinks{
-						URL: github.Ptr("url"),
+						URL: github.String("url"),
 					},
-					State: github.Ptr("open"),
+					State: github.String("open"),
 				},
 				Installation: &github.Installation{
-					ID: &idd,
+					ID: github.Int64(123),
 				},
-				Comment: &github.IssueComment{Body: github.Ptr("/ok-to-test")},
+				Comment: &github.IssueComment{Body: github.String("/ok-to-test")},
 			},
 			eventType:  "issue_comment",
 			isGH:       true,
@@ -137,17 +136,17 @@ func TestProvider_Detect(t *testing.T) {
 		{
 			name: "issue comment Event with ok-to-test and some string",
 			event: github.IssueCommentEvent{
-				Action: github.Ptr("created"),
+				Action: github.String("created"),
 				Issue: &github.Issue{
 					PullRequestLinks: &github.PullRequestLinks{
-						URL: github.Ptr("url"),
+						URL: github.String("url"),
 					},
-					State: github.Ptr("open"),
+					State: github.String("open"),
 				},
 				Installation: &github.Installation{
-					ID: &idd,
+					ID: github.Int64(123),
 				},
-				Comment: &github.IssueComment{Body: github.Ptr("/ok-to-test \n let me in :)")},
+				Comment: &github.IssueComment{Body: github.String("/ok-to-test \n let me in :)")},
 			},
 			eventType:  "issue_comment",
 			isGH:       true,
@@ -156,17 +155,17 @@ func TestProvider_Detect(t *testing.T) {
 		{
 			name: "issue comment Event with retest",
 			event: github.IssueCommentEvent{
-				Action: github.Ptr("created"),
+				Action: github.String("created"),
 				Issue: &github.Issue{
 					PullRequestLinks: &github.PullRequestLinks{
-						URL: github.Ptr("url"),
+						URL: github.String("url"),
 					},
-					State: github.Ptr("open"),
+					State: github.String("open"),
 				},
 				Installation: &github.Installation{
-					ID: &idd,
+					ID: github.Int64(123),
 				},
-				Comment: &github.IssueComment{Body: github.Ptr("/retest")},
+				Comment: &github.IssueComment{Body: github.String("/retest")},
 			},
 			eventType:  "issue_comment",
 			isGH:       true,
@@ -175,17 +174,17 @@ func TestProvider_Detect(t *testing.T) {
 		{
 			name: "issue comment Event with retest with some string",
 			event: github.IssueCommentEvent{
-				Action: github.Ptr("created"),
+				Action: github.String("created"),
 				Issue: &github.Issue{
 					PullRequestLinks: &github.PullRequestLinks{
-						URL: github.Ptr("url"),
+						URL: github.String("url"),
 					},
-					State: github.Ptr("open"),
+					State: github.String("open"),
 				},
 				Installation: &github.Installation{
-					ID: &idd,
+					ID: github.Int64(123),
 				},
-				Comment: &github.IssueComment{Body: github.Ptr("/retest \n will you retest?")},
+				Comment: &github.IssueComment{Body: github.String("/retest \n will you retest?")},
 			},
 			eventType:  "issue_comment",
 			isGH:       true,
@@ -194,7 +193,7 @@ func TestProvider_Detect(t *testing.T) {
 		{
 			name: "push event",
 			event: github.PushEvent{
-				Pusher: &github.CommitAuthor{Name: github.Ptr("user")},
+				Pusher: &github.CommitAuthor{Name: github.String("user")},
 			},
 			eventType:  "push",
 			isGH:       true,
@@ -203,7 +202,7 @@ func TestProvider_Detect(t *testing.T) {
 		{
 			name: "pull request event",
 			event: github.PullRequestEvent{
-				Action: github.Ptr("opened"),
+				Action: github.String("opened"),
 			},
 			eventType:  "pull_request",
 			isGH:       true,
@@ -212,7 +211,7 @@ func TestProvider_Detect(t *testing.T) {
 		{
 			name: "pull request event not supported action",
 			event: github.PullRequestEvent{
-				Action: github.Ptr("deleted"),
+				Action: github.String("deleted"),
 			},
 			eventType:  "pull_request",
 			isGH:       true,
@@ -221,17 +220,17 @@ func TestProvider_Detect(t *testing.T) {
 		{
 			name: "issue comment event with cancel comment",
 			event: github.IssueCommentEvent{
-				Action: github.Ptr("created"),
+				Action: github.String("created"),
 				Issue: &github.Issue{
 					PullRequestLinks: &github.PullRequestLinks{
-						URL: github.Ptr("url"),
+						URL: github.String("url"),
 					},
-					State: github.Ptr("open"),
+					State: github.String("open"),
 				},
 				Installation: &github.Installation{
-					ID: &idd,
+					ID: github.Int64(123),
 				},
-				Comment: &github.IssueComment{Body: github.Ptr("/cancel")},
+				Comment: &github.IssueComment{Body: github.String("/cancel")},
 			},
 			eventType:  "issue_comment",
 			isGH:       true,
@@ -240,17 +239,17 @@ func TestProvider_Detect(t *testing.T) {
 		{
 			name: "issue comment Event with cancel comment ",
 			event: github.IssueCommentEvent{
-				Action: github.Ptr("created"),
+				Action: github.String("created"),
 				Issue: &github.Issue{
 					PullRequestLinks: &github.PullRequestLinks{
-						URL: github.Ptr("url"),
+						URL: github.String("url"),
 					},
-					State: github.Ptr("open"),
+					State: github.String("open"),
 				},
 				Installation: &github.Installation{
-					ID: &idd,
+					ID: github.Int64(123),
 				},
-				Comment: &github.IssueComment{Body: github.Ptr("/cancel dummy")},
+				Comment: &github.IssueComment{Body: github.String("/cancel dummy")},
 			},
 			eventType:  "issue_comment",
 			isGH:       true,
@@ -259,11 +258,11 @@ func TestProvider_Detect(t *testing.T) {
 		{
 			name: "commit comment event with cancel comment",
 			event: github.CommitCommentEvent{
-				Action: github.Ptr("created"),
+				Action: github.String("created"),
 				Installation: &github.Installation{
-					ID: &idd,
+					ID: github.Int64(123),
 				},
-				Comment: &github.RepositoryComment{Body: github.Ptr("/cancel")},
+				Comment: &github.RepositoryComment{Body: github.String("/cancel")},
 			},
 			eventType:  "commit_comment",
 			isGH:       true,
@@ -272,11 +271,11 @@ func TestProvider_Detect(t *testing.T) {
 		{
 			name: "commit comment Event with retest",
 			event: github.CommitCommentEvent{
-				Action: github.Ptr("created"),
+				Action: github.String("created"),
 				Installation: &github.Installation{
-					ID: &idd,
+					ID: github.Int64(123),
 				},
-				Comment: &github.RepositoryComment{Body: github.Ptr("/retest")},
+				Comment: &github.RepositoryComment{Body: github.String("/retest")},
 			},
 			eventType:  "commit_comment",
 			isGH:       true,
@@ -285,11 +284,11 @@ func TestProvider_Detect(t *testing.T) {
 		{
 			name: "commit comment Event with test",
 			event: github.CommitCommentEvent{
-				Action: github.Ptr("created"),
+				Action: github.String("created"),
 				Installation: &github.Installation{
-					ID: &idd,
+					ID: github.Int64(123),
 				},
-				Comment: &github.RepositoryComment{Body: github.Ptr("/test")},
+				Comment: &github.RepositoryComment{Body: github.String("/test")},
 			},
 			eventType:  "commit_comment",
 			isGH:       true,

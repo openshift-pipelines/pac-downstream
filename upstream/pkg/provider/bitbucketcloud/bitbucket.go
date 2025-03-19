@@ -17,6 +17,7 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/bitbucketcloud/types"
 	"go.uber.org/zap"
+	"gopkg.in/yaml.v2"
 )
 
 var _ provider.Interface = (*Provider)(nil)
@@ -112,11 +113,8 @@ func (v *Provider) CreateStatus(_ context.Context, event *info.Event, statusopts
 	if err != nil {
 		return err
 	}
-
-	eventType := triggertype.IsPullRequestType(event.EventType)
 	if statusopts.Conclusion != "STOPPED" && statusopts.Status == "completed" &&
-		statusopts.Text != "" &&
-		(eventType == triggertype.PullRequest || event.TriggerTarget == triggertype.PullRequest) {
+		statusopts.Text != "" && event.EventType == triggertype.PullRequest.String() {
 		onPr := ""
 		if statusopts.OriginalPipelineRunName != "" {
 			onPr = "/" + statusopts.OriginalPipelineRunName
@@ -264,8 +262,9 @@ func (v *Provider) concatAllYamlFiles(objects []bitbucket.RepositoryFile, event 
 			if err != nil {
 				return "", err
 			}
-			if err := provider.ValidateYaml([]byte(data), value.Path); err != nil {
-				return "", err
+			var i any
+			if err := yaml.Unmarshal([]byte(data), &i); err != nil {
+				return "", fmt.Errorf("error unmarshalling yaml file %s: %w", value.Path, err)
 			}
 
 			if allTemplates != "" && !strings.HasPrefix(data, "---") {

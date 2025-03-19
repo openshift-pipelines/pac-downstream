@@ -5,15 +5,13 @@ package test
 
 import (
 	"context"
-	"fmt"
 	"regexp"
 	"testing"
 
-	"github.com/google/go-github/v68/github"
+	"github.com/google/go-github/v64/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/test/pkg/cctx"
 	tgithub "github.com/openshift-pipelines/pipelines-as-code/test/pkg/github"
-	"github.com/openshift-pipelines/pipelines-as-code/test/pkg/options"
 	twait "github.com/openshift-pipelines/pipelines-as-code/test/pkg/wait"
 	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 	"gotest.tools/v3/assert"
@@ -21,70 +19,11 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-func TestGithubPushRequestGitOpsCommentOnComment(t *testing.T) {
-	opsComment := "/hello-world"
-	ctx := context.Background()
-	g := &tgithub.PRTest{
-		Label:         "Github GitOps push/retest request",
-		YamlFiles:     []string{"testdata/pipelinerun-on-comment-annotation.yaml"},
-		NoStatusCheck: true,
-		TargetRefName: options.MainBranch,
-	}
-	g.RunPushRequest(ctx, t)
-	defer g.TearDown(ctx, t)
-
-	// let's make sure we didn't create any PipelineRuns since we only match on-comment here
-	pruns, err := g.Cnx.Clients.Tekton.TektonV1().PipelineRuns(g.TargetNamespace).List(ctx, metav1.ListOptions{})
-	assert.NilError(t, err)
-	assert.Equal(t, len(pruns.Items), 0)
-
-	g.Cnx.Clients.Log.Infof("Running ops comment %s as Push comment", opsComment)
-	_, _, err = g.Provider.Client.Repositories.CreateComment(ctx,
-		g.Options.Organization,
-		g.Options.Repo, g.SHA,
-		&github.RepositoryComment{Body: github.Ptr(opsComment)})
-	assert.NilError(t, err)
-
-	waitOpts := twait.Opts{
-		RepoName:        g.TargetNamespace,
-		Namespace:       g.TargetNamespace,
-		MinNumberStatus: len(g.YamlFiles),
-		PollTimeout:     twait.DefaultTimeout,
-		TargetSHA:       g.SHA,
-	}
-	g.Cnx.Clients.Log.Info("Waiting for Repository to be updated")
-	_, err = twait.UntilRepositoryUpdated(ctx, g.Cnx.Clients, waitOpts)
-	assert.NilError(t, err)
-
-	g.Cnx.Clients.Log.Infof("Check if we have the repository set as succeeded")
-	repo, err := g.Cnx.Clients.PipelineAsCode.PipelinesascodeV1alpha1().Repositories(g.TargetNamespace).Get(ctx, g.TargetNamespace, metav1.GetOptions{})
-	assert.NilError(t, err)
-	assert.Equal(t, repo.Status[len(repo.Status)-1].Conditions[0].Status, corev1.ConditionTrue)
-
-	pruns, err = g.Cnx.Clients.Tekton.TektonV1().PipelineRuns(g.TargetNamespace).List(ctx, metav1.ListOptions{})
-	assert.NilError(t, err)
-	assert.Equal(t, len(pruns.Items), len(g.YamlFiles))
-	lastPrName := pruns.Items[0].GetName()
-	err = twait.RegexpMatchingInPodLog(
-		context.Background(),
-		g.Cnx,
-		g.TargetNamespace,
-		fmt.Sprintf("tekton.dev/pipelineRun=%s", lastPrName),
-		"step-task",
-		*regexp.MustCompile(opsComment),
-		"",
-		2)
-
-	assert.NilError(t, err)
-}
-
 func TestGithubPushRequestGitOpsCommentRetest(t *testing.T) {
 	ctx := context.Background()
 	g := &tgithub.PRTest{
-		Label: "Github GitOps push/retest request",
-		YamlFiles: []string{
-			"testdata/pipelinerun-on-push.yaml", "testdata/pipelinerun.yaml",
-		},
+		Label:     "Github GitOps push/retest request",
+		YamlFiles: []string{"testdata/pipelinerun-on-push.yaml", "testdata/pipelinerun.yaml"},
 	}
 	g.RunPushRequest(ctx, t)
 	defer g.TearDown(ctx, t)
@@ -98,7 +37,7 @@ func TestGithubPushRequestGitOpsCommentRetest(t *testing.T) {
 	_, _, err = g.Provider.Client.Repositories.CreateComment(ctx,
 		g.Options.Organization,
 		g.Options.Repo, g.SHA,
-		&github.RepositoryComment{Body: github.Ptr(comment)})
+		&github.RepositoryComment{Body: github.String(comment)})
 	assert.NilError(t, err)
 
 	waitOpts := twait.Opts{
@@ -151,7 +90,7 @@ func TestGithubPushRequestGitOpsCommentCancel(t *testing.T) {
 	_, _, err = g.Provider.Client.Repositories.CreateComment(ctx,
 		g.Options.Organization,
 		g.Options.Repo, g.SHA,
-		&github.RepositoryComment{Body: github.Ptr("/test pipelinerun-on-push branch:" + g.TargetNamespace)})
+		&github.RepositoryComment{Body: github.String("/test pipelinerun-on-push branch:" + g.TargetNamespace)})
 	assert.NilError(t, err)
 	numberOfStatus := 3
 	waitOpts := twait.Opts{
@@ -169,7 +108,7 @@ func TestGithubPushRequestGitOpsCommentCancel(t *testing.T) {
 	_, _, err = g.Provider.Client.Repositories.CreateComment(ctx,
 		g.Options.Organization,
 		g.Options.Repo, g.SHA,
-		&github.RepositoryComment{Body: github.Ptr(comment)})
+		&github.RepositoryComment{Body: github.String(comment)})
 	assert.NilError(t, err)
 
 	g.Cnx.Clients.Log.Infof("Waiting for Repository to be updated still to %d since it has been canceled", numberOfStatus)
@@ -183,9 +122,8 @@ func TestGithubPushRequestGitOpsCommentCancel(t *testing.T) {
 
 	// this went too fast so at least we check it was requested for it
 	if !cancelled {
-		numLines := int64(20)
-		reg := regexp.MustCompile(".*pipelinerun.*skipping cancelling pipelinerun.*on-push.*already done.*")
-		err = twait.RegexpMatchingInControllerLog(ctx, g.Cnx, *reg, 10, "controller", &numLines)
+		reg := regexp.MustCompile(".*pipelinerun.*is done.*skipping cancellation.*")
+		err = twait.RegexpMatchingInControllerLog(ctx, g.Cnx, *reg, 10, "controller", github.Int64(20))
 		if err != nil {
 			t.Errorf("neither a cancelled pipelinerun in repo status or a request to skip the cancellation in the controller log was found: %s", err.Error())
 		}

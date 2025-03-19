@@ -26,7 +26,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"knative.dev/eventing/pkg/adapter/v2"
 	"knative.dev/pkg/logging"
-	"knative.dev/pkg/system"
 )
 
 const globalAdapterPort = "8080"
@@ -41,11 +40,7 @@ type envConfig struct {
 }
 
 func NewEnvConfig() adapter.EnvConfigAccessor {
-	return &envConfig{
-		adapter.EnvConfig{
-			Namespace: system.Namespace(),
-		},
-	}
+	return &envConfig{}
 }
 
 type listener struct {

@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/go-github/v68/github"
+	"github.com/google/go-github/v64/github"
 	"github.com/jonboulle/clockwork"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
@@ -22,6 +22,7 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
 	"go.uber.org/zap"
 	"golang.org/x/oauth2"
+	"k8s.io/apimachinery/pkg/util/yaml"
 	"k8s.io/client-go/kubernetes"
 )
 
@@ -62,7 +63,7 @@ type skippedRun struct {
 
 func New() *Provider {
 	return &Provider{
-		APIURL:        github.Ptr(keys.PublicGithubAPIURL),
+		APIURL:        github.String(keys.PublicGithubAPIURL),
 		PaginedNumber: defaultPaginedNumber,
 		skippedRun: skippedRun{
 			mutex: &sync.Mutex{},
@@ -88,7 +89,7 @@ func detectGHERawURL(event *info.Event, taskHost string) bool {
 func splitGithubURL(event *info.Event, uri string) (string, string, string, string, error) {
 	pURL, err := url.Parse(uri)
 	if err != nil {
-		return "", "", "", "", fmt.Errorf("URL %s is not a valid provider URL: %w", uri, err)
+		return "", "", "", "", fmt.Errorf("URL %s does not seem to be a proper provider url: %w", uri, err)
 	}
 	path := pURL.Path
 	if pURL.RawPath != "" {
@@ -111,7 +112,7 @@ func splitGithubURL(event *info.Event, uri string) (string, string, string, stri
 		spRef = split[4]
 		spPath = strings.Join(split[5:], "/")
 	default:
-		return "", "", "", "", fmt.Errorf("cannot recognize task as a GitHub URL to fetch: %s", uri)
+		return "", "", "", "", fmt.Errorf("cannot recognize task as a Github URL to fetch: %s", uri)
 	}
 	// url decode the org, repo, ref and path
 	if spRef, err = url.QueryUnescape(spRef); err != nil {
@@ -212,7 +213,7 @@ func MakeClient(ctx context.Context, apiURL, token string) (*github.Client, stri
 		apiURL = client.BaseURL.String()
 	}
 
-	return client, providerName, github.Ptr(apiURL)
+	return client, providerName, github.String(apiURL)
 }
 
 func parseTS(headerTS string) (time.Time, error) {
@@ -261,7 +262,7 @@ func (v *Provider) checkWebhookSecretValidity(ctx context.Context, cw clockwork.
 	}
 
 	if rl.SCIM.Remaining == 0 {
-		return fmt.Errorf("api rate limit exceeded. Access will be restored at %s", rl.SCIM.Reset.Format(time.RFC1123))
+		return fmt.Errorf("token is ratelimited, it will be available again at %s", rl.SCIM.Reset.Format(time.RFC1123))
 	}
 	return nil
 }
@@ -409,8 +410,10 @@ func (v *Provider) concatAllYamlFiles(ctx context.Context, objects []*github.Tre
 			if err != nil {
 				return "", err
 			}
-			if err := provider.ValidateYaml(data, value.GetPath()); err != nil {
-				return "", err
+			// validate yaml
+			var i any
+			if err := yaml.Unmarshal(data, &i); err != nil {
+				return "", fmt.Errorf("error unmarshalling yaml file %s: %w", value.GetPath(), err)
 			}
 			if allTemplates != "" && !strings.HasPrefix(string(data), "---") {
 				allTemplates += "---"
@@ -444,10 +447,6 @@ func (v *Provider) getPullRequest(ctx context.Context, runevent *info.Event) (*i
 	runevent.BaseURL = pr.GetBase().GetRepo().GetHTMLURL()
 	if runevent.EventType == "" {
 		runevent.EventType = triggertype.PullRequest.String()
-	}
-
-	for _, label := range pr.Labels {
-		runevent.PullRequestLabel = append(runevent.PullRequestLabel, label.GetName())
 	}
 
 	v.RepositoryIDs = []int64{
@@ -600,5 +599,5 @@ func (v *Provider) isBranchContainsCommit(ctx context.Context, runevent *info.Ev
 	if branchInfo.Commit.GetSHA() == runevent.SHA {
 		return nil
 	}
-	return fmt.Errorf("provided SHA %s is not the HEAD commit of the branch %s", runevent.SHA, branchName)
+	return fmt.Errorf("provided branch %s does not contains sha %s", branchName, runevent.SHA)
 }

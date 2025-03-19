@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/google/go-github/v64/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -17,8 +18,8 @@ func GetControllerLog(ctx context.Context, kclient corev1i.CoreV1Interface, labe
 	if err != nil {
 		return "", err
 	}
-	numLines := int64(10)
-	return GetPodLog(ctx, kclient, ns, labelselector, containerName, &numLines)
+
+	return GetPodLog(ctx, kclient, ns, labelselector, containerName, github.Int64(10))
 }
 
 func GetPodLog(ctx context.Context, kclient corev1i.CoreV1Interface, ns, labelselector, containerName string, lines *int64) (string, error) {

@@ -5,7 +5,7 @@ Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    http://www.apache.org/licenses/LICENSE-2.0
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -20,16 +20,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net"
 	nethttp "net/http"
 	"net/url"
 	"time"
-
-	"k8s.io/apimachinery/pkg/types"
-	corev1listers "k8s.io/client-go/listers/core/v1"
-	"knative.dev/pkg/network"
-
-	"knative.dev/eventing/pkg/auth"
 
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 	ceclient "github.com/cloudevents/sdk-go/v2/client"
@@ -117,9 +110,6 @@ type ClientConfig struct {
 	Reporter            source.StatsReporter
 	CrStatusEventClient *crstatusevent.CRStatusEventClient
 	Options             []http.Option
-	TokenProvider       *auth.OIDCTokenProvider
-
-	TrustBundleConfigMapLister corev1listers.ConfigMapNamespaceLister
 }
 
 type clientConfigKey struct{}
@@ -152,28 +142,25 @@ func NewClient(cfg ClientConfig) (Client, error) {
 		if sinkWait := cfg.Env.GetSinktimeout(); sinkWait > 0 {
 			pOpts = append(pOpts, setTimeOut(time.Duration(sinkWait)*time.Second))
 		}
-
 		if eventingtls.IsHttpsSink(cfg.Env.GetSink()) {
+			var err error
+
 			clientConfig := eventingtls.NewDefaultClientConfig()
 			clientConfig.CACerts = cfg.Env.GetCACerts()
-			clientConfig.TrustBundleConfigMapLister = cfg.TrustBundleConfigMapLister
+
+			tlsConfig, err := eventingtls.GetTLSClientConfig(clientConfig)
+			if err != nil {
+				return nil, err
+			}
 
 			httpsTransport := transport.Base.(*nethttp.Transport).Clone()
-
-			httpsTransport.DialTLSContext = func(ctx context.Context, net, addr string) (net.Conn, error) {
-				tlsConfig, err := eventingtls.GetTLSClientConfig(clientConfig)
-				if err != nil {
-					return nil, err
-				}
-				return network.DialTLSWithBackOff(ctx, net, addr, tlsConfig)
-			}
+			httpsTransport.TLSClientConfig = tlsConfig
 
 			transport = &ochttp.Transport{
 				Base:        httpsTransport,
 				Propagation: tracecontextb3.TraceContextEgress,
 			}
 		}
-
 		if ceOverrides == nil {
 			var err error
 			ceOverrides, err = cfg.Env.GetCloudEventOverrides()
@@ -202,30 +189,13 @@ func NewClient(cfg ClientConfig) (Client, error) {
 	if err != nil {
 		return nil, err
 	}
-
-	client := &client{
+	return &client{
 		ceClient:            ceClient,
 		closeIdler:          transport.Base.(*nethttp.Transport),
 		ceOverrides:         ceOverrides,
 		reporter:            cfg.Reporter,
 		crStatusEventClient: cfg.CrStatusEventClient,
-		oidcTokenProvider:   cfg.TokenProvider,
-		scheme:              "http",
-	}
-
-	if cfg.Env != nil {
-		client.audience = cfg.Env.GetAudience()
-		client.oidcServiceAccountName = cfg.Env.GetOIDCServiceAccountName()
-		sinkURI := cfg.Env.GetSink()
-		if sinkURI != "" {
-			parsedUrl, err := url.Parse(sinkURI)
-			if err == nil {
-				client.scheme = parsedUrl.Scheme
-			}
-		}
-	}
-
-	return client, nil
+	}, nil
 }
 
 func setTimeOut(duration time.Duration) http.Option {
@@ -242,15 +212,11 @@ func setTimeOut(duration time.Duration) http.Option {
 }
 
 type client struct {
-	ceClient               cloudevents.Client
-	ceOverrides            *duckv1.CloudEventOverrides
-	reporter               source.StatsReporter
-	crStatusEventClient    *crstatusevent.CRStatusEventClient
-	closeIdler             closeIdler
-	scheme                 string
-	oidcTokenProvider      *auth.OIDCTokenProvider
-	audience               *string
-	oidcServiceAccountName *types.NamespacedName
+	ceClient            cloudevents.Client
+	ceOverrides         *duckv1.CloudEventOverrides
+	reporter            source.StatsReporter
+	crStatusEventClient *crstatusevent.CRStatusEventClient
+	closeIdler          closeIdler
 }
 
 func (c *client) CloseIdleConnections() {
@@ -262,15 +228,6 @@ var _ cloudevents.Client = (*client)(nil)
 // Send implements client.Send
 func (c *client) Send(ctx context.Context, out event.Event) protocol.Result {
 	c.applyOverrides(&out)
-	var err error
-
-	if c.audience != nil && c.oidcServiceAccountName != nil {
-		ctx, err = c.withAuthHeader(ctx)
-		if err != nil {
-			return err
-		}
-	}
-
 	res := c.ceClient.Send(ctx, out)
 	c.reportMetrics(ctx, out, res)
 	return res
@@ -279,15 +236,6 @@ func (c *client) Send(ctx context.Context, out event.Event) protocol.Result {
 // Request implements client.Request
 func (c *client) Request(ctx context.Context, out event.Event) (*event.Event, protocol.Result) {
 	c.applyOverrides(&out)
-	var err error
-
-	if c.audience != nil && c.oidcServiceAccountName != nil {
-		ctx, err = c.withAuthHeader(ctx)
-		if err != nil {
-			return nil, err
-		}
-	}
-
 	resp, res := c.ceClient.Request(ctx, out)
 	c.reportMetrics(ctx, out, res)
 	return resp, res
@@ -310,7 +258,6 @@ func (c *client) reportMetrics(ctx context.Context, event cloudevents.Event, res
 	if c.reporter == nil {
 		return
 	}
-
 	tags := MetricTagFromContext(ctx)
 	reportArgs := &source.ReportArgs{
 		Namespace:     tags.Namespace,
@@ -318,7 +265,6 @@ func (c *client) reportMetrics(ctx context.Context, event cloudevents.Event, res
 		EventType:     event.Type(),
 		Name:          tags.Name,
 		ResourceGroup: tags.ResourceGroup,
-		EventScheme:   c.scheme,
 	}
 
 	var rres *http.RetriesResult
@@ -414,22 +360,4 @@ func tracecontextMiddleware(h nethttp.Handler) nethttp.Handler {
 		Handler:        h,
 		FormatSpanName: formatSpanName,
 	}
-}
-
-// When OIDC is enabled, withAuthHeader will request the JWT token from the tokenProvider and append it to every request
-// it has interaction with, if source's OIDC service account (source.Status.Auth.ServiceAccountName) and destination's
-// audience are present.
-func (c *client) withAuthHeader(ctx context.Context) (context.Context, error) {
-	// Request the JWT token for the given service account
-	jwt, err := c.oidcTokenProvider.GetJWT(*c.oidcServiceAccountName, *c.audience)
-	if err != nil {
-		return ctx, protocol.NewResult("Failed when appending the Authorization header to the outgoing request %w", err)
-	}
-
-	// Appending the auth token to the outgoing request
-	headers := http.HeaderFrom(ctx)
-	headers.Set("Authorization", fmt.Sprintf("Bearer %s", jwt))
-	ctx = http.WithCustomHeader(ctx, headers)
-
-	return ctx, nil
 }

@@ -5,7 +5,7 @@ Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    http://www.apache.org/licenses/LICENSE-2.0
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -50,7 +50,6 @@ var (
 	namespaceKey           = tag.MustNewKey(eventingmetrics.LabelNamespaceName)
 	eventSourceKey         = tag.MustNewKey(eventingmetrics.LabelEventSource)
 	eventTypeKey           = tag.MustNewKey(eventingmetrics.LabelEventType)
-	eventScheme            = tag.MustNewKey(eventingmetrics.LabelEventScheme)
 	sourceNameKey          = tag.MustNewKey(eventingmetrics.LabelName)
 	sourceResourceGroupKey = tag.MustNewKey(eventingmetrics.LabelResourceGroup)
 	responseCodeKey        = tag.MustNewKey(eventingmetrics.LabelResponseCode)
@@ -63,7 +62,6 @@ var (
 type ReportArgs struct {
 	Namespace     string
 	EventType     string
-	EventScheme   string
 	EventSource   string
 	Name          string
 	ResourceGroup string
@@ -124,7 +122,6 @@ func (r *reporter) generateTag(args *ReportArgs, responseCode int) (context.Cont
 		tag.Insert(namespaceKey, args.Namespace),
 		tag.Insert(eventSourceKey, args.EventSource),
 		tag.Insert(eventTypeKey, args.EventType),
-		tag.Insert(eventScheme, args.EventScheme),
 		tag.Insert(sourceNameKey, args.Name),
 		tag.Insert(sourceResourceGroupKey, args.ResourceGroup),
 		metrics.MaybeInsertIntTag(responseCodeKey, responseCode, responseCode > 0),
@@ -138,14 +135,12 @@ func register() {
 		namespaceKey,
 		eventSourceKey,
 		eventTypeKey,
-		eventScheme,
 		sourceNameKey,
 		sourceResourceGroupKey,
 		responseCodeKey,
 		responseCodeClassKey,
 		responseError,
-		responseTimeout,
-	}
+		responseTimeout}
 
 	// Create view to see our measurements.
 	if err := view.Register(

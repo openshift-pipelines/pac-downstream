@@ -11,7 +11,7 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
-	gitlab "gitlab.com/gitlab-org/api/client-go"
+	"github.com/xanzy/go-gitlab"
 )
 
 func (v *Provider) ParsePayload(_ context.Context, _ *params.Run, request *http.Request,
@@ -43,7 +43,7 @@ func (v *Provider) ParsePayload(_ context.Context, _ *params.Run, request *http.
 		processedEvent.URL = gitEvent.Project.WebURL
 		processedEvent.SHA = gitEvent.ObjectAttributes.LastCommit.ID
 		processedEvent.SHAURL = gitEvent.ObjectAttributes.LastCommit.URL
-		processedEvent.SHATitle = gitEvent.ObjectAttributes.LastCommit.Title
+		processedEvent.SHATitle = gitEvent.ObjectAttributes.Title
 		processedEvent.HeadBranch = gitEvent.ObjectAttributes.SourceBranch
 		processedEvent.BaseBranch = gitEvent.ObjectAttributes.TargetBranch
 		processedEvent.HeadURL = gitEvent.ObjectAttributes.Source.WebURL
@@ -56,22 +56,10 @@ func (v *Provider) ParsePayload(_ context.Context, _ *params.Run, request *http.
 
 		v.pathWithNamespace = gitEvent.ObjectAttributes.Target.PathWithNamespace
 		processedEvent.Organization, processedEvent.Repository = getOrgRepo(v.pathWithNamespace)
+		processedEvent.TriggerTarget = triggertype.PullRequest
 		processedEvent.SourceProjectID = gitEvent.ObjectAttributes.SourceProjectID
 		processedEvent.TargetProjectID = gitEvent.Project.ID
-
-		processedEvent.TriggerTarget = triggertype.PullRequest
 		processedEvent.EventType = strings.ReplaceAll(event, " Hook", "")
-
-		// This is a label update, like adding or removing a label from a MR.
-		if gitEvent.Changes.Labels.Current != nil {
-			processedEvent.EventType = triggertype.LabelUpdate.String()
-		}
-		for _, label := range gitEvent.Labels {
-			processedEvent.PullRequestLabel = append(processedEvent.PullRequestLabel, label.Title)
-		}
-		if gitEvent.ObjectAttributes.Action == "close" {
-			processedEvent.TriggerTarget = triggertype.PullRequestClosed
-		}
 	case *gitlab.TagEvent:
 		// GitLab sends same event for both Tag creation and deletion i.e. "Tag Push Hook".
 		// if gitEvent.After is containing all zeros and gitEvent.CheckoutSHA is empty

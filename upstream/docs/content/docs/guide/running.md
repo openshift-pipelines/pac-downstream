@@ -12,9 +12,9 @@ that are annotated with the appropriate event type.
 
 {{< hint info >}}
 The PipelineRuns definitions are fetched from the `.tekton` directory at the
-root of your repository from where the event comes from, this is unless you have
+root of you repository from where the event come from, this is unless you have
 configured the [provenance from the default
-branch](../repositorycrd/#pipelinerun-definition-provenance) on your Repository
+branch](../repositorycrd/#pipelinerun-definition-provenance) on you Repository
 CR.
 {{< /hint >}}
 
@@ -38,8 +38,9 @@ run a PipelineRun on CI:
 - The author of the pull request has permissions to push to branches inside the
   repository.
 
-- The author of the pull request is listed in the `OWNERS` file located in the main
-  directory of the default branch on GitHub or your other service provider.
+- The author who initiated the pull request is identified in an `OWNERS` files
+  found in the main directory of the branch that is set as the default branch
+  on GitHub or your other service provider.
 
   The OWNERS file adheres to a specific format, similar to the Prow OWNERS
   file format (available at <https://www.kubernetes.dev/docs/guide/owners/>). We
@@ -102,42 +103,6 @@ If you have set-up Pipelines-as-Code with the [Tekton Dashboard](https://github.
 or on OpenShift using the OpenShift Console.
 Pipelines-as-Code will post a URL in the Checks tab for GitHub apps to let you
 click on it and follow the pipeline execution directly there.
-
-## Cancelling
-
-### Cancelling in-progress PipelineRuns
-
-{{< tech_preview "Cancelling in progress PipelineRuns" >}}
-{{< support_matrix github_app="true" github_webhook="true" gitea="true" gitlab="true" bitbucket_cloud="true" bitbucket_server="false" >}}
-
-You can choose to cancel a PipelineRun that is currently in progress. This can
-be done by adding the annotation `pipelinesascode.tekton.dev/cancel-in-progress:
-"true"` in the PipelineRun definition.
-
-This feature is effective only when the `PipelineRun` is in progress. If the
-`PipelineRun` has already completed or been cancelled, the cancellation will
-have no effect. (see the [max-keep-run annotation]({{< relref
-"/docs/guide/cleanups.md" >}}) instead to clean old `PipelineRuns`.)
-
-The cancellation only applies to `PipelineRuns` within the scope of the current
-`PullRequest` or the targeted branch for Push events. For example, if two
-`PullRequests` each have a `PipelineRun` with the same name and the
-cancel-in-progress annotation, only the `PipelineRun` in the specific PullRequest
-will be cancelled. This prevents interference between separate PullRequests.
-
-Older `PipelineRuns` are canceled only after the latest `PipelineRun` is
-successfully created and started. This annotation does not guarantee that only
-one `PipelineRun` will be active at a time.
-
-If a `PipelineRun` is in progress and the Pull Request is closed or declined,
-the `PipelineRun` will be canceled.
-
-Currently, `cancel-in-progress` cannot be used in conjunction with the [concurrency
-limit]({{< relref "/docs/guide/repositorycrd.md#concurrency" >}}) setting.
-
-### Cancelling a PipelineRun with a GitOps command
-
-See [here]({{< relref "/docs/guide/gitops_commands.md#cancelling-a-pipelinerun" >}})
 
 ## Restarting the PipelineRun
 

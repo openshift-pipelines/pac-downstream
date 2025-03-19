@@ -20,6 +20,7 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
 	"go.uber.org/zap"
+	"gopkg.in/yaml.v2"
 )
 
 const (
@@ -169,17 +170,21 @@ func (v *Provider) createStatusCommit(event *info.Event, pacopts *info.PacOpts, 
 		State:       state,
 		TargetURL:   status.DetailsURL,
 		Description: status.Title,
-		Context:     provider.GetCheckName(status, pacopts),
+		Context:     getCheckName(status, pacopts),
 	}
 	if _, _, err := v.Client.CreateStatus(event.Organization, event.Repository, event.SHA, gStatus); err != nil {
 		return err
 	}
-
-	eventType := triggertype.IsPullRequestType(event.EventType)
-	if opscomments.IsAnyOpsEventType(eventType.String()) {
-		eventType = triggertype.PullRequest
+	eventType := event.EventType
+	if eventType == triggertype.OkToTest.String() || eventType == triggertype.Retest.String() ||
+		eventType == triggertype.Cancel.String() {
+		eventType = triggertype.PullRequest.String()
 	}
-	if status.Text != "" && (eventType == triggertype.PullRequest || event.TriggerTarget == triggertype.PullRequest) {
+	if opscomments.IsAnyOpsEventType(eventType) {
+		eventType = triggertype.PullRequest.String()
+	}
+
+	if status.Text != "" && (eventType == triggertype.PullRequest.String() || event.TriggerTarget == triggertype.PullRequest) {
 		status.Text = strings.ReplaceAll(strings.TrimSpace(status.Text), "<br>", "\n")
 		_, _, err := v.Client.CreateIssueComment(event.Organization, event.Repository,
 			int64(event.PullRequestNumber), gitea.CreateIssueCommentOption{
@@ -191,6 +196,17 @@ func (v *Provider) createStatusCommit(event *info.Event, pacopts *info.PacOpts, 
 		}
 	}
 	return nil
+}
+
+// TODO: move to common since used in github and here.
+func getCheckName(status provider.StatusOpts, pacopts *info.PacOpts) string {
+	if pacopts.ApplicationName != "" {
+		if status.OriginalPipelineRunName == "" {
+			return pacopts.ApplicationName
+		}
+		return fmt.Sprintf("%s / %s", pacopts.ApplicationName, status.OriginalPipelineRunName)
+	}
+	return status.OriginalPipelineRunName
 }
 
 func (v *Provider) GetTektonDir(_ context.Context, event *info.Event, path, provenance string) (string, error) {
@@ -242,8 +258,10 @@ func (v *Provider) concatAllYamlFiles(objects []gitea.GitEntry, event *info.Even
 			if err != nil {
 				return "", err
 			}
-			if err := provider.ValidateYaml(data, value.Path); err != nil {
-				return "", err
+			// validate yaml
+			var i any
+			if err := yaml.Unmarshal(data, &i); err != nil {
+				return "", fmt.Errorf("error unmarshalling yaml file %s: %w", value.Path, err)
 			}
 			if allTemplates != "" && !strings.HasPrefix(string(data), "---") {
 				allTemplates += "---"
@@ -341,7 +359,7 @@ func (v *Provider) GetFiles(_ context.Context, runevent *info.Event) (changedfil
 
 	//nolint:exhaustive // we don't need to handle all cases
 	switch runevent.TriggerTarget {
-	case triggertype.PullRequest, triggertype.PullRequestClosed:
+	case triggertype.PullRequest:
 		opt := gitea.ListPullRequestFilesOptions{ListOptions: gitea.ListOptions{Page: 1, PageSize: 50}}
 		shouldGetNextPage := false
 		for {

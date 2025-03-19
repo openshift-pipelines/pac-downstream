@@ -7,7 +7,6 @@ type Workspace struct {
 type Repository struct {
 	Workspace Workspace `json:"workspace"`
 	Name      string    `json:"name"`
-	FullName  string    `json:"full_name"`
 	Links     Links     `json:"links"`
 }
 
@@ -55,7 +54,6 @@ type PullRequest struct {
 	ID          int         `json:"id"`
 	Links       Links
 	Title       string `json:"title"`
-	State       string `json:"state"`
 }
 
 type PullRequestEvent struct {

@@ -11,7 +11,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/google/go-github/v68/github"
+	"github.com/google/go-github/v64/github"
 	"gotest.tools/v3/assert"
 )
 
@@ -53,7 +53,7 @@ func TestSkippedEvent(t *testing.T) {
 	ctx := context.TODO()
 
 	event := github.PullRequestEvent{
-		Action: github.Ptr("closed"),
+		Action: github.String("closed"),
 	}
 	eventType := "pull_request"
 
@@ -82,7 +82,7 @@ func TestSkippedEvent(t *testing.T) {
 	assert.NilError(t, err)
 	defer resp.Body.Close()
 
-	assert.Assert(t, resp.StatusCode >= 200 && resp.StatusCode < 300, "%s reply expected 2xx OK: %d", elURL, resp.StatusCode)
+	assert.Equal(t, resp.StatusCode, http.StatusOK, "%s reply expected 200 OK", elURL)
 }
 
 func TestGETCall(t *testing.T) {

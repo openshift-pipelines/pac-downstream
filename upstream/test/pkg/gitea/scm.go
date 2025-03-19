@@ -10,7 +10,7 @@ import (
 	"testing"
 
 	"code.gitea.io/sdk/gitea"
-	"github.com/google/go-github/v68/github"
+	"github.com/google/go-github/v64/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/git"
 	pgitea "github.com/openshift-pipelines/pipelines-as-code/pkg/provider/gitea"
 	"github.com/openshift-pipelines/pipelines-as-code/test/pkg/payload"
@@ -106,7 +106,7 @@ func GetIssueTimeline(ctx context.Context, topts *TestOpts) (Timelines, error) {
 	return tls, nil
 }
 
-func CreateGiteaRepo(giteaClient *gitea.Client, user, name, defaultBranch, hookURL string, onOrg bool, logger *zap.SugaredLogger) (*gitea.Repository, error) {
+func CreateGiteaRepo(giteaClient *gitea.Client, user, name, hookURL string, onOrg bool, logger *zap.SugaredLogger) (*gitea.Repository, error) {
 	var repo *gitea.Repository
 	var err error
 	// Create a new repo
@@ -131,11 +131,9 @@ func CreateGiteaRepo(giteaClient *gitea.Client, user, name, defaultBranch, hookU
 	} else {
 		logger.Infof("Creating gitea repository %s for user %s", name, user)
 		repo, _, err = giteaClient.AdminCreateRepo(user, gitea.CreateRepoOption{
-			Name:          name,
-			Description:   "This is a repo it's a wonderful thing",
-			AutoInit:      true,
-			IssueLabels:   "Default",
-			DefaultBranch: defaultBranch,
+			Name:        name,
+			Description: "This is a repo it's a wonderful thing",
+			AutoInit:    true,
 		})
 	}
 	if err != nil {
@@ -199,7 +197,7 @@ func CreateGiteaUser(giteaClient *gitea.Client, username, password string) (*git
 		Username:           username,
 		Email:              username + "@redhat.com",
 		Password:           password,
-		MustChangePassword: github.Ptr(false),
+		MustChangePassword: github.Bool(false),
 		Visibility:         &visibility,
 	}
 	newuser, _, err := giteaClient.AdminCreateUser(opts)
@@ -264,7 +262,7 @@ func PushToPullRequest(t *testing.T, topts *TestOpts, secondcnx pgitea.Provider,
 		TargetRefName: topts.TargetRefName,
 		BaseRefName:   topts.DefaultBranch,
 	}
-	_ = scm.PushFilesToRefGit(t, scmOpts, entries)
+	scm.PushFilesToRefGit(t, scmOpts, entries)
 }
 
 func CreateAccess(topts *TestOpts, touser, accessMode string) error {

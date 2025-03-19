@@ -16,7 +16,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/go-github/v68/github"
+	"github.com/google/go-github/v64/github"
 	"github.com/jonboulle/clockwork"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
@@ -275,7 +275,7 @@ func TestGetTektonDir(t *testing.T) {
 			},
 			expectedString: "FROMSUBTREE",
 			treepath:       "testdata/tree/badyaml",
-			wantErr:        "error unmarshalling yaml file badyaml.yaml: yaml: line 2: did not find expected key",
+			wantErr:        "error unmarshalling yaml file badyaml.yaml: error converting YAML to JSON: yaml: line 2: did not find expected key",
 		},
 	}
 	for _, tt := range testGetTektonDir {
@@ -300,7 +300,7 @@ func TestGetTektonDir(t *testing.T) {
 			got, err := gvcs.GetTektonDir(ctx, tt.event, ".tekton", tt.provenance)
 			if tt.wantErr != "" {
 				assert.Assert(t, err != nil, "we should have get an error here")
-				assert.ErrorContains(t, err, tt.wantErr)
+				assert.Equal(t, tt.wantErr, err.Error())
 				return
 			}
 			assert.NilError(t, err)
@@ -846,7 +846,7 @@ func TestProvider_checkWebhookSecretValidity(t *testing.T) {
 		},
 		{
 			name:         "no remaining scim calls",
-			wantSubErr:   "api rate limit exceeded. Access will be restored at Mon, 01 Jan 0001 00:00:00 UTC",
+			wantSubErr:   "token is ratelimited",
 			remaining:    0,
 			expHeaderSet: true,
 			expTime:      cw.Now().Add(1 * time.Minute),
@@ -864,7 +864,7 @@ func TestProvider_checkWebhookSecretValidity(t *testing.T) {
 		{
 			name:       "no header but no remaining scim calls",
 			remaining:  0,
-			wantSubErr: "api rate limit exceeded. Access will be restored at Mon, 01 Jan 0001 00:00:00 UTC",
+			wantSubErr: "token is ratelimited",
 		},
 		{
 			name:       "api error",
