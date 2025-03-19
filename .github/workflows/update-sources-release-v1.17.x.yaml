@@ -23,7 +23,7 @@ jobs:
     - name: Clone openshift-pipelines/pipelines-as-code
       run: |
         rm -fR upstream
-        git clone https://github.com/openshift-pipelines/pipelines-as-code}} upstream
+        git clone https://github.com/openshift-pipelines/pipelines-as-code upstream
         pushd upstream
         git checkout -B release-v0.29.x origin/release-v0.29.x
         popd
@@ -34,6 +34,7 @@ jobs:
         git config user.name openshift-pipelines-bot
         git config user.email pipelines-extcomm@redhat.com
         git checkout -b actions/update/sources-release-v1.17.x
+        touch head
         pushd upstream
         OLD_COMMIT=$(cat ../head)
         NEW_COMMIT=$(git rev-parse HEAD)
@@ -45,7 +46,7 @@ jobs:
         git rev-parse HEAD > ../head
         popd
         rm -rf upstream/.git
-        git add -f upstream head .konflux
+        git add -f upstream head
 
         if [[ -z $(git status --porcelain --untracked-files=no) ]]; then
           echo "No change, exiting"
