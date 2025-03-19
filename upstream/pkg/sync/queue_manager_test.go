@@ -2,7 +2,6 @@ package sync
 
 import (
 	"fmt"
-	"runtime"
 	"testing"
 	"time"
 
@@ -24,16 +23,7 @@ import (
 	rtesting "knative.dev/pkg/reconciler/testing"
 )
 
-func skipOnOSX64(t *testing.T) {
-	if runtime.GOOS == "darwin" && runtime.GOARCH == "arm64" {
-		t.Skip("Skipping test on OSX arm64")
-	}
-}
-
 func TestSomeoneElseSetPendingWithNoConcurrencyLimit(t *testing.T) {
-	// Skip if we are running on OSX, there is a problem with ordering only happening on arm64
-	skipOnOSX64(t)
-
 	observer, _ := zapobserver.New(zap.InfoLevel)
 	logger := zap.New(observer).Sugar()
 
@@ -80,8 +70,6 @@ func TestAddToPendingQueueDirectly(t *testing.T) {
 }
 
 func TestNewQueueManagerForList(t *testing.T) {
-	// Skip if we are running on OSX, there is a problem with ordering only happening on arm64
-	skipOnOSX64(t)
 	observer, _ := zapobserver.New(zap.InfoLevel)
 	logger := zap.New(observer).Sugar()
 
@@ -169,7 +157,7 @@ func TestNewQueueManagerReListing(t *testing.T) {
 	// still there should only one running and 2 in pending
 	assert.Equal(t, len(qm.RunningPipelineRuns(repo)), 2)
 	assert.Equal(t, len(qm.QueuedPipelineRuns(repo)), 1)
-	// assert.Equal(t, qm.QueuedPipelineRuns(repo)[0], "test-ns/third")
+	assert.Equal(t, qm.QueuedPipelineRuns(repo)[0], "test-ns/third")
 
 	// a new request comes
 	prFourth := newTestPR("fourth", time.Now(), nil, nil, tektonv1.PipelineRunSpec{})

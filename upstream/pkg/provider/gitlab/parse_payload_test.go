@@ -4,13 +4,12 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/google/go-github/v68/github"
+	"github.com/google/go-github/v64/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/opscomments"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
 	thelp "github.com/openshift-pipelines/pipelines-as-code/pkg/provider/gitlab/test"
-	gitlab "gitlab.com/gitlab-org/api/client-go"
+	"github.com/xanzy/go-gitlab"
 	"gotest.tools/v3/assert"
 	rtesting "knative.dev/pkg/reconciler/testing"
 )
@@ -73,21 +72,7 @@ func TestParsePayload(t *testing.T) {
 			want: &info.Event{
 				EventType:     "Merge Request",
 				TriggerTarget: "pull_request",
-				Organization:  "hello/this/is/me/ze",
-				Repository:    "project",
-				SHATitle:      "commit it",
-			},
-		},
-		{
-			name: "merge event closed",
-			args: args{
-				event:   gitlab.EventTypeMergeRequest,
-				payload: sample.MREventAsJSON("close", ""),
-			},
-			want: &info.Event{
-				EventType:     "Merge Request",
-				TriggerTarget: triggertype.PullRequestClosed,
-				Organization:  "hello/this/is/me/ze",
+				Organization:  "hello-this-is-me-ze",
 				Repository:    "project",
 			},
 		},
@@ -108,7 +93,7 @@ func TestParsePayload(t *testing.T) {
 			want: &info.Event{
 				EventType:     "Push",
 				TriggerTarget: "push",
-				Organization:  "hello/this/is/me/ze",
+				Organization:  "hello-this-is-me-ze",
 				Repository:    "project",
 			},
 		},
@@ -121,7 +106,7 @@ func TestParsePayload(t *testing.T) {
 			want: &info.Event{
 				EventType:     "Tag Push",
 				TriggerTarget: "push",
-				Organization:  "hello/this/is/me/ze",
+				Organization:  "hello-this-is-me-ze",
 				Repository:    "project",
 			},
 		},
@@ -134,7 +119,7 @@ func TestParsePayload(t *testing.T) {
 			want: &info.Event{
 				EventType:     opscomments.NoOpsCommentEventType.String(),
 				TriggerTarget: "pull_request",
-				Organization:  "hello/this/is/me/ze",
+				Organization:  "hello-this-is-me-ze",
 				Repository:    "project",
 			},
 		},
@@ -147,7 +132,7 @@ func TestParsePayload(t *testing.T) {
 			want: &info.Event{
 				EventType:     opscomments.TestSingleCommentEventType.String(),
 				TriggerTarget: "pull_request",
-				Organization:  "hello/this/is/me/ze",
+				Organization:  "hello-this-is-me-ze",
 				Repository:    "project",
 				State:         info.State{TargetTestPipelineRun: "dummy"},
 			},
@@ -161,7 +146,7 @@ func TestParsePayload(t *testing.T) {
 			want: &info.Event{
 				EventType:     opscomments.CancelCommentAllEventType.String(),
 				TriggerTarget: "pull_request",
-				Organization:  "hello/this/is/me/ze",
+				Organization:  "hello-this-is-me-ze",
 				Repository:    "project",
 			},
 		},
@@ -174,7 +159,7 @@ func TestParsePayload(t *testing.T) {
 			want: &info.Event{
 				EventType:     opscomments.CancelCommentSingleEventType.String(),
 				TriggerTarget: "pull_request",
-				Organization:  "hello/this/is/me/ze",
+				Organization:  "hello-this-is-me-ze",
 				Repository:    "project",
 				State:         info.State{TargetCancelPipelineRun: "dummy"},
 			},
@@ -184,7 +169,7 @@ func TestParsePayload(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx, _ := rtesting.SetupFakeContext(t)
 			v := &Provider{
-				Token:           github.Ptr("tokeneuneu"),
+				Token:           github.String("tokeneuneu"),
 				targetProjectID: tt.fields.targetProjectID,
 				sourceProjectID: tt.fields.sourceProjectID,
 				userID:          tt.fields.userID,

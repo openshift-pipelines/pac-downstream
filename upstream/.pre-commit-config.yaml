@@ -4,7 +4,7 @@ default_install_hook_types: ["pre-push"]
 exclude: '(^docs/themes/hugo-book|^vendor|.*golden$|^\.vale)'
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v5.0.0
+    rev: v4.6.0
     hooks:
       - id: check-added-large-files
       - id: check-toml
@@ -13,6 +13,10 @@ repos:
       - id: check-vcs-permalinks
       - id: detect-private-key
         exclude: ".*_test.go"
+  - repo: https://github.com/jorisroovers/gitlint
+    rev: v0.19.1
+    hooks:
+      - id: gitlint
   - repo: https://github.com/codespell-project/codespell
     rev: v2.3.0
     hooks:
@@ -45,10 +49,4 @@ repos:
         entry: "shellcheck"
         language: system
         types: [shell]
-      - id: gitlint
-        name: "Gitlint"
-        entry: "make"
-        language: system
-        types: [text]
-        args: ["gitlint"]
 # TODO: add a lint-sh when we have the errors fix

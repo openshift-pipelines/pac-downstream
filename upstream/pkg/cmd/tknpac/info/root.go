@@ -19,6 +19,5 @@ func Root(clients *params.Run, ioStreams *cli.IOStreams) *cobra.Command {
 	}
 
 	cmd.AddCommand(installCommand(clients, ioStreams))
-	cmd.AddCommand(globbingCommand(ioStreams))
 	return cmd
 }

@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# shellcheck disable=SC2038
 # Helper script for GitHub Actions CI, used from e2e tests.
 set -exufo pipefail
 
@@ -37,8 +36,8 @@ create_second_github_app_controller_on_ghe() {
   local test_github_second_webhook_secret="${3}"
 
   if [[ -n "$(type -p apt)" ]]; then
-    sudo apt update &&
-      sudo apt install -y python3-yaml
+    apt update &&
+      apt install -y python3-yaml
   elif [[ -n "$(type -p dnf)" ]]; then
     dnf install -y python3-pyyaml
   else
@@ -64,37 +63,20 @@ create_second_github_app_controller_on_ghe() {
   kubectl -n pipelines-as-code delete pod -l app.kubernetes.io/name=ghe-controller
 }
 
-get_tests() {
-  target=$1
-  mapfile -t testfiles < <(find test/ -maxdepth 1 -name '*.go')
-  ghglabre="Github|Gitlab|Bitbucket"
-  if [[ ${target} == "providers" ]]; then
-    grep -hioP "^func Test.*(${ghglabre})(\w+)\(" "${testfiles[@]}" | sed -e 's/func[ ]*//' -e 's/($//'
-  elif [[ ${target} == "gitea_others" ]]; then
-    grep -hioP '^func Test(\w+)\(' "${testfiles[@]}" | grep -iPv "(${ghglabre})" | sed -e 's/func[ ]*//' -e 's/($//'
-  else
-    echo "Invalid target: ${target}"
-    echo "supported targets: githubgitlab, others"
-  fi
-}
-
 run_e2e_tests() {
-  set +x
-  target="${1}"
-  bitbucket_cloud_token="${2}"
-  webhook_secret="${3}"
-  test_gitea_smeeurl="${4}"
-  installation_id="${5}"
-  gh_apps_token="${6}"
-  test_github_second_token="${7}"
-  gitlab_token="${8}"
-  bitbucket_server_token="${9}"
-  bitbucket_server_api_url="${10}"
-  bitbucket_server_webhook_secret="${11}"
+  bitbucket_cloud_token="${1}"
+  webhook_secret="${2}"
+  test_gitea_smeeurl="${3}"
+  installation_id="${4}"
+  gh_apps_token="${5}"
+  test_github_second_token="${6}"
+  gitlab_token="${7}"
 
   # Nothing specific to webhook here it  just that repo is private in that org and that's what we want to test
   export TEST_GITHUB_PRIVATE_TASK_URL="https://github.com/openshift-pipelines/pipelines-as-code-e2e-tests-private/blob/main/remote_task.yaml"
   export TEST_GITHUB_PRIVATE_TASK_NAME="task-remote"
+
+  export GO_TEST_FLAGS="-v -race -failfast"
 
   export TEST_BITBUCKET_CLOUD_API_URL=https://api.bitbucket.org/2.0
   export TEST_BITBUCKET_CLOUD_E2E_REPOSITORY=cboudjna/pac-e2e-tests
@@ -130,22 +112,10 @@ run_e2e_tests() {
   export TEST_GITLAB_PROJECT_ID="34405323"
   export TEST_GITLAB_TOKEN=${gitlab_token}
   # https://gitlab.com/gitlab-com/alliances/ibm-red-hat/sandbox/openshift-pipelines/pac-e2e-tests
-
-  export TEST_BITBUCKET_SERVER_TOKEN="${bitbucket_server_token}"
-  export TEST_BITBUCKET_SERVER_API_URL="${bitbucket_server_api_url}"
-  export TEST_BITBUCKET_SERVER_WEBHOOK_SECRET="${bitbucket_server_webhook_secret}"
-  export TEST_BITBUCKET_SERVER_USER="pipelines"
-  export TEST_BITBUCKET_SERVER_E2E_REPOSITORY="PAC/pac-e2e-tests"
-
-  mapfile -t tests < <(get_tests "${target}")
-  echo "About to run ${#tests[@]} tests: ${tests[*]}"
-  # shellcheck disable=SC2001
-  make test-e2e GO_TEST_FLAGS="-run \"$(echo "${tests[*]}" | sed 's/ /|/g')\""
+  make test-e2e
 }
 
 collect_logs() {
-  test_gitea_smee_url="${1}"
-  github_ghe_smee_url="${2}"
   mkdir -p /tmp/logs
   kind export logs /tmp/logs
   [[ -d /tmp/gosmee-replay ]] && cp -a /tmp/gosmee-replay /tmp/logs/
@@ -163,25 +133,6 @@ collect_logs() {
     done
     kubectl -n ${ns} get events >/tmp/logs/ns/${ns}/events
   done
-
-  for url in "${test_gitea_smee_url}" "${github_ghe_smee_url}"; do
-    find /tmp/logs -type f -exec grep -l "${url}" {} \; | xargs -r sed -i "s|${url}|SMEE_URL|g"
-  done
-
-  detect_panic
-}
-
-detect_panic() {
-  # shellcheck disable=SC2016
-  (find /tmp/logs/ -type f -regex '.*/pipelines-as-code.*/[0-9]\.log$' | xargs -r sed -n '/stderr F panic:.*/,$p' | head -n 80) >/tmp/panic.log
-  if [[ -s /tmp/panic.log ]]; then
-    set +x
-    echo "=====================  PANIC DETECTED ====================="
-    echo "**********************************************************************"
-    cat /tmp/panic.log
-    echo "**********************************************************************"
-    exit 1
-  fi
 }
 
 help() {
@@ -196,7 +147,7 @@ help() {
   create_second_github_app_controller_on_ghe <test_github_second_smee_url> <test_github_second_private_key> <test_github_second_webhook_secret>
     Create the second controller on GHE
 
-  run_e2e_tests <target> <bitbucket_cloud_token> <webhook_secret> <test_gitea_smeeurl> <installation_id> <gh_apps_token> <test_github_second_token> <gitlab_token> <bitbucket_server_token> <bitbucket_server_api_url> <bitbucket_server_webhook_secret>
+  run_e2e_tests <bitbucket_cloud_token> <webhook_secret> <test_gitea_smeeurl> <installation_id> <gh_apps_token> <test_github_second_token> <gitlab_token>
     Run the e2e tests
 
   collect_logs
@@ -212,10 +163,10 @@ create_second_github_app_controller_on_ghe)
   create_second_github_app_controller_on_ghe "${2}" "${3}" "${4}"
   ;;
 run_e2e_tests)
-  run_e2e_tests "${2}" "${3}" "${4}" "${5}" "${6}" "${7}" "${8}" "${9}" "${10}" "${11}" "${12}"
+  run_e2e_tests "${2}" "${3}" "${4}" "${5}" "${6}" "${7}" "${8}"
   ;;
 collect_logs)
-  collect_logs "${2}" "${3}"
+  collect_logs
   ;;
 help)
   help

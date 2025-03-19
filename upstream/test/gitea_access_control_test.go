@@ -142,7 +142,7 @@ func TestGiteaPolicyOkToTestRetest(t *testing.T) {
 	topts.GiteaCNX = normalUserCnx
 	tgitea.PostCommentOnPullRequest(t, topts, okToTestComment)
 	topts.CheckForStatus = "Skipped"
-	topts.Regexp = regexp.MustCompile(fmt.Sprintf(".*User %s is not allowed to trigger CI via pull_request in this repo.", normalUser.UserName))
+	topts.Regexp = regexp.MustCompile(fmt.Sprintf(".*User %s is not allowed to trigger CI via pull_request on this repo.", normalUser.UserName))
 	tgitea.WaitForPullRequestCommentMatch(t, topts)
 
 	topts.ParamsRun.Clients.Log.Infof("Sending a /retest comment as a user not belonging to an allowed team in Repo CR policy but part of the organization")
@@ -423,13 +423,13 @@ func TestGiteaPolicyAllowedOwnerFiles(t *testing.T) {
 		BaseRefName:   topts.DefaultBranch,
 	}
 	// push OWNERS file to main
-	_ = scm.PushFilesToRefGit(t, scmOpts, entries)
+	scm.PushFilesToRefGit(t, scmOpts, entries)
 	scmOpts.TargetRefName = targetRef
 
 	newyamlFiles := map[string]string{".tekton/pr.yaml": "testdata/pipelinerun.yaml"}
 	newEntries, err := payload.GetEntries(newyamlFiles, topts.TargetNS, topts.DefaultBranch, topts.TargetEvent, map[string]string{})
 	assert.NilError(t, err)
-	_ = scm.PushFilesToRefGit(t, scmOpts, newEntries)
+	scm.PushFilesToRefGit(t, scmOpts, newEntries)
 
 	npr := tgitea.CreateForkPullRequest(t, topts, allowedCnx, "")
 	waitOpts := twait.Opts{

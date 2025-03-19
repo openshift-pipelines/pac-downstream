@@ -4,15 +4,11 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"net/url"
 	"path/filepath"
 	"strings"
 
 	bbv1 "github.com/gfleury/go-bitbucket-v1"
-	"github.com/google/go-github/v68/github"
-	"github.com/jenkins-x/go-scm/scm"
-	"github.com/jenkins-x/go-scm/scm/driver/stash"
-	"github.com/jenkins-x/go-scm/scm/transport/oauth2"
+	"github.com/google/go-github/v64/github"
 	"github.com/mitchellh/mapstructure"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/changedfiles"
@@ -31,8 +27,7 @@ const taskStatusTemplate = `
 var _ provider.Interface = (*Provider)(nil)
 
 type Provider struct {
-	Client                    *bbv1.APIClient // temporarily keeping it after the refactor finishes, will be removed
-	ScmClient                 *scm.Client
+	Client                    *bbv1.APIClient
 	Logger                    *zap.SugaredLogger
 	run                       *params.Run
 	pacInfo                   *info.PacOpts
@@ -155,10 +150,6 @@ func (v *Provider) concatAllYamlFiles(objects []string, runevent *info.Event) (s
 				return "", err
 			}
 
-			if err := provider.ValidateYaml([]byte(data), value); err != nil {
-				return "", err
-			}
-
 			if allTemplates != "" && !strings.HasPrefix(data, "---") {
 				allTemplates += "---"
 			}
@@ -223,25 +214,6 @@ func (v *Provider) GetFileInsideRepo(_ context.Context, event *info.Event, path,
 	return ret, err
 }
 
-func removeLastSegment(urlStr string) string {
-	u, _ := url.Parse(urlStr)
-	segments := strings.Split(u.Path, "/")
-	switch {
-	case len(segments) > 1:
-		segments = segments[:len(segments)-1]
-	case (len(segments) == 1 && segments[0] != "") || u.Path == "/":
-		segments = []string{""}
-	}
-
-	newPath := strings.Join(segments, "/")
-	if newPath == "" && strings.HasPrefix(u.Path, "/") {
-		newPath = "/" // Ensure root path is correctly represented as "/"
-	}
-
-	u.Path = newPath
-	return u.String()
-}
-
 func (v *Provider) SetClient(ctx context.Context, run *params.Run, event *info.Event, _ *v1alpha1.Repository, _ *events.EventEmitter) error {
 	if event.Provider.User == "" {
 		return fmt.Errorf("no spec.git_provider.user has been set in the repo crd")
@@ -269,26 +241,9 @@ func (v *Provider) SetClient(ctx context.Context, run *params.Run, event *info.E
 	if v.Client == nil {
 		v.Client = bbv1.NewAPIClient(ctx, cfg)
 	}
-
-	if v.ScmClient == nil {
-		client, err := stash.New(removeLastSegment(event.Provider.URL)) // remove `/rest` from url
-		if err != nil {
-			return err
-		}
-		client.Client = &http.Client{
-			Transport: &oauth2.Transport{
-				Source: oauth2.StaticTokenSource(
-					&scm.Token{
-						Token: event.Provider.Token,
-					},
-				),
-			},
-		}
-		v.ScmClient = client
-	}
 	v.run = run
-	_, resp, err := v.ScmClient.Users.FindLogin(ctx, event.Provider.User)
-	if resp != nil && resp.Status == http.StatusUnauthorized {
+	resp, err := v.Client.DefaultApi.GetUser(event.Provider.User)
+	if resp.Response != nil && resp.StatusCode == http.StatusUnauthorized {
 		return fmt.Errorf("cannot get user %s with token: %w", event.Provider.User, err)
 	}
 	if err != nil {
@@ -334,80 +289,7 @@ func (v *Provider) GetConfig() *info.ProviderConfig {
 	}
 }
 
-func (v *Provider) GetFiles(ctx context.Context, runevent *info.Event) (changedfiles.ChangedFiles, error) {
-	limit := 100
-	OrgAndRepo := fmt.Sprintf("%s/%s", runevent.Organization, runevent.Repository)
-	if runevent.TriggerTarget == triggertype.PullRequest {
-		opts := &scm.ListOptions{Page: 1, Size: limit}
-		changedFiles := changedfiles.ChangedFiles{}
-		for {
-			changes, _, err := v.ScmClient.PullRequests.ListChanges(ctx, OrgAndRepo, runevent.PullRequestNumber, opts)
-			if err != nil {
-				return changedfiles.ChangedFiles{}, fmt.Errorf("failed to list changes for pull request: %w", err)
-			}
-
-			for _, c := range changes {
-				changedFiles.All = append(changedFiles.All, c.Path)
-				if c.Added {
-					changedFiles.Added = append(changedFiles.Added, c.Path)
-				}
-				if c.Modified {
-					changedFiles.Modified = append(changedFiles.Modified, c.Path)
-				}
-				if c.Renamed {
-					changedFiles.Renamed = append(changedFiles.Renamed, c.Path)
-				}
-				if c.Deleted {
-					changedFiles.Deleted = append(changedFiles.Deleted, c.Path)
-				}
-			}
-
-			// In the Jenkins-x/go-scm package, the `isLastPage` field is not available, and the value of
-			// `response.Page.Last` is set to `0`. Therefore, to determine if there are more items to fetch,
-			// we can check if the length of the currently fetched items is less than the specified limit.
-			// If the length is less than the limit, it indicates that there are no more items to retrieve.
-			if len(changes) < limit {
-				break
-			}
-
-			opts.Page++
-		}
-		return changedFiles, nil
-	}
-
-	if runevent.TriggerTarget == triggertype.Push {
-		opts := &scm.ListOptions{Page: 1, Size: limit}
-		changedFiles := changedfiles.ChangedFiles{}
-		for {
-			changes, _, err := v.ScmClient.Git.ListChanges(ctx, OrgAndRepo, runevent.SHA, opts)
-			if err != nil {
-				return changedfiles.ChangedFiles{}, fmt.Errorf("failed to list changes for commit %s: %w", runevent.SHA, err)
-			}
-
-			for _, c := range changes {
-				changedFiles.All = append(changedFiles.All, c.Path)
-				if c.Added {
-					changedFiles.Added = append(changedFiles.Added, c.Path)
-				}
-				if c.Modified {
-					changedFiles.Modified = append(changedFiles.Modified, c.Path)
-				}
-				if c.Renamed {
-					changedFiles.Renamed = append(changedFiles.Renamed, c.Path)
-				}
-				if c.Deleted {
-					changedFiles.Deleted = append(changedFiles.Deleted, c.Path)
-				}
-			}
-
-			if len(changes) < limit {
-				break
-			}
-
-			opts.Page++
-		}
-		return changedFiles, nil
-	}
+func (v *Provider) GetFiles(_ context.Context, _ *info.Event) (changedfiles.ChangedFiles, error) {
 	return changedfiles.ChangedFiles{}, nil
 }
 

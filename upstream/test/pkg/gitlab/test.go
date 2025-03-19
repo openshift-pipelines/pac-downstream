@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"net/http"
 
-	ghlib "gitlab.com/gitlab-org/api/client-go"
+	ghlib "github.com/xanzy/go-gitlab"
 )
 
 func CreateMR(client *ghlib.Client, pid int, sourceBranch, targetBranch, title string) (int, error) {

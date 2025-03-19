@@ -3,8 +3,6 @@ package main
 import (
 	"context"
 	"log"
-	"os"
-	"strings"
 
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/adapter"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/kubeinteraction"
@@ -12,7 +10,6 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	evadapter "knative.dev/eventing/pkg/adapter/v2"
 	"knative.dev/pkg/client/injection/kube/client"
-	"knative.dev/pkg/injection/sharedmain"
 	"knative.dev/pkg/logging"
 	"knative.dev/pkg/signals"
 	"knative.dev/pkg/system"
@@ -44,12 +41,6 @@ func main() {
 
 	ctx = info.StoreNS(ctx, system.Namespace())
 	ctx = info.StoreCurrentControllerName(ctx, run.Info.Controller.Name)
-
-	if val, ok := os.LookupEnv("PAC_DISABLE_HEALTH_PROBE"); ok {
-		if strings.ToLower(val) == "true" {
-			ctx = sharedmain.WithHealthProbesDisabled(ctx)
-		}
-	}
 
 	ctx = context.WithValue(ctx, client.Key{}, run.Clients.Kube)
 	ctx = evadapter.WithNamespace(ctx, system.Namespace())

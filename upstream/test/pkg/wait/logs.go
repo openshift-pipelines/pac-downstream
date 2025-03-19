@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/go-github/v64/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	tlogs "github.com/openshift-pipelines/pipelines-as-code/test/pkg/logs"
@@ -46,9 +47,9 @@ func RegexpMatchingInPodLog(ctx context.Context, clients *params.Run, ns, labels
 	} else {
 		clients.Clients.Log.Infof("looking for matching content of file %s in namespace: %s for label %s and container %s", goldenFile, ns, labelselector, containerName)
 	}
-	numLines := int64(10)
+
 	for i := 0; i <= maxNumberOfLoop; i++ {
-		output, err = tlogs.GetPodLog(ctx, clients.Clients.Kube.CoreV1(), ns, labelselector, containerName, &numLines)
+		output, err = tlogs.GetPodLog(ctx, clients.Clients.Kube.CoreV1(), ns, labelselector, containerName, github.Int64(10))
 		if err != nil {
 			return err
 		}
@@ -71,10 +72,9 @@ func RegexpMatchingInPodLog(ctx context.Context, clients *params.Run, ns, labels
 // GoldenPodLog is a helper function to get the logs of a pod and compare it to a golden file.
 func GoldenPodLog(ctx context.Context, t *testing.T, clients *params.Run, ns, labelselector, containerName, goldenFile string, maxNumberOfLoop int) {
 	var err error
-	numLines := int64(10)
 	for i := 0; i <= maxNumberOfLoop; i++ {
 		var output string
-		output, err = tlogs.GetPodLog(ctx, clients.Clients.Kube.CoreV1(), ns, labelselector, containerName, &numLines)
+		output, err = tlogs.GetPodLog(ctx, clients.Clients.Kube.CoreV1(), ns, labelselector, containerName, github.Int64(10))
 		if err != nil {
 			time.Sleep(5 * time.Second)
 			continue

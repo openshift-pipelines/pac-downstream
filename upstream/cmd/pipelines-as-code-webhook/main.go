@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"os"
-	"strings"
 
 	validationWebhook "github.com/openshift-pipelines/pipelines-as-code/pkg/webhook"
 	"knative.dev/pkg/configmap"
@@ -32,12 +31,6 @@ func main() {
 		Port:        8443,
 		SecretName:  secretName,
 	})
-
-	if val, ok := os.LookupEnv("PAC_DISABLE_HEALTH_PROBE"); ok {
-		if strings.ToLower(val) == "true" {
-			ctx = sharedmain.WithHealthProbesDisabled(ctx)
-		}
-	}
 
 	sharedmain.WebhookMainWithConfig(ctx, "pipelines-as-code-webhook",
 		injection.ParseAndGetRESTConfigOrDie(),

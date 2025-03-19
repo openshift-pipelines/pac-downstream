@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/google/go-github/v68/github"
+	"github.com/google/go-github/v64/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/clients"
@@ -169,12 +169,12 @@ func TestGetExistingPendingApprovalCheckRunID(t *testing.T) {
 					"id": %v,
 					"external_id": "%s",
 					"output": {
-						"title": "%s",
+						"title": "Pending approval",
 						"summary": "My CI is waiting for approval"
 					}
 				}
 			]
-		}`, chosenID, chosenOne, pendingApproval)
+		}`, chosenID, chosenOne)
 	})
 
 	id, err := cnx.getExistingCheckRunID(ctx, event, provider.StatusOpts{
@@ -414,7 +414,7 @@ func TestGithubProviderCreateStatus(t *testing.T) {
                                 "status": "queued",
                                 "conclusion": "pending", 
 								"output": {
-									"title": "Pending approval, waiting for an /ok-to-test",
+									"title": "Pending approval",
 									"summary": "My CI is waiting for approval"
 								}
 							}
@@ -476,7 +476,7 @@ func TestGithubProviderCreateStatus(t *testing.T) {
 func TestGithubProvidercreateStatusCommit(t *testing.T) {
 	issuenumber := 666
 	anevent := &info.Event{
-		Event:             &github.PullRequestEvent{PullRequest: &github.PullRequest{Number: github.Ptr(issuenumber)}},
+		Event:             &github.PullRequestEvent{PullRequest: &github.PullRequest{Number: github.Int(issuenumber)}},
 		Organization:      "owner",
 		Repository:        "repository",
 		SHA:               "createStatusCommitSHA",
@@ -561,8 +561,57 @@ func TestGithubProvidercreateStatusCommit(t *testing.T) {
 	}
 }
 
+func TestGetCheckName(t *testing.T) {
+	type args struct {
+		status  provider.StatusOpts
+		pacopts *info.PacOpts
+	}
+	tests := []struct {
+		name string
+		args args
+		want string
+	}{
+		{
+			name: "no application name",
+			args: args{
+				status: provider.StatusOpts{
+					OriginalPipelineRunName: "HELLO",
+				},
+				pacopts: &info.PacOpts{Settings: settings.Settings{ApplicationName: ""}},
+			},
+			want: "HELLO",
+		},
+		{
+			name: "application and pipelinerun name",
+			args: args{
+				status: provider.StatusOpts{
+					OriginalPipelineRunName: "MOTO",
+				},
+				pacopts: &info.PacOpts{Settings: settings.Settings{ApplicationName: "HELLO"}},
+			},
+			want: "HELLO / MOTO",
+		},
+		{
+			name: "application no pipelinerun name",
+			args: args{
+				status: provider.StatusOpts{
+					OriginalPipelineRunName: "",
+				},
+				pacopts: &info.PacOpts{Settings: settings.Settings{ApplicationName: "PAC"}},
+			},
+			want: "PAC",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := getCheckName(tt.args.status, tt.args.pacopts); got != tt.want {
+				t.Errorf("getCheckName() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestProviderGetExistingCheckRunID(t *testing.T) {
-	idd := int64(55555)
 	tests := []struct {
 		name       string
 		jsonret    string
@@ -581,7 +630,7 @@ func TestProviderGetExistingCheckRunID(t *testing.T) {
 				}
 			]
 		}`,
-			expectedID: &idd,
+			expectedID: github.Int64(55555),
 			prname:     "blahpr",
 		},
 		{
