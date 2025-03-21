@@ -1,5 +1,5 @@
 ARG GO_BUILDER=brew.registry.redhat.io/rh-osbs/openshift-golang-builder:v1.22
-ARG RUNTIME=registry.access.redhat.com/ubi9/ubi-minimal:latest@sha256:bafd57451de2daa71ed301b277d49bd120b474ed438367f087eac0b885a668dc
+ARG RUNTIME=registry.redhat.io/ubi8/ubi-minimal@sha256:33161cf5ec11ea13bfe60cad64f56a3aa4d893852e8ec44b2fd2a6b40cc38539
 
 FROM $GO_BUILDER AS builder
 
@@ -23,7 +23,7 @@ COPY head ${KO_DATA_PATH}/HEAD
 
 LABEL \
       com.redhat.component="openshift-pipelines-pipelines-as-code-watcher-container" \
-      name="openshift-pipelines/pipelines-as-code-watcher-rhel9" \
+      name="openshift-pipelines/pipelines-as-code-watcher-rhel8" \
       version=$VERSION \
       summary="Red Hat OpenShift Pipelines Pipelines as Code Watcher" \
       maintainer="pipelines-extcomm@redhat.com" \
@@ -32,7 +32,8 @@ LABEL \
       io.k8s.description="Red Hat OpenShift Pipelines Pipelines as Code Watcher" \
       io.openshift.tags="pipelines,tekton,openshift"
 
-RUN groupadd -r -g 65532 nonroot && \
+RUN microdnf install -y shadow-utils && \
+    groupadd -r -g 65532 nonroot && \
     useradd --no-log-init -r -u 65532 -g nonroot nonroot
 USER 65532
 
