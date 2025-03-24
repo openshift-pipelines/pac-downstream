@@ -15,23 +15,23 @@ import (
 )
 
 type langOpts struct {
-	detectionFiles []string
+	detectionFile string
 }
 
 // I hate this part of the code so much.. but we are waiting for UBI images
 // having >1.6 golang for integrated templates.
 var languageDetection = map[string]langOpts{
 	"go": {
-		detectionFiles: []string{"go.mod"},
+		detectionFile: "go.mod",
 	},
 	"python": {
-		detectionFiles: []string{"setup.py", "pyproject.toml", "poetry.lock"},
+		detectionFile: "setup.py",
 	},
 	"nodejs": {
-		detectionFiles: []string{"package.json"},
+		detectionFile: "package.json",
 	},
 	"java": {
-		detectionFiles: []string{"pom.xml"},
+		detectionFile: "pom.xml",
 	},
 	"generic": {},
 }
@@ -39,15 +39,6 @@ var languageDetection = map[string]langOpts{
 //go:embed templates
 var resource embed.FS
 
-// detectLanguage determines the programming language used in the repository.
-// It first checks if a language has been explicitly set in the options. If so,
-// it verifies that a template is available for that language. If not, it returns an error.
-// If no language is set, it iterates over the known languages and checks if a
-// characteristic file for each language exists in the repository (go.mod >
-// go). If it finds a match, it outputs a success message and returns the
-// detected language. If no language can be detected, it defaults to "generic".
-// Returns the detected language as a string, or an error if a problem
-// occurred.
 func (o *Opts) detectLanguage() (string, error) {
 	if o.language != "" {
 		if _, ok := languageDetection[o.language]; !ok {
@@ -58,18 +49,16 @@ func (o *Opts) detectLanguage() (string, error) {
 
 	cs := o.IOStreams.ColorScheme()
 	for t, v := range languageDetection {
-		if v.detectionFiles == nil {
+		if v.detectionFile == "" {
 			continue
 		}
-		for _, f := range v.detectionFiles {
-			fpath := filepath.Join(o.GitInfo.TopLevelPath, f)
-			if _, err := os.Stat(fpath); !os.IsNotExist(err) {
-				fmt.Fprintf(o.IOStreams.Out, "%s We have detected your repository using the programming language %s.\n",
-					cs.SuccessIcon(),
-					cs.Bold(cases.Title(language.Und, cases.NoLower).String(t)),
-				)
-				return t, nil
-			}
+		fpath := filepath.Join(o.GitInfo.TopLevelPath, v.detectionFile)
+		if _, err := os.Stat(fpath); !os.IsNotExist(err) {
+			fmt.Fprintf(o.IOStreams.Out, "%s We have detected your repository using the programming language %s.\n",
+				cs.SuccessIcon(),
+				cs.Bold(cases.Title(language.Und, cases.NoLower).String(t)),
+			)
+			return t, nil
 		}
 	}
 	return "generic", nil
@@ -89,9 +78,6 @@ func (o *Opts) genTmpl() (*bytes.Buffer, error) {
 	tmplB, _ := io.ReadAll(embedfile)
 
 	prName := filepath.Base(o.GitInfo.URL)
-	if prName == "." {
-		prName = filepath.Base(o.Event.URL)
-	}
 
 	// if eventType has both the events [push, pull_request] then skip
 	// adding it to pipelinerun name

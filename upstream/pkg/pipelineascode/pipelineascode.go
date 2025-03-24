@@ -88,13 +88,6 @@ func (p *PacRun) Run(ctx context.Context) error {
 		if match.Repo == nil {
 			match.Repo = repo
 		}
-
-		// After matchRepo func fetched repo from k8s api repo is updated and
-		// need to merge global repo again
-		if p.globalRepo != nil {
-			match.Repo.Spec.Merge(p.globalRepo.Spec)
-		}
-
 		wg.Add(1)
 
 		go func(match matcher.Match, i int) {
@@ -176,30 +169,13 @@ func (p *PacRun) startPR(ctx context.Context, match matcher.Match) (*tektonv1.Pi
 		match.PipelineRun.Annotations[keys.State] = kubeinteraction.StateQueued
 	}
 
-	// Create the actual pipelineRun
+	// Create the actual pipeline
 	pr, err := p.run.Clients.Tekton.TektonV1().PipelineRuns(match.Repo.GetNamespace()).Create(ctx,
 		match.PipelineRun, metav1.CreateOptions{})
 	if err != nil {
-		// cleanup the gitauth secret because ownerRef isn't set when the pipelineRun creation failed
-		if p.pacInfo.SecretAutoCreation {
-			if errDelSec := p.k8int.DeleteSecret(ctx, p.logger, match.Repo.GetNamespace(), gitAuthSecretName); errDelSec != nil {
-				// don't overshadow the pipelineRun creation error, just log
-				p.logger.Errorf("removing auto created secret: %s in namespace %s has failed: %w ", gitAuthSecretName, match.Repo.GetNamespace(), errDelSec)
-			}
-		}
 		// we need to make difference between markdown error and normal error that goes to namespace/controller stream
 		return nil, fmt.Errorf("creating pipelinerun %s in namespace %s has failed.\n\nTekton Controller has reported this error: ```%w``` ", match.PipelineRun.GetGenerateName(),
 			match.Repo.GetNamespace(), err)
-	}
-
-	// update ownerRef of secret with pipelineRun, so that it gets cleanedUp with pipelineRun
-	if p.pacInfo.SecretAutoCreation {
-		err := p.k8int.UpdateSecretWithOwnerRef(ctx, p.logger, pr.Namespace, gitAuthSecretName, pr)
-		if err != nil {
-			// we still return the created PR with error, and allow caller to decide what to do with the PR, and avoid
-			// unneeded SIGSEGV's
-			return pr, fmt.Errorf("cannot update pipelinerun %s with ownerRef: %w", pr.GetGenerateName(), err)
-		}
 	}
 
 	// Create status with the log url
@@ -253,6 +229,15 @@ func (p *PacRun) startPR(ctx context.Context, match matcher.Match) (*tektonv1.Pi
 		}
 	}
 
+	// update ownerRef of secret with pipelineRun, so that it gets cleanedUp with pipelineRun
+	if p.pacInfo.SecretAutoCreation {
+		err := p.k8int.UpdateSecretWithOwnerRef(ctx, p.logger, pr.Namespace, gitAuthSecretName, pr)
+		if err != nil {
+			// we still return the created PR with error, and allow caller to decide what to do with the PR, and avoid
+			// unneeded SIGSEGV's
+			return pr, fmt.Errorf("cannot update pipelinerun %s with ownerRef: %w", pr.GetGenerateName(), err)
+		}
+	}
 	return pr, nil
 }
 

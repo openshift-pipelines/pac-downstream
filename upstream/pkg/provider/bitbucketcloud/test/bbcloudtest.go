@@ -280,7 +280,7 @@ func MakePREvent(accountid, nickname, sha, comment string) types.PullRequestEven
 	return pr
 }
 
-func MakePushEvent(accountid, nickname, sha, changeType string) types.PushRequestEvent {
+func MakePushEvent(accountid, nickname, sha string) types.PushRequestEvent {
 	if accountid == "" {
 		accountid = "countlady"
 	}
@@ -299,11 +299,9 @@ func MakePushEvent(accountid, nickname, sha, changeType string) types.PushReques
 			Changes: []types.Change{
 				{
 					New: types.ChangeType{
-						Name: "mychange",
 						Target: types.Commit{
 							Hash: sha,
 						},
-						Type: changeType,
 					},
 					Old: types.ChangeType{
 						Target: types.Commit{

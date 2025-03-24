@@ -111,7 +111,6 @@ exceptions:
   - NetXen
   - NetXtreme
   - NFSv
-  - NMState
   - NuGet
   - NVidia
   - NVMe
@@ -173,7 +172,6 @@ exceptions:
   - TypeScript
   - UltraSPARC
   - USBGuard
-  - vCenter
   - vDisk
   - vHost
   - VMware

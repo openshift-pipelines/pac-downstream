@@ -1,7 +1,6 @@
 package bitbucket
 
 import (
-	"context"
 	"encoding/json"
 
 	"github.com/mitchellh/mapstructure"
@@ -24,12 +23,6 @@ type ProjectOptions struct {
 	Key         string `json:"key"`
 	Description string `json:"description"`
 	IsPrivate   bool   `json:"is_private"`
-	ctx         context.Context
-}
-
-func (po *ProjectOptions) WithContext(ctx context.Context) *ProjectOptions {
-	po.ctx = ctx
-	return po
 }
 
 func (t *Workspace) GetProject(opt *ProjectOptions) (*Project, error) {
@@ -48,7 +41,7 @@ func (t *Workspace) CreateProject(opt *ProjectOptions) (*Project, error) {
 		return nil, err
 	}
 	urlStr := t.c.requestUrl("/workspaces/%s/projects", opt.Owner)
-	response, err := t.c.executeWithContext("POST", urlStr, data, opt.ctx)
+	response, err := t.c.execute("POST", urlStr, data)
 	if err != nil {
 		return nil, err
 	}

@@ -111,10 +111,8 @@ func TestDetectPacInstallation(t *testing.T) {
 				},
 				Info: info.Info{},
 			}
-			if tp.configMap != nil {
-				if _, err := run.Clients.Kube.CoreV1().ConfigMaps(tp.namespace).Create(ctx, tp.configMap, metav1.CreateOptions{}); err != nil {
-					t.Errorf("failed to create configmap: %v", err)
-				}
+			if _, err := run.Clients.Kube.CoreV1().ConfigMaps(tp.namespace).Create(ctx, tp.configMap, metav1.CreateOptions{}); err != nil {
+				t.Errorf("failed to create configmap: %v", err)
 			}
 			installed, ns, err := DetectPacInstallation(ctx, tp.userProvidedNamespace, run)
 			if err != nil {

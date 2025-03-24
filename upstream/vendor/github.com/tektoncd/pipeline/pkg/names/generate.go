@@ -18,10 +18,7 @@ package names
 
 import (
 	"fmt"
-	"hash/fnv"
 	"regexp"
-	"strconv"
-	"strings"
 
 	utilrand "k8s.io/apimachinery/pkg/util/rand"
 )
@@ -75,20 +72,4 @@ func (simpleNameGenerator) RestrictLength(base string) string {
 		base = base[:len(base)-1]
 	}
 	return base
-}
-
-// GenerateHashedName creates a unique name with a hashed suffix.
-func GenerateHashedName(prefix, name string, hashedLength int) string {
-	if hashedLength <= 0 {
-		hashedLength = randomLength
-	}
-	h := fnv.New32a()
-	h.Write([]byte(name))
-	suffix := strconv.FormatUint(uint64(h.Sum32()), 16)
-	if ln := len(suffix); ln > hashedLength {
-		suffix = suffix[:hashedLength]
-	} else if ln < hashedLength {
-		suffix += strings.Repeat("0", hashedLength-ln)
-	}
-	return fmt.Sprintf("%s-%s", prefix, suffix)
 }

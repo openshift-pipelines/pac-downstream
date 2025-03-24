@@ -1,9 +1,12 @@
 ---
 extends: readability
-grade: 9
-message: "Simplify your language. The calculated Flesch–Kincaid grade level of %s is above the recommended reading grade level of 9."
-link: https://redhat-documentation.github.io/vale-at-red-hat/docs/main/reference-guide/readabilitygrade/
+grade: 21
 level: suggestion
+link: https://redhat-documentation.github.io/vale-at-red-hat/docs/main/reference-guide/readabilitygrade/
+message: "Grade level ('%s') too high."
 metrics:
+  - Automated Readability
+  - Coleman-Liau
   - Flesch-Kincaid
-
+  - Gunning Fog
+  - SMOG

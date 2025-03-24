@@ -20,25 +20,12 @@ import (
 	yaml "sigs.k8s.io/yaml/goyaml.v2"
 )
 
-// Contains Resources Fetched from tektondir.
 type TektonTypes struct {
 	PipelineRuns     []*tektonv1.PipelineRun
 	Pipelines        []*tektonv1.Pipeline
 	TaskRuns         []*tektonv1.TaskRun
 	Tasks            []*tektonv1.Task
 	ValidationErrors map[string]string
-}
-
-// Contains Fetched Resources for Event, with key equals to annotation value.
-type FetchedResources struct {
-	Tasks     map[string]*tektonv1.Task
-	Pipelines map[string]*tektonv1.Pipeline
-}
-
-// Contains Fetched Resources for Run, with key equals to resource name from metadata.name field.
-type FetchedResourcesForRun struct {
-	Tasks    map[string]*tektonv1.Task
-	Pipeline *tektonv1.Pipeline
 }
 
 func NewTektonTypes() TektonTypes {
@@ -70,10 +57,19 @@ func detectAtleastNameOrGenerateNameFromPipelineRun(data string) string {
 	return "unknown"
 }
 
-// getPipelineByName returns the Pipeline with the given name the first one found
+// getTaskRunByName returns the taskrun with the given name the first one found
 // will be matched. It does not handle conflicts so user has fetched multiple
-// pipeline with the same name it will just pick up the first one.
-// if the pipeline is not found it returns an error.
+// taskruns with the same name it will just pick up the first one.
+// if the taskrun is not found it returns an error.
+func getTaskByName(name string, tasks []*tektonv1.Task) (*tektonv1.Task, error) {
+	for _, value := range tasks {
+		if value.Name == name {
+			return value, nil
+		}
+	}
+	return &tektonv1.Task{}, fmt.Errorf("cannot find referenced task %s. if it's a remote task make sure to add it in the annotations", name)
+}
+
 func getPipelineByName(name string, tasks []*tektonv1.Pipeline) (*tektonv1.Pipeline, error) {
 	for _, value := range tasks {
 		if value.Name == name {
@@ -119,7 +115,7 @@ func isTektonAPIVersion(apiVersion string) bool {
 	return strings.HasPrefix(apiVersion, "tekton.dev/") || apiVersion == ""
 }
 
-func inlineTasks(tasks []tektonv1.PipelineTask, ropt *Opts, remoteResource FetchedResourcesForRun) ([]tektonv1.PipelineTask, error) {
+func inlineTasks(tasks []tektonv1.PipelineTask, ropt *Opts, types TektonTypes) ([]tektonv1.PipelineTask, error) {
 	pipelineTasks := []tektonv1.PipelineTask{}
 	for _, task := range tasks {
 		if task.TaskRef != nil &&
@@ -127,9 +123,9 @@ func inlineTasks(tasks []tektonv1.PipelineTask, ropt *Opts, remoteResource Fetch
 			isTektonAPIVersion(task.TaskRef.APIVersion) &&
 			string(task.TaskRef.Kind) != "ClusterTask" &&
 			!skippingTask(task.TaskRef.Name, ropt.SkipInlining) {
-			taskResolved, ok := remoteResource.Tasks[task.TaskRef.Name]
-			if !ok {
-				return nil, fmt.Errorf("cannot find referenced task %s. if it's a remote task make sure to add it in the annotations", task.TaskRef.Name)
+			taskResolved, err := getTaskByName(task.TaskRef.Name, types.Tasks)
+			if err != nil {
+				return nil, err
 			}
 			tmd := tektonv1.PipelineTaskMetadata{
 				Annotations: taskResolved.GetObjectMeta().GetAnnotations(),
@@ -213,18 +209,70 @@ func Resolve(ctx context.Context, cs *params.Run, logger *zap.SugaredLogger, pro
 		return []*tektonv1.PipelineRun{}, err
 	}
 
-	rt := &matcher.RemoteTasks{
-		Run:               cs,
-		Event:             event,
-		ProviderInterface: providerintf,
-		Logger:            logger,
+	// Resolve remote annotations on remote task or remote pipeline or tasks
+	// inside remote pipeline
+	if ropt.RemoteTasks {
+		rt := &matcher.RemoteTasks{
+			Run:               cs,
+			Event:             event,
+			ProviderInterface: providerintf,
+			Logger:            logger,
+		}
+		var err error
+		if types, err = getRemotes(ctx, rt, types); err != nil {
+			return []*tektonv1.PipelineRun{}, err
+		}
 	}
 
-	fetchedResources, err := resolveRemoteResources(ctx, rt, types, ropt)
-	if err != nil {
-		return []*tektonv1.PipelineRun{}, err
+	// Resolve {Finally/Task}Ref inside Pipeline
+	for _, pipeline := range types.Pipelines {
+		pipelineTasks, err := inlineTasks(pipeline.Spec.Tasks, ropt, types)
+		if err != nil {
+			return nil, err
+		}
+		pipeline.Spec.Tasks = pipelineTasks
+
+		finallyTasks, err := inlineTasks(pipeline.Spec.Finally, ropt, types)
+		if err != nil {
+			return nil, err
+		}
+		pipeline.Spec.Finally = finallyTasks
 	}
-	return fetchedResources, nil
+
+	for _, pipelinerun := range types.PipelineRuns {
+		// Resolve {Finally/Task}Ref inside PipelineSpec inside PipelineRun
+		if pipelinerun.Spec.PipelineSpec != nil {
+			turns, err := inlineTasks(pipelinerun.Spec.PipelineSpec.Tasks, ropt, types)
+			if err != nil {
+				return nil, err
+			}
+			pipelinerun.Spec.PipelineSpec.Tasks = turns
+
+			fruns, err := inlineTasks(pipelinerun.Spec.PipelineSpec.Finally, ropt, types)
+			if err != nil {
+				return nil, err
+			}
+			pipelinerun.Spec.PipelineSpec.Finally = fruns
+		}
+
+		// Resolve PipelineRef inside PipelineRef
+		if pipelinerun.Spec.PipelineRef != nil && pipelinerun.Spec.PipelineRef.Resolver == "" {
+			pipelineResolved, err := getPipelineByName(pipelinerun.Spec.PipelineRef.Name, types.Pipelines)
+			if err != nil {
+				return []*tektonv1.PipelineRun{}, err
+			}
+			pipelinerun.Spec.PipelineRef = nil
+			pipelinerun.Spec.PipelineSpec = &pipelineResolved.Spec
+		}
+
+		// Add a GenerateName based on the pipeline name and a "-"
+		// if we already have a GenerateName then just keep it like this
+		if ropt.GenerateName && pipelinerun.GenerateName == "" {
+			pipelinerun.GenerateName = pipelinerun.Name + "-"
+			pipelinerun.Name = ""
+		}
+	}
+	return types.PipelineRuns, nil
 }
 
 func MetadataResolve(prs []*tektonv1.PipelineRun) ([]*tektonv1.PipelineRun, error) {
