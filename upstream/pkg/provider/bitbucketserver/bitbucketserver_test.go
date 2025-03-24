@@ -55,9 +55,9 @@ func TestGetTektonDir(t *testing.T) {
 			observer, _ := zapobserver.New(zap.InfoLevel)
 			logger := zap.New(observer).Sugar()
 			ctx, _ := rtesting.SetupFakeContext(t)
-			client, mux, tearDown, tURL := bbtest.SetupBBServerClient(ctx)
+			client, mux, tearDown := bbtest.SetupBBServerClient(ctx)
 			defer tearDown()
-			v := &Provider{Logger: logger, baseURL: tURL, Client: client, projectKey: tt.event.Organization}
+			v := &Provider{Logger: logger, Client: client, projectKey: tt.event.Organization}
 			bbtest.MuxDirContent(t, mux, tt.event, tt.testDirPath, tt.path)
 			content, err := v.GetTektonDir(ctx, tt.event, tt.path, "")
 			if tt.wantErr {
@@ -168,7 +168,7 @@ func TestCreateStatus(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx, _ := rtesting.SetupFakeContext(t)
-			client, mux, tearDown, tURL := bbtest.SetupBBServerClient(ctx)
+			client, mux, tearDown := bbtest.SetupBBServerClient(ctx)
 			defer tearDown()
 			if tt.nilClient {
 				client = nil
@@ -177,7 +177,6 @@ func TestCreateStatus(t *testing.T) {
 			event.EventType = "pull_request"
 			event.Provider.Token = "token"
 			v := &Provider{
-				baseURL:           tURL,
 				Client:            client,
 				pullRequestNumber: pullRequestNumber,
 				projectKey:        event.Organization,
@@ -230,9 +229,9 @@ func TestGetFileInsideRepo(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx, _ := rtesting.SetupFakeContext(t)
-			client, mux, tearDown, tURL := bbtest.SetupBBServerClient(ctx)
+			client, mux, tearDown := bbtest.SetupBBServerClient(ctx)
 			defer tearDown()
-			v := &Provider{Client: client, baseURL: tURL, defaultBranchLatestCommit: "1234", projectKey: tt.event.Organization}
+			v := &Provider{Client: client, defaultBranchLatestCommit: "1234", projectKey: tt.event.Organization}
 			bbtest.MuxFiles(t, mux, tt.event, tt.targetbranch, filepath.Dir(tt.path), tt.filescontents)
 			fc, err := v.GetFileInsideRepo(ctx, tt.event, tt.path, tt.targetbranch)
 			assert.NilError(t, err)
@@ -247,12 +246,11 @@ func TestSetClient(t *testing.T) {
 		apiURL        string
 		opts          *info.Event
 		wantErrSubstr string
-		muxUser       func(w http.ResponseWriter, r *http.Request)
 	}{
 		{
 			name:          "bad/no username",
 			opts:          info.NewEvent(),
-			wantErrSubstr: "no spec.git_provider.user",
+			wantErrSubstr: "no provider.user",
 		},
 		{
 			name: "bad/no secret",
@@ -261,7 +259,7 @@ func TestSetClient(t *testing.T) {
 					User: "foo",
 				},
 			},
-			wantErrSubstr: "no spec.git_provider.secret",
+			wantErrSubstr: "no provider.secret",
 		},
 		{
 			name: "bad/no url",
@@ -271,39 +269,7 @@ func TestSetClient(t *testing.T) {
 					Token: "bar",
 				},
 			},
-			wantErrSubstr: "no spec.git_provider.url",
-		},
-		{
-			name: "bad/invalid user",
-			opts: &info.Event{
-				Provider: &info.Provider{
-					User:  "foo",
-					Token: "bar",
-					URL:   "https://foo.bar",
-				},
-			},
-			muxUser: func(w http.ResponseWriter, _ *http.Request) {
-				w.WriteHeader(http.StatusUnauthorized)
-				_, _ = w.Write([]byte(`{"errors": [{"message": "Unauthorized"}]}`))
-			},
-			apiURL:        "https://foo.bar/rest",
-			wantErrSubstr: "cannot get user foo with token",
-		},
-		{
-			name: "bad/unknown error",
-			opts: &info.Event{
-				Provider: &info.Provider{
-					User:  "foo",
-					Token: "bar",
-					URL:   "https://foo.bar",
-				},
-			},
-			muxUser: func(w http.ResponseWriter, _ *http.Request) {
-				w.WriteHeader(http.StatusInternalServerError)
-				_, _ = w.Write([]byte(`{"errors": [{"message": "Internal Server Error"}]}`))
-			},
-			apiURL:        "https://foo.bar/rest",
-			wantErrSubstr: "cannot get user foo: Status: 500",
+			wantErrSubstr: "no provider.url",
 		},
 		{
 			name: "good/url append /rest",
@@ -314,21 +280,13 @@ func TestSetClient(t *testing.T) {
 					URL:   "https://foo.bar",
 				},
 			},
-			muxUser: func(w http.ResponseWriter, _ *http.Request) {
-				fmt.Fprint(w, `{"name": "foo"}`)
-			},
 			apiURL: "https://foo.bar/rest",
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx, _ := rtesting.SetupFakeContext(t)
-			bbclient, mux, tearDown, tURL := bbtest.SetupBBServerClient(ctx)
-			defer tearDown()
-			if tt.muxUser != nil {
-				mux.HandleFunc("/users/foo", tt.muxUser)
-			}
-			v := &Provider{Client: bbclient, baseURL: tURL}
+			v := &Provider{}
 			err := v.SetClient(ctx, nil, tt.opts, nil, nil)
 			if tt.wantErrSubstr != "" {
 				assert.ErrorContains(t, err, tt.wantErrSubstr)
@@ -341,6 +299,7 @@ func TestSetClient(t *testing.T) {
 }
 
 func TestGetCommitInfo(t *testing.T) {
+	defaultBaseURL := "https://base"
 	tests := []struct {
 		name          string
 		event         *info.Event
@@ -366,11 +325,11 @@ func TestGetCommitInfo(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx, _ := rtesting.SetupFakeContext(t)
-			bbclient, mux, tearDown, tURL := bbtest.SetupBBServerClient(ctx)
+			bbclient, mux, tearDown := bbtest.SetupBBServerClient(ctx)
 			bbtest.MuxCommitInfo(t, mux, tt.event, tt.commit)
 			bbtest.MuxDefaultBranch(t, mux, tt.event, tt.defaultBranch, tt.latestCommit)
 			defer tearDown()
-			v := &Provider{Client: bbclient, baseURL: tURL, projectKey: tt.event.Organization}
+			v := &Provider{Client: bbclient, baseURL: defaultBaseURL, projectKey: tt.event.Organization}
 			err := v.GetCommitInfo(ctx, tt.event)
 			assert.NilError(t, err)
 			assert.Equal(t, tt.defaultBranch, tt.event.DefaultBranch)

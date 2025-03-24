@@ -245,40 +245,17 @@ func (v *Provider) GetTektonDir(_ context.Context, event *info.Event, path, prov
 		Path:      gitlab.Ptr(path),
 		Ref:       gitlab.Ptr(revision),
 		Recursive: gitlab.Ptr(true),
-		ListOptions: gitlab.ListOptions{
-			OrderBy:    "id",
-			Pagination: "keyset",
-			PerPage:    20,
-			Sort:       "asc",
-		},
 	}
 
-	options := []gitlab.RequestOptionFunc{}
-	nodes := []*gitlab.TreeNode{}
-
-	for {
-		objects, resp, err := v.Client.Repositories.ListTree(v.sourceProjectID, opt, options...)
-		if err != nil {
-			return "", fmt.Errorf("failed to list %s dir: %w", path, err)
-		}
-		if resp != nil && resp.StatusCode == http.StatusNotFound {
-			return "", nil
-		}
-
-		nodes = append(nodes, objects...)
-
-		// Exit the loop when we've seen all pages.
-		if resp.NextLink == "" {
-			break
-		}
-
-		// Otherwise, set param to query the next page
-		options = []gitlab.RequestOptionFunc{
-			gitlab.WithKeysetPaginationParameters(resp.NextLink),
-		}
+	objects, resp, err := v.Client.Repositories.ListTree(v.sourceProjectID, opt)
+	if resp != nil && resp.StatusCode == http.StatusNotFound {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("failed to list %s dir: %w", path, err)
 	}
 
-	return v.concatAllYamlFiles(nodes, event)
+	return v.concatAllYamlFiles(objects, event)
 }
 
 // concatAllYamlFiles concat all yaml files from a directory as one big multi document yaml string.
@@ -287,7 +264,7 @@ func (v *Provider) concatAllYamlFiles(objects []*gitlab.TreeNode, runevent *info
 	for _, value := range objects {
 		if strings.HasSuffix(value.Name, ".yaml") ||
 			strings.HasSuffix(value.Name, ".yml") {
-			data, _, err := v.getObject(value.Path, runevent.HeadBranch, v.sourceProjectID)
+			data, err := v.getObject(value.Path, runevent.HeadBranch, v.sourceProjectID)
 			if err != nil {
 				return "", err
 			}
@@ -306,22 +283,22 @@ func (v *Provider) concatAllYamlFiles(objects []*gitlab.TreeNode, runevent *info
 	return allTemplates, nil
 }
 
-func (v *Provider) getObject(fname, branch string, pid int) ([]byte, *gitlab.Response, error) {
+func (v *Provider) getObject(fname, branch string, pid int) ([]byte, error) {
 	opt := &gitlab.GetRawFileOptions{
 		Ref: gitlab.Ptr(branch),
 	}
 	file, resp, err := v.Client.RepositoryFiles.GetRawFile(pid, fname, opt)
 	if err != nil {
-		return []byte{}, resp, fmt.Errorf("failed to get filename from api %s dir: %w", fname, err)
+		return []byte{}, fmt.Errorf("failed to get filename from api %s dir: %w", fname, err)
 	}
 	if resp != nil && resp.Response.StatusCode == http.StatusNotFound {
-		return []byte{}, resp, nil
+		return []byte{}, nil
 	}
-	return file, resp, nil
+	return file, nil
 }
 
 func (v *Provider) GetFileInsideRepo(_ context.Context, runevent *info.Event, path, _ string) (string, error) {
-	getobj, _, err := v.getObject(path, runevent.HeadBranch, v.sourceProjectID)
+	getobj, err := v.getObject(path, runevent.HeadBranch, v.sourceProjectID)
 	if err != nil {
 		return "", err
 	}
@@ -330,13 +307,13 @@ func (v *Provider) GetFileInsideRepo(_ context.Context, runevent *info.Event, pa
 
 func (v *Provider) GetCommitInfo(_ context.Context, runevent *info.Event) error {
 	if v.Client == nil {
-		return fmt.Errorf("%s", noClientErrStr)
+		return fmt.Errorf(noClientErrStr)
 	}
 
 	// if we don't have a SHA (ie: incoming-webhook) then get it from the branch
 	// and populate in the runevent.
 	if runevent.SHA == "" && runevent.HeadBranch != "" {
-		branchinfo, _, err := v.Client.Commits.GetCommit(v.sourceProjectID, runevent.HeadBranch, &gitlab.GetCommitOptions{})
+		branchinfo, _, err := v.Client.Commits.GetCommit(v.sourceProjectID, runevent.HeadBranch)
 		if err != nil {
 			return err
 		}
@@ -354,47 +331,25 @@ func (v *Provider) GetFiles(_ context.Context, runevent *info.Event) (changedfil
 			"exiting... (hint: did you forget setting a secret on your repo?)")
 	}
 	if runevent.TriggerTarget == triggertype.PullRequest {
-		opt := &gitlab.ListMergeRequestDiffsOptions{
-			ListOptions: gitlab.ListOptions{
-				OrderBy:    "id",
-				Pagination: "keyset",
-				PerPage:    20,
-				Sort:       "asc",
-			},
+		mrchanges, _, err := v.Client.MergeRequests.ListMergeRequestDiffs(v.targetProjectID, runevent.PullRequestNumber, &gitlab.ListMergeRequestDiffsOptions{})
+		if err != nil {
+			return changedfiles.ChangedFiles{}, err
 		}
-		options := []gitlab.RequestOptionFunc{}
+
 		changedFiles := changedfiles.ChangedFiles{}
-
-		for {
-			mrchanges, resp, err := v.Client.MergeRequests.ListMergeRequestDiffs(v.targetProjectID, runevent.PullRequestNumber, opt, options...)
-			if err != nil {
-				return changedfiles.ChangedFiles{}, err
+		for _, change := range mrchanges {
+			changedFiles.All = append(changedFiles.All, change.NewPath)
+			if change.NewFile {
+				changedFiles.Added = append(changedFiles.Added, change.NewPath)
 			}
-
-			for _, change := range mrchanges {
-				changedFiles.All = append(changedFiles.All, change.NewPath)
-				if change.NewFile {
-					changedFiles.Added = append(changedFiles.Added, change.NewPath)
-				}
-				if change.DeletedFile {
-					changedFiles.Deleted = append(changedFiles.Deleted, change.NewPath)
-				}
-				if !change.RenamedFile && !change.DeletedFile && !change.NewFile {
-					changedFiles.Modified = append(changedFiles.Modified, change.NewPath)
-				}
-				if change.RenamedFile {
-					changedFiles.Renamed = append(changedFiles.Renamed, change.NewPath)
-				}
+			if change.DeletedFile {
+				changedFiles.Deleted = append(changedFiles.Deleted, change.NewPath)
 			}
-
-			// Exit the loop when we've seen all pages.
-			if resp.NextLink == "" {
-				break
+			if !change.RenamedFile && !change.DeletedFile && !change.NewFile {
+				changedFiles.Modified = append(changedFiles.Modified, change.NewPath)
 			}
-
-			// Otherwise, set param to query the next page
-			options = []gitlab.RequestOptionFunc{
-				gitlab.WithKeysetPaginationParameters(resp.NextLink),
+			if change.RenamedFile {
+				changedFiles.Renamed = append(changedFiles.Renamed, change.NewPath)
 			}
 		}
 		return changedFiles, nil
