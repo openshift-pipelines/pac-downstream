@@ -17,26 +17,23 @@ func TestGetControllerInfoFromEnvOrDefault(t *testing.T) {
 		{
 			name: "info with envs",
 			envs: map[string]string{
-				"PAC_CONTROLLER_LABEL":             "mylabel",
-				"PAC_CONTROLLER_SECRET":            "mysecret",
-				"PAC_CONTROLLER_CONFIGMAP":         "myconfigmap",
-				"PAC_CONTROLLER_GLOBAL_REPOSITORY": "arepo",
+				"PAC_CONTROLLER_LABEL":     "mylabel",
+				"PAC_CONTROLLER_SECRET":    "mysecret",
+				"PAC_CONTROLLER_CONFIGMAP": "myconfigmap",
 			},
 			want: &ControllerInfo{
-				Name:             "mylabel",
-				Configmap:        "myconfigmap",
-				Secret:           "mysecret",
-				GlobalRepository: "arepo",
+				Name:      "mylabel",
+				Configmap: "myconfigmap",
+				Secret:    "mysecret",
 			},
 		},
 		{
 			name: "info from default",
 			envs: map[string]string{},
 			want: &ControllerInfo{
-				Name:             defaultControllerLabel,
-				Configmap:        DefaultPipelinesAscodeConfigmapName,
-				Secret:           DefaultPipelinesAscodeSecretName,
-				GlobalRepository: DefaultGlobalRepoName,
+				Name:      defaultControllerLabel,
+				Configmap: DefaultPipelinesAscodeConfigmapName,
+				Secret:    DefaultPipelinesAscodeSecretName,
 			},
 		},
 	}

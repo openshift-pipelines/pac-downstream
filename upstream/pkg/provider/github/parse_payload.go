@@ -11,16 +11,13 @@ import (
 	"strconv"
 	"strings"
 
-	ghinstallation "github.com/bradleyfalzon/ghinstallation/v2"
-	oGithub "github.com/google/go-github/v62/github"
-	"github.com/google/go-github/v64/github"
+	"github.com/bradleyfalzon/ghinstallation/v2"
+	"github.com/google/go-github/v56/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/opscomments"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 )
 
@@ -29,7 +26,7 @@ import (
 // It returns the application ID (int64), private key ([]byte), and an error if any.
 func (v *Provider) GetAppIDAndPrivateKey(ctx context.Context, ns string, kube kubernetes.Interface) (int64, []byte, error) {
 	paramsinfo := &v.Run.Info
-	secret, err := kube.CoreV1().Secrets(ns).Get(ctx, paramsinfo.Controller.Secret, metav1.GetOptions{})
+	secret, err := kube.CoreV1().Secrets(ns).Get(ctx, paramsinfo.Controller.Secret, v1.GetOptions{})
 	if err != nil {
 		return 0, []byte{}, fmt.Errorf("could not get the secret %s in ns %s: %w", paramsinfo.Controller.Secret, ns, err)
 	}
@@ -56,7 +53,7 @@ func (v *Provider) GetAppToken(ctx context.Context, kube kubernetes.Interface, g
 	if err != nil {
 		return "", err
 	}
-	itr.InstallationTokenOptions = &oGithub.InstallationTokenOptions{
+	itr.InstallationTokenOptions = &github.InstallationTokenOptions{
 		RepositoryIDs: v.RepositoryIDs,
 	}
 
@@ -99,9 +96,9 @@ func (v *Provider) parseEventType(request *http.Request, event *info.Event) erro
 	event.Provider.URL = request.Header.Get("X-GitHub-Enterprise-Host")
 
 	if event.EventType == "push" {
-		event.TriggerTarget = triggertype.Push
+		event.TriggerTarget = "push"
 	} else {
-		event.TriggerTarget = triggertype.PullRequest
+		event.TriggerTarget = "pull_request"
 	}
 
 	return nil
@@ -184,13 +181,13 @@ func (v *Provider) ParsePayload(ctx context.Context, run *params.Run, request *h
 	processedEvent.Provider.URL = event.Provider.URL
 
 	// regenerate token scoped to the repo IDs
-	if v.pacInfo.SecretGHAppRepoScoped && installationIDFrompayload != -1 && len(v.RepositoryIDs) > 0 {
+	if run.Info.Pac.SecretGHAppRepoScoped && installationIDFrompayload != -1 && len(v.RepositoryIDs) > 0 {
 		repoLists := []string{}
-		if v.pacInfo.SecretGhAppTokenScopedExtraRepos != "" {
+		if run.Info.Pac.SecretGhAppTokenScopedExtraRepos != "" {
 			// this is going to show up a lot in the logs but i guess that
 			// would make people fix the value instead of being lost into
 			// the top of the logs at controller start.
-			for _, configValue := range strings.Split(v.pacInfo.SecretGhAppTokenScopedExtraRepos, ",") {
+			for _, configValue := range strings.Split(run.Info.Pac.SecretGhAppTokenScopedExtraRepos, ",") {
 				configValueS := strings.TrimSpace(configValue)
 				if configValueS == "" {
 					continue
@@ -238,9 +235,6 @@ func (v *Provider) processEvent(ctx context.Context, event *info.Event, eventInt
 		if v.Client == nil {
 			return nil, fmt.Errorf("gitops style comments operation is only supported with github apps integration")
 		}
-		if gitEvent.GetAction() != "created" {
-			return nil, fmt.Errorf("only newly created comment is supported, received: %s", gitEvent.GetAction())
-		}
 		processedEvent, err = v.handleIssueCommentEvent(ctx, gitEvent)
 		if err != nil {
 			return nil, err
@@ -249,10 +243,7 @@ func (v *Provider) processEvent(ctx context.Context, event *info.Event, eventInt
 		if v.Client == nil {
 			return nil, fmt.Errorf("gitops style comments operation is only supported with github apps integration")
 		}
-		processedEvent, err = v.handleCommitCommentEvent(ctx, gitEvent)
-		if err != nil {
-			return nil, err
-		}
+		return v.handleCommitCommentEvent(ctx, gitEvent)
 	case *github.PushEvent:
 		processedEvent.Organization = gitEvent.GetRepo().GetOwner().GetLogin()
 		processedEvent.Repository = gitEvent.GetRepo().GetName()
@@ -268,7 +259,7 @@ func (v *Provider) processEvent(ctx context.Context, event *info.Event, eventInt
 		processedEvent.SHATitle = gitEvent.GetHeadCommit().GetMessage()
 		processedEvent.Sender = gitEvent.GetSender().GetLogin()
 		processedEvent.BaseBranch = gitEvent.GetRef()
-		processedEvent.EventType = event.TriggerTarget.String()
+		processedEvent.EventType = event.TriggerTarget
 		processedEvent.HeadBranch = processedEvent.BaseBranch // in push events Head Branch is the same as Basebranch
 		processedEvent.BaseURL = gitEvent.GetRepo().GetHTMLURL()
 		processedEvent.HeadURL = processedEvent.BaseURL // in push events Head URL is the same as BaseURL
@@ -295,10 +286,7 @@ func (v *Provider) processEvent(ctx context.Context, event *info.Event, eventInt
 		return nil, errors.New("this event is not supported")
 	}
 
-	// check before overriding the value for TriggerTarget
-	if processedEvent.TriggerTarget == "" {
-		processedEvent.TriggerTarget = event.TriggerTarget
-	}
+	processedEvent.TriggerTarget = event.TriggerTarget
 	processedEvent.Provider.Token = event.Provider.Token
 
 	return processedEvent, nil
@@ -324,7 +312,7 @@ func (v *Provider) handleReRequestEvent(ctx context.Context, event *github.Check
 		return runevent, nil
 	}
 	runevent.PullRequestNumber = event.GetCheckRun().GetCheckSuite().PullRequests[0].GetNumber()
-	runevent.TriggerTarget = triggertype.PullRequest
+	runevent.TriggerTarget = "pull_request"
 	v.Logger.Infof("Recheck of PR %s/%s#%d has been requested", runevent.Organization, runevent.Repository, runevent.PullRequestNumber)
 	return v.getPullRequest(ctx, runevent)
 }
@@ -352,7 +340,7 @@ func (v *Provider) handleCheckSuites(ctx context.Context, event *github.CheckSui
 		// return nil, fmt.Errorf("check suite event is not supported for push events")
 	}
 	runevent.PullRequestNumber = event.GetCheckSuite().PullRequests[0].GetNumber()
-	runevent.TriggerTarget = triggertype.PullRequest
+	runevent.TriggerTarget = "pull_request"
 	v.Logger.Infof("Rerun of all check on PR %s/%s#%d has been requested", runevent.Organization, runevent.Repository, runevent.PullRequestNumber)
 	return v.getPullRequest(ctx, runevent)
 }
@@ -372,11 +360,20 @@ func (v *Provider) handleIssueCommentEvent(ctx context.Context, event *github.Is
 	runevent.Repository = event.GetRepo().GetName()
 	runevent.Sender = event.GetSender().GetLogin()
 	// Always set the trigger target as pull_request on issue comment events
-	runevent.TriggerTarget = triggertype.PullRequest
+	runevent.TriggerTarget = "pull_request"
 	if !event.GetIssue().IsPullRequest() {
 		return info.NewEvent(), fmt.Errorf("issue comment is not coming from a pull_request")
 	}
-	opscomments.SetEventTypeAndTargetPR(runevent, event.GetComment().GetBody())
+
+	// if it is a /test or /retest comment with pipelinerun name figure out the pipelinerun name
+	if provider.IsTestRetestComment(event.GetComment().GetBody()) {
+		runevent.TargetTestPipelineRun = provider.GetPipelineRunFromTestComment(event.GetComment().GetBody())
+	}
+	if provider.IsCancelComment(event.GetComment().GetBody()) {
+		action = "cancellation"
+		runevent.CancelPipelineRuns = true
+		runevent.TargetCancelPipelineRun = provider.GetPipelineRunFromCancelComment(event.GetComment().GetBody())
+	}
 	// We are getting the full URL so we have to get the last part to get the PR number,
 	// we don't have to care about URL query string/hash and other stuff because
 	// that comes up from the API.
@@ -402,7 +399,6 @@ func (v *Provider) handleCommitCommentEvent(ctx context.Context, event *github.C
 	runevent.BaseURL = runevent.HeadURL
 	runevent.EventType = "push"
 	runevent.TriggerTarget = "push"
-	runevent.TriggerComment = event.GetComment().GetBody()
 
 	// Set main as default branch to runevent.HeadBranch, runevent.BaseBranch
 	runevent.HeadBranch, runevent.BaseBranch = "main", "main"
@@ -412,7 +408,6 @@ func (v *Provider) handleCommitCommentEvent(ctx context.Context, event *github.C
 		err        error
 	)
 
-	// TODO: reuse the code from opscomments
 	// If it is a /test or /retest comment with pipelinerun name figure out the pipelinerun name
 	if provider.IsTestRetestComment(event.GetComment().GetBody()) {
 		prName, branchName, err = provider.GetPipelineRunAndBranchNameFromTestComment(event.GetComment().GetBody())

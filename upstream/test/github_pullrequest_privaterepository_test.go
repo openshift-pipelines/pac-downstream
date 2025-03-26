@@ -6,14 +6,9 @@ package test
 import (
 	"context"
 	"os"
-	"regexp"
 	"testing"
 
-	"github.com/google/go-github/v64/github"
-	"github.com/openshift-pipelines/pipelines-as-code/test/pkg/cctx"
 	tgithub "github.com/openshift-pipelines/pipelines-as-code/test/pkg/github"
-	"github.com/openshift-pipelines/pipelines-as-code/test/pkg/wait"
-	"gotest.tools/v3/assert"
 )
 
 func TestGithubPullRequestGitClone(t *testing.T) {
@@ -21,28 +16,16 @@ func TestGithubPullRequestGitClone(t *testing.T) {
 		t.Skip("Skipping test since only enabled for nightly")
 	}
 	ctx := context.Background()
-	g := &tgithub.PRTest{
-		Label:     "Github - Private Repo",
-		YamlFiles: []string{"testdata/pipelinerun_git_clone_private.yaml"},
-	}
-	g.RunPullRequest(ctx, t)
-
-	ctx, err := cctx.GetControllerCtxInfo(ctx, g.Cnx)
-	assert.NilError(t, err)
-	assert.NilError(t, wait.RegexpMatchingInControllerLog(ctx, g.Cnx, *regexp.MustCompile(".*fetched git-clone task"),
-		10, "controller", github.Int64(20)), "Error while checking the logs of the pipelines-as-code controller pod")
-	defer g.TearDown(ctx, t)
+	runcnx, ghcnx, opts, targetNS, targetRefName, prNumber, _ := tgithub.RunPullRequest(ctx, t,
+		"Github Private Repo", []string{"testdata/pipelinerun_git_clone_private.yaml"}, false, false)
+	defer tgithub.TearDown(ctx, t, runcnx, ghcnx, prNumber, targetRefName, targetNS, opts)
 }
 
 func TestGithubSecondPullRequestGitClone(t *testing.T) {
 	ctx := context.Background()
-	g := &tgithub.PRTest{
-		Label:            "Github GHE - Private Repo",
-		YamlFiles:        []string{"testdata/pipelinerun_git_clone_private.yaml"},
-		SecondController: true,
-	}
-	g.RunPullRequest(ctx, t)
-	defer g.TearDown(ctx, t)
+	runcnx, ghcnx, opts, targetNS, targetRefName, prNumber, _ := tgithub.RunPullRequest(ctx, t,
+		"Github Private Repo", []string{"testdata/pipelinerun_git_clone_private.yaml"}, true, false)
+	defer tgithub.TearDown(ctx, t, runcnx, ghcnx, prNumber, targetRefName, targetNS, opts)
 }
 
 func TestGithubPullRequestPrivateRepositoryOnWebhook(t *testing.T) {
@@ -50,13 +33,9 @@ func TestGithubPullRequestPrivateRepositoryOnWebhook(t *testing.T) {
 		t.Skip("Skipping test since only enabled for nightly")
 	}
 	ctx := context.Background()
-	g := &tgithub.PRTest{
-		Label:     "Github Rerequest",
-		YamlFiles: []string{"testdata/pipelinerun_git_clone_private.yaml"},
-		Webhook:   true,
-	}
-	g.RunPullRequest(ctx, t)
-	defer g.TearDown(ctx, t)
+	runcnx, ghcnx, opts, targetNS, targetRefName, prNumber, _ := tgithub.RunPullRequest(ctx, t,
+		"Github Private Repo OnWebhook", []string{"testdata/pipelinerun_git_clone_private.yaml"}, false, true)
+	defer tgithub.TearDown(ctx, t, runcnx, ghcnx, prNumber, targetRefName, targetNS, opts)
 }
 
 // Local Variables:

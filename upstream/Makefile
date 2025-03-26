@@ -1,5 +1,4 @@
 TARGET_NAMESPACE=pipelines-as-code
-HUGO_VERSION=0.96.0
 GOLANGCI_LINT=golangci-lint
 GOFUMPT=gofumpt
 TKN_BINARY_NAME := tkn
@@ -10,16 +9,12 @@ GO           = go
 TIMEOUT_UNIT = 20m
 TIMEOUT_E2E  = 45m
 GO_TEST_FLAGS +=
-
 SHELL := bash
-TOPDIR := $(shell git rev-parse --show-toplevel)
-TMPDIR := $(TOPDIR)/tmp
-HUGO_BIN := $(TMPDIR)/hugo/hugo
+
 PY_FILES := $(shell find . -type f -regex ".*\.py" -print)
 SH_FILES := $(shell find hack/ -type f -regex ".*\.sh" -print)
 YAML_FILES := $(shell find . -not -regex '^./vendor/.*' -type f -regex ".*y[a]ml" -print)
 MD_FILES := $(shell find . -type f -regex ".*md"  -not -regex '^./vendor/.*'  -not -regex '^./.vale/.*'  -not -regex "^./docs/themes/.*" -not -regex "^./.git/.*" -print)
-
 
 ifeq ($(PAC_VERSION),)
 	PAC_VERSION="$(shell git describe --tags --exact-match 2>/dev/null || echo nightly-`date +'%Y%m%d'`-`git rev-parse --short HEAD`)"
@@ -60,12 +55,11 @@ test-clean:  ## Clean testcache
 	@echo "Cleaning test cache"
 	@go clean -testcache
 .PHONY: $(TEST_UNIT_TARGETS) test test-unit
-test-no-cache: test-clean test-unit ## Run test-unit without caching
-test: test-unit ## Run test-unit
+test: test-clean test-unit ## Run test-unit
 test-unit: ## Run unit tests
 	@echo "Running unit tests..."
 	@set -o pipefail ; \
-		$(GO) test $(GO_TEST_FLAGS) -timeout $(TIMEOUT_UNIT) $(ARGS) ./pkg/... | { grep -v 'no test files'; true; }
+		$(GO) test $(GO_TEST_FLAGS) -timeout $(TIMEOUT_UNIT) $(ARGS) ./... | { grep -v 'no test files'; true; }
 
 .PHONY: test-e2e-cleanup
 test-e2e-cleanup: ## cleanup test e2e namespace/pr left open
@@ -171,8 +165,8 @@ dev-redeploy: ## redeploy pac in local setup
 	./hack/dev/kind/install.sh -p
 
 .PHONY: dev-docs
-dev-docs: download-hugo ## preview live your docs with hugo
-	@$(HUGO_BIN) server -s docs/ &
+dev-docs: ## preview live your docs with hugo
+	@hugo server -s docs/ &
 	if type -p xdg-open 2>/dev/null >/dev/null; then \
 		xdg-open http://localhost:1313; \
 	elif type -p open 2>/dev/null >/dev/null; then \
@@ -193,10 +187,7 @@ update-golden: ## run unit tests (updating golden files)
 .PHONY: generated
 generated: update-golden fumpt ## generate all files that needs to be generated
 
-.PHONY: download-hugo
-download-hugo: 
-	./hack/download-hugo.sh $(HUGO_VERSION) $(TMPDIR)/hugo
-	
+
 .PHONY: clean
 clean: ## clean build artifacts
 	rm -fR bin

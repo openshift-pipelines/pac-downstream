@@ -65,12 +65,6 @@ def parse_arguments():
     )
 
     parser.add_argument(
-        "--ingress-domain",
-        help="if set this will add an ingress to the generated controller",
-        default=os.environ.get("PAC_CONTROLLER_INGRESS_DOMAIN"),
-    )
-
-    parser.add_argument(
         "--secret",
         help="name of the secret to use for the controller, default label-secret",
         default=os.environ.get("PAC_CONTROLLER_SECRET"),
@@ -134,7 +128,6 @@ with open("config/400-controller.yaml", "r", encoding="utf-8") as f:
     )
     for container in controller["spec"]["template"]["spec"]["containers"]:
         if container["name"] == "pac-controller":
-            container["name"] = args.label + "-controller"
             if args.controller_image and args.controller_image != "ko":
                 container["image"] = args.controller_image
             for env in container["env"]:
@@ -198,34 +191,6 @@ spec:
             ]
     """
     )
-
-if args.ingress_domain:
-    sys.stdout.write(
-        f"""
----
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: {args.label}-controller
-  namespace: {args.namespace}
-  labels:
-    pipelines-as-code/route: {args.label}
-spec:
-  ingressClassName: nginx
-  rules:
-  - host: "{args.label}.{args.ingress_domain}"
-    http:
-      paths:
-      - backend:
-          service:
-            name: "{args.label}-controller"
-            port:
-              number: 8080
-        path: /
-        pathType: Prefix
-"""
-    )
-
 
 if args.openshift_route:
     with open("config/openshift/10-routes.yaml", "r", encoding="utf-8") as f:

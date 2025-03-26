@@ -10,15 +10,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/go-github/v64/github"
+	"github.com/google/go-github/v56/github"
 	"github.com/jonboulle/clockwork"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/opscomments"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/clients"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
 	ghprovider "github.com/openshift-pipelines/pipelines-as-code/pkg/provider/github"
 	glprovider "github.com/openshift-pipelines/pipelines-as-code/pkg/provider/gitlab"
@@ -26,12 +24,12 @@ import (
 	testclient "github.com/openshift-pipelines/pipelines-as-code/pkg/test/clients"
 	ghtesthelper "github.com/openshift-pipelines/pipelines-as-code/pkg/test/github"
 	testnewrepo "github.com/openshift-pipelines/pipelines-as-code/pkg/test/repository"
+	"github.com/openshift-pipelines/pipelines-as-code/test/pkg/options"
 	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 	"github.com/xanzy/go-gitlab"
 	"go.uber.org/zap"
 	zapobserver "go.uber.org/zap/zaptest/observer"
 	"gotest.tools/v3/assert"
-	"gotest.tools/v3/golden"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	rtesting "knative.dev/pkg/reconciler/testing"
 )
@@ -592,11 +590,11 @@ func TestMatchPipelinerunAnnotationAndRepositories(t *testing.T) {
 			name: "matching incoming webhook event on push target",
 			args: annotationTestArgs{
 				pruns: []*tektonv1.PipelineRun{
-					makePipelineRunTargetNS(triggertype.Push.String(), ""),
+					makePipelineRunTargetNS(options.PushEvent, ""),
 				},
 				runevent: info.Event{
 					URL:        targetURL,
-					EventType:  triggertype.Incoming.String(),
+					EventType:  options.IncomingEvent,
 					BaseBranch: mainBranch,
 				},
 				data: testclient.Data{
@@ -616,11 +614,11 @@ func TestMatchPipelinerunAnnotationAndRepositories(t *testing.T) {
 			name: "matching incoming webhook event on incoming target",
 			args: annotationTestArgs{
 				pruns: []*tektonv1.PipelineRun{
-					makePipelineRunTargetNS(triggertype.Incoming.String(), ""),
+					makePipelineRunTargetNS(options.IncomingEvent, ""),
 				},
 				runevent: info.Event{
 					URL:        targetURL,
-					EventType:  triggertype.Incoming.String(),
+					EventType:  options.IncomingEvent,
 					BaseBranch: mainBranch,
 				},
 				data: testclient.Data{
@@ -767,7 +765,7 @@ func TestMatchPipelinerunAnnotationAndRepositories(t *testing.T) {
 		{
 			name:    "no match a repository with target NS",
 			wantErr: true,
-			wantLog: "could not find Repository CRD in branch targetNamespace, the pipelineRun pipeline-target-ns has a label that explicitly targets it",
+			wantLog: "matching pipelineruns to event: URL",
 			args: annotationTestArgs{
 				pruns: []*tektonv1.PipelineRun{
 					makePipelineRunTargetNS("pull_request", targetNamespace),
@@ -1021,7 +1019,7 @@ func TestMatchPipelinerunAnnotationAndRepositories(t *testing.T) {
 				Token:  github.String("None"),
 			}
 			if len(tt.args.fileChanged) > 0 {
-				commitFiles := []*gitlab.MergeRequestDiff{}
+				commitFiles := &gitlab.MergeRequest{}
 				pushFileChanges := []*gitlab.Diff{}
 				if tt.args.runevent.TriggerTarget == "push" {
 					for _, v := range tt.args.fileChanged {
@@ -1040,14 +1038,14 @@ func TestMatchPipelinerunAnnotationAndRepositories(t *testing.T) {
 					})
 				} else {
 					for _, v := range tt.args.fileChanged {
-						commitFiles = append(commitFiles, &gitlab.MergeRequestDiff{
+						commitFiles.Changes = append(commitFiles.Changes, &gitlab.MergeRequestDiff{
 							NewPath:     v.FileName,
 							RenamedFile: v.RenamedFile,
 							DeletedFile: v.DeletedFile,
 							NewFile:     v.NewFile,
 						})
 					}
-					url := fmt.Sprintf("/projects/0/merge_requests/%d/diffs", tt.args.runevent.PullRequestNumber)
+					url := fmt.Sprintf("/projects/0/merge_requests/%d/changes", tt.args.runevent.PullRequestNumber)
 					glMux.HandleFunc(url, func(w http.ResponseWriter, _ *http.Request) {
 						jeez, err := json.Marshal(commitFiles)
 						assert.NilError(t, err)
@@ -1097,7 +1095,9 @@ func runTest(ctx context.Context, t *testing.T, tt annotationTest, vcx provider.
 		assert.Assert(t, tt.wantPRName == matches[0].PipelineRun.GetName())
 	}
 	if tt.wantLog != "" {
-		assert.Assert(t, log.FilterMessage(tt.wantLog) != nil, "We didn't get the expected log message")
+		logmsg := log.TakeAll()
+		assert.Assert(t, len(logmsg) > 0, "We didn't get any log message")
+		assert.Assert(t, strings.Contains(logmsg[0].Message, tt.wantLog), logmsg[0].Message, tt.wantLog)
 	}
 }
 
@@ -1112,30 +1112,12 @@ func TestMatchPipelinerunByAnnotation(t *testing.T) {
 		},
 	}
 
-	pipelineCel := &tektonv1.PipelineRun{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "pipeline-cel",
-			Annotations: map[string]string{
-				keys.OnCelExpression: `event == "pull_request"`,
-			},
-		},
-	}
-
 	pipelinePush := &tektonv1.PipelineRun{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "pipeline-push",
 			Annotations: map[string]string{
 				keys.OnEvent:        "[push]",
 				keys.OnTargetBranch: "[main]",
-			},
-		},
-	}
-
-	pipelineOnComment := &tektonv1.PipelineRun{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "pipeline-on-comment",
-			Annotations: map[string]string{
-				keys.OnComment: "^/hello-world",
 			},
 		},
 	}
@@ -1211,49 +1193,6 @@ func TestMatchPipelinerunByAnnotation(t *testing.T) {
 			},
 			wantErr:    false,
 			wantPrName: "pipeline-good",
-		},
-		{
-			name: "match-on-cel-expression",
-			args: args{
-				pruns: []*tektonv1.PipelineRun{pipelineCel},
-				runevent: info.Event{
-					TriggerTarget: "pull_request",
-					EventType:     "pull_request",
-					BaseBranch:    "main",
-					Request: &info.Request{
-						Header: http.Header{},
-					},
-				},
-			},
-			wantErr:    false,
-			wantPrName: pipelineCel.GetName(),
-		},
-		{
-			name: "match-on-comment",
-			args: args{
-				pruns: []*tektonv1.PipelineRun{pipelineGood, pipelineOnComment},
-				runevent: info.Event{
-					TriggerComment: "/hello-world",
-					TriggerTarget:  "pull_request",
-					EventType:      opscomments.OnCommentEventType.String(),
-					BaseBranch:     "main",
-				},
-			},
-			wantErr:    false,
-			wantPrName: pipelineOnComment.GetName(),
-		},
-		{
-			name: "no-match-on-the-comment-should-not-match-the-other-pruns",
-			args: args{
-				pruns: []*tektonv1.PipelineRun{pipelineGood, pipelineOnComment},
-				runevent: info.Event{
-					TriggerComment: "good morning",
-					TriggerTarget:  "pull_request",
-					EventType:      opscomments.OnCommentEventType.String(),
-					BaseBranch:     "main",
-				},
-			},
-			wantErr: true,
 		},
 		{
 			name: "no-match-on-event",
@@ -1846,164 +1785,6 @@ func TestMatchRunningPipelineRunForIncomingWebhook(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			outPruns := MatchRunningPipelineRunForIncomingWebhook(tt.runevent.EventType, tt.runevent.TargetPipelineRun, tt.pruns)
 			assert.Equal(t, len(outPruns), tt.wantedPrunsNumber)
-		})
-	}
-}
-
-func TestBuildAvailableMatchingAnnotationErr(t *testing.T) {
-	tests := []struct {
-		name  string
-		pruns []*tektonv1.PipelineRun
-		event *info.Event
-	}{
-		{
-			name: "Test with one PipelineRun and one annotation",
-			pruns: []*tektonv1.PipelineRun{
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "test-pipeline",
-						Annotations: map[string]string{
-							keys.OnEvent: "pull_request",
-							keys.Task:    "test-task",
-						},
-					},
-				},
-			},
-			event: &info.Event{
-				EventType:  "pull_request",
-				HeadBranch: "feature",
-				BaseBranch: "main",
-			},
-		},
-		// Add more test cases as needed
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := buildAvailableMatchingAnnotationErr(tt.event, tt.pruns)
-			golden.Assert(t, got, strings.ReplaceAll(fmt.Sprintf("%s.golden", t.Name()), "/", "-"))
-		})
-	}
-}
-
-func TestGetTargetBranch(t *testing.T) {
-	tests := []struct {
-		name           string
-		prun           *tektonv1.PipelineRun
-		event          *info.Event
-		expectedMatch  bool
-		expectedEvent  string
-		expectedBranch string
-	}{
-		{
-			name: "Test with pull_request event",
-			prun: &tektonv1.PipelineRun{
-				ObjectMeta: metav1.ObjectMeta{
-					Annotations: map[string]string{
-						keys.OnEvent:        "pull_request",
-						keys.OnTargetBranch: "main",
-					},
-				},
-			},
-			event: &info.Event{
-				TriggerTarget: triggertype.PullRequest,
-				EventType:     triggertype.PullRequest.String(),
-				BaseBranch:    "main",
-			},
-			expectedMatch:  true,
-			expectedEvent:  "pull_request",
-			expectedBranch: "main",
-		},
-		{
-			name: "Test with incoming event",
-			prun: &tektonv1.PipelineRun{
-				ObjectMeta: metav1.ObjectMeta{
-					Annotations: map[string]string{
-						keys.OnEvent:        "incoming",
-						keys.OnTargetBranch: "main",
-					},
-				},
-			},
-			event: &info.Event{
-				TriggerTarget: triggertype.Incoming,
-				EventType:     triggertype.Incoming.String(),
-				BaseBranch:    "main",
-			},
-			expectedMatch:  true,
-			expectedEvent:  "incoming",
-			expectedBranch: "main",
-		},
-		{
-			name: "Test with no match",
-			prun: &tektonv1.PipelineRun{
-				ObjectMeta: metav1.ObjectMeta{
-					Annotations: map[string]string{
-						keys.OnEvent:        "push",
-						keys.OnTargetBranch: "develop",
-					},
-				},
-			},
-			event: &info.Event{
-				TriggerTarget: triggertype.PullRequest,
-				EventType:     triggertype.PullRequest.String(),
-				BaseBranch:    "main",
-			},
-			expectedMatch:  false,
-			expectedEvent:  "",
-			expectedBranch: "",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			matched, targetEvent, targetBranch, err := getTargetBranch(tt.prun, tt.event)
-			assert.NilError(t, err)
-			assert.Equal(t, tt.expectedMatch, matched)
-			assert.Equal(t, tt.expectedEvent, targetEvent)
-			assert.Equal(t, tt.expectedBranch, targetBranch)
-		})
-	}
-}
-
-func TestGetName(t *testing.T) {
-	tests := []struct {
-		name     string
-		prun     *tektonv1.PipelineRun
-		expected string
-	}{
-		{
-			name: "Test with name",
-			prun: &tektonv1.PipelineRun{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "test-pipeline",
-				},
-			},
-			expected: "test-pipeline",
-		},
-		{
-			name: "Test with generateName",
-			prun: &tektonv1.PipelineRun{
-				ObjectMeta: metav1.ObjectMeta{
-					GenerateName: "test-pipeline-",
-				},
-			},
-			expected: "test-pipeline-",
-		},
-		{
-			name: "Test with generateName and name",
-			prun: &tektonv1.PipelineRun{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:         "test-pipeline",
-					GenerateName: "generate-pipeline-",
-				},
-			},
-			expected: "generate-pipeline-",
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			name := getName(tt.prun)
-			assert.Equal(t, tt.expected, name)
 		})
 	}
 }

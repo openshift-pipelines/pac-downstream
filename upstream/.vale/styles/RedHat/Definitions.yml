@@ -44,7 +44,6 @@ exceptions:
   - DNS
   - DOM
   - DOS
-  - DPDK
   - DPI
   - DRL
   - DSL
@@ -113,8 +112,6 @@ exceptions:
   - NVDA
   - OEM
   - OSS
-  - OVN
-  - OVS
   - PATH
   - PC
   - PDF
@@ -126,8 +123,6 @@ exceptions:
   - PPP
   - PROM
   - PTP
-  - PV
-  - PVC
   - PXE
   - QCOW2
   - QEMU

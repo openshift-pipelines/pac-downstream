@@ -9,13 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/google/go-github/v64/github"
-	"gotest.tools/v3/assert"
-	"gotest.tools/v3/env"
-	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	rtesting "knative.dev/pkg/reconciler/testing"
-
+	"github.com/google/go-github/v56/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/clients"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
@@ -23,6 +17,11 @@ import (
 	testclient "github.com/openshift-pipelines/pipelines-as-code/pkg/test/clients"
 	ghtesthelper "github.com/openshift-pipelines/pipelines-as-code/pkg/test/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/test/logger"
+	"gotest.tools/v3/assert"
+	"gotest.tools/v3/env"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	rtesting "knative.dev/pkg/reconciler/testing"
 )
 
 // script kiddies, don't get too excited, this has been randomly generated with random words.
@@ -150,7 +149,7 @@ func TestParsePayLoad(t *testing.T) {
 			eventType:          "issue_comment",
 			triggerTarget:      "pull_request",
 			githubClient:       true,
-			payloadEventStruct: github.IssueCommentEvent{Action: github.String("created"), Issue: &github.Issue{}},
+			payloadEventStruct: github.IssueCommentEvent{Issue: &github.Issue{}},
 			wantErrString:      "issue comment is not coming from a pull_request",
 		},
 		{
@@ -159,7 +158,6 @@ func TestParsePayLoad(t *testing.T) {
 			triggerTarget: "pull_request",
 			githubClient:  true,
 			payloadEventStruct: github.IssueCommentEvent{
-				Action: github.String("created"),
 				Issue: &github.Issue{
 					PullRequestLinks: &github.PullRequestLinks{
 						HTMLURL: github.String("/bad"),
@@ -236,20 +234,11 @@ func TestParsePayLoad(t *testing.T) {
 			shaRet: "headSHACheckSuite",
 		},
 		{
-			name:               "bad/issue_comment_not_from_created",
-			wantErrString:      "only newly created comment is supported, received: deleted",
-			payloadEventStruct: github.IssueCommentEvent{Action: github.String("deleted")},
-			eventType:          "issue_comment",
-			triggerTarget:      "pull_request",
-			githubClient:       true,
-		},
-		{
 			name:          "good/issue comment",
 			eventType:     "issue_comment",
 			triggerTarget: "pull_request",
 			githubClient:  true,
 			payloadEventStruct: github.IssueCommentEvent{
-				Action: github.String("created"),
 				Issue: &github.Issue{
 					PullRequestLinks: &github.PullRequestLinks{
 						HTMLURL: github.String("/666"),
@@ -286,7 +275,6 @@ func TestParsePayLoad(t *testing.T) {
 			triggerTarget: "pull_request",
 			githubClient:  true,
 			payloadEventStruct: github.IssueCommentEvent{
-				Action: github.String("created"),
 				Issue: &github.Issue{
 					PullRequestLinks: &github.PullRequestLinks{
 						HTMLURL: github.String("/777"),
@@ -307,7 +295,6 @@ func TestParsePayLoad(t *testing.T) {
 			triggerTarget: "pull_request",
 			githubClient:  true,
 			payloadEventStruct: github.IssueCommentEvent{
-				Action: github.String("created"),
 				Issue: &github.Issue{
 					PullRequestLinks: &github.PullRequestLinks{
 						HTMLURL: github.String("/999"),
@@ -327,7 +314,6 @@ func TestParsePayLoad(t *testing.T) {
 			triggerTarget: "pull_request",
 			githubClient:  true,
 			payloadEventStruct: github.IssueCommentEvent{
-				Action: github.String("created"),
 				Issue: &github.Issue{
 					PullRequestLinks: &github.PullRequestLinks{
 						HTMLURL: github.String("/888"),
@@ -527,14 +513,14 @@ func TestParsePayLoad(t *testing.T) {
 			}
 
 			for key, value := range tt.muxReplies {
-				mux.HandleFunc(key, func(rw http.ResponseWriter, _ *http.Request) {
+				mux.HandleFunc(key, func(rw http.ResponseWriter, r *http.Request) {
 					bjeez, _ := json.Marshal(value)
 					fmt.Fprint(rw, string(bjeez))
 				})
 			}
 			if tt.eventType == "commit_comment" {
 				mux.HandleFunc(fmt.Sprintf("/repos/%s/%s/branches/test1",
-					"owner", "reponame"), func(rw http.ResponseWriter, _ *http.Request) {
+					"owner", "reponame"), func(rw http.ResponseWriter, r *http.Request) {
 					_, err := fmt.Fprintf(rw, `{
 			"name": "test1",
 			"commit": {
@@ -544,7 +530,7 @@ func TestParsePayLoad(t *testing.T) {
 					assert.NilError(t, err)
 				})
 				mux.HandleFunc(fmt.Sprintf("/repos/%s/%s/branches/testnew",
-					"owner", "reponame"), func(rw http.ResponseWriter, _ *http.Request) {
+					"owner", "reponame"), func(rw http.ResponseWriter, r *http.Request) {
 					_, err := fmt.Fprintf(rw, `{
 			"name": "testnew",
 			"commit": {
@@ -553,7 +539,8 @@ func TestParsePayLoad(t *testing.T) {
 		}`)
 					assert.NilError(t, err)
 				})
-				mux.HandleFunc(fmt.Sprintf("/repos/%s/%s/branches/main", "owner", "reponame"), func(rw http.ResponseWriter, _ *http.Request) {
+				mux.HandleFunc(fmt.Sprintf("/repos/%s/%s/branches/main",
+					"owner", "reponame"), func(rw http.ResponseWriter, r *http.Request) {
 					_, err := fmt.Fprintf(rw, `{
 			"name": "main",
 			"commit": {
@@ -567,14 +554,17 @@ func TestParsePayLoad(t *testing.T) {
 			gprovider := Provider{
 				Client: ghClient,
 				Logger: logger,
-				pacInfo: &info.PacOpts{
-					Settings: settings.Settings{},
-				},
 			}
 			request := &http.Request{Header: map[string][]string{}}
 			request.Header.Set("X-GitHub-Event", tt.eventType)
 
-			run := &params.Run{}
+			run := &params.Run{
+				Info: info.Info{
+					Pac: &info.PacOpts{
+						Settings: &settings.Settings{},
+					},
+				},
+			}
 			bjeez, _ := json.Marshal(tt.payloadEventStruct)
 			jeez := string(bjeez)
 			if tt.jeez != "" {
@@ -671,7 +661,7 @@ func TestAppTokenGeneration(t *testing.T) {
 		envs                map[string]string
 		resultBaseURL       string
 		checkInstallIDs     []int64
-		extraRepoInstallIDs map[string]string
+		extraRepoInstallIds map[string]string
 	}{
 		{
 			name:         "secret not found",
@@ -702,7 +692,7 @@ func TestAppTokenGeneration(t *testing.T) {
 			seedData:            vaildSecret,
 			nilClient:           false,
 			checkInstallIDs:     []int64{123},
-			extraRepoInstallIDs: map[string]string{"another/one": "789", "andanother/two": "10112"},
+			extraRepoInstallIds: map[string]string{"another/one": "789", "andanother/two": "10112"},
 		},
 		{
 			ctx:          ctxInvalidAppID,
@@ -723,7 +713,7 @@ func TestAppTokenGeneration(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			fakeghclient, mux, serverURL, teardown := ghtesthelper.SetupGH()
 			defer teardown()
-			mux.HandleFunc(fmt.Sprintf("/app/installations/%d/access_tokens", testInstallationID), func(w http.ResponseWriter, _ *http.Request) {
+			mux.HandleFunc(fmt.Sprintf("/app/installations/%d/access_tokens", testInstallationID), func(w http.ResponseWriter, r *http.Request) {
 				_, _ = fmt.Fprint(w, "{}")
 			})
 			envRemove := env.PatchAll(t, tt.envs)
@@ -750,9 +740,6 @@ func TestAppTokenGeneration(t *testing.T) {
 			gprovider := Provider{
 				Logger: logger,
 				Client: fakeghclient,
-				pacInfo: &info.PacOpts{
-					Settings: settings.Settings{},
-				},
 			}
 			request := &http.Request{Header: map[string][]string{}}
 			request.Header.Set("X-GitHub-Event", "pull_request")
@@ -768,28 +755,31 @@ func TestAppTokenGeneration(t *testing.T) {
 				},
 
 				Info: info.Info{
+					Pac: &info.PacOpts{
+						Settings: &settings.Settings{},
+					},
 					Controller: &info.ControllerInfo{Secret: secretName},
 				},
 			}
 
 			if len(tt.checkInstallIDs) > 0 {
-				gprovider.pacInfo.SecretGHAppRepoScoped = true
+				run.Info.Pac.SecretGHAppRepoScoped = true
 			}
-			if len(tt.extraRepoInstallIDs) > 0 {
+			if len(tt.extraRepoInstallIds) > 0 {
 				extras := ""
-				for name := range tt.extraRepoInstallIDs {
+				for name := range tt.extraRepoInstallIds {
 					split := strings.Split(name, "/")
-					mux.HandleFunc(fmt.Sprintf("/repos/%s/%s", split[0], split[1]), func(w http.ResponseWriter, _ *http.Request) {
+					mux.HandleFunc(fmt.Sprintf("/repos/%s/%s", split[0], split[1]), func(w http.ResponseWriter, r *http.Request) {
 						// i can't do a for name, iid and use iid, cause golang shadows the variable out of the for loop
 						// a bit stupid
-						sid := tt.extraRepoInstallIDs[fmt.Sprintf("%s/%s", split[0], split[1])]
+						sid := tt.extraRepoInstallIds[fmt.Sprintf("%s/%s", split[0], split[1])]
 						_, _ = fmt.Fprintf(w, `{"id": %s}`, sid)
 					})
 					extras += fmt.Sprintf("%s, ", name)
 				}
 
-				gprovider.pacInfo.SecretGHAppRepoScoped = true
-				gprovider.pacInfo.SecretGhAppTokenScopedExtraRepos = extras
+				run.Info.Pac.SecretGHAppRepoScoped = true
+				run.Info.Pac.SecretGhAppTokenScopedExtraRepos = extras
 			}
 
 			tt.ctx = info.StoreCurrentControllerName(tt.ctx, "default")
@@ -813,7 +803,7 @@ func TestAppTokenGeneration(t *testing.T) {
 				}
 			}
 
-			for _, extraid := range tt.extraRepoInstallIDs {
+			for _, extraid := range tt.extraRepoInstallIds {
 				// checkInstallIDs and extraRepoInstallIds are merged and extraRepoInstallIds is after
 				found := false
 				extraIDInt, _ := strconv.ParseInt(extraid, 10, 64)
@@ -822,7 +812,7 @@ func TestAppTokenGeneration(t *testing.T) {
 						found = true
 					}
 				}
-				assert.Assert(t, found, "Could not find %s in %s", extraIDInt, tt.extraRepoInstallIDs)
+				assert.Assert(t, found, "Could not find %s in %s", extraIDInt, tt.extraRepoInstallIds)
 			}
 
 			assert.Assert(t, gprovider.Client != nil)

@@ -8,7 +8,6 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/kubeinteraction"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/clients"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/sync"
 	testclient "github.com/openshift-pipelines/pipelines-as-code/pkg/test/clients"
 	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
@@ -111,16 +110,12 @@ func TestReconciler_FinalizeKind(t *testing.T) {
 					Clients: clients.Clients{
 						PipelineAsCode: stdata.PipelineAsCode,
 					},
-					Info: info.Info{
-						Kube:       &info.KubeOpts{Namespace: "pac"},
-						Controller: &info.ControllerInfo{GlobalRepository: "pac"},
-					},
 				},
 			}
 
 			if len(tt.addToQueue) != 0 {
 				for _, pr := range tt.addToQueue {
-					_, err := r.qm.AddListToRunningQueue(finalizeTestRepo, []string{pr.GetNamespace() + "/" + pr.GetName()})
+					_, err := r.qm.AddListToQueue(finalizeTestRepo, []string{pr.GetNamespace() + "/" + pr.GetName()})
 					assert.NilError(t, err)
 				}
 			}

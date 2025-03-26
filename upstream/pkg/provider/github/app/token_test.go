@@ -15,6 +15,7 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/github"
 	testclient "github.com/openshift-pipelines/pipelines-as-code/pkg/test/clients"
 	ghtesthelper "github.com/openshift-pipelines/pipelines-as-code/pkg/test/github"
+	httptesthelper "github.com/openshift-pipelines/pipelines-as-code/pkg/test/http"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/test/logger"
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
@@ -144,8 +145,7 @@ func Test_GenerateJWT(t *testing.T) {
 				},
 			}
 
-			ip := NewInstallation(httptest.NewRequest(http.MethodGet, "http://localhost", strings.NewReader("")), run, &v1alpha1.Repository{}, &github.Provider{}, tt.namespace.GetName())
-			token, err := ip.GenerateJWT(ctx)
+			token, err := GenerateJWT(ctx, tt.namespace.GetName(), run)
 			if tt.wantErr {
 				assert.Assert(t, err != nil)
 				return
@@ -159,7 +159,6 @@ func Test_GenerateJWT(t *testing.T) {
 	}
 }
 
-// Test_GetAndUpdateInstallationID tests we properly obtain the list of repos for a GitHub App and find a matching repo.
 func Test_GetAndUpdateInstallationID(t *testing.T) {
 	tdata := testclient.Data{
 		Namespaces: []*corev1.Namespace{testNamespace},
@@ -169,23 +168,17 @@ func Test_GetAndUpdateInstallationID(t *testing.T) {
 	wantID := 120
 	badToken := "BADTOKEN"
 	badID := 666
-	missingID := 111
 
 	fakeghclient, mux, serverURL, teardown := ghtesthelper.SetupGH()
 	defer teardown()
-
-	mux.HandleFunc("/app/installations", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Authorization", "Bearer 12345")
-		w.Header().Set("Accept", "application/vnd.github+json")
-		if r.URL.Query().Get("page") == "" {
-			w.Header().Add("Link", `<https://api.github.com/app/installations/?page=1&per_page=1>; rel="first",`+`<https://api.github.com/app/installations/?page=2&per_page=1>; rel="next",`)
-			_, _ = fmt.Fprintf(w, `[{"id":%d}]`, missingID)
-		} else if r.URL.Query().Get("page") == "2" {
-			w.Header().Add("Link", `<https://api.github.com/app/installations/?page=3&per_page=1>`)
-			_, _ = fmt.Fprintf(w, `[{"id":%d}]`, wantID)
-		}
-	})
-
+	// created fakeconfig to get InstallationID
+	config := map[string]map[string]string{
+		fmt.Sprintf("%s/app/installations", serverURL): {
+			"body": fmt.Sprintf(`[{"id":%d}, {"id":121}]`, wantID),
+			"code": "200",
+		},
+	}
+	httpTestClient := httptesthelper.MakeHTTPTestClient(config)
 	ctx, _ := rtesting.SetupFakeContext(t)
 	stdata, _ := testclient.SeedTestData(t, ctx, tdata)
 	logger, _ := logger.GetLogger()
@@ -194,10 +187,11 @@ func Test_GetAndUpdateInstallationID(t *testing.T) {
 			Log:            logger,
 			PipelineAsCode: stdata.PipelineAsCode,
 			Kube:           stdata.Kube,
+			HTTP:           *httpTestClient,
 		},
 		Info: info.Info{
 			Pac: &info.PacOpts{
-				Settings: settings.Settings{},
+				Settings: &settings.Settings{},
 			},
 			Controller: &info.ControllerInfo{Secret: validSecret.GetName()},
 		},
@@ -205,8 +199,7 @@ func Test_GetAndUpdateInstallationID(t *testing.T) {
 	ctx = info.StoreCurrentControllerName(ctx, "default")
 	ctx = info.StoreNS(ctx, testNamespace.GetName())
 
-	ip := NewInstallation(httptest.NewRequest(http.MethodGet, "http://localhost", strings.NewReader("")), run, &v1alpha1.Repository{}, &github.Provider{}, testNamespace.GetName())
-	jwtToken, err := ip.GenerateJWT(ctx)
+	jwtToken, err := GenerateJWT(ctx, testNamespace.GetName(), run)
 	assert.NilError(t, err)
 	req := httptest.NewRequest(http.MethodGet, "http://localhost", strings.NewReader(""))
 	repo := &v1alpha1.Repository{
@@ -243,15 +236,14 @@ func Test_GetAndUpdateInstallationID(t *testing.T) {
 
 	t.Setenv("PAC_GIT_PROVIDER_TOKEN_APIURL", serverURL+"/api/v3")
 
-	mux.HandleFunc("/installation/repositories", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("/installation/repositories", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Authorization", "Bearer 12345")
 		w.Header().Set("Accept", "application/vnd.github+json")
-		_, _ = fmt.Fprint(w, `{"total_count": 2,"repositories": [{"id":1,"html_url": "https://matched/by/incoming"},{"id":2,"html_url": "https://anotherrepo/that/would/failit"}]}`)
+		_, _ = fmt.Fprint(w, `{"total_count": 1,"repositories": [{"id":1,"html_url": "https://matched/by/incoming"},{"id":2,"html_url": "https://anotherrepo/that/would/failit"}]}`)
 	})
-	ip = NewInstallation(req, run, repo, gprovider, testNamespace.GetName())
-	_, token, installationID, err := ip.GetAndUpdateInstallationID(ctx)
+	_, token, installationID, err := GetAndUpdateInstallationID(ctx, req, run, repo, gprovider, testNamespace.GetName())
 	assert.NilError(t, err)
-	assert.Equal(t, installationID, int64(wantID))
+	assert.Equal(t, installationID, int64(120))
 	assert.Equal(t, *gprovider.Token, wantToken)
 	assert.Equal(t, token, wantToken)
 }
@@ -267,11 +259,11 @@ func Test_ListRepos(t *testing.T) {
 	fakeclient, mux, _, teardown := ghtesthelper.SetupGH()
 	defer teardown()
 
-	mux.HandleFunc("user/installations/1/repositories/2", func(rw http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("user/installations/1/repositories/2", func(rw http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(rw)
 	})
 
-	mux.HandleFunc("/installation/repositories", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("/installation/repositories", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Authorization", "Bearer 12345")
 		w.Header().Set("Accept", "application/vnd.github+json")
 		_, _ = fmt.Fprint(w, `{"total_count": 1,"repositories": [{"id":1,"html_url": "https://matched/by/incoming"}]}`)
@@ -296,9 +288,7 @@ func Test_ListRepos(t *testing.T) {
 
 	ctx, _ := rtesting.SetupFakeContext(t)
 	gprovider := &github.Provider{Client: fakeclient}
-	ip := NewInstallation(httptest.NewRequest(http.MethodGet, "http://localhost", strings.NewReader("")),
-		&params.Run{}, repo, gprovider, testNamespace.GetName())
-	exist, err := ip.matchRepos(ctx)
+	exist, err := listRepos(ctx, repo, gprovider)
 	assert.NilError(t, err)
 	assert.Equal(t, exist, true)
 }

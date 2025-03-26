@@ -13,11 +13,9 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/events"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/bitbucketcloud/types"
 	"go.uber.org/zap"
-	"gopkg.in/yaml.v2"
 )
 
 var _ provider.Interface = (*Provider)(nil)
@@ -26,7 +24,6 @@ type Provider struct {
 	Client        *bitbucket.Client
 	Logger        *zap.SugaredLogger
 	run           *params.Run
-	pacInfo       *info.PacOpts
 	Token, APIURL *string
 	Username      *string
 	provenance    string
@@ -40,10 +37,6 @@ func (v *Provider) CheckPolicyAllowing(_ context.Context, _ *info.Event, _ []str
 // GetTaskURI TODO: Implement ME.
 func (v *Provider) GetTaskURI(_ context.Context, _ *info.Event, _ string) (bool, string, error) {
 	return false, "", nil
-}
-
-func (v *Provider) SetPacInfo(pacInfo *info.PacOpts) {
-	v.pacInfo = pacInfo
 }
 
 const taskStatusTemplate = `| **Status** | **Duration** | **Name** |
@@ -94,7 +87,7 @@ func (v *Provider) CreateStatus(_ context.Context, event *info.Event, statusopts
 	}
 
 	cso := &bitbucket.CommitStatusOptions{
-		Key:         v.pacInfo.ApplicationName,
+		Key:         v.run.Info.Pac.ApplicationName,
 		Url:         detailsURL,
 		State:       statusopts.Conclusion,
 		Description: statusopts.Title,
@@ -114,7 +107,7 @@ func (v *Provider) CreateStatus(_ context.Context, event *info.Event, statusopts
 		return err
 	}
 	if statusopts.Conclusion != "STOPPED" && statusopts.Status == "completed" &&
-		statusopts.Text != "" && event.EventType == triggertype.PullRequest.String() {
+		statusopts.Text != "" && event.EventType == "pull_request" {
 		onPr := ""
 		if statusopts.OriginalPipelineRunName != "" {
 			onPr = "/" + statusopts.OriginalPipelineRunName
@@ -124,7 +117,7 @@ func (v *Provider) CreateStatus(_ context.Context, event *info.Event, statusopts
 				Owner:         event.Organization,
 				RepoSlug:      event.Repository,
 				PullRequestID: strconv.Itoa(event.PullRequestNumber),
-				Content:       fmt.Sprintf("**%s%s** - %s\n\n%s", v.pacInfo.ApplicationName, onPr, statusopts.Title, statusopts.Text),
+				Content:       fmt.Sprintf("**%s%s** - %s\n\n%s", v.run.Info.Pac.ApplicationName, onPr, statusopts.Title, statusopts.Text),
 			})
 		if err != nil {
 			return err
@@ -261,10 +254,6 @@ func (v *Provider) concatAllYamlFiles(objects []bitbucket.RepositoryFile, event 
 			data, err := v.getBlob(event, revision, value.Path)
 			if err != nil {
 				return "", err
-			}
-			var i any
-			if err := yaml.Unmarshal([]byte(data), &i); err != nil {
-				return "", fmt.Errorf("error unmarshalling yaml file %s: %w", value.Path, err)
 			}
 
 			if allTemplates != "" && !strings.HasPrefix(data, "---") {

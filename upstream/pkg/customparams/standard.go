@@ -7,7 +7,6 @@ import (
 
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/changedfiles"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/formatting"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/opscomments"
 	"go.uber.org/zap"
 )
 
@@ -18,7 +17,6 @@ func (p *CustomParams) getChangedFiles(ctx context.Context) changedfiles.Changed
 	changedFiles, err := p.vcx.GetFiles(ctx, p.event)
 	if err != nil {
 		p.eventEmitter.EmitMessage(p.repo, zap.ErrorLevel, "ParamsError", fmt.Sprintf("error getting changed files: %s", err.Error()))
-		return changedfiles.ChangedFiles{}
 	}
 	changedFiles.RemoveDuplicates()
 	return changedFiles
@@ -33,7 +31,6 @@ func (p *CustomParams) makeStandardParamsFromEvent(ctx context.Context) (map[str
 		repoURL = p.event.CloneURL
 	}
 	changedFiles := p.getChangedFiles(ctx)
-	triggerCommentAsSingleLine := strings.ReplaceAll(p.event.TriggerComment, "\n", "\\n")
 
 	return map[string]string{
 			"revision":         p.event.SHA,
@@ -45,8 +42,7 @@ func (p *CustomParams) makeStandardParamsFromEvent(ctx context.Context) (map[str
 			"source_url":       p.event.HeadURL,
 			"sender":           strings.ToLower(p.event.Sender),
 			"target_namespace": p.repo.GetNamespace(),
-			"event_type":       opscomments.EventTypeBackwardCompat(p.eventEmitter, p.repo, p.event.EventType),
-			"trigger_comment":  triggerCommentAsSingleLine,
+			"event_type":       p.event.EventType,
 		}, map[string]interface{}{
 			"all":      changedFiles.All,
 			"added":    changedFiles.Added,

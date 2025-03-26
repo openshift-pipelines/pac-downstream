@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/google/go-github/v64/github"
+	"github.com/google/go-github/v56/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/clients"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
@@ -118,6 +118,13 @@ func TestConfigureRepository(t *testing.T) {
 					PipelineAsCode: cs.PipelineAsCode,
 					Kube:           cs.Kube,
 				},
+				Info: info.Info{
+					Pac: &info.PacOpts{
+						Settings: &settings.Settings{
+							AutoConfigureRepoNamespaceTemplate: tt.nsTemplate,
+						},
+					},
+				},
 			}
 			req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, "URL", bytes.NewReader(tt.event))
 			if err != nil {
@@ -125,13 +132,7 @@ func TestConfigureRepository(t *testing.T) {
 			}
 			req.Header.Set("X-Github-Event", tt.eventType)
 
-			infoPac := &info.PacOpts{
-				Settings: settings.Settings{
-					AutoConfigureNewGitHubRepo:         true,
-					AutoConfigureRepoNamespaceTemplate: tt.nsTemplate,
-				},
-			}
-			detected, configuring, err := ConfigureRepository(ctx, run, req, string(tt.event), infoPac, logger)
+			detected, configuring, err := ConfigureRepository(ctx, run, req, string(tt.event), logger)
 			assert.Equal(t, detected, tt.detected)
 			assert.Equal(t, configuring, tt.configuring)
 

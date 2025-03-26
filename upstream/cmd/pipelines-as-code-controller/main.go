@@ -21,9 +21,11 @@ const (
 
 func main() {
 	ctx := signals.NewContext()
+	ns := system.Namespace()
 	run := params.New()
-
-	err := run.Clients.NewClients(ctx, &run.Info)
+	rinfo := &run.Info
+	rinfo.Controller = info.GetControllerInfoFromEnvOrDefault()
+	err := run.Clients.NewClients(ctx, rinfo)
 	if err != nil {
 		log.Fatal("failed to init clients : ", err)
 	}
@@ -39,8 +41,8 @@ func main() {
 	// put logger configurator to ctx
 	ctx = evadapter.WithConfiguratorOptions(ctx, []evadapter.ConfiguratorOption{copt})
 
-	ctx = info.StoreNS(ctx, system.Namespace())
-	ctx = info.StoreCurrentControllerName(ctx, run.Info.Controller.Name)
+	ctx = info.StoreNS(ctx, ns)
+	ctx = info.StoreCurrentControllerName(ctx, rinfo.Controller.Name)
 
 	ctx = context.WithValue(ctx, client.Key{}, run.Clients.Kube)
 	ctx = evadapter.WithNamespace(ctx, system.Namespace())

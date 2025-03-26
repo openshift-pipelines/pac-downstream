@@ -11,17 +11,15 @@ const (
 	DefaultPipelinesAscodeSecretName = "pipelines-as-code-secret"
 
 	DefaultPipelinesAscodeConfigmapName = "pipelines-as-code"
-	DefaultGlobalRepoName               = "pipelines-as-code"
 	defaultControllerLabel              = "default"
 )
 
 var InstallNamespaces = []string{"openshift-pipelines", "pipelines-as-code"}
 
 type ControllerInfo struct {
-	Name             string `json:"name"`
-	Configmap        string `json:"configmap"`
-	Secret           string `json:"secret"`
-	GlobalRepository string `json:"gRepo"`
+	Name      string `json:"name"`
+	Configmap string `json:"configmap"`
+	Secret    string `json:"secret"`
 }
 
 // GetControllerInfoFromEnvOrDefault retrieves controller info from the env or use the defaults
@@ -40,15 +38,10 @@ func GetControllerInfoFromEnvOrDefault() *ControllerInfo {
 	if !ok {
 		controllerConfigMap = DefaultPipelinesAscodeConfigmapName
 	}
-	globalRepo, ok := os.LookupEnv("PAC_CONTROLLER_GLOBAL_REPOSITORY")
-	if !ok {
-		globalRepo = DefaultGlobalRepoName
-	}
 	return &ControllerInfo{
-		Name:             controllerlabel,
-		Secret:           controllerSecret,
-		Configmap:        controllerConfigMap,
-		GlobalRepository: globalRepo,
+		Name:      controllerlabel,
+		Secret:    controllerSecret,
+		Configmap: controllerConfigMap,
 	}
 }
 

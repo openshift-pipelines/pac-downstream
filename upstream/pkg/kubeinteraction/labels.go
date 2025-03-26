@@ -29,7 +29,7 @@ func AddLabelsAndAnnotations(event *info.Event, pipelineRun *tektonv1.PipelineRu
 	// Add labels on the soon-to-be created pipelinerun so UI/CLI can easily
 	// query them.
 	labels := map[string]string{
-		// These keys are used in LabelSelector query, so we are keeping in Labels as it is.
+		// These keys are used in LabelSelector query so we are keeping in Labels as it is.
 		// But adding same keys to Annotations so UI/CLI can fetch the actual value instead of modified value
 		"app.kubernetes.io/managed-by": pipelinesascode.GroupName,
 		"app.kubernetes.io/version":    formatting.CleanValueKubernetes(version.Version),
@@ -39,25 +39,28 @@ func AddLabelsAndAnnotations(event *info.Event, pipelineRun *tektonv1.PipelineRu
 		keys.Repository:                formatting.CleanValueKubernetes(repo.GetName()),
 		keys.State:                     StateStarted,
 		keys.EventType:                 formatting.CleanValueKubernetes(event.EventType),
+
+		// We are deprecating these below keys from labels and adding it to Annotations
+		// In PAC v0.20.x releases we will remove these keys from Labels
+		keys.Sender:      formatting.CleanValueKubernetes(event.Sender),
+		keys.Branch:      formatting.CleanValueKubernetes(event.BaseBranch),
+		keys.GitProvider: providerConfig.Name,
 	}
 
 	annotations := map[string]string{
-		keys.ShaTitle:      event.SHATitle,
-		keys.ShaURL:        event.SHAURL,
-		keys.RepoURL:       event.URL,
-		keys.SourceRepoURL: event.HeadURL,
-		keys.URLOrg:        event.Organization,
-		keys.URLRepository: event.Repository,
-		keys.SHA:           event.SHA,
-		keys.Sender:        event.Sender,
-		keys.EventType:     event.EventType,
-		keys.Branch:        event.BaseBranch,
-		keys.SourceBranch:  event.HeadBranch,
-		keys.Repository:    repo.GetName(),
-		keys.GitProvider:   providerConfig.Name,
-		keys.State:         StateStarted,
-		keys.ControllerInfo: fmt.Sprintf(`{"name":"%s","configmap":"%s","secret":"%s", "gRepo": "%s"}`,
-			paramsinfo.Controller.Name, paramsinfo.Controller.Configmap, paramsinfo.Controller.Secret, paramsinfo.Controller.GlobalRepository),
+		keys.ShaTitle:       event.SHATitle,
+		keys.ShaURL:         event.SHAURL,
+		keys.RepoURL:        event.URL,
+		keys.URLOrg:         event.Organization,
+		keys.URLRepository:  event.Repository,
+		keys.SHA:            event.SHA,
+		keys.Sender:         event.Sender,
+		keys.EventType:      event.EventType,
+		keys.Branch:         event.BaseBranch,
+		keys.Repository:     repo.GetName(),
+		keys.GitProvider:    providerConfig.Name,
+		keys.State:          StateStarted,
+		keys.ControllerInfo: fmt.Sprintf(`{"name":"%s","configmap":"%s","secret":"%s"}`, paramsinfo.Controller.Name, paramsinfo.Controller.Configmap, paramsinfo.Controller.Secret),
 	}
 
 	if event.PullRequestNumber != 0 {

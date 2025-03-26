@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"code.gitea.io/sdk/gitea"
-	"github.com/google/go-github/v64/github"
+	"github.com/google/go-github/v56/github"
 	pacapi "github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	tknpacdelete "github.com/openshift-pipelines/pipelines-as-code/pkg/cmd/tknpac/deleterepo"
@@ -25,7 +25,6 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/settings"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
 	"github.com/openshift-pipelines/pipelines-as-code/test/pkg/cctx"
 	tknpactest "github.com/openshift-pipelines/pipelines-as-code/test/pkg/cli"
 	tgitea "github.com/openshift-pipelines/pipelines-as-code/test/pkg/gitea"
@@ -49,7 +48,7 @@ var successRegexp = regexp.MustCompile(`.*Pipelines as Code CI.*has.*successfull
 func TestGiteaPullRequestTaskAnnotations(t *testing.T) {
 	topts := &tgitea.TestOpts{
 		Regexp:      successRegexp,
-		TargetEvent: triggertype.PullRequest.String(),
+		TargetEvent: options.PullRequestEvent,
 		YAMLFiles: map[string]string{
 			".tekton/pipeline.yaml":                        "testdata/pipeline_in_tektondir.yaml",
 			".other-tasks/task-referenced-internally.yaml": "testdata/task_referenced_internally.yaml",
@@ -65,25 +64,10 @@ func TestGiteaPullRequestTaskAnnotations(t *testing.T) {
 	defer f()
 }
 
-func TestGiteaPullRequestTaskAnnotationsSameTaskDifferentVersion(t *testing.T) {
-	topts := &tgitea.TestOpts{
-		Regexp:      successRegexp,
-		TargetEvent: triggertype.PullRequest.String(),
-		YAMLFiles: map[string]string{
-			".tekton/pr1.yaml": "testdata/pipelinerun-with-yq-3.yaml",
-			".tekton/pr2.yaml": "testdata/pipelinerun-with-yq-4.yaml",
-		},
-		CheckForNumberStatus: 2,
-		CheckForStatus:       "success",
-	}
-	_, f := tgitea.TestPR(t, topts)
-	defer f()
-}
-
 func TestGiteaUseDisplayName(t *testing.T) {
 	topts := &tgitea.TestOpts{
 		Regexp:      regexp.MustCompile(`.*The Task name is Task.*`),
-		TargetEvent: triggertype.PullRequest.String(),
+		TargetEvent: options.PullRequestEvent,
 		YAMLFiles: map[string]string{
 			".tekton/pr.yaml": "testdata/pipelinerun.yaml",
 		},
@@ -100,30 +84,9 @@ func TestGiteaUseDisplayName(t *testing.T) {
 func TestGiteaPullRequestPipelineAnnotations(t *testing.T) {
 	topts := &tgitea.TestOpts{
 		Regexp:      successRegexp,
-		TargetEvent: triggertype.PullRequest.String(),
+		TargetEvent: options.PullRequestEvent,
 		YAMLFiles: map[string]string{
 			".tekton/pr.yaml": "testdata/pipelinerun_remote_pipeline_annotations.yaml",
-		},
-		ExpectEvents:   false,
-		CheckForStatus: "success",
-		ExtraArgs: map[string]string{
-			"RemoteTaskURL":  options.RemoteTaskURL,
-			"RemoteTaskName": options.RemoteTaskName,
-		},
-	}
-	_, f := tgitea.TestPR(t, topts)
-	defer f()
-}
-
-func TestGiteaPullRequestResolvePipelineOnlyAssociatedWithPipelineRunFilterted(t *testing.T) {
-	topts := &tgitea.TestOpts{
-		Regexp:      successRegexp,
-		TargetEvent: triggertype.PullRequest.String(),
-		YAMLFiles: map[string]string{
-			".tekton/pr1.yaml":       "testdata/pipelinerun1_remote_task_annotations.yaml",
-			".tekton/pr2.yaml":       "testdata/pipelinerun2_remote_task_annotations.yaml",
-			".tekton/pipeline1.yaml": "testdata/pipeline1_in_tektondir.yaml",
-			".tekton/pipeline2.yaml": "testdata/pipeline2_in_tektondir.yaml",
 		},
 		ExpectEvents:   false,
 		CheckForStatus: "success",
@@ -139,27 +102,9 @@ func TestGiteaPullRequestResolvePipelineOnlyAssociatedWithPipelineRunFilterted(t
 func TestGiteaPullRequestPrivateRepository(t *testing.T) {
 	topts := &tgitea.TestOpts{
 		Regexp:      successRegexp,
-		TargetEvent: triggertype.PullRequest.String(),
+		TargetEvent: options.PullRequestEvent,
 		YAMLFiles: map[string]string{
 			".tekton/pipeline.yaml": "testdata/pipelinerun_git_clone_private-gitea.yaml",
-		},
-		ExpectEvents:   false,
-		CheckForStatus: "success",
-	}
-	ctx, f := tgitea.TestPR(t, topts)
-	defer f()
-	reg := regexp.MustCompile(".*fetched git-clone task")
-	err := twait.RegexpMatchingInControllerLog(ctx, topts.ParamsRun, *reg, 10, "controller", github.Int64(20))
-	assert.NilError(t, err)
-	tgitea.WaitForSecretDeletion(t, topts, topts.TargetRefName)
-}
-
-func TestGiteaStepActions(t *testing.T) {
-	topts := &tgitea.TestOpts{
-		Regexp:      successRegexp,
-		TargetEvent: triggertype.PullRequest.String(),
-		YAMLFiles: map[string]string{
-			".tekton/pipelinerun-stepaction.yaml": "testdata/pipelinerun-stepactions.yaml",
 		},
 		ExpectEvents:   false,
 		CheckForStatus: "success",
@@ -174,7 +119,7 @@ func TestGiteaStepActions(t *testing.T) {
 // it can only success if it matches it.
 func TestGiteaBadYaml(t *testing.T) {
 	topts := &tgitea.TestOpts{
-		TargetEvent:  triggertype.PullRequest.String(),
+		TargetEvent:  options.PullRequestEvent,
 		YAMLFiles:    map[string]string{".tekton/pr-bad-format.yaml": "testdata/failures/pipeline_bad_format.yaml"},
 		ExpectEvents: true,
 	}
@@ -182,22 +127,7 @@ func TestGiteaBadYaml(t *testing.T) {
 	ctx, f := tgitea.TestPR(t, topts)
 	defer f()
 	assert.NilError(t, twait.RegexpMatchingInControllerLog(ctx, topts.ParamsRun, *regexp.MustCompile(
-		"pipelinerun.*has failed.*expected exactly one, got neither: spec.pipelineRef, spec.pipelineSpec"), 10, "controller", github.Int64(20)))
-}
-
-// TestGiteaInvalidSpecValues tests invalid field values of a PipelinRun and ensures that these
-// validation errors are reported on UI.
-func TestGiteaInvalidSpecValues(t *testing.T) {
-	topts := &tgitea.TestOpts{
-		TargetEvent:    triggertype.PullRequest.String(),
-		YAMLFiles:      map[string]string{".tekton/pr-bad-format.yaml": "testdata/failures/invalid-timeouts-values-pipelinerun.yaml"},
-		CheckForStatus: "failure",
-		ExpectEvents:   true,
-		Regexp:         regexp.MustCompile(options.InvalidYamlErrorPattern),
-	}
-
-	_, f := tgitea.TestPR(t, topts)
-	defer f()
+		"pipelinerun.*has failed.*expected exactly one, got neither: spec.pipelineRef, spec.pipelineSpec"), 10, "controller"))
 }
 
 // don't test concurrency limit here, just parallel pipeline.
@@ -209,7 +139,7 @@ func TestGiteaMultiplesParallelPipelines(t *testing.T) {
 	}
 	topts := &tgitea.TestOpts{
 		Regexp:               successRegexp,
-		TargetEvent:          triggertype.PullRequest.String(),
+		TargetEvent:          options.PullRequestEvent,
 		YAMLFiles:            yamlFiles,
 		CheckForStatus:       "success",
 		CheckForNumberStatus: maxParallel,
@@ -228,7 +158,7 @@ func TestGiteaConcurrencyExclusivenessMultiplePipelines(t *testing.T) {
 	}
 	topts := &tgitea.TestOpts{
 		Regexp:               successRegexp,
-		TargetEvent:          triggertype.PullRequest.String(),
+		TargetEvent:          options.PullRequestEvent,
 		YAMLFiles:            yamlFiles,
 		CheckForStatus:       "success",
 		CheckForNumberStatus: numPipelines,
@@ -243,7 +173,7 @@ func TestGiteaConcurrencyExclusivenessMultiplePipelines(t *testing.T) {
 func TestGiteaConcurrencyExclusivenessMultipleRuns(t *testing.T) {
 	numPipelines := 1
 	topts := &tgitea.TestOpts{
-		TargetEvent:          triggertype.PullRequest.String(),
+		TargetEvent:          options.PullRequestEvent,
 		YAMLFiles:            map[string]string{".tekton/pr.yaml": "testdata/pipelinerun.yaml"},
 		CheckForNumberStatus: numPipelines,
 		ConcurrencyLimit:     github.Int(1),
@@ -316,7 +246,7 @@ func TestGiteaConcurrencyExclusivenessMultipleRuns(t *testing.T) {
 func TestGiteaRetestAfterPush(t *testing.T) {
 	topts := &tgitea.TestOpts{
 		Regexp:      regexp.MustCompile(`.*has <b>failed</b>`),
-		TargetEvent: triggertype.PullRequest.String(),
+		TargetEvent: options.PullRequestEvent,
 		YAMLFiles: map[string]string{
 			".tekton/pr.yaml": "testdata/failures/pipelinerun-exit-1.yaml",
 		},
@@ -346,7 +276,7 @@ func TestGiteaRetestAfterPush(t *testing.T) {
 func TestGiteaConfigMaxKeepRun(t *testing.T) {
 	topts := &tgitea.TestOpts{
 		Regexp:      successRegexp,
-		TargetEvent: triggertype.PullRequest.String(),
+		TargetEvent: options.PullRequestEvent,
 		YAMLFiles: map[string]string{
 			".tekton/pr.yaml": "testdata/pipelinerun-max-keep-run-1.yaml",
 		},
@@ -365,7 +295,7 @@ func TestGiteaConfigMaxKeepRun(t *testing.T) {
 		PollTimeout:     twait.DefaultTimeout,
 		TargetSHA:       topts.PullRequest.Head.Sha,
 	}
-	_, err := twait.UntilRepositoryUpdated(context.Background(), topts.ParamsRun.Clients, waitOpts)
+	err := twait.UntilRepositoryUpdated(context.Background(), topts.ParamsRun.Clients, waitOpts)
 	assert.NilError(t, err)
 
 	time.Sleep(15 * time.Second) // “Evil does not sleep. It waits.” - Galadriel
@@ -433,8 +363,8 @@ func TestGiteaWithCLI(t *testing.T) {
 
 	output, err = tknpactest.ExecCommand(topts.ParamsRun, tknpacdelete.Root, "-n", topts.TargetNS, "repository", topts.TargetNS, "--cascade")
 	assert.NilError(t, err)
-	expectedOutput := fmt.Sprintf("secret %s has been deleted\nrepository %s has been deleted\n", topts.TargetNS, topts.TargetNS)
-	assert.Assert(t, output == expectedOutput, topts.TargetRefName, fmt.Sprintf("delete command should have this output: %s received: %s", expectedOutput, output))
+	expectedOutput := fmt.Sprintf("secret gitea-secret has been deleted\nrepository %s has been deleted\n", topts.TargetNS)
+	assert.Assert(t, output == expectedOutput, topts.TargetRefName, "delete command should have this output: %s received: %s", expectedOutput, output)
 }
 
 func TestGiteaWithCLIGeneratePipeline(t *testing.T) {
@@ -523,7 +453,7 @@ func TestGiteaWithCLIGeneratePipeline(t *testing.T) {
 			envRemove := env.PatchAll(t, map[string]string{"PAC_PROVIDER_TOKEN": "NOWORRIESBEHAPPY"})
 			defer envRemove()
 			topts.ParamsRun.Info.Pac = &info.PacOpts{}
-			topts.ParamsRun.Info.Pac.Settings = settings.Settings{}
+			topts.ParamsRun.Info.Pac.Settings = &settings.Settings{}
 			_, err = tknpactest.ExecCommand(topts.ParamsRun, tknpacresolve.Command, "-f", ".tekton/pr.yaml", "-p", "revision=main")
 			assert.NilError(t, err)
 
@@ -560,10 +490,37 @@ func TestGiteaWithCLIGeneratePipeline(t *testing.T) {
 	}
 }
 
+func TestGiteaCancelRun(t *testing.T) {
+	topts := &tgitea.TestOpts{
+		TargetEvent: options.PullRequestEvent,
+		YAMLFiles: map[string]string{
+			".tekton/pr.yaml": "testdata/pipelinerun_long_running.yaml",
+		},
+		ExpectEvents: false,
+	}
+	_, f := tgitea.TestPR(t, topts)
+	defer f()
+	// let pipelineRun start and then cancel it
+	time.Sleep(time.Second * 2)
+	tgitea.PostCommentOnPullRequest(t, topts, "/cancel")
+
+	waitOpts := twait.Opts{
+		RepoName:        topts.TargetNS,
+		Namespace:       topts.TargetNS,
+		MinNumberStatus: 1,
+		PollTimeout:     twait.DefaultTimeout,
+		TargetSHA:       topts.PullRequest.Head.Sha,
+	}
+	err := twait.UntilRepositoryUpdated(context.Background(), topts.ParamsRun.Clients, waitOpts)
+	assert.Error(t, err, "pipelinerun has failed")
+
+	tgitea.CheckIfPipelineRunsCancelled(t, topts)
+}
+
 func TestGiteaConcurrencyOrderedExecution(t *testing.T) {
 	topts := &tgitea.TestOpts{
 		Regexp:      successRegexp,
-		TargetEvent: triggertype.PullRequest.String(),
+		TargetEvent: options.PullRequestEvent,
 		YAMLFiles: map[string]string{
 			".tekton/pr.yaml": "testdata/pipelineruns-ordered-execution.yaml",
 		},
@@ -587,7 +544,7 @@ func TestGiteaConcurrencyOrderedExecution(t *testing.T) {
 
 func TestGiteaErrorSnippet(t *testing.T) {
 	topts := &tgitea.TestOpts{
-		TargetEvent: triggertype.PullRequest.String(),
+		TargetEvent: options.PullRequestEvent,
 		YAMLFiles: map[string]string{
 			".tekton/pr.yaml": "testdata/pipelinerun-error-snippet.yaml",
 		},
@@ -614,7 +571,7 @@ func TestGiteaErrorSnippetWithSecret(t *testing.T) {
 	assert.NilError(t, err)
 	assert.NilError(t, pacrepo.CreateNS(ctx, topts.TargetNS, topts.ParamsRun))
 	assert.NilError(t, secret.Create(ctx, topts.ParamsRun, map[string]string{"secret": "SHHHHHHH"}, topts.TargetNS, "pac-secret"))
-	topts.TargetEvent = triggertype.PullRequest.String()
+	topts.TargetEvent = options.PullRequestEvent
 	topts.YAMLFiles = map[string]string{
 		".tekton/pr.yaml": "testdata/pipelinerun-error-snippet-with-secret.yaml",
 	}
@@ -631,7 +588,7 @@ func TestGiteaErrorSnippetWithSecret(t *testing.T) {
 func TestGiteaNotExistingClusterTask(t *testing.T) {
 	topts := &tgitea.TestOpts{
 		Regexp:      regexp.MustCompile(`.*clustertasks.tekton.dev "foo-bar" not found`),
-		TargetEvent: triggertype.PullRequest.String(),
+		TargetEvent: options.PullRequestEvent,
 		YAMLFiles: map[string]string{
 			".tekton/pr.yaml": "testdata/failures/not-existing-clustertask.yaml",
 		},
@@ -647,7 +604,7 @@ func TestGiteaNotExistingClusterTask(t *testing.T) {
 // and inside the pac controller.
 func TestGiteaBadLinkOfTask(t *testing.T) {
 	topts := &tgitea.TestOpts{
-		TargetEvent: triggertype.PullRequest.String(),
+		TargetEvent: options.PullRequestEvent,
 		YAMLFiles: map[string]string{
 			".tekton/pr.yaml": "testdata/failures/bad-runafter-task.yaml",
 		},
@@ -658,114 +615,17 @@ func TestGiteaBadLinkOfTask(t *testing.T) {
 	ctx, f := tgitea.TestPR(t, topts)
 	defer f()
 	errre := regexp.MustCompile("There was an error starting the PipelineRun")
-	assert.NilError(t, twait.RegexpMatchingInControllerLog(ctx, topts.ParamsRun, *errre, 10, "controller", github.Int64(20)))
+	assert.NilError(t, twait.RegexpMatchingInControllerLog(ctx, topts.ParamsRun, *errre, 10, "controller"))
 }
 
-// TestGiteaPipelineRunWithSameName checks that we fail properly with the error from the
-// tekton pipelines controller. We check on the UI interface that we display
-// and inside the pac controller.
-func TestGiteaPipelineRunWithSameName(t *testing.T) {
-	topts := &tgitea.TestOpts{
-		TargetEvent: triggertype.PullRequest.String(),
-		YAMLFiles: map[string]string{
-			".tekton/pr1.yaml": "testdata/failures/pipelinerun_same_name_on_pull.yaml",
-			".tekton/pr2.yaml": "testdata/failures/pipelinerun_same_name_on_push.yaml",
-		},
-		CheckForStatus: "failure",
-		ExpectEvents:   true,
-		Regexp:         regexp.MustCompile(".*found multiple pipelinerun in .tekton with the same name*"),
-	}
-	ctx, f := tgitea.TestPR(t, topts)
-	defer f()
-	errre := regexp.MustCompile("found multiple pipelinerun in .tekton with the same name")
-	assert.NilError(t, twait.RegexpMatchingInControllerLog(ctx, topts.ParamsRun, *errre, 10, "controller", github.Int64(20)))
-}
+// TestGiteaParamsOnRepoCR test gitea params on CR and its filters
 
-// TestGiteaProvenanceForDefaultBranch tests the provenance feature of the PipelineRun.
-// It fetches the PipelineRun definition from the default branch of the repository
-// as configured on the git platform (e.g., main).
-func TestGiteaProvenanceForDefaultBranch(t *testing.T) {
+func TestGiteaProvenance(t *testing.T) {
 	topts := &tgitea.TestOpts{
 		SkipEventsCheck:       true,
-		TargetEvent:           triggertype.PullRequest.String(),
+		TargetEvent:           options.PullRequestEvent,
 		Settings:              &v1alpha1.Settings{PipelineRunProvenance: "default_branch"},
 		NoPullRequestCreation: true,
-	}
-	verifyProvinance(t, topts, "HELLOMOTO", "step-task", false)
-}
-
-// TestGiteaProvenanceForSource tests the provenance feature of the PipelineRun.
-// It fetches the PipelineRun definition from the source branch of where the event has been triggered.
-func TestGiteaProvenanceForSource(t *testing.T) {
-	topts := &tgitea.TestOpts{
-		SkipEventsCheck:       true,
-		TargetEvent:           triggertype.PullRequest.String(),
-		Settings:              &v1alpha1.Settings{PipelineRunProvenance: "source"},
-		NoPullRequestCreation: true,
-	}
-	verifyProvinance(t, topts, "testing provenance for source", "step-source-provenance-test", false)
-}
-
-// TestGiteaGlobalRepoProvenanceForDefaultBranch tests the provenance feature of the PipelineRun.
-// It fetches the PipelineRun definition from the default branch of the repository
-// as configured on the git platform (e.g., main).
-// In this test, the provenance is enabled using a global repository instead of a local repository.
-func TestGiteaGlobalRepoProvenanceForDefaultBranch(t *testing.T) {
-	topts := &tgitea.TestOpts{
-		SkipEventsCheck:       true,
-		TargetEvent:           triggertype.PullRequest.String(),
-		NoPullRequestCreation: true,
-		Settings:              &v1alpha1.Settings{},
-	}
-
-	verifyProvinance(t, topts, "HELLOMOTO", "step-task", true)
-}
-
-// TestGiteaGlobalAndLocalRepoProvenance verifies the provenance feature of the PipelineRun,
-// ensuring that when provenance is configured at both the global and local repository levels,
-// the local repository settings take precedence. This end-to-end test confirms that behavior.
-func TestGiteaGlobalAndLocalRepoProvenance(t *testing.T) {
-	topts := &tgitea.TestOpts{
-		SkipEventsCheck:       true,
-		TargetEvent:           triggertype.PullRequest.String(),
-		NoPullRequestCreation: true,
-		Settings: &v1alpha1.Settings{
-			PipelineRunProvenance: "source",
-		},
-	}
-
-	verifyProvinance(t, topts, "testing provenance for source", "step-source-provenance-test", true)
-}
-
-func verifyProvinance(t *testing.T, topts *tgitea.TestOpts, expectedOutput, cName string, isGlobal bool) {
-	if isGlobal {
-		ctx := context.Background()
-		topts.ParamsRun, topts.Opts, topts.GiteaCNX, _ = tgitea.Setup(ctx)
-		assert.NilError(t, topts.ParamsRun.Clients.NewClients(ctx, &topts.ParamsRun.Info))
-		topts.TargetRefName = names.SimpleNameGenerator.RestrictLengthWithRandomSuffix("pac-e2e-test")
-		topts.TargetNS = topts.TargetRefName
-		ctx, err := cctx.GetControllerCtxInfo(ctx, topts.ParamsRun)
-		assert.NilError(t, err)
-		assert.NilError(t, pacrepo.CreateNS(ctx, topts.TargetNS, topts.ParamsRun))
-
-		globalNs := info.GetNS(ctx)
-		err = tgitea.CreateCRD(ctx, topts,
-			v1alpha1.RepositorySpec{
-				Settings: &v1alpha1.Settings{
-					PipelineRunProvenance: "default_branch",
-				},
-			},
-			isGlobal)
-		assert.NilError(t, err)
-
-		defer (func() {
-			if os.Getenv("TEST_NOCLEANUP") != "true" {
-				topts.ParamsRun.Clients.Log.Infof("Cleaning up global repo %s in %s", info.DefaultGlobalRepoName, globalNs)
-				err = topts.ParamsRun.Clients.PipelineAsCode.PipelinesascodeV1alpha1().Repositories(globalNs).Delete(
-					context.Background(), info.DefaultGlobalRepoName, metav1.DeleteOptions{})
-				assert.NilError(t, err)
-			}
-		})()
 	}
 	_, f := tgitea.TestPR(t, topts)
 	defer f()
@@ -776,15 +636,14 @@ func verifyProvinance(t *testing.T, topts *tgitea.TestOpts, expectedOutput, cNam
 	topts.TargetRefName = topts.DefaultBranch
 
 	scmOpts := &scm.Opts{
-		GitURL:             topts.GitCloneURL,
-		Log:                topts.ParamsRun.Clients.Log,
-		WebURL:             topts.GitHTMLURL,
-		TargetRefName:      topts.DefaultBranch,
-		BaseRefName:        topts.DefaultBranch,
-		NoCheckOutFromBase: true,
+		GitURL:        topts.GitCloneURL,
+		Log:           topts.ParamsRun.Clients.Log,
+		WebURL:        topts.GitHTMLURL,
+		TargetRefName: topts.DefaultBranch,
+		BaseRefName:   topts.DefaultBranch,
 	}
 	scm.PushFilesToRefGit(t, scmOpts, entries)
-	prmap = map[string]string{".tekton/notgonnatobetested.yaml": "testdata/pipelinerun-provenance-test.yaml"}
+	prmap = map[string]string{"notgonnatobetested.yaml": "testdata/pipelinerun.yaml"}
 	entries, err = payload.GetEntries(prmap, topts.TargetNS, topts.DefaultBranch, topts.TargetEvent, map[string]string{})
 	assert.NilError(t, err)
 	scmOpts.TargetRefName = targetRef
@@ -800,56 +659,12 @@ func verifyProvinance(t *testing.T, topts *tgitea.TestOpts, expectedOutput, cNam
 	topts.ParamsRun.Clients.Log.Infof("PullRequest %s has been created", pr.HTMLURL)
 	topts.CheckForStatus = "success"
 	tgitea.WaitForStatus(t, topts, "heads/"+targetRef, "", false)
-
-	// check the output of the PipelineRun logs
-	err = twait.RegexpMatchingInPodLog(context.Background(), topts.ParamsRun, topts.TargetNS, "pipelinesascode.tekton.dev/event-type=pull_request", cName, *regexp.MustCompile(expectedOutput), "", 2)
-	assert.NilError(t, err)
-}
-
-// TestGiteaGlobalRepoConcurrencyLimit tests the concurrency_limit feature of the PipelineRun.
-// It fetches the PipelineRun definition from the default branch of the repository
-// as configured on the git platform (e.g., main).
-// In this test, the concurrency_limit is enabled using a global repository instead of a local repository.
-func TestGiteaGlobalRepoConcurrencyLimit(t *testing.T) {
-	numPipelines := 10
-	yamlFiles := map[string]string{}
-	for i := 0; i < numPipelines; i++ {
-		yamlFiles[fmt.Sprintf(".tekton/pr%d.yaml", i)] = "testdata/pipelinerun.yaml"
-	}
-	topts := &tgitea.TestOpts{
-		TargetEvent:          triggertype.PullRequest.String(),
-		YAMLFiles:            yamlFiles,
-		CheckForNumberStatus: numPipelines,
-		CheckForStatus:       "success",
-	}
-
-	tgitea.VerifyConcurrency(t, topts, github.Int(2))
-}
-
-// TestGiteaGlobalAndLocalRepoConcurrencyLimit verifies the concurrency_limit feature of the PipelineRun,
-// ensuring that when concurrency_limit is defined in both global and local repository,
-// the local repository limit takes precedence. This end-to-end test confirms that behavior.
-func TestGiteaGlobalAndLocalRepoConcurrencyLimit(t *testing.T) {
-	numPipelines := 10
-	yamlFiles := map[string]string{}
-	for i := 0; i < numPipelines; i++ {
-		yamlFiles[fmt.Sprintf(".tekton/pr%d.yaml", i)] = "testdata/pipelinerun.yaml"
-	}
-	topts := &tgitea.TestOpts{
-		TargetEvent:          triggertype.PullRequest.String(),
-		YAMLFiles:            yamlFiles,
-		CheckForNumberStatus: numPipelines,
-		ConcurrencyLimit:     github.Int(3),
-		CheckForStatus:       "success",
-	}
-
-	tgitea.VerifyConcurrency(t, topts, github.Int(2))
 }
 
 func TestGiteaPushToTagGreedy(t *testing.T) {
 	topts := &tgitea.TestOpts{
 		SkipEventsCheck:       true,
-		TargetEvent:           triggertype.Push.String(),
+		TargetEvent:           options.PushEvent,
 		NoPullRequestCreation: true,
 	}
 	_, f := tgitea.TestPR(t, topts)
@@ -879,7 +694,7 @@ func TestGiteaPushToTagGreedy(t *testing.T) {
 		MinNumberStatus: 0,
 		PollTimeout:     twait.DefaultTimeout,
 	}
-	_, err = twait.UntilRepositoryUpdated(context.Background(), topts.ParamsRun.Clients, waitOpts)
+	err = twait.UntilRepositoryUpdated(context.Background(), topts.ParamsRun.Clients, waitOpts)
 	assert.NilError(t, err)
 }
 
@@ -935,7 +750,7 @@ func TestGiteaClusterTasks(t *testing.T) {
 		PollTimeout:     twait.DefaultTimeout,
 		TargetSHA:       topts.PullRequest.Head.Sha,
 	}
-	_, err = twait.UntilRepositoryUpdated(context.Background(), topts.ParamsRun.Clients, waitOpts)
+	err = twait.UntilRepositoryUpdated(context.Background(), topts.ParamsRun.Clients, waitOpts)
 	assert.NilError(t, err)
 
 	topts.CheckForStatus = "success"

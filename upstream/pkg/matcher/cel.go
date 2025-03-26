@@ -14,17 +14,18 @@ import (
 	"github.com/google/cel-go/common/types/ref"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/changedfiles"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
 )
 
 const (
-	reChangedFilesTags = `files\.`
+	// Utilizing this regex, the GetFiles function will be selectively executed exclusively when the "file."
+	// property is specified within the CEL expression.
+	changedFilesTags = "files."
 )
 
 func celEvaluate(ctx context.Context, expr string, event *info.Event, vcx provider.Interface) (ref.Val, error) {
 	eventTitle := event.PullRequestTitle
-	if event.TriggerTarget == triggertype.Push {
+	if event.TriggerTarget == "push" {
 		eventTitle = event.SHATitle
 		// For push event the target_branch & source_branch info coming from payload have refs/heads/
 		// but user may or mayn't provide refs/heads/ info while giving target_branch or source_branch in CEL expression
@@ -60,7 +61,7 @@ func celEvaluate(ctx context.Context, expr string, event *info.Event, vcx provid
 		headerMap[strings.ToLower(k)] = v[0]
 	}
 
-	r := regexp.MustCompile(reChangedFilesTags)
+	r := regexp.MustCompile(changedFilesTags)
 	changedFiles := changedfiles.ChangedFiles{}
 
 	if r.MatchString(expr) {
@@ -71,7 +72,7 @@ func celEvaluate(ctx context.Context, expr string, event *info.Event, vcx provid
 	}
 
 	data := map[string]interface{}{
-		"event":         event.TriggerTarget.String(),
+		"event":         event.TriggerTarget,
 		"event_title":   eventTitle,
 		"target_branch": event.BaseBranch,
 		"source_branch": event.HeadBranch,

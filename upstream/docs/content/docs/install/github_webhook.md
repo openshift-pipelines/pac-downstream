@@ -126,7 +126,7 @@ $ tkn pac create repo
   * Add a Webhook secret or generate a random one with this command (and note it, we will need it later):
 
     ```shell
-    head -c 30 /dev/random | base64
+    openssl rand -hex 20
     ```
 
   * Click "Let me select individual events" and select these events:

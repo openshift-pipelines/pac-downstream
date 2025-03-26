@@ -14,12 +14,11 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/settings"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
 	"github.com/spf13/cobra"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-var eventTypes = map[string]string{triggertype.PullRequest.String(): "Pull Request", "push": "Push to a Branch or a Tag"}
+var eventTypes = map[string]string{"pull_request": "Pull Request", "push": "Push to a Branch or a Tag"}
 
 const (
 	gitCloneClusterTaskName = "git-clone"
@@ -58,7 +57,7 @@ func Command(run *params.Run, ioStreams *cli.IOStreams) *cobra.Command {
 		Use:     "generate",
 		Aliases: []string{"gen"},
 		Short:   "Generate PipelineRun",
-		RunE: func(_ *cobra.Command, _ []string) error {
+		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := context.Background()
 			gopt.CLIOpts = cli.NewCliOptions()
 			gopt.IOStreams.SetColorEnabled(!gopt.CLIOpts.NoColoring)
@@ -92,7 +91,7 @@ func Command(run *params.Run, ioStreams *cli.IOStreams) *cobra.Command {
 		},
 	}
 	cmd.PersistentFlags().StringVar(&gopt.Event.BaseBranch, "branch", "",
-		"The target branch for the PipelineRun to handle (eg: main, nightly)")
+		"The target branch of the repository  event to handle (eg: main, nightly)")
 	cmd.PersistentFlags().StringVar(&gopt.Event.EventType, "event-type", "",
 		"The event type of the repository event to handle (eg: pull_request, push)")
 	cmd.PersistentFlags().StringVar(&gopt.pipelineRunName, "pipeline-name", "",
@@ -163,7 +162,7 @@ func (o *Opts) branchOrTag() error {
 
 	o.Event.BaseBranch = mainBranch
 
-	if o.Event.EventType == triggertype.PullRequest.String() {
+	if o.Event.EventType == "pull_request" {
 		msg = "Enter the target GIT branch for the Pull Request (default: %s): "
 	} else if o.Event.EventType == "push" {
 		msg = "Enter a target GIT branch or a tag for the push (default: %s)"

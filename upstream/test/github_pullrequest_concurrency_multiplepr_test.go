@@ -12,8 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/go-github/v64/github"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
+	"github.com/google/go-github/v56/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/random"
 	tgithub "github.com/openshift-pipelines/pipelines-as-code/test/pkg/github"
 	"github.com/openshift-pipelines/pipelines-as-code/test/pkg/options"
@@ -56,7 +55,7 @@ func TestGithubSecondPullRequestConcurrencyMultiplePR(t *testing.T) {
 	err = tgithub.CreateCRD(ctx, t, repoinfo, runcnx, opts, targetNS)
 	assert.NilError(t, err)
 
-	allPullRequests := []tgithub.PRTest{}
+	allPullRequests := []int{}
 	for prc := 0; prc < numberOfPullRequest; prc++ {
 		branchName := names.SimpleNameGenerator.RestrictLengthWithRandomSuffix("branch")
 		logmsg := fmt.Sprintf("Testing %s with Github APPS integration branch %s namespace %s", label, branchName, targetNS)
@@ -66,7 +65,7 @@ func TestGithubSecondPullRequestConcurrencyMultiplePR(t *testing.T) {
 			yamlFiles[fmt.Sprintf(".tekton/prlongrunnning-%s-%d.yaml", randomAlphaString, i)] = "testdata/pipelinerun_long_running_maxkeep_run.yaml"
 		}
 
-		entries, err := payload.GetEntries(yamlFiles, targetNS, options.MainBranch, triggertype.PullRequest.String(), map[string]string{
+		entries, err := payload.GetEntries(yamlFiles, targetNS, options.MainBranch, "pull_request", map[string]string{
 			"MaxKeepRun": fmt.Sprint(maxKeepRun),
 		})
 		assert.NilError(t, err)
@@ -82,25 +81,16 @@ func TestGithubSecondPullRequestConcurrencyMultiplePR(t *testing.T) {
 		prNumber, err := tgithub.PRCreate(ctx, runcnx, ghcnx, opts.Organization, opts.Repo, targetRefName, repoinfo.GetDefaultBranch(), logmsg)
 		assert.NilError(t, err)
 
-		g := tgithub.PRTest{
-			Cnx:           runcnx,
-			Options:       opts,
-			Provider:      ghcnx,
-			TargetRefName: targetRefName,
-			PRNumber:      prNumber,
-			SHA:           sha,
-			Logger:        runcnx.Clients.Log,
-		}
-		defer g.TearDown(ctx, t)
-		allPullRequests = append(allPullRequests, g)
+		defer tgithub.TearDown(ctx, t, runcnx, ghcnx, prNumber, targetRefName, targetNS, opts)
+		allPullRequests = append(allPullRequests, prNumber)
 	}
 
 	// send some retest to spice things up on concurrency and test the maxKeepRun
 	for i := 0; i < numberOfRetests; i++ {
-		for _, g := range allPullRequests {
-			_, _, err := g.Provider.Client.Issues.CreateComment(ctx,
-				g.Options.Organization,
-				g.Options.Repo, g.PRNumber,
+		for _, prNumber := range allPullRequests {
+			_, _, err := ghcnx.Client.Issues.CreateComment(ctx,
+				opts.Organization,
+				opts.Repo, prNumber,
 				&github.IssueComment{Body: github.String("/retest")})
 			assert.NilError(t, err)
 		}
@@ -137,11 +127,7 @@ func TestGithubSecondPullRequestConcurrencyMultiplePR(t *testing.T) {
 
 	prs, err := runcnx.Clients.Tekton.TektonV1().PipelineRuns(targetNS).List(ctx, metav1.ListOptions{})
 	assert.NilError(t, err)
-	allPipelineRunsNamesAndStatus := []string{}
-	for _, pr := range prs.Items {
-		allPipelineRunsNamesAndStatus = append(allPipelineRunsNamesAndStatus, fmt.Sprintf("%s %s", pr.Name, pr.Status.GetConditions()))
-	}
-	assert.Equal(t, len(prs.Items), allPipelinesRunAfterCleanUp, "we should have had %d kept after cleanup, we got %d: %v", allPipelinesRunAfterCleanUp, len(prs.Items), allPipelineRunsNamesAndStatus)
+	assert.Equal(t, len(prs.Items), allPipelinesRunAfterCleanUp, "we should have had %d kept after cleanup, we got %d", allPipelinesRunAfterCleanUp, len(prs.Items))
 
 	runcnx.Clients.Log.Infof("success: number of cleaned PR is %d we expected to have %d after the cleanup", len(prs.Items), allPipelinesRunAfterCleanUp)
 

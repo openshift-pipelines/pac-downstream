@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/google/go-github/v64/github"
+	"github.com/google/go-github/v56/github"
 	"github.com/jonboulle/clockwork"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
@@ -191,9 +191,15 @@ func TestReconciler_ReconcileKind(t *testing.T) {
 						PipelineAsCode: stdata.PipelineAsCode,
 						Tekton:         stdata.Pipeline,
 						Kube:           stdata.Kube,
+						ConsoleUI:      consoleui.FallBackConsole{},
 					},
 					Info: info.Info{
-						Kube: &info.KubeOpts{},
+						Pac: &info.PacOpts{
+							Settings: &settings.Settings{
+								ErrorLogSnippet:    true,
+								SecretAutoCreation: true,
+							},
+						},
 						Controller: &info.ControllerInfo{
 							Secret: secretName,
 						},
@@ -210,19 +216,11 @@ func TestReconciler_ReconcileKind(t *testing.T) {
 				},
 				metrics: metrics,
 			}
-			r.run.Clients.SetConsoleUI(consoleui.FallBackConsole{})
-			pacInfo := &info.PacOpts{
-				Settings: settings.Settings{
-					ErrorLogSnippet:    true,
-					SecretAutoCreation: true,
-				},
-			}
-			vcx.SetPacInfo(pacInfo)
 
 			event := buildEventFromPipelineRun(pr)
 			testSetupGHReplies(t, mux, event, tt.checkRunID, tt.finalStatus)
 
-			_, err = r.reportFinalStatus(ctx, fakelogger, pacInfo, event, pr, vcx)
+			_, err = r.reportFinalStatus(ctx, fakelogger, event, pr, vcx)
 			assert.NilError(t, err)
 
 			got, err := stdata.Pipeline.TektonV1().PipelineRuns(pr.Namespace).Get(ctx, pr.Name, metav1.GetOptions{})

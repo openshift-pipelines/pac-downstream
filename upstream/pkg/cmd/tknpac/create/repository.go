@@ -51,7 +51,7 @@ func repositoryCommand(run *params.Run, ioStreams *cli.IOStreams) *cobra.Command
 		Use:     "repository",
 		Aliases: []string{"repo"},
 		Short:   "Create a repository",
-		RunE: func(_ *cobra.Command, _ []string) error {
+		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := context.Background()
 			createOpts.IoStreams = ioStreams
 			createOpts.cliOpts = cli.NewCliOptions()
@@ -136,7 +136,6 @@ func (r *RepoOptions) generateTemplate(gopt *generate.Opts) error {
 	// defaulting the values for repo create command
 	gopt.Event.EventType = "pull_request, push"
 	gopt.Event.BaseBranch = "main"
-	gopt.Event.URL = r.Event.URL
 
 	return generate.Generate(gopt, false)
 }

@@ -14,13 +14,10 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/changedfiles"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/events"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/opscomments"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
 	"go.uber.org/zap"
-	"gopkg.in/yaml.v2"
 )
 
 const (
@@ -46,7 +43,6 @@ var _ provider.Interface = (*Provider)(nil)
 type Provider struct {
 	Client           *gitea.Client
 	Logger           *zap.SugaredLogger
-	pacInfo          *info.PacOpts
 	Token            *string
 	giteaInstanceURL string
 	// only exposed for e2e tests
@@ -54,10 +50,6 @@ type Provider struct {
 	repo         *v1alpha1.Repository
 	eventEmitter *events.EventEmitter
 	run          *params.Run
-}
-
-func (v *Provider) SetPacInfo(pacInfo *info.PacOpts) {
-	v.pacInfo = pacInfo
 }
 
 // GetTaskURI TODO: Implement ME.
@@ -147,9 +139,9 @@ func (v *Provider) CreateStatus(_ context.Context, event *info.Event, statusOpts
 		onPr = fmt.Sprintf("/%s", statusOpts.PipelineRunName)
 	}
 	// gitea show weirdly the <br>
-	statusOpts.Summary = fmt.Sprintf("%s%s %s", v.pacInfo.ApplicationName, onPr, statusOpts.Summary)
+	statusOpts.Summary = fmt.Sprintf("%s%s %s", v.run.Info.Pac.ApplicationName, onPr, statusOpts.Summary)
 
-	return v.createStatusCommit(event, v.pacInfo, statusOpts)
+	return v.createStatusCommit(event, v.run.Info.Pac, statusOpts)
 }
 
 func (v *Provider) createStatusCommit(event *info.Event, pacopts *info.PacOpts, status provider.StatusOpts) error {
@@ -175,16 +167,8 @@ func (v *Provider) createStatusCommit(event *info.Event, pacopts *info.PacOpts, 
 	if _, _, err := v.Client.CreateStatus(event.Organization, event.Repository, event.SHA, gStatus); err != nil {
 		return err
 	}
-	eventType := event.EventType
-	if eventType == triggertype.OkToTest.String() || eventType == triggertype.Retest.String() ||
-		eventType == triggertype.Cancel.String() {
-		eventType = triggertype.PullRequest.String()
-	}
-	if opscomments.IsAnyOpsEventType(eventType) {
-		eventType = triggertype.PullRequest.String()
-	}
 
-	if status.Text != "" && (eventType == triggertype.PullRequest.String() || event.TriggerTarget == triggertype.PullRequest) {
+	if status.Text != "" && event.EventType == "pull_request" {
 		status.Text = strings.ReplaceAll(strings.TrimSpace(status.Text), "<br>", "\n")
 		_, _, err := v.Client.CreateIssueComment(event.Organization, event.Repository,
 			int64(event.PullRequestNumber), gitea.CreateIssueCommentOption{
@@ -257,11 +241,6 @@ func (v *Provider) concatAllYamlFiles(objects []gitea.GitEntry, event *info.Even
 			data, err := v.getObject(value.SHA, event)
 			if err != nil {
 				return "", err
-			}
-			// validate yaml
-			var i any
-			if err := yaml.Unmarshal(data, &i); err != nil {
-				return "", fmt.Errorf("error unmarshalling yaml file %s: %w", value.Path, err)
 			}
 			if allTemplates != "" && !strings.HasPrefix(string(data), "---") {
 				allTemplates += "---"
@@ -357,9 +336,8 @@ type PushPayload struct {
 func (v *Provider) GetFiles(_ context.Context, runevent *info.Event) (changedfiles.ChangedFiles, error) {
 	changedFiles := changedfiles.ChangedFiles{}
 
-	//nolint:exhaustive // we don't need to handle all cases
 	switch runevent.TriggerTarget {
-	case triggertype.PullRequest:
+	case "pull_request":
 		opt := gitea.ListPullRequestFilesOptions{ListOptions: gitea.ListOptions{Page: 1, PageSize: 50}}
 		shouldGetNextPage := false
 		for {
@@ -388,7 +366,7 @@ func (v *Provider) GetFiles(_ context.Context, runevent *info.Event) (changedfil
 				break
 			}
 		}
-	case triggertype.Push:
+	case "push":
 		pushPayload := PushPayload{}
 		err := json.Unmarshal(runevent.Request.Payload, &pushPayload)
 		if err != nil {

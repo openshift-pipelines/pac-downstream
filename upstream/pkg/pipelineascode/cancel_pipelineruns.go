@@ -10,7 +10,6 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/formatting"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
 	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 	"go.uber.org/zap"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -30,7 +29,7 @@ func (p *PacRun) cancelPipelineRuns(ctx context.Context, repo *v1alpha1.Reposito
 		keys.SHA:           formatting.CleanValueKubernetes(p.event.SHA),
 	})
 
-	if p.event.TriggerTarget == triggertype.PullRequest {
+	if p.event.TriggerTarget == "pull_request" {
 		labelSelector = getLabelSelector(map[string]string{
 			keys.PullRequest: strconv.Itoa(p.event.PullRequestNumber),
 		})

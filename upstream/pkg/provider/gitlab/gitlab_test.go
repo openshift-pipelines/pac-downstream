@@ -9,15 +9,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/events"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/clients"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/settings"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
 	thelp "github.com/openshift-pipelines/pipelines-as-code/pkg/provider/gitlab/test"
-	testclient "github.com/openshift-pipelines/pipelines-as-code/pkg/test/clients"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/test/logger"
 	"github.com/xanzy/go-gitlab"
 	"go.uber.org/zap"
 	zapobserver "go.uber.org/zap/zaptest/observer"
@@ -172,22 +167,9 @@ func TestCreateStatus(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx, _ := rtesting.SetupFakeContext(t)
-			logger, _ := logger.GetLogger()
-			stdata, _ := testclient.SeedTestData(t, ctx, testclient.Data{})
-			run := &params.Run{
-				Clients: clients.Clients{
-					Kube: stdata.Kube,
-				},
-			}
 			v := &Provider{
 				targetProjectID: tt.fields.targetProjectID,
 				run:             params.New(),
-				pacInfo: &info.PacOpts{
-					Settings: settings.Settings{
-						ApplicationName: settings.PACApplicationNameDefaultValue,
-					},
-				},
-				eventEmitter: events.NewEventEmitter(run.Clients.Kube, logger),
 			}
 			if tt.args.event == nil {
 				tt.args.event = info.NewEvent()
@@ -289,14 +271,14 @@ func TestGetTektonDir(t *testing.T) {
 		fields               fields
 		args                 args
 		wantStr              string
-		wantErr              string
+		wantErr              bool
 		wantClient           bool
 		prcontent            string
 		filterMessageSnippet string
 	}{
 		{
 			name:    "no client set",
-			wantErr: noClientErrStr,
+			wantErr: true,
 		},
 		{
 			name:       "not found, no err",
@@ -306,15 +288,11 @@ func TestGetTektonDir(t *testing.T) {
 		{
 			name:       "bad yaml",
 			wantClient: true,
-			args: args{
-				event: &info.Event{SHA: "abcd", HeadBranch: "main"},
-				path:  ".tekton",
-			},
+			args:       args{event: &info.Event{SHA: "abcd", HeadBranch: "main"}},
 			fields: fields{
 				sourceProjectID: 10,
 			},
-			prcontent: "bad:\n- yaml\nfoo",
-			wantErr:   "error unmarshalling yaml file pr.yaml: yaml: line 4: could not find expected ':'",
+			prcontent: "bad yaml",
 		},
 		{
 			name:      "list tekton dir",
@@ -390,9 +368,8 @@ func TestGetTektonDir(t *testing.T) {
 			}
 
 			got, err := v.GetTektonDir(ctx, tt.args.event, tt.args.path, tt.args.provenance)
-			if tt.wantErr != "" {
-				assert.Assert(t, err != nil, "expected error %s, got %v", tt.wantErr, err)
-				assert.Equal(t, err.Error(), tt.wantErr)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("GetTektonDir() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
 			if tt.wantStr != "" {
@@ -420,7 +397,7 @@ func TestGetFileInsideRepo(t *testing.T) {
 		Client:          client,
 	}
 	thelp.MuxListTektonDir(t, mux, v.sourceProjectID, event.HeadBranch, content)
-	got, err := v.GetFileInsideRepo(ctx, event, "pr.yaml", "")
+	got, err := v.GetFileInsideRepo(ctx, event, ".tekton/subtree/pr.yaml", "")
 	assert.NilError(t, err)
 	assert.Equal(t, content, got)
 
@@ -484,16 +461,14 @@ func TestValidate(t *testing.T) {
 
 func TestGetFiles(t *testing.T) {
 	tests := []struct {
-		name                             string
-		event                            *info.Event
-		mrchanges                        []*gitlab.MergeRequestDiff
-		pushChanges                      []*gitlab.Diff
-		wantAddedFilesCount              int
-		wantDeletedFilesCount            int
-		wantModifiedFilesCount           int
-		wantRenamedFilesCount            int
-		sourceProjectID, targetProjectID int
-		wantError                        bool
+		name                   string
+		event                  *info.Event
+		mrchanges              *gitlab.MergeRequest
+		pushChanges            []*gitlab.Diff
+		wantAddedFilesCount    int
+		wantDeletedFilesCount  int
+		wantModifiedFilesCount int
+		wantRenamedFilesCount  int
 	}{
 		{
 			name: "pull-request",
@@ -503,60 +478,29 @@ func TestGetFiles(t *testing.T) {
 				Repository:        "pullrequestrepository",
 				PullRequestNumber: 10,
 			},
-			mrchanges: []*gitlab.MergeRequestDiff{
-				{
-					NewPath: "modified.yaml",
-				},
-				{
-					NewPath: "added.doc",
-					NewFile: true,
-				},
-				{
-					NewPath:     "removed.yaml",
-					DeletedFile: true,
-				},
-				{
-					NewPath:     "renamed.doc",
-					RenamedFile: true,
+			mrchanges: &gitlab.MergeRequest{
+				Changes: []*gitlab.MergeRequestDiff{
+					{
+						NewPath: "modified.yaml",
+					},
+					{
+						NewPath: "added.doc",
+						NewFile: true,
+					},
+					{
+						NewPath:     "removed.yaml",
+						DeletedFile: true,
+					},
+					{
+						NewPath:     "renamed.doc",
+						RenamedFile: true,
+					},
 				},
 			},
 			wantAddedFilesCount:    1,
 			wantDeletedFilesCount:  1,
 			wantModifiedFilesCount: 1,
 			wantRenamedFilesCount:  1,
-			targetProjectID:        10,
-		},
-		{
-			name: "pull-request with wrong project ID",
-			event: &info.Event{
-				TriggerTarget:     "pull_request",
-				Organization:      "pullrequestowner",
-				Repository:        "pullrequestrepository",
-				PullRequestNumber: 10,
-			},
-			mrchanges: []*gitlab.MergeRequestDiff{
-				{
-					NewPath: "modified.yaml",
-				},
-				{
-					NewPath: "added.doc",
-					NewFile: true,
-				},
-				{
-					NewPath:     "removed.yaml",
-					DeletedFile: true,
-				},
-				{
-					NewPath:     "renamed.doc",
-					RenamedFile: true,
-				},
-			},
-			wantAddedFilesCount:    0,
-			wantDeletedFilesCount:  0,
-			wantModifiedFilesCount: 0,
-			wantRenamedFilesCount:  0,
-			targetProjectID:        12,
-			wantError:              true,
 		},
 		{
 			name: "push",
@@ -587,7 +531,6 @@ func TestGetFiles(t *testing.T) {
 			wantDeletedFilesCount:  1,
 			wantModifiedFilesCount: 1,
 			wantRenamedFilesCount:  1,
-			sourceProjectID:        0,
 		},
 	}
 	for _, tt := range tests {
@@ -595,26 +538,28 @@ func TestGetFiles(t *testing.T) {
 			ctx, _ := rtesting.SetupFakeContext(t)
 			fakeclient, mux, teardown := thelp.Setup(t)
 			defer teardown()
-			mergeFileChanges := []*gitlab.MergeRequestDiff{
-				{
-					NewPath: "modified.yaml",
-				},
-				{
-					NewPath: "added.doc",
-					NewFile: true,
-				},
-				{
-					NewPath:     "removed.yaml",
-					DeletedFile: true,
-				},
-				{
-					NewPath:     "renamed.doc",
-					RenamedFile: true,
+			mergeFileChanges := &gitlab.MergeRequest{
+				Changes: []*gitlab.MergeRequestDiff{
+					{
+						NewPath: "modified.yaml",
+					},
+					{
+						NewPath: "added.doc",
+						NewFile: true,
+					},
+					{
+						NewPath:     "removed.yaml",
+						DeletedFile: true,
+					},
+					{
+						NewPath:     "renamed.doc",
+						RenamedFile: true,
+					},
 				},
 			}
 			if tt.event.TriggerTarget == "pull_request" {
-				mux.HandleFunc(fmt.Sprintf("/projects/10/merge_requests/%d/diffs",
-					tt.event.PullRequestNumber), func(rw http.ResponseWriter, _ *http.Request) {
+				mux.HandleFunc(fmt.Sprintf("/projects/0/merge_requests/%d/changes",
+					tt.event.PullRequestNumber), func(rw http.ResponseWriter, r *http.Request) {
 					jeez, err := json.Marshal(mergeFileChanges)
 					assert.NilError(t, err)
 					_, _ = rw.Write(jeez)
@@ -639,18 +584,16 @@ func TestGetFiles(t *testing.T) {
 			}
 			if tt.event.TriggerTarget == "push" {
 				mux.HandleFunc(fmt.Sprintf("/projects/0/repository/commits/%s/diff", tt.event.SHA),
-					func(rw http.ResponseWriter, _ *http.Request) {
+					func(rw http.ResponseWriter, r *http.Request) {
 						jeez, err := json.Marshal(pushFileChanges)
 						assert.NilError(t, err)
 						_, _ = rw.Write(jeez)
 					})
 			}
 
-			providerInfo := &Provider{Client: fakeclient, sourceProjectID: tt.sourceProjectID, targetProjectID: tt.targetProjectID}
+			providerInfo := &Provider{Client: fakeclient}
 			changedFiles, err := providerInfo.GetFiles(ctx, tt.event)
-			if tt.wantError != true {
-				assert.NilError(t, err, nil)
-			}
+			assert.NilError(t, err, nil)
 			assert.Equal(t, tt.wantAddedFilesCount, len(changedFiles.Added))
 			assert.Equal(t, tt.wantDeletedFilesCount, len(changedFiles.Deleted))
 			assert.Equal(t, tt.wantModifiedFilesCount, len(changedFiles.Modified))
@@ -658,7 +601,7 @@ func TestGetFiles(t *testing.T) {
 
 			if tt.event.TriggerTarget == "pull_request" {
 				for i := range changedFiles.All {
-					assert.Equal(t, tt.mrchanges[i].NewPath, changedFiles.All[i])
+					assert.Equal(t, tt.mrchanges.Changes[i].NewPath, changedFiles.All[i])
 				}
 			}
 			if tt.event.TriggerTarget == "push" {

@@ -74,7 +74,7 @@ func Command(run *params.Run, streams *cli.IOStreams) *cobra.Command {
 		Use:   "resolve",
 		Long:  longhelp,
 		Short: "Resolve PipelineRun the same way its run on CI",
-		RunE: func(_ *cobra.Command, _ []string) error {
+		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := context.Background()
 
 			errc := run.Clients.NewClients(ctx, &run.Info)
@@ -97,14 +97,14 @@ func Command(run *params.Run, streams *cli.IOStreams) *cobra.Command {
 				}
 			} else {
 				// it's OK  if pac is not installed, ignore the error
-				_ = run.UpdatePacConfig(ctx)
+				_ = run.UpdatePACInfo(ctx)
 			}
 
 			if len(filenames) == 0 {
 				return fmt.Errorf("you need to at least specify a file with -f")
 			}
 
-			if err := settings.SyncConfig(run.Clients.Log, &run.Info.Pac.Settings, map[string]string{}, settings.DefaultValidators()); err != nil {
+			if err := settings.ConfigToSettings(run.Clients.Log, run.Info.Pac.Settings, map[string]string{}); err != nil {
 				return err
 			}
 
@@ -268,7 +268,7 @@ func listAllYamls(paths []string) []string {
 			ret = append(ret, path)
 			continue
 		}
-		err := filepath.Walk(path, func(fname string, _ os.FileInfo, _ error) error {
+		err := filepath.Walk(path, func(fname string, fi os.FileInfo, err error) error {
 			if filepath.Ext(fname) == ".yaml" {
 				ret = append(ret, fname)
 			}

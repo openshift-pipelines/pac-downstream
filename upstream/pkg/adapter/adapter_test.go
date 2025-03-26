@@ -8,17 +8,13 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/google/go-github/v64/github"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
+	"github.com/google/go-github/v56/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/clients"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/settings"
 	testclient "github.com/openshift-pipelines/pipelines-as-code/pkg/test/clients"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/test/logger"
-	testnewrepo "github.com/openshift-pipelines/pipelines-as-code/pkg/test/repository"
-	tektontest "github.com/openshift-pipelines/pipelines-as-code/pkg/test/tekton"
-	pipelinev1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -42,7 +38,7 @@ func TestHandleEvent(t *testing.T) {
 			},
 		},
 	})
-	logger, logCatcher := logger.GetLogger()
+	logger, _ := logger.GetLogger()
 
 	ctx = info.StoreCurrentControllerName(ctx, "default")
 	ctx = info.StoreNS(ctx, "default")
@@ -57,66 +53,31 @@ func TestHandleEvent(t *testing.T) {
 		},
 	})
 	dynClient := dynamicfake.NewSimpleDynamicClient(runtime.NewScheme(), emptys)
-	repositories := []*v1alpha1.Repository{
-		testnewrepo.NewRepo(
-			testnewrepo.RepoTestcreationOpts{
-				Name:             "pipelines-as-code",
-				URL:              "https://nowhere.com",
-				InstallNamespace: "pipelines-as-code",
-			},
-		),
-	}
-
-	tdata := testclient.Data{
-		Namespaces: []*corev1.Namespace{
-			{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "namespace",
-				},
-			},
-		},
-		Repositories: repositories,
-		PipelineRuns: []*pipelinev1.PipelineRun{
-			tektontest.MakePRStatus("namespace", "force-me", []pipelinev1.ChildStatusReference{
-				tektontest.MakeChildStatusReference("first"),
-				tektontest.MakeChildStatusReference("last"),
-				tektontest.MakeChildStatusReference("middle"),
-			}, nil),
-		},
-	}
-	stdata, _ := testclient.SeedTestData(t, ctx, tdata)
 	l := listener{
 		run: &params.Run{
 			Clients: clients.Clients{
-				PipelineAsCode: stdata.PipelineAsCode,
+				PipelineAsCode: cs.PipelineAsCode,
 				Log:            logger,
 				Kube:           cs.Kube,
 				Dynamic:        dynClient,
 			},
 			Info: info.Info{
 				Pac: &info.PacOpts{
-					Settings: settings.Settings{
+					Settings: &settings.Settings{
 						AutoConfigureNewGitHubRepo: false,
 					},
 				},
 				Controller: &info.ControllerInfo{
-					Configmap:        info.DefaultPipelinesAscodeConfigmapName,
-					Secret:           info.DefaultPipelinesAscodeSecretName,
-					GlobalRepository: info.DefaultGlobalRepoName,
-				},
-				Kube: &info.KubeOpts{
-					// TODO: we should use a global for that
-					Namespace: "pipelines-as-code",
+					Configmap: info.DefaultPipelinesAscodeConfigmapName,
+					Secret:    info.DefaultPipelinesAscodeSecretName,
 				},
 			},
 		},
 		logger: logger,
 	}
-	l.run.Clients.InitClients()
-	l.run.Info.InitInfo()
 
 	// valid push event
-	testEvent := github.PushEvent{Pusher: &github.CommitAuthor{Name: github.String("user")}}
+	testEvent := github.PushEvent{Pusher: &github.User{ID: github.Int64(101)}}
 	event, err := json.Marshal(testEvent)
 	assert.NilError(t, err)
 
@@ -125,12 +86,11 @@ func TestHandleEvent(t *testing.T) {
 	assert.NilError(t, err)
 
 	tests := []struct {
-		name           string
-		event          []byte
-		eventType      string
-		requestType    string
-		statusCode     int
-		wantLogSnippet string
+		name        string
+		event       []byte
+		eventType   string
+		requestType string
+		statusCode  int
 	}{
 		{
 			name:        "get http call",
@@ -156,14 +116,6 @@ func TestHandleEvent(t *testing.T) {
 			eventType:   "push",
 			event:       event,
 			statusCode:  202,
-		},
-		{
-			name:           "detected global repository",
-			requestType:    "POST",
-			eventType:      "push",
-			event:          event,
-			statusCode:     202,
-			wantLogSnippet: "detected global repository settings named pipelines-as-code in namespace pipelines-as-code",
 		},
 		{
 			name:        "skip event",
@@ -201,9 +153,6 @@ func TestHandleEvent(t *testing.T) {
 			}
 			defer resp.Body.Close()
 
-			if tn.wantLogSnippet != "" {
-				assert.Assert(t, logCatcher.FilterMessageSnippet(tn.wantLogSnippet).Len() > 0, logCatcher.All())
-			}
 			if resp.StatusCode != tn.statusCode {
 				t.Fatalf("expected status code : %v but got %v ", tn.statusCode, resp.StatusCode)
 			}
@@ -229,7 +178,7 @@ func TestWhichProvider(t *testing.T) {
 				"X-GitHub-Delivery": {"abcd"},
 			},
 			event: github.PushEvent{
-				Pusher: &github.CommitAuthor{Name: github.String("user")},
+				Pusher: &github.User{ID: github.Int64(123)},
 			},
 		},
 		{

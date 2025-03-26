@@ -5,7 +5,6 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/kubeinteraction"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
@@ -15,14 +14,12 @@ import (
 )
 
 type sinker struct {
-	run        *params.Run
-	vcx        provider.Interface
-	kint       kubeinteraction.Interface
-	event      *info.Event
-	logger     *zap.SugaredLogger
-	payload    []byte
-	pacInfo    *info.PacOpts
-	globalRepo *v1alpha1.Repository
+	run     *params.Run
+	vcx     provider.Interface
+	kint    kubeinteraction.Interface
+	event   *info.Event
+	logger  *zap.SugaredLogger
+	payload []byte
 }
 
 func (s *sinker) processEventPayload(ctx context.Context, request *http.Request) error {
@@ -45,6 +42,7 @@ func (s *sinker) processEventPayload(ctx context.Context, request *http.Request)
 }
 
 func (s *sinker) processEvent(ctx context.Context, request *http.Request) error {
+	// TODO(chmouel): Add E2E Test for incoming test on GHE when #1518 is merged
 	if s.event.EventType == "incoming" {
 		if request.Header.Get("X-GitHub-Enterprise-Host") != "" {
 			s.event.Provider.URL = request.Header.Get("X-GitHub-Enterprise-Host")
@@ -56,6 +54,6 @@ func (s *sinker) processEvent(ctx context.Context, request *http.Request) error 
 		}
 	}
 
-	p := pipelineascode.NewPacs(s.event, s.vcx, s.run, s.pacInfo, s.kint, s.logger, s.globalRepo)
+	p := pipelineascode.NewPacs(s.event, s.vcx, s.run, s.kint, s.logger)
 	return p.Run(ctx)
 }

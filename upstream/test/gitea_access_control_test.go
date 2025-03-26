@@ -12,10 +12,10 @@ import (
 
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/settings"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
 	"github.com/openshift-pipelines/pipelines-as-code/test/pkg/cctx"
 	"github.com/openshift-pipelines/pipelines-as-code/test/pkg/configmap"
 	tgitea "github.com/openshift-pipelines/pipelines-as-code/test/pkg/gitea"
+	"github.com/openshift-pipelines/pipelines-as-code/test/pkg/options"
 	"github.com/openshift-pipelines/pipelines-as-code/test/pkg/payload"
 	"github.com/openshift-pipelines/pipelines-as-code/test/pkg/scm"
 	twait "github.com/openshift-pipelines/pipelines-as-code/test/pkg/wait"
@@ -41,7 +41,7 @@ func TestGiteaPolicyPullRequest(t *testing.T) {
 		OnOrg:                true,
 		SkipEventsCheck:      true,
 		CheckForNumberStatus: 2,
-		TargetEvent:          triggertype.PullRequest.String(),
+		TargetEvent:          options.PullRequestEvent,
 		Settings: &v1alpha1.Settings{
 			Policy: &v1alpha1.Policy{
 				PullRequest: []string{"pull_requester"},
@@ -51,7 +51,6 @@ func TestGiteaPolicyPullRequest(t *testing.T) {
 	}
 	_, f := tgitea.TestPR(t, topts)
 	defer f()
-	adminCnx := topts.GiteaCNX
 
 	topts.ParamsRun.Clients.Log.Infof("Repo CRD %s has been created with Policy: %+v", topts.TargetRefName, topts.Settings.Policy)
 
@@ -85,7 +84,6 @@ func TestGiteaPolicyPullRequest(t *testing.T) {
 	tgitea.CreateForkPullRequest(t, topts, pullRequesterUserCnx, "")
 	topts.Regexp = successRegexp
 	tgitea.WaitForPullRequestCommentMatch(t, topts)
-	topts.GiteaCNX = adminCnx
 }
 
 // TestGiteaPolicyOkToTestRetest test the ok-to-test and retest policy
@@ -104,7 +102,7 @@ func TestGiteaPolicyOkToTestRetest(t *testing.T) {
 	topts := &tgitea.TestOpts{
 		OnOrg:           true,
 		SkipEventsCheck: true,
-		TargetEvent:     triggertype.PullRequest.String(),
+		TargetEvent:     options.PullRequestEvent,
 		Settings: &v1alpha1.Settings{
 			Policy: &v1alpha1.Policy{
 				OkToTest: []string{"ok-to-test"},
@@ -114,7 +112,6 @@ func TestGiteaPolicyOkToTestRetest(t *testing.T) {
 	}
 	_, f := tgitea.TestPR(t, topts)
 	defer f()
-	adminCnx := topts.GiteaCNX
 	topts.ParamsRun.Clients.Log.Infof("Repo CRD %s has been created with Policy: %+v", topts.TargetRefName, topts.Settings.Policy)
 
 	orgName := "org-" + topts.TargetRefName
@@ -142,7 +139,7 @@ func TestGiteaPolicyOkToTestRetest(t *testing.T) {
 	topts.GiteaCNX = normalUserCnx
 	tgitea.PostCommentOnPullRequest(t, topts, okToTestComment)
 	topts.CheckForStatus = "Skipped"
-	topts.Regexp = regexp.MustCompile(fmt.Sprintf(".*User %s is not allowed to trigger CI via pull_request on this repo.", normalUser.UserName))
+	topts.Regexp = regexp.MustCompile(fmt.Sprintf("User %s is not allowed to run CI on this repo.", normalUser.UserName))
 	tgitea.WaitForPullRequestCommentMatch(t, topts)
 
 	topts.ParamsRun.Clients.Log.Infof("Sending a /retest comment as a user not belonging to an allowed team in Repo CR policy but part of the organization")
@@ -168,13 +165,12 @@ func TestGiteaPolicyOkToTestRetest(t *testing.T) {
 	// failure without the prun and the new one with the prun on success same
 	// bug we have github checkrun that we need to fix
 	tgitea.WaitForStatus(t, topts, "heads/"+topts.TargetRefName, fmt.Sprintf("%s / %s", settings.PACApplicationNameDefaultValue, generatename), true)
-	topts.GiteaCNX = adminCnx
 }
 
 // TestGiteaACLOrgAllowed tests that the policy check works when the user is part of an allowed org.
 func TestGiteaACLOrgAllowed(t *testing.T) {
 	topts := &tgitea.TestOpts{
-		TargetEvent: triggertype.PullRequest.String(),
+		TargetEvent: options.PullRequestEvent,
 		YAMLFiles: map[string]string{
 			".tekton/pr.yaml": "testdata/pipelinerun.yaml",
 		},
@@ -183,20 +179,18 @@ func TestGiteaACLOrgAllowed(t *testing.T) {
 	}
 	_, f := tgitea.TestPR(t, topts)
 	defer f()
-	adminCnx := topts.GiteaCNX
 	secondcnx, _, err := tgitea.CreateGiteaUserSecondCnx(topts, topts.TargetRefName, topts.GiteaPassword)
 	assert.NilError(t, err)
 
 	tgitea.CreateForkPullRequest(t, topts, secondcnx, "read")
 	topts.CheckForStatus = "success"
 	tgitea.WaitForStatus(t, topts, "heads/"+topts.TargetRefName, "", false)
-	topts.GiteaCNX = adminCnx
 }
 
 // TestGiteaACLOrgPendingApproval tests when non authorized user sends a PR the status of CI shows as pending.
 func TestGiteaACLOrgPendingApproval(t *testing.T) {
 	topts := &tgitea.TestOpts{
-		TargetEvent: triggertype.PullRequest.String(),
+		TargetEvent: options.PullRequestEvent,
 		YAMLFiles: map[string]string{
 			".tekton/pr.yaml": "testdata/pipelinerun.yaml",
 		},
@@ -204,7 +198,6 @@ func TestGiteaACLOrgPendingApproval(t *testing.T) {
 	}
 	_, f := tgitea.TestPR(t, topts)
 	defer f()
-	adminCnx := topts.GiteaCNX
 	secondcnx, _, err := tgitea.CreateGiteaUserSecondCnx(topts, topts.TargetRefName, topts.GiteaPassword)
 	assert.NilError(t, err)
 
@@ -213,7 +206,6 @@ func TestGiteaACLOrgPendingApproval(t *testing.T) {
 	tgitea.WaitForStatus(t, topts, topts.PullRequest.Head.Sha, "", false)
 	topts.Regexp = regexp.MustCompile(`.*is skipping this commit.*`)
 	tgitea.WaitForPullRequestCommentMatch(t, topts)
-	topts.GiteaCNX = adminCnx
 }
 
 // TestGiteaACLCommentsAllowing tests that the gitops comment commands work.
@@ -237,7 +229,7 @@ func TestGiteaACLCommentsAllowing(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			topts := &tgitea.TestOpts{
-				TargetEvent: triggertype.PullRequest.String(),
+				TargetEvent: options.PullRequestEvent,
 				YAMLFiles: map[string]string{
 					".tekton/pipelinerun-gitops.yaml": "testdata/pipelinerun-gitops.yaml",
 				},
@@ -259,7 +251,9 @@ func TestGiteaACLCommentsAllowing(t *testing.T) {
 			tgitea.WaitForPullRequestCommentMatch(t, topts)
 			tgitea.WaitForStatus(t, topts, topts.PullRequest.Head.Sha, "", false)
 			// checking the pod log to make sure /test <prname> works
-			err = twait.RegexpMatchingInPodLog(context.Background(), topts.ParamsRun, topts.TargetNS, "pipelinesascode.tekton.dev/event-type=pull_request", "step-task", *regexp.MustCompile(".*MOTO"), "", 2)
+			err = twait.RegexpMatchingInPodLog(context.Background(), topts.ParamsRun, topts.TargetNS,
+				"pipelinesascode.tekton.dev/event-type=pull_request",
+				"step-task", *regexp.MustCompile(".*MOTO"), 2)
 			assert.NilError(t, err, "Error while checking the logs of the pods")
 		})
 	}
@@ -274,7 +268,7 @@ func TestGiteaACLCommentsAllowingRememberOkToTestFalse(t *testing.T) {
 
 	ctx := context.Background()
 	topts := &tgitea.TestOpts{
-		TargetEvent: triggertype.PullRequest.String(),
+		TargetEvent: options.PullRequestEvent,
 		YAMLFiles: map[string]string{
 			".tekton/pr.yaml": "testdata/pipelinerun.yaml",
 		},
@@ -294,8 +288,6 @@ func TestGiteaACLCommentsAllowingRememberOkToTestFalse(t *testing.T) {
 
 	_, f := tgitea.TestPR(t, topts)
 	defer f()
-	adminCnx := topts.GiteaCNX
-
 	secondcnx, _, err := tgitea.CreateGiteaUserSecondCnx(topts, topts.TargetRefName, topts.GiteaPassword)
 	assert.NilError(t, err)
 
@@ -329,7 +321,6 @@ func TestGiteaACLCommentsAllowingRememberOkToTestFalse(t *testing.T) {
 	// status of CI is success because comment /ok-to-test added by authorized user
 	topts.Regexp = successRegexp
 	tgitea.WaitForPullRequestCommentMatch(t, topts)
-	topts.GiteaCNX = adminCnx
 }
 
 // TestGiteaACLCommentsAllowingRememberOkToTestTrue tests when unauthorized user sends a PR the status shows as pending
@@ -339,7 +330,7 @@ func TestGiteaACLCommentsAllowingRememberOkToTestFalse(t *testing.T) {
 func TestGiteaACLCommentsAllowingRememberOkToTestTrue(t *testing.T) {
 	ctx := context.Background()
 	topts := &tgitea.TestOpts{
-		TargetEvent: triggertype.PullRequest.String(),
+		TargetEvent: options.PullRequestEvent,
 		YAMLFiles: map[string]string{
 			".tekton/pr.yaml": "testdata/pipelinerun.yaml",
 		},
@@ -350,7 +341,6 @@ func TestGiteaACLCommentsAllowingRememberOkToTestTrue(t *testing.T) {
 	assert.NilError(t, topts.ParamsRun.Clients.NewClients(ctx, &topts.ParamsRun.Info))
 	_, f := tgitea.TestPR(t, topts)
 	defer f()
-	adminCnx := topts.GiteaCNX
 	secondcnx, _, err := tgitea.CreateGiteaUserSecondCnx(topts, topts.TargetRefName, topts.GiteaPassword)
 	assert.NilError(t, err)
 
@@ -372,14 +362,13 @@ func TestGiteaACLCommentsAllowingRememberOkToTestTrue(t *testing.T) {
 	// status of CI is success because comment /ok-to-test added by authorized user before
 	topts.Regexp = successRegexp
 	tgitea.WaitForPullRequestCommentMatch(t, topts)
-	topts.GiteaCNX = adminCnx
 }
 
 func TestGiteaPolicyAllowedOwnerFiles(t *testing.T) {
 	topts := &tgitea.TestOpts{
 		OnOrg:                 true,
 		NoPullRequestCreation: true,
-		TargetEvent:           triggertype.PullRequest.String(),
+		TargetEvent:           options.PullRequestEvent,
 		Settings: &v1alpha1.Settings{
 			Policy: &v1alpha1.Policy{
 				PullRequest: []string{"normal"},
@@ -388,7 +377,6 @@ func TestGiteaPolicyAllowedOwnerFiles(t *testing.T) {
 	}
 	_, f := tgitea.TestPR(t, topts)
 	defer f()
-	adminCnx := topts.GiteaCNX
 	targetRef := topts.TargetRefName
 	orgName := "org-" + topts.TargetRefName
 	topts.Opts.Organization = orgName
@@ -406,10 +394,7 @@ func TestGiteaPolicyAllowedOwnerFiles(t *testing.T) {
 	allowedCnx, allowedUser, err := tgitea.CreateGiteaUserSecondCnx(topts, allowedUserNamePasswd, allowedUserNamePasswd)
 	assert.NilError(t, err)
 
-	prmap := map[string]string{
-		"OWNERS":         "testdata/OWNERS",
-		"OWNERS_ALIASES": "testdata/OWNERS_ALIASES",
-	}
+	prmap := map[string]string{"OWNERS": "testdata/OWNERS"}
 	entries, err := payload.GetEntries(prmap, topts.TargetNS, topts.DefaultBranch, topts.TargetEvent, map[string]string{
 		"Approver": allowedUser.UserName,
 	})
@@ -439,8 +424,7 @@ func TestGiteaPolicyAllowedOwnerFiles(t *testing.T) {
 		PollTimeout:     twait.DefaultTimeout,
 		TargetSHA:       npr.Head.Sha,
 	}
-	_, err = twait.UntilRepositoryUpdated(context.Background(), topts.ParamsRun.Clients, waitOpts)
-	assert.NilError(t, err)
+	assert.NilError(t, twait.UntilRepositoryUpdated(context.Background(), topts.ParamsRun.Clients, waitOpts))
 	time.Sleep(5 * time.Second) // “Evil does not sleep. It waits.” - Galadriel
 
 	prs, err := topts.ParamsRun.Clients.Tekton.TektonV1().PipelineRuns(topts.TargetNS).List(context.Background(), metav1.ListOptions{})
@@ -451,63 +435,6 @@ func TestGiteaPolicyAllowedOwnerFiles(t *testing.T) {
 	topts.CheckForStatus = "success"
 	generatename := strings.TrimSuffix(firstpr.GetGenerateName(), "-")
 	tgitea.WaitForStatus(t, topts, "heads/"+topts.TargetRefName, fmt.Sprintf("%s / %s", settings.PACApplicationNameDefaultValue, generatename), false)
-	topts.GiteaCNX = adminCnx
-}
-
-// TestGiteaPolicyOnComment tests that on-comments annotation respect the pull_requests policy.
-func TestGiteaPolicyOnComment(t *testing.T) {
-	topts := &tgitea.TestOpts{
-		OnOrg:                true,
-		SkipEventsCheck:      true,
-		CheckForNumberStatus: 2,
-		TargetEvent:          triggertype.PullRequest.String(),
-		Settings: &v1alpha1.Settings{
-			Policy: &v1alpha1.Policy{
-				PullRequest: []string{"pull_requester"},
-			},
-		},
-		YAMLFiles: map[string]string{".tekton/pr.yaml": "testdata/pipelinerun-on-comment-annotation.yaml"},
-	}
-	_, f := tgitea.TestPR(t, topts)
-	defer f()
-	adminCnx := topts.GiteaCNX
-	topts.ParamsRun.Clients.Log.Infof("Repo CRD %s has been created with Policy: %+v", topts.TargetRefName, topts.Settings.Policy)
-	orgName := "org-" + topts.TargetRefName
-	topts.Opts.Organization = orgName
-
-	// create normal team on org and add user normal onto it
-	normalTeam, err := tgitea.CreateTeam(topts, orgName, "normal")
-	assert.NilError(t, err)
-	normalUserNamePasswd := fmt.Sprintf("normal-%s", topts.TargetRefName)
-	normalUserCnx, normalUser, err := tgitea.CreateGiteaUserSecondCnx(topts, normalUserNamePasswd, normalUserNamePasswd)
-	assert.NilError(t, err)
-	_, err = topts.GiteaCNX.Client.AddTeamMember(normalTeam.ID, normalUser.UserName)
-	assert.NilError(t, err)
-	topts.ParamsRun.Clients.Log.Infof("User %s has been added to team %s", normalUser.UserName, normalTeam.Name)
-	tgitea.CreateForkPullRequest(t, topts, normalUserCnx, "")
-
-	topts.GiteaCNX = normalUserCnx
-	tgitea.PostCommentOnPullRequest(t, topts, "/hello-world")
-	topts.CheckForStatus = "Skipped"
-	topts.CheckForNumberStatus = 1
-	topts.Regexp = regexp.MustCompile(`.*Pipelines as Code CI is skipping this commit.*`)
-	tgitea.WaitForPullRequestCommentMatch(t, topts)
-	tgitea.WaitForStatus(t, topts, "heads/"+topts.TargetRefName, settings.PACApplicationNameDefaultValue, false)
-
-	topts.GiteaCNX = adminCnx
-	pullRequesterTeam, err := tgitea.CreateTeam(topts, orgName, "pull_requester")
-	assert.NilError(t, err)
-	pullRequesterUserNamePasswd := fmt.Sprintf("pullRequester-%s", topts.TargetRefName)
-	pullRequesterUserCnx, pullRequesterUser, err := tgitea.CreateGiteaUserSecondCnx(topts, pullRequesterUserNamePasswd, pullRequesterUserNamePasswd)
-	assert.NilError(t, err)
-	_, err = topts.GiteaCNX.Client.AddTeamMember(pullRequesterTeam.ID, pullRequesterUser.UserName)
-	assert.NilError(t, err)
-	topts.ParamsRun.Clients.Log.Infof("User %s has been added to team %s", pullRequesterUser.UserName, pullRequesterTeam.Name)
-	topts.GiteaCNX = pullRequesterUserCnx
-	tgitea.PostCommentOnPullRequest(t, topts, "/hello-world")
-	topts.Regexp = successRegexp
-	tgitea.WaitForPullRequestCommentMatch(t, topts)
-	topts.GiteaCNX = adminCnx
 }
 
 // Local Variables:

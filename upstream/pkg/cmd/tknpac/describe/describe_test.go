@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/go-github/v64/github"
+	"github.com/google/go-github/v56/github"
 	"github.com/jonboulle/clockwork"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
@@ -52,11 +52,10 @@ func TestDescribe(t *testing.T) {
 				currentNamespace: ns,
 				opts:             &describeOpts{},
 				pruns: []*tektonv1.PipelineRun{
-					tektontest.MakePRCompletion(cw, "running", ns, running, map[string]string{
-						keys.Branch:    "tartanpion",
-						keys.EventType: "papayolo",
-					}, map[string]string{
+					tektontest.MakePRCompletion(cw, "running", ns, running, nil, map[string]string{
 						keys.Repository: "test-run",
+						keys.Branch:     "tartanpion",
+						keys.EventType:  "papayolo",
 					}, 30),
 				},
 				statuses: []v1alpha1.RepositoryRunStatus{
@@ -90,10 +89,9 @@ func TestDescribe(t *testing.T) {
 				currentNamespace: ns,
 				opts:             &describeOpts{},
 				pruns: []*tektonv1.PipelineRun{
-					tektontest.MakePRCompletion(cw, "running", ns, running, map[string]string{
-						keys.Branch: "tartanpion",
-					}, map[string]string{
+					tektontest.MakePRCompletion(cw, "running", ns, running, nil, map[string]string{
 						keys.Repository: "test-run",
+						keys.Branch:     "tartanpion",
 					}, 30),
 				},
 				statuses: []v1alpha1.RepositoryRunStatus{},
@@ -107,15 +105,13 @@ func TestDescribe(t *testing.T) {
 				currentNamespace: ns,
 				opts:             &describeOpts{TargetPipelineRun: "running2"},
 				pruns: []*tektonv1.PipelineRun{
-					tektontest.MakePRCompletion(cw, "running", ns, running, map[string]string{
-						keys.Branch: "tartanpion",
-					}, map[string]string{
+					tektontest.MakePRCompletion(cw, "running", ns, running, nil, map[string]string{
 						keys.Repository: "test-run",
+						keys.Branch:     "tartanpion",
 					}, 30),
-					tektontest.MakePRCompletion(cw, "running2", ns, running, map[string]string{
-						keys.Branch: "vavaroom",
-					}, map[string]string{
+					tektontest.MakePRCompletion(cw, "running2", ns, running, nil, map[string]string{
 						keys.Repository: "test-run",
+						keys.Branch:     "vavaroom",
 					}, 30),
 				},
 				statuses: []v1alpha1.RepositoryRunStatus{},
@@ -129,15 +125,13 @@ func TestDescribe(t *testing.T) {
 				currentNamespace: ns,
 				opts:             &describeOpts{},
 				pruns: []*tektonv1.PipelineRun{
-					tektontest.MakePRCompletion(cw, "running", ns, running, map[string]string{
-						keys.Branch: "tartanpion",
-					}, map[string]string{
+					tektontest.MakePRCompletion(cw, "running", ns, running, nil, map[string]string{
 						keys.Repository: "test-run",
+						keys.Branch:     "tartanpion",
 					}, 30),
-					tektontest.MakePRCompletion(cw, "running2", ns, running, map[string]string{
-						keys.Branch: "vavaroom",
-					}, map[string]string{
+					tektontest.MakePRCompletion(cw, "running2", ns, running, nil, map[string]string{
 						keys.Repository: "test-run",
+						keys.Branch:     "vavaroom",
 					}, 30),
 				},
 				statuses: []v1alpha1.RepositoryRunStatus{},
@@ -484,11 +478,11 @@ func TestDescribe(t *testing.T) {
 				Clients: clients.Clients{
 					PipelineAsCode: stdata.PipelineAsCode,
 					Tekton:         stdata.Pipeline,
+					ConsoleUI:      consoleui.FallBackConsole{},
 					Kube:           stdata.Kube,
 				},
 				Info: info.Info{Kube: &info.KubeOpts{Namespace: tt.args.currentNamespace}},
 			}
-			cs.Clients.SetConsoleUI(consoleui.FallBackConsole{})
 
 			io, out := tcli.NewIOStream()
 			if err := describe(

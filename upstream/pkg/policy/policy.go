@@ -7,7 +7,6 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/events"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
 	"go.uber.org/zap"
 )
@@ -28,8 +27,7 @@ type Policy struct {
 	EventEmitter *events.EventEmitter
 }
 
-// checkAllowed checks if the policy is set and allows the event to be processed.
-func (p *Policy) checkAllowed(ctx context.Context, tType triggertype.Trigger) (Result, string) {
+func (p *Policy) checkAllowed(ctx context.Context, tType info.TriggerType) (Result, string) {
 	if p.Repository == nil {
 		return ResultNotSet, ""
 	}
@@ -41,14 +39,12 @@ func (p *Policy) checkAllowed(ctx context.Context, tType triggertype.Trigger) (R
 	var sType []string
 	switch tType {
 	// NOTE: This make /retest /ok-to-test /test bound to the same policy, which is fine from a security standpoint but maybe we want to refine this in the future.
-	case triggertype.OkToTest, triggertype.Retest:
+	case info.TriggerTypeOkToTest, info.TriggerTypeRetest:
 		sType = settings.Policy.OkToTest
-	// apply the same policy for PullRequest and comment
-	// we don't support comments on PRs yet but if we do on the future we will need our own policy
-	case triggertype.PullRequest, triggertype.Comment:
+	case info.TriggerTypePullRequest:
 		sType = settings.Policy.PullRequest
-		// NOTE: not supported yet, will imp if it gets requested and reasonable to implement
-	case triggertype.Push, triggertype.Cancel, triggertype.CheckSuiteRerequested, triggertype.CheckRunRerequested, triggertype.Incoming:
+	// NOTE: not supported yet, will imp if it gets requested and reasonable to implement
+	case info.TriggerTypePush, info.TriggerTypeCancel, info.TriggerTypeCheckSuiteRerequested, info.TriggerTypeCheckRunRerequested:
 		return ResultNotSet, ""
 	default:
 		return ResultNotSet, ""
@@ -80,7 +76,7 @@ func (p *Policy) checkAllowed(ctx context.Context, tType triggertype.Trigger) (R
 	return ResultDisallowed, fmt.Sprintf("policy check: %s, %s", string(tType), reason)
 }
 
-func (p *Policy) IsAllowed(ctx context.Context, tType triggertype.Trigger) (Result, string) {
+func (p *Policy) IsAllowed(ctx context.Context, tType info.TriggerType) (Result, string) {
 	var reason string
 	policyRes, reason := p.checkAllowed(ctx, tType)
 	switch policyRes {

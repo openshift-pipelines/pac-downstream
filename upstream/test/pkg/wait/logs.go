@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/go-github/v64/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	tlogs "github.com/openshift-pipelines/pipelines-as-code/test/pkg/logs"
@@ -16,19 +15,19 @@ import (
 	"gotest.tools/v3/golden"
 )
 
-func RegexpMatchingInControllerLog(ctx context.Context, clients *params.Run, reg regexp.Regexp, maxNumberOfLoop int, controllerName string, lines *int64) error {
+func RegexpMatchingInControllerLog(ctx context.Context, clients *params.Run, reg regexp.Regexp, maxNumberOfLoop int, controllerName string) error {
 	labelselector := fmt.Sprintf("app.kubernetes.io/name=%s", controllerName)
 	containerName := "pac-controller"
 	ns := info.GetNS(ctx)
 	clients.Clients.Log.Infof("looking for regexp %s in %s for label %s container %s", reg.String(), ns, labelselector, containerName)
 	for i := 0; i <= maxNumberOfLoop; i++ {
-		output, err := tlogs.GetPodLog(ctx, clients.Clients.Kube.CoreV1(), ns, labelselector, containerName, lines)
+		output, err := tlogs.GetPodLog(ctx, clients.Clients.Kube.CoreV1(), info.GetNS(ctx), labelselector, containerName)
 		if err != nil {
 			return err
 		}
 
 		if reg.MatchString(output) {
-			clients.Clients.Log.Infof("matched regexp %s in %s:%s labelSelector/pod", reg.String(), labelselector, containerName)
+			clients.Clients.Log.Infof("matched regexp %s in %s:%s labelSelector/pod %s for regexp: %s", reg.String(), labelselector, containerName)
 			return nil
 		}
 		time.Sleep(5 * time.Second)
@@ -36,31 +35,19 @@ func RegexpMatchingInControllerLog(ctx context.Context, clients *params.Run, reg
 	return fmt.Errorf("could not find a match using the labelSelector: %s in container %s for regexp: %s", labelselector, containerName, reg.String())
 }
 
-func RegexpMatchingInPodLog(ctx context.Context, clients *params.Run, ns, labelselector, containerName string, reg regexp.Regexp, goldenFile string, maxNumberOfLoop int) error {
+func RegexpMatchingInPodLog(ctx context.Context, clients *params.Run, ns, labelselector, containerName string, reg regexp.Regexp, maxNumberOfLoop int) error {
 	var err error
 	output := ""
-	if goldenFile != "" {
-		goldenFile = strings.ReplaceAll(fmt.Sprintf("%s.golden", goldenFile), "/", "-")
-	}
-	if reg.String() != "" {
-		clients.Clients.Log.Infof("looking for regexp %s in namespace: %s for label %s and container %s", reg.String(), ns, labelselector, containerName)
-	} else {
-		clients.Clients.Log.Infof("looking for matching content of file %s in namespace: %s for label %s and container %s", goldenFile, ns, labelselector, containerName)
-	}
-
+	clients.Clients.Log.Infof("looking for regexp %s in %s:%s labelSelector/pod", reg.String(), labelselector, containerName)
 	for i := 0; i <= maxNumberOfLoop; i++ {
-		output, err = tlogs.GetPodLog(ctx, clients.Clients.Kube.CoreV1(), ns, labelselector, containerName, github.Int64(10))
+		output, err = tlogs.GetPodLog(ctx, clients.Clients.Kube.CoreV1(), ns, labelselector, containerName)
 		if err != nil {
 			return err
 		}
-		if goldenFile != "" {
-			if golden.String(output, goldenFile)().Success() {
-				clients.Clients.Log.Infof("matched file content %s in labelSelector/container %s:%s", goldenFile, labelselector, containerName)
-				return nil
-			}
-		} else if reg.MatchString(output) {
-			clients.Clients.Log.Infof("matched regexp %s in labelSelector/container %s:%s",
-				reg.String(), labelselector, containerName)
+
+		if reg.MatchString(output) {
+			clients.Clients.Log.Infof("matched regexp in labelSelector/container %s:%s",
+				labelselector, containerName)
 			return nil
 		}
 		time.Sleep(5 * time.Second)
@@ -74,7 +61,7 @@ func GoldenPodLog(ctx context.Context, t *testing.T, clients *params.Run, ns, la
 	var err error
 	for i := 0; i <= maxNumberOfLoop; i++ {
 		var output string
-		output, err = tlogs.GetPodLog(ctx, clients.Clients.Kube.CoreV1(), ns, labelselector, containerName, github.Int64(10))
+		output, err = tlogs.GetPodLog(ctx, clients.Clients.Kube.CoreV1(), ns, labelselector, containerName)
 		if err != nil {
 			time.Sleep(5 * time.Second)
 			continue

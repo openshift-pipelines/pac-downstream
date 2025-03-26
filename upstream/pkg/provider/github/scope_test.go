@@ -191,16 +191,15 @@ func TestScopeTokenToListOfRepos(t *testing.T) {
 					Kube:           stdata.Kube,
 				},
 				Info: info.Info{
+					Pac: &info.PacOpts{
+						Settings: &settings.Settings{
+							SecretGhAppTokenScopedExtraRepos: tt.repoListsByGlobalConf,
+							SecretGHAppRepoScoped:            tt.secretGHAppRepoScopedKey,
+						},
+					},
 					Controller: &info.ControllerInfo{
 						Secret: info.DefaultPipelinesAscodeSecretName,
 					},
-				},
-			}
-
-			pacInfo := &info.PacOpts{
-				Settings: settings.Settings{
-					SecretGhAppTokenScopedExtraRepos: tt.repoListsByGlobalConf,
-					SecretGHAppRepoScoped:            tt.secretGHAppRepoScopedKey,
 				},
 			}
 
@@ -209,7 +208,7 @@ func TestScopeTokenToListOfRepos(t *testing.T) {
 
 			fakeghclient, mux, serverURL, teardown := ghtesthelper.SetupGH()
 			defer teardown()
-			mux.HandleFunc(fmt.Sprintf("/app/installations/%d/access_tokens", installationID), func(w http.ResponseWriter, _ *http.Request) {
+			mux.HandleFunc(fmt.Sprintf("/app/installations/%d/access_tokens", installationID), func(w http.ResponseWriter, r *http.Request) {
 				_, _ = fmt.Fprintf(w, `{"token": "%s"}`, tempToken)
 			})
 
@@ -226,22 +225,21 @@ func TestScopeTokenToListOfRepos(t *testing.T) {
 			}
 
 			gvcs := &Provider{
-				Logger:  logger,
-				Client:  fakeghclient,
-				Run:     run,
-				pacInfo: pacInfo,
+				Logger: logger,
+				Client: fakeghclient,
+				Run:    run,
 			}
 
-			extraRepoInstallIDs := map[string]string{"owner/repo": "789", "owner1/repo1": "10112", "owner2/repo2": "112233"}
-			for v := range extraRepoInstallIDs {
+			extraRepoInstallIds := map[string]string{"owner/repo": "789", "owner1/repo1": "10112", "owner2/repo2": "112233"}
+			for v := range extraRepoInstallIds {
 				split := strings.Split(v, "/")
-				mux.HandleFunc(fmt.Sprintf("/repos/%s/%s", split[0], split[1]), func(w http.ResponseWriter, _ *http.Request) {
-					sid := extraRepoInstallIDs[fmt.Sprintf("%s/%s", split[0], split[1])]
+				mux.HandleFunc(fmt.Sprintf("/repos/%s/%s", split[0], split[1]), func(w http.ResponseWriter, r *http.Request) {
+					sid := extraRepoInstallIds[fmt.Sprintf("%s/%s", split[0], split[1])]
 					_, _ = fmt.Fprintf(w, `{"id": %s}`, sid)
 				})
 			}
 			eventEmitter := events.NewEventEmitter(run.Clients.Kube, logger)
-			token, err := ScopeTokenToListOfRepos(ctx, gvcs, pacInfo, tt.repository, run, info, eventEmitter, logger)
+			token, err := ScopeTokenToListOfRepos(ctx, gvcs, tt.repository, run, info, eventEmitter, logger)
 			assert.Equal(t, token, tt.wantToken)
 			if err != nil {
 				assert.Equal(t, err.Error(), tt.wantError)

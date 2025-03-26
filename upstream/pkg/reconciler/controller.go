@@ -25,11 +25,14 @@ import (
 
 func NewController() func(context.Context, configmap.Watcher) *controller.Impl {
 	return func(ctx context.Context, _ configmap.Watcher) *controller.Impl {
-		ctx = info.StoreNS(ctx, system.Namespace())
-		log := logging.FromContext(ctx)
+		ns := system.Namespace()
+		ctx = info.StoreNS(ctx, ns)
 
+		log := logging.FromContext(ctx)
 		run := params.New()
-		err := run.Clients.NewClients(ctx, &run.Info)
+		rinfo := &run.Info
+		rinfo.Controller = info.GetControllerInfoFromEnvOrDefault()
+		err := run.Clients.NewClients(ctx, rinfo)
 		if err != nil {
 			log.Fatal("failed to init clients : ", err)
 		}
@@ -39,8 +42,9 @@ func NewController() func(context.Context, configmap.Watcher) *controller.Impl {
 			log.Fatal("failed to init kinit client : ", err)
 		}
 
-		// Start pac config syncer
-		go params.StartConfigSync(ctx, run)
+		if err := run.UpdatePACInfo(ctx); err != nil {
+			log.Fatal("error from WatchConfigMapChanges from watcher reconciler : ", err)
+		}
 
 		pipelineRunInformer := tektonPipelineRunInformerv1.Get(ctx)
 		metrics, err := metrics.NewRecorder()
@@ -86,7 +90,7 @@ func checkStateAndEnqueue(impl *controller.Impl) func(obj interface{}) {
 }
 
 func ctrlOpts() func(impl *controller.Impl) controller.Options {
-	return func(_ *controller.Impl) controller.Options {
+	return func(impl *controller.Impl) controller.Options {
 		return controller.Options{
 			FinalizerName: pipelinesascode.GroupName,
 			PromoteFilterFunc: func(obj interface{}) bool {

@@ -106,8 +106,7 @@ func (l *listener) detectIncoming(ctx context.Context, req *http.Request, payloa
 		gh := github.New()
 		gh.Run = l.run
 		ns := info.GetNS(ctx)
-		ip := app.NewInstallation(req, l.run, repo, gh, ns)
-		enterpriseURL, token, installationID, err := ip.GetAndUpdateInstallationID(ctx)
+		enterpriseURL, token, installationID, err := app.GetAndUpdateInstallationID(ctx, req, l.run, repo, gh, ns)
 		if err != nil {
 			return false, nil, err
 		}

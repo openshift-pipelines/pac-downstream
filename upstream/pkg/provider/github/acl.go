@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/google/go-github/v64/github"
+	"github.com/google/go-github/v56/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/acl"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/policy"
@@ -18,7 +18,7 @@ import (
 func (v *Provider) CheckPolicyAllowing(ctx context.Context, event *info.Event, allowedTeams []string) (bool, string) {
 	for _, team := range allowedTeams {
 		// TODO: caching
-		opt := github.ListOptions{PerPage: v.PaginedNumber}
+		opt := github.ListOptions{PerPage: v.paginedNumber}
 		for {
 			members, resp, err := v.Client.Teams.ListTeamMembersBySlug(ctx, event.Organization, team, &github.TeamListTeamMembersOptions{ListOptions: opt})
 			if resp.StatusCode == http.StatusNotFound {
@@ -46,8 +46,8 @@ func (v *Provider) CheckPolicyAllowing(ctx context.Context, event *info.Event, a
 	return false, fmt.Sprintf("user: %s is not a member of any of the allowed teams: %v", event.Sender, allowedTeams)
 }
 
-// IsAllowedOwnersFile get the owner files (OWNERS, OWNERS_ALIASES) from main branch
-// and check if we have explicitly allowed the user in there.
+// IsAllowedOwnersFile gets the owner file from main branch and check if we have
+// explicitly allowed the user in there.
 func (v *Provider) IsAllowedOwnersFile(ctx context.Context, event *info.Event) (bool, error) {
 	ownerContent, err := v.getFileFromDefaultBranch(ctx, "OWNERS", event)
 	if err != nil {
@@ -57,15 +57,8 @@ func (v *Provider) IsAllowedOwnersFile(ctx context.Context, event *info.Event) (
 		}
 		return false, err
 	}
-	// If there is OWNERS file, check for OWNERS_ALIASES
-	ownerAliasesContent, err := v.getFileFromDefaultBranch(ctx, "OWNERS_ALIASES", event)
-	if err != nil {
-		if !strings.Contains(err.Error(), "cannot find") {
-			return false, err
-		}
-	}
 
-	return acl.UserInOwnerFile(ownerContent, ownerAliasesContent, event.Sender)
+	return acl.UserInOwnerFile(ownerContent, event.Sender)
 }
 
 func (v *Provider) IsAllowed(ctx context.Context, event *info.Event) (bool, error) {
@@ -109,7 +102,7 @@ func (v *Provider) IsAllowed(ctx context.Context, event *info.Event) (bool, erro
 
 	// error with the policy reason if it was set
 	if policyReason != "" {
-		return false, fmt.Errorf("%s", policyReason)
+		return false, fmt.Errorf(policyReason)
 	}
 
 	// finally silently return false if no rules allowed this
@@ -133,14 +126,14 @@ func (v *Provider) aclAllowedOkToTestFromAnOwner(ctx context.Context, event *inf
 	case *github.IssueCommentEvent:
 		// if we don't need to check old comments, then on issue comment we
 		// need to check if comment have /ok-to-test and is from allowed user
-		if !v.pacInfo.RememberOKToTest {
+		if !v.Run.Info.Pac.RememberOKToTest {
 			return v.aclAllowedOkToTestCurrentComment(ctx, revent, event.Comment.GetID())
 		}
 		revent.URL = event.Issue.GetPullRequestLinks().GetHTMLURL()
 	case *github.PullRequestEvent:
 		// if we don't need to check old comments, then on push event we don't need
 		// to check anything for the non-allowed user
-		if !v.pacInfo.RememberOKToTest {
+		if !v.Run.Info.Pac.RememberOKToTest {
 			return false, nil
 		}
 		revent.URL = event.GetPullRequest().GetHTMLURL()
@@ -254,7 +247,7 @@ func (v *Provider) checkPullRequestForSameURL(ctx context.Context, runevent *inf
 // only get the one that the user sets as public 🤷.
 func (v *Provider) checkSenderOrgMembership(ctx context.Context, runevent *info.Event) (bool, error) {
 	opt := &github.ListMembersOptions{
-		ListOptions: github.ListOptions{PerPage: v.PaginedNumber},
+		ListOptions: github.ListOptions{PerPage: v.paginedNumber},
 	}
 
 	for {
@@ -310,7 +303,7 @@ func (v *Provider) GetStringPullRequestComment(ctx context.Context, runevent *in
 	}
 
 	opt := &github.IssueListCommentsOptions{
-		ListOptions: github.ListOptions{PerPage: v.PaginedNumber},
+		ListOptions: github.ListOptions{PerPage: v.paginedNumber},
 	}
 	for {
 		comments, resp, err := v.Client.Issues.ListComments(ctx, runevent.Organization, runevent.Repository,

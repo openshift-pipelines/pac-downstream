@@ -4,7 +4,7 @@ default_install_hook_types: ["pre-push"]
 exclude: '(^docs/themes/hugo-book|^vendor|.*golden$|^\.vale)'
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.6.0
+    rev: v4.5.0
     hooks:
       - id: check-added-large-files
       - id: check-toml
@@ -13,15 +13,39 @@ repos:
       - id: check-vcs-permalinks
       - id: detect-private-key
         exclude: ".*_test.go"
+  - repo: https://github.com/koalaman/shellcheck-precommit
+    rev: v0.9.0
+    hooks:
+      - id: shellcheck
   - repo: https://github.com/jorisroovers/gitlint
     rev: v0.19.1
     hooks:
       - id: gitlint
   - repo: https://github.com/codespell-project/codespell
-    rev: v2.3.0
+    rev: v2.2.6
     hooks:
       - id: codespell
         files: "^(docs/content|pkg|test)/.*"
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.1.11
+    hooks:
+      - id: ruff
+        args: ["--fix"]
+      - id: ruff-format
+  - repo: https://github.com/igorshubovych/markdownlint-cli
+    rev: v0.38.0
+    hooks:
+      - id: markdownlint-fix-docker
+  - repo: https://github.com/adrienverge/yamllint.git
+    rev: v1.33.0
+    hooks:
+      - id: yamllint
+        args: [-c=.yamllint]
+  - repo: https://github.com/golangci/golangci-lint
+    rev: v1.55.2
+    hooks:
+      - id: golangci-lint
+        args: ["./pkg/...", "./test/..."]
   - repo: local
     hooks:
       - id: test
@@ -31,12 +55,6 @@ repos:
         language: system
         types: [go]
         pass_filenames: false
-      - id: lint
-        name: "Linting"
-        entry: make
-        args: ["lint"]
-        language: system
-        pass_filenames: false
       - id: check-generated
         name: "Check generated vendor and golden files"
         entry: make
@@ -44,9 +62,4 @@ repos:
         language: system
         types: [go]
         pass_filenames: false
-      - id: shellcheck
-        name: "Shellcheck"
-        entry: "shellcheck"
-        language: system
-        types: [shell]
 # TODO: add a lint-sh when we have the errors fix

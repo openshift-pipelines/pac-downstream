@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	apipac "github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/clients"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	kitesthelper "github.com/openshift-pipelines/pipelines-as-code/pkg/test/kubernetestint"
 	"go.uber.org/zap"
@@ -105,12 +107,16 @@ func TestSecretFromRepository(t *testing.T) {
 			k8int := &kitesthelper.KinterfaceTest{
 				GetSecretResult: retsecret,
 			}
-			event := info.NewEvent()
-			sfr := SecretFromRepository{
-				k8int, tt.providerconfig, event, tt.repo, tt.providerType, "namespace", logger,
+			cs := &params.Run{
+				Clients: clients.Clients{},
+				Info: info.Info{
+					Pac: &info.PacOpts{
+						WebhookType: tt.providerType,
+					},
+				},
 			}
-
-			err := sfr.Get(ctx)
+			event := info.NewEvent()
+			err := SecretFromRepository(ctx, cs, k8int, tt.providerconfig, event, tt.repo, logger)
 			assert.NilError(t, err)
 			logs := log.TakeAll()
 			assert.Equal(t, len(tt.logmatch), len(logs), "we didn't get the number of logging message: %+v", logs)

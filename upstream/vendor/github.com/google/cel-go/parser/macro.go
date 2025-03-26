@@ -322,14 +322,15 @@ func MakeMap(eh ExprHelper, target ast.Expr, args []ast.Expr) (ast.Expr, *common
 		fn = args[1]
 	}
 
+	accuExpr := eh.NewAccuIdent()
 	init := eh.NewList()
 	condition := eh.NewLiteral(types.True)
-	step := eh.NewCall(operators.Add, eh.NewAccuIdent(), eh.NewList(fn))
+	step := eh.NewCall(operators.Add, accuExpr, eh.NewList(fn))
 
 	if filter != nil {
-		step = eh.NewCall(operators.Conditional, filter, step, eh.NewAccuIdent())
+		step = eh.NewCall(operators.Conditional, filter, step, accuExpr)
 	}
-	return eh.NewComprehension(target, v, AccumulatorName, init, condition, step, eh.NewAccuIdent()), nil
+	return eh.NewComprehension(target, v, AccumulatorName, init, condition, step, accuExpr), nil
 }
 
 // MakeFilter expands the input call arguments into a comprehension which produces a list which contains
@@ -342,11 +343,12 @@ func MakeFilter(eh ExprHelper, target ast.Expr, args []ast.Expr) (ast.Expr, *com
 	}
 
 	filter := args[1]
+	accuExpr := eh.NewAccuIdent()
 	init := eh.NewList()
 	condition := eh.NewLiteral(types.True)
-	step := eh.NewCall(operators.Add, eh.NewAccuIdent(), eh.NewList(args[0]))
-	step = eh.NewCall(operators.Conditional, filter, step, eh.NewAccuIdent())
-	return eh.NewComprehension(target, v, AccumulatorName, init, condition, step, eh.NewAccuIdent()), nil
+	step := eh.NewCall(operators.Add, accuExpr, eh.NewList(args[0]))
+	step = eh.NewCall(operators.Conditional, filter, step, accuExpr)
+	return eh.NewComprehension(target, v, AccumulatorName, init, condition, step, accuExpr), nil
 }
 
 // MakeHas expands the input call arguments into a presence test, e.g. has(<operand>.field)
@@ -382,11 +384,13 @@ func makeQuantifier(kind quantifierKind, eh ExprHelper, target ast.Expr, args []
 		step = eh.NewCall(operators.LogicalOr, eh.NewAccuIdent(), args[1])
 		result = eh.NewAccuIdent()
 	case quantifierExistsOne:
-		init = eh.NewLiteral(types.Int(0))
+		zeroExpr := eh.NewLiteral(types.Int(0))
+		oneExpr := eh.NewLiteral(types.Int(1))
+		init = zeroExpr
 		condition = eh.NewLiteral(types.True)
 		step = eh.NewCall(operators.Conditional, args[1],
-			eh.NewCall(operators.Add, eh.NewAccuIdent(), eh.NewLiteral(types.Int(1))), eh.NewAccuIdent())
-		result = eh.NewCall(operators.Equals, eh.NewAccuIdent(), eh.NewLiteral(types.Int(1)))
+			eh.NewCall(operators.Add, eh.NewAccuIdent(), oneExpr), eh.NewAccuIdent())
+		result = eh.NewCall(operators.Equals, eh.NewAccuIdent(), oneExpr)
 	default:
 		return nil, eh.NewError(args[0].ID(), fmt.Sprintf("unrecognized quantifier '%v'", kind))
 	}

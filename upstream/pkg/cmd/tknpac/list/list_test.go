@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/go-github/v64/github"
+	"github.com/google/go-github/v56/github"
 	"github.com/jonboulle/clockwork"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	pacv1alpha1 "github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
@@ -191,10 +191,10 @@ func TestList(t *testing.T) {
 				Clients: clients.Clients{
 					PipelineAsCode: stdata.PipelineAsCode,
 					Tekton:         stdata.Pipeline,
+					ConsoleUI:      consoleui.FallBackConsole{},
 				},
 				Info: info.Info{Kube: &info.KubeOpts{Namespace: tt.args.currentNamespace}},
 			}
-			cs.Clients.SetConsoleUI(consoleui.FallBackConsole{})
 			io, out := newIOStream()
 			if err := list(ctx, cs, tt.args.opts, io,
 				cw, tt.args.selectors); (err != nil) != tt.wantErr {

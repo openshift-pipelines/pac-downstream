@@ -9,16 +9,10 @@ import (
 )
 
 type PacOpts struct {
-	settings.Settings
+	*settings.Settings
 	WebhookType        string
 	PayloadFile        string
 	TektonDashboardURL string
-}
-
-func NewPacOpts() *PacOpts {
-	return &PacOpts{
-		Settings: settings.DefaultSettings(),
-	}
 }
 
 func (p *PacOpts) DeepCopy(out *PacOpts) {

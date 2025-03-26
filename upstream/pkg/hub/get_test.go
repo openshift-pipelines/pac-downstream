@@ -20,15 +20,15 @@ func TestGetTask(t *testing.T) {
 	var hubCatalogs sync.Map
 	hubCatalogs.Store(
 		"default", settings.HubCatalog{
-			Index: "default",
-			URL:   testHubURL,
-			Name:  testCatalogHubName,
+			ID:   "default",
+			URL:  testHubURL,
+			Name: testCatalogHubName,
 		})
 	hubCatalogs.Store(
 		"anotherHub", settings.HubCatalog{
-			Index: "1",
-			URL:   testHubURL,
-			Name:  testCatalogHubName,
+			ID:   "anotherHub",
+			URL:  testHubURL,
+			Name: testCatalogHubName,
 		})
 	tests := []struct {
 		name        string
@@ -219,7 +219,7 @@ func TestGetTask(t *testing.T) {
 					HTTP: *httpTestClient,
 				},
 				Info: info.Info{Pac: &info.PacOpts{
-					Settings: settings.Settings{
+					Settings: &settings.Settings{
 						HubCatalogs: &hubCatalogs,
 					},
 				}},

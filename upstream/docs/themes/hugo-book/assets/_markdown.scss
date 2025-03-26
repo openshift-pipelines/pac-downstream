@@ -69,8 +69,6 @@
   }
 
   code {
-    direction: ltr;
-    unicode-bidi: embed;
     padding: 0 $padding-4;
     background: var(--gray-200);
     border-radius: $border-radius;
@@ -78,8 +76,6 @@
   }
 
   pre {
-    direction: ltr;
-    unicode-bidi: embed;
     padding: $padding-16;
     background: var(--gray-100);
     border-radius: $border-radius;
@@ -154,11 +150,6 @@
   }
 
   // Special case for highlighted code with line numbers
-  .highlight {
-    direction: ltr;
-    unicode-bidi: embed;
-  }
-  
   .highlight table tr {
     td:nth-child(1) pre {
       margin: 0;

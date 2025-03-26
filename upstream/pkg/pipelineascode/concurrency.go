@@ -28,9 +28,6 @@ func (c *ConcurrencyManager) AddPipelineRun(pr *v1.PipelineRun) {
 	if !c.enabled {
 		return
 	}
-	if pr == nil {
-		return
-	}
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 

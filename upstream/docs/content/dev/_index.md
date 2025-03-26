@@ -224,23 +224,21 @@ make pre-commit
 
 ## Developing the Documentation
 
-Documentation is important to us. Most of the time, new features or changes in
-behavior need to include documentation as part of the Pull Request.
+Documentation is important to us, most of the time new features or change of
+behaviour needs to include documentation part of the Pull Request.
 
-We use [hugo](https://gohugo.io). If you want to preview the changes you made
-locally while developing, you can run this command:
+We use hugo, if you want to preview your change, you need to install
+[hugo](https://gohugo.io) and do a :
 
 ```shell
-make dev-docs
+make docs-dev
 ```
 
-This will download a version of Hugo that is the same as what we use on
-Cloudflare Pages (where [pipelinesascode.com](https://pipelinesascode.com) is
-generated) and start the Hugo server with a live preview of the docs on:
+this will start a hugo server with live preview of the docs on :
 
 <https://localhost:1313>
 
-When we push the release, the docs gets rebuilt automatically by CloudFare pages.
+When we push the release, the docs get rebuilt by CloudFare.
 
 By default the website <https://pipelinesascode.com> only contains the "stable"
 documentation. If you want to preview the dev documentation as from `main` you
@@ -248,95 +246,9 @@ need to go to this URL:
 
 <https://main.pipelines-as-code.pages.dev>
 
-There is a drop-down at the bottom of the page to let you change the older
-major version.
-
 ## Documentation when we are doing the Release Process
 
-- See here [release-process]({{< relref "/dev/release-process.md" >}})
-
-## How to update all dependencies in Pipelines-as-Code
-
-### Go Modules
-
-Unless if we that's not possible we try to update all dependencies to the
-latest version as long it's compatible with the Pipeline version as shipped by
-OpenShift Pipelines Operator (which should be conservative).
-
-Every time you do a go modules update check if we can remove the `replace`
-clause that pins a dependency to a specific version/commit or match the replace
-to the tektoncd/pipeline version.
-
-- Update all go modules:
-
-  ```shell
-  go get -u ./...
-  make vendor
-  ```
-
-- Go to <https://github.com/google/go-github> and note the latest go version for example: v59
-- Open a file that use the go-github library (ie: pkg/provider/github/detect.go) and check the old version, for example: v56
-
-- Run this sed command:
-
-  ```shell
-  find -name '*.go'|xargs sed -i 's,github.com/google/go-github/v56,github.com/google/go-github/v59,'
-  ```
-
-- This will update everything, sometime the library ghinstallation is not
-updated with the new version, so you will need to keep the old version kept in
-there. For example you will get this kind of error:
-
-  ```text
-  pkg/provider/github/parse_payload.go:56:33: cannot use &github.InstallationTokenOptions{…} (value of type *"github.com/google/go-github/v59/github".InstallationTokenOptions) as *"github.com/google/go-github/v57/github".InstallationTokenOptions value in assignment
-  ```
-
-- Check that everything compiles and tests are passing with this command:
-
-  ```shell
-  make allbinaries test lint
-  ```
-
-- Some structs needs to be updated, some of them are going to fail on
-  deprecated, so you will need to figure how to update them. Don't be lazy and avoid the
-  update with a nolint or a pin to a dep you only delay the inevitable until
-  the problem come back and hit you harder.
-
-### Go version
-
-- Check that the go version is updated to the latest RHEL version:
-
-  ```shell
-  docker pull golang
-  docker run golang go version
-  ```
-
-- If this not the same as what we have in go.mod then you need to update the go.mod version. then you need to update for example here 1.20:
-
-  ```shell
-  go mod tidy -go=1.20
-  ```
-
-- Grep for the image go-toolset everywhere with:
-
-  ```shell
-  git grep golang:
-  ```
-
-  and change the old version to the new version
-
-### Update the pre-commit rules
-
-  ```shell
-  pre-commit autoupdate
-  ```
-
-### Update the vale rules
-
-  ```shell
-  vale sync
-  make lint-md
-  ```
+- See here [release-process](release-process)
 
 ## Tools that are useful
 
@@ -359,12 +271,6 @@ need to have on your system:
   to the outer loop.
 - [pass](https://www.passwordstore.org/) - For getting/storing secrets
 - [gosmee](https://github.com/chmouel/gosmee) - For replaying webhooks
-
-## Target architecture
-
-- We target arm64 and amd64, the dogfooding is on arm64, so we need to make
-sure that all jobs and docker images used in the .tekton PipelineRuns are built
-for arm64.
 
 # Links
 

@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/google/go-github/v64/github"
+	"github.com/google/go-github/v56/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	tgithub "github.com/openshift-pipelines/pipelines-as-code/test/pkg/github"
 	"github.com/openshift-pipelines/pipelines-as-code/test/pkg/payload"
@@ -27,27 +27,24 @@ func TestGithubPullRerequest(t *testing.T) {
 		t.Skip("Skipping test since only enabled for nightly")
 	}
 	ctx := context.TODO()
-	g := &tgithub.PRTest{
-		Label:     "Github Rerequest",
-		YamlFiles: []string{"testdata/pipelinerun.yaml"},
-	}
-	g.RunPullRequest(ctx, t)
-	defer g.TearDown(ctx, t)
+	runcnx, ghcnx, opts, targetNS, targetRefName, prNumber, sha := tgithub.RunPullRequest(ctx, t, "Github Rerequest",
+		[]string{"testdata/pipelinerun.yaml"}, false, false)
+	defer tgithub.TearDown(ctx, t, runcnx, ghcnx, prNumber, targetRefName, targetNS, opts)
 
-	repoinfo, resp, err := g.Provider.Client.Repositories.Get(ctx, g.Options.Organization, g.Options.Repo)
+	repoinfo, resp, err := ghcnx.Client.Repositories.Get(ctx, opts.Organization, opts.Repo)
 	assert.NilError(t, err)
 	if resp != nil && resp.StatusCode == http.StatusNotFound {
-		t.Errorf("Repository %s not found in %s", g.Options.Organization, g.Options.Repo)
+		t.Errorf("Repository %s not found in %s", opts.Organization, opts.Repo)
 	}
 
 	runinfo := info.Event{
 		DefaultBranch: repoinfo.GetDefaultBranch(),
-		HeadBranch:    g.TargetRefName,
-		Organization:  g.Options.Organization,
-		Repository:    g.Options.Repo,
+		HeadBranch:    targetRefName,
+		Organization:  opts.Organization,
+		Repository:    opts.Repo,
 		URL:           repoinfo.GetHTMLURL(),
-		SHA:           g.SHA,
-		Sender:        g.Options.Organization,
+		SHA:           sha,
+		Sender:        opts.Organization,
 	}
 
 	installID, err := strconv.ParseInt(os.Getenv("TEST_GITHUB_REPO_INSTALLATION_ID"), 10, 64)
@@ -63,7 +60,7 @@ func TestGithubPullRerequest(t *testing.T) {
 				HeadSHA:    &runinfo.SHA,
 				PullRequests: []*github.PullRequest{
 					{
-						Number: github.Int(g.PRNumber),
+						Number: github.Int(prNumber),
 					},
 				},
 			},
@@ -80,7 +77,7 @@ func TestGithubPullRerequest(t *testing.T) {
 	}
 
 	err = payload.Send(ctx,
-		g.Cnx,
+		runcnx,
 		os.Getenv("TEST_EL_URL"),
 		os.Getenv("TEST_EL_WEBHOOK_SECRET"),
 		os.Getenv("TEST_GITHUB_API_URL"),
@@ -90,18 +87,18 @@ func TestGithubPullRerequest(t *testing.T) {
 	)
 	assert.NilError(t, err)
 
-	g.Cnx.Clients.Log.Infof("Wait for the second repository update to be updated")
-	_, err = twait.UntilRepositoryUpdated(ctx, g.Cnx.Clients, twait.Opts{
-		RepoName:        g.TargetNamespace,
-		Namespace:       g.TargetNamespace,
+	runcnx.Clients.Log.Infof("Wait for the second repository update to be updated")
+	err = twait.UntilRepositoryUpdated(ctx, runcnx.Clients, twait.Opts{
+		RepoName:        targetNS,
+		Namespace:       targetNS,
 		MinNumberStatus: 1,
 		PollTimeout:     twait.DefaultTimeout,
-		TargetSHA:       g.SHA,
+		TargetSHA:       sha,
 	})
 	assert.NilError(t, err)
 
-	g.Cnx.Clients.Log.Infof("Check if we have the repository set as succeeded")
-	repo, err := g.Cnx.Clients.PipelineAsCode.PipelinesascodeV1alpha1().Repositories(g.TargetNamespace).Get(ctx, g.TargetNamespace, metav1.GetOptions{})
+	runcnx.Clients.Log.Infof("Check if we have the repository set as succeeded")
+	repo, err := runcnx.Clients.PipelineAsCode.PipelinesascodeV1alpha1().Repositories(targetNS).Get(ctx, targetNS, metav1.GetOptions{})
 	assert.NilError(t, err)
 	assert.Assert(t, repo.Status[len(repo.Status)-1].Conditions[0].Status == corev1.ConditionTrue)
 	csEvent := github.CheckSuiteEvent{
@@ -114,7 +111,7 @@ func TestGithubPullRerequest(t *testing.T) {
 			HeadSHA:    &runinfo.SHA,
 			PullRequests: []*github.PullRequest{
 				{
-					Number: github.Int(g.PRNumber),
+					Number: github.Int(prNumber),
 				},
 			},
 		},
@@ -130,7 +127,7 @@ func TestGithubPullRerequest(t *testing.T) {
 	}
 
 	err = payload.Send(ctx,
-		g.Cnx,
+		runcnx,
 		os.Getenv("TEST_EL_URL"),
 		os.Getenv("TEST_EL_WEBHOOK_SECRET"),
 		os.Getenv("TEST_GITHUB_API_URL"),
@@ -140,13 +137,13 @@ func TestGithubPullRerequest(t *testing.T) {
 	)
 	assert.NilError(t, err)
 
-	g.Cnx.Clients.Log.Infof("Wait for the second repository update to be updated")
-	_, err = twait.UntilRepositoryUpdated(ctx, g.Cnx.Clients, twait.Opts{
-		RepoName:        g.TargetNamespace,
-		Namespace:       g.TargetNamespace,
+	runcnx.Clients.Log.Infof("Wait for the second repository update to be updated")
+	err = twait.UntilRepositoryUpdated(ctx, runcnx.Clients, twait.Opts{
+		RepoName:        targetNS,
+		Namespace:       targetNS,
 		MinNumberStatus: 2,
 		PollTimeout:     twait.DefaultTimeout,
-		TargetSHA:       g.SHA,
+		TargetSHA:       sha,
 	})
 	assert.NilError(t, err)
 }
