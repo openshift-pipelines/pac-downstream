@@ -37,24 +37,17 @@ func (r *Reconciler) FinalizeKind(ctx context.Context, pr *tektonv1.PipelineRun)
 		if err != nil {
 			return err
 		}
-		r.secretNS = repo.GetNamespace()
-		if r.globalRepo, err = r.repoLister.Repositories(r.run.Info.Kube.Namespace).Get(r.run.Info.Controller.GlobalRepository); err == nil && r.globalRepo != nil {
-			if repo.Spec.GitProvider != nil && repo.Spec.GitProvider.Secret == nil && r.globalRepo.Spec.GitProvider != nil && r.globalRepo.Spec.GitProvider.Secret != nil {
-				r.secretNS = r.globalRepo.GetNamespace()
-			}
-			repo.Spec.Merge(r.globalRepo.Spec)
-		}
+
 		logger = logger.With("namespace", repo.Namespace)
-		next := r.qm.RemoveAndTakeItemFromQueue(repo, pr)
+		next := r.qm.RemoveFromQueue(repo, pr)
 		if next != "" {
 			key := strings.Split(next, "/")
 			pr, err := r.run.Clients.Tekton.TektonV1().PipelineRuns(key[0]).Get(ctx, key[1], metav1.GetOptions{})
 			if err != nil {
 				return err
 			}
-			if err := r.
-				updatePipelineRunToInProgress(ctx, logger, repo, pr); err != nil {
-				logger.Errorf("failed to update status: %w", err)
+			if err := r.updatePipelineRunToInProgress(ctx, logger, repo, pr); err != nil {
+				logger.Error("failed to update status: ", err)
 				return err
 			}
 			return nil

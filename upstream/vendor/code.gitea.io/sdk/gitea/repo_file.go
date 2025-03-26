@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"net/url"
 	"strings"
 )
@@ -127,7 +128,7 @@ func (c *Client) GetFile(owner, repo, ref, filepath string, resolveLFS ...bool) 
 	}
 	defer reader.Close()
 
-	data, err2 := io.ReadAll(reader)
+	data, err2 := ioutil.ReadAll(reader)
 	if err2 != nil {
 		return nil, resp, err2
 	}

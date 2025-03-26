@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/google/go-github/v64/github"
+	"github.com/google/go-github/v56/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/events"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
@@ -369,7 +369,7 @@ func TestProcessTemplates(t *testing.T) {
 			if tt.event == nil {
 				tt.event = &info.Event{}
 			}
-			p := NewPacs(tt.event, nil, run, &info.PacOpts{}, &kitesthelper.KinterfaceTest{GetSecretResult: tt.secretData}, nil, nil)
+			p := NewPacs(tt.event, nil, run, &kitesthelper.KinterfaceTest{GetSecretResult: tt.secretData}, nil)
 			p.logger = logger
 			stdata, _ := testclient.SeedTestData(t, ctx, testclient.Data{})
 			p.eventEmitter = events.NewEventEmitter(stdata.Kube, logger)

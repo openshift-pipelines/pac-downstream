@@ -84,7 +84,7 @@ func (v *Provider) IsAllowed(ctx context.Context, event *info.Event) (bool, erro
 
 	// error with the policy reason if it was set
 	if policyReason != "" {
-		return false, fmt.Errorf("%s", policyReason)
+		return false, fmt.Errorf(policyReason)
 	}
 
 	// finally silently return false if no rules allowed this
@@ -108,14 +108,14 @@ func (v *Provider) aclAllowedOkToTestFromAnOwner(ctx context.Context, event *inf
 	case *giteaStructs.IssueCommentPayload:
 		// if we don't need to check old comments, then on issue comment we
 		// need to check if comment have /ok-to-test and is from allowed user
-		if !v.pacInfo.RememberOKToTest {
+		if !v.run.Info.Pac.RememberOKToTest {
 			return v.aclAllowedOkToTestCurrentComment(ctx, revent, event.Comment.ID)
 		}
 		revent.URL = event.Issue.URL
 	case *giteaStructs.PullRequestPayload:
 		// if we don't need to check old comments, then on push event we don't need
 		// to check anything for the non-allowed user
-		if !v.pacInfo.RememberOKToTest {
+		if !v.run.Info.Pac.RememberOKToTest {
 			return false, nil
 		}
 		revent.URL = event.PullRequest.HTMLURL
@@ -178,11 +178,11 @@ func (v *Provider) aclCheckAll(ctx context.Context, rev *info.Event) (bool, erro
 	return v.IsAllowedOwnersFile(ctx, rev)
 }
 
-// IsAllowedOwnersFile get the OWNERS files from main branch and check if we have
+// IsAllowedOwnersFile get the owner file from main branch and check if we have
 // explicitly allowed the user in there.
 func (v *Provider) IsAllowedOwnersFile(ctx context.Context, rev *info.Event) (bool, error) {
-	// If we have a OWNERS and OWNERS_ALIASE files in the defaultBranch (ie: master) then
-	// parse them and check if sender is in there.
+	// If we have a prow OWNERS file in the defaultBranch (ie: master) then
+	// parse it in approver and reviewer field and check if sender is in there.
 	ownerContent, err := v.getFileFromDefaultBranch(ctx, "OWNERS", rev)
 	if err != nil {
 		if strings.Contains(err.Error(), "cannot find") {
@@ -191,16 +191,8 @@ func (v *Provider) IsAllowedOwnersFile(ctx context.Context, rev *info.Event) (bo
 		}
 		return false, err
 	}
-	// If there is OWNERS file, check for OWNERS_ALIASES. OWNERS can exist without OWNERS_ALIASES.
-	// OWNERS_ALIASES can't exist without OWNERS.
-	ownerAliasesContent, err := v.getFileFromDefaultBranch(ctx, "OWNERS_ALIASES", rev)
-	if err != nil {
-		if !strings.Contains(err.Error(), "cannot find") {
-			return false, err
-		}
-	}
 
-	return acl.UserInOwnerFile(ownerContent, ownerAliasesContent, rev.Sender)
+	return acl.UserInOwnerFile(ownerContent, rev.Sender)
 }
 
 func (v *Provider) checkSenderRepoMembership(_ context.Context, runevent *info.Event) (bool, error) {

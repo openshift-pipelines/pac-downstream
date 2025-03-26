@@ -22,8 +22,6 @@ func TestAddLabelsAndAnnotations(t *testing.T) {
 	event.EventType = "pull_request"
 	event.BaseBranch = "main"
 	event.SHAURL = "https://url/sha"
-	event.HeadBranch = "pr_branch"
-	event.HeadURL = "https://url/pr"
 
 	type args struct {
 		event          *info.Event
@@ -51,10 +49,9 @@ func TestAddLabelsAndAnnotations(t *testing.T) {
 					},
 				},
 				controllerInfo: &info.ControllerInfo{
-					Name:             "controller",
-					Configmap:        "configmap",
-					Secret:           "secret",
-					GlobalRepository: "repo",
+					Name:      "controller",
+					Configmap: "configmap",
+					Secret:    "secret",
 				},
 			},
 		},
@@ -73,10 +70,8 @@ func TestAddLabelsAndAnnotations(t *testing.T) {
 			assert.Equal(t, tt.args.pipelineRun.Annotations[keys.URLOrg], tt.args.event.Organization, "'%s' != %s",
 				tt.args.pipelineRun.Annotations[keys.URLOrg], tt.args.event.Organization)
 			assert.Equal(t, tt.args.pipelineRun.Annotations[keys.ShaURL], tt.args.event.SHAURL)
-			assert.Equal(t, tt.args.pipelineRun.Annotations[keys.SourceBranch], tt.args.event.HeadBranch)
-			assert.Equal(t, tt.args.pipelineRun.Annotations[keys.SourceRepoURL], tt.args.event.HeadURL)
 			assert.Equal(t, tt.args.pipelineRun.Annotations[keys.ControllerInfo],
-				fmt.Sprintf(`{"name":"%s","configmap":"%s","secret":"%s", "gRepo": "%s"}`, tt.args.controllerInfo.Name, tt.args.controllerInfo.Configmap, tt.args.controllerInfo.Secret, tt.args.controllerInfo.GlobalRepository))
+				fmt.Sprintf(`{"name":"%s","configmap":"%s","secret":"%s"}`, tt.args.controllerInfo.Name, tt.args.controllerInfo.Configmap, tt.args.controllerInfo.Secret))
 		})
 	}
 }

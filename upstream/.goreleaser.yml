@@ -1,7 +1,3 @@
-# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
-# vim: set ts=2 sw=2 tw=0 fo=jcroql
-version: 2
-
 before:
   hooks:
     - /bin/sh -c "env TARGET_BRANCH={{.Tag }} PAC_VERSION={{.Tag }} TARGET_OPENSHIFT=true ./hack/generate-releaseyaml.sh  > release.yaml"
@@ -42,7 +38,7 @@ archives:
 checksum:
   name_template: "checksums.txt"
 snapshot:
-  version_template: "{{ .Tag }}-next"
+  name_template: "{{ .Tag }}-next"
 release:
   extra_files:
     - glob: ./release.yaml
@@ -79,7 +75,7 @@ brews:
     repository:
       owner: openshift-pipelines
       name: homebrew-pipelines-as-code
-    directory: Formula
+    folder: Formula
     dependencies:
       - name: tektoncd-cli
         type: optional

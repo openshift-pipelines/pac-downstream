@@ -3,19 +3,17 @@ package bitbucketserver
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"path/filepath"
 	"strings"
 
 	bbv1 "github.com/gfleury/go-bitbucket-v1"
-	"github.com/google/go-github/v64/github"
+	"github.com/google/go-github/v56/github"
 	"github.com/mitchellh/mapstructure"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/changedfiles"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/events"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
 	"go.uber.org/zap"
 )
@@ -30,17 +28,12 @@ type Provider struct {
 	Client                    *bbv1.APIClient
 	Logger                    *zap.SugaredLogger
 	run                       *params.Run
-	pacInfo                   *info.PacOpts
 	baseURL                   string
 	defaultBranchLatestCommit string
 	pullRequestNumber         int
 	apiURL                    string
 	provenance                string
 	projectKey                string
-}
-
-func (v *Provider) SetPacInfo(pacInfo *info.PacOpts) {
-	v.pacInfo = pacInfo
 }
 
 func (v *Provider) CheckPolicyAllowing(_ context.Context, _ *info.Event, _ []string) (bool, string) {
@@ -107,7 +100,7 @@ func (v *Provider) CreateStatus(_ context.Context, event *info.Event, statusOpts
 		event.SHA,
 		bbv1.BuildStatus{
 			State:       statusOpts.Conclusion,
-			Name:        v.pacInfo.ApplicationName,
+			Name:        v.run.Info.Pac.ApplicationName,
 			Key:         key,
 			Description: statusOpts.Title,
 			Url:         detailsURL,
@@ -122,12 +115,12 @@ func (v *Provider) CreateStatus(_ context.Context, event *info.Event, statusOpts
 		onPr = "/" + statusOpts.OriginalPipelineRunName
 	}
 	bbcomment := bbv1.Comment{
-		Text: fmt.Sprintf("**%s%s** - %s\n\n%s", v.pacInfo.ApplicationName, onPr,
+		Text: fmt.Sprintf("**%s%s** - %s\n\n%s", v.run.Info.Pac.ApplicationName, onPr,
 			statusOpts.Title, statusOpts.Text),
 	}
 
 	if statusOpts.Conclusion == "SUCCESSFUL" && statusOpts.Status == "completed" &&
-		statusOpts.Text != "" && event.EventType == triggertype.PullRequest.String() && v.pullRequestNumber > 0 {
+		statusOpts.Text != "" && event.EventType == "pull_request" && v.pullRequestNumber > 0 {
 		_, err := v.Client.DefaultApi.CreatePullRequestComment(
 			v.projectKey, event.Repository, v.pullRequestNumber,
 			bbcomment, []string{"application/json"})
@@ -165,7 +158,7 @@ func (v *Provider) getRaw(runevent *info.Event, revision, path string) (string, 
 	}
 	resp, err := v.Client.DefaultApi.GetRawContent(v.projectKey, runevent.Repository, path, localVarOptionals)
 	if err != nil {
-		return "", fmt.Errorf("cannot find %s inside the %s repository: %w", path, runevent.Repository, err)
+		return "", err
 	}
 	return string(resp.Payload), nil
 }
@@ -216,13 +209,13 @@ func (v *Provider) GetFileInsideRepo(_ context.Context, event *info.Event, path,
 
 func (v *Provider) SetClient(ctx context.Context, run *params.Run, event *info.Event, _ *v1alpha1.Repository, _ *events.EventEmitter) error {
 	if event.Provider.User == "" {
-		return fmt.Errorf("no spec.git_provider.user has been set in the repo crd")
+		return fmt.Errorf("no provider.user has been set in the repo crd")
 	}
 	if event.Provider.Token == "" {
-		return fmt.Errorf("no spec.git_provider.secret has been set in the repo crd")
+		return fmt.Errorf("no provider.secret has been set in the repo crd")
 	}
 	if event.Provider.URL == "" {
-		return fmt.Errorf("no spec.git_provider.url has been set in the repo crd")
+		return fmt.Errorf("no provider.url has been set in the repo crd")
 	}
 
 	// make sure we have /rest at the end of the url
@@ -238,17 +231,8 @@ func (v *Provider) SetClient(ctx context.Context, run *params.Run, event *info.E
 
 	ctx = context.WithValue(ctx, bbv1.ContextBasicAuth, basicAuth)
 	cfg := bbv1.NewConfiguration(event.Provider.URL)
-	if v.Client == nil {
-		v.Client = bbv1.NewAPIClient(ctx, cfg)
-	}
+	v.Client = bbv1.NewAPIClient(ctx, cfg)
 	v.run = run
-	resp, err := v.Client.DefaultApi.GetUser(event.Provider.User)
-	if resp.Response != nil && resp.StatusCode == http.StatusUnauthorized {
-		return fmt.Errorf("cannot get user %s with token: %w", event.Provider.User, err)
-	}
-	if err != nil {
-		return fmt.Errorf("cannot get user %s: %w", event.Provider.User, err)
-	}
 
 	return nil
 }

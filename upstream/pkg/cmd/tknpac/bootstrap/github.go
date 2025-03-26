@@ -5,8 +5,7 @@ import (
 	"fmt"
 
 	"github.com/google/go-github/scrape"
-	"github.com/google/go-github/v64/github"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
+	"github.com/google/go-github/v56/github"
 )
 
 // generateManifest generate manifest from the given options.
@@ -23,7 +22,7 @@ func generateManifest(opts *bootstrapOpts) ([]byte, error) {
 			"check_suite",
 			"issue_comment",
 			"commit_comment",
-			triggertype.PullRequest.String(),
+			"pull_request",
 			"push",
 		},
 		DefaultPermissions: &github.InstallationPermissions{

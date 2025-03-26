@@ -7,14 +7,13 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"net/url"
 	"regexp"
 	"strings"
 	"testing"
 
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
 	tgithub "github.com/openshift-pipelines/pipelines-as-code/test/pkg/github"
+	"github.com/openshift-pipelines/pipelines-as-code/test/pkg/options"
 	"github.com/openshift-pipelines/pipelines-as-code/test/pkg/payload"
 	"github.com/openshift-pipelines/pipelines-as-code/test/pkg/secret"
 	"github.com/openshift-pipelines/pipelines-as-code/test/pkg/wait"
@@ -31,32 +30,10 @@ func TestGithubAppIncoming(t *testing.T) {
 
 	entries, err := payload.GetEntries(map[string]string{
 		".tekton/pipelinerun-incoming.yaml": "testdata/pipelinerun-incoming.yaml", ".tekton/pr.yaml": "testdata/pipelinerun.yaml",
-	}, randomedString, randomedString, triggertype.Incoming.String(), map[string]string{})
+	}, randomedString, randomedString, options.IncomingEvent, map[string]string{})
 	assert.NilError(t, err)
 
-	verifyIncomingWebhook(t, randomedString, entries, false, false)
-}
-
-func TestGithubSecondIncoming(t *testing.T) {
-	randomedString := names.SimpleNameGenerator.RestrictLengthWithRandomSuffix("pac-e2e-ns")
-
-	entries, err := payload.GetEntries(map[string]string{
-		".tekton/pipelinerun-incoming.yaml": "testdata/pipelinerun-incoming.yaml", ".tekton/pr.yaml": "testdata/pipelinerun.yaml",
-	}, randomedString, randomedString, triggertype.Incoming.String(), map[string]string{})
-	assert.NilError(t, err)
-
-	verifyIncomingWebhook(t, randomedString, entries, false, true)
-}
-
-func TestGithubWebhookIncoming(t *testing.T) {
-	randomedString := names.SimpleNameGenerator.RestrictLengthWithRandomSuffix("pac-e2e-ns")
-
-	entries, err := payload.GetEntries(map[string]string{
-		".tekton/pipelinerun-incoming.yaml": "testdata/pipelinerun-incoming.yaml", ".tekton/pr.yaml": "testdata/pipelinerun.yaml",
-	}, randomedString, randomedString, triggertype.Incoming.String(), map[string]string{})
-	assert.NilError(t, err)
-
-	verifyIncomingWebhook(t, randomedString, entries, true, false)
+	verifyIncomingWebhook(t, randomedString, entries)
 }
 
 // TestGithubAppIncomingForDifferentEvent tests that a Pipelinerun with the incoming event
@@ -67,15 +44,15 @@ func TestGithubAppIncomingForDifferentEvent(t *testing.T) {
 
 	entries, err := payload.GetEntries(map[string]string{
 		".tekton/pipelinerun-incoming.yaml": "testdata/pipelinerun-incoming-generatename.yaml", ".tekton/pr.yaml": "testdata/pipelinerun.yaml",
-	}, randomedString, randomedString, triggertype.PullRequest.String(), map[string]string{})
+	}, randomedString, randomedString, options.PullRequestEvent, map[string]string{})
 	assert.NilError(t, err)
 
-	verifyIncomingWebhook(t, randomedString, entries, false, false)
+	verifyIncomingWebhook(t, randomedString, entries)
 }
 
-func verifyIncomingWebhook(t *testing.T, randomedString string, entries map[string]string, onWebhook, onSecondController bool) {
+func verifyIncomingWebhook(t *testing.T, randomedString string, entries map[string]string) {
 	ctx := context.Background()
-	ctx, runcnx, opts, ghprovider, err := tgithub.Setup(ctx, onSecondController, onWebhook)
+	ctx, runcnx, opts, ghprovider, err := tgithub.Setup(ctx, false, false)
 	assert.NilError(t, err)
 	label := "GithubApp Incoming"
 	logmsg := fmt.Sprintf("Testing %s with Github APPS integration on %s", label, randomedString)
@@ -119,40 +96,24 @@ func verifyIncomingWebhook(t *testing.T, randomedString string, entries map[stri
 	assert.NilError(t, err)
 	runcnx.Clients.Log.Infof("Commit %s has been created and pushed to branch %s", sha, vref.GetURL())
 
-	incomingURL := fmt.Sprintf("%s/incoming?repository=%s&branch=%s&pipelinerun=%s&secret=%s", opts.ControllerURL,
+	url := fmt.Sprintf("%s/incoming?repository=%s&branch=%s&pipelinerun=%s&secret=%s", opts.ControllerURL,
 		randomedString, randomedString, "pipelinerun-incoming", incomingSecreteValue)
 	body := `{"params":{"the_best_superhero_is":"Superman"}}`
 	client := &http.Client{}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, incomingURL, strings.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, strings.NewReader(body))
 	req.Header.Add("Content-Type", "application/json")
-	if onSecondController {
-		urlParse, _ := url.Parse(*ghprovider.APIURL)
-		req.Header.Add("X-GitHub-Enterprise-Host", urlParse.Host)
-	}
 	assert.NilError(t, err)
 	httpResp, err := client.Do(req)
 	assert.NilError(t, err)
 	defer httpResp.Body.Close()
-	runcnx.Clients.Log.Infof("Kicked off on incoming URL: %s", incomingURL)
+	runcnx.Clients.Log.Infof("Kicked off on incoming URL: %s", url)
 	assert.Assert(t, httpResp.StatusCode >= 200 && httpResp.StatusCode < 300, "http status Code should be %d", httpResp.StatusCode)
 	// to re enable after debugging...
-	g := tgithub.PRTest{
-		Cnx:              runcnx,
-		Options:          opts,
-		Provider:         ghprovider,
-		TargetNamespace:  randomedString,
-		TargetRefName:    targetRefName,
-		PRNumber:         -1,
-		SHA:              sha,
-		Logger:           runcnx.Clients.Log,
-		Webhook:          onWebhook,
-		SecondController: onSecondController,
-	}
-	defer g.TearDown(ctx, t)
+	defer tgithub.TearDown(ctx, t, runcnx, ghprovider, -1, targetRefName, randomedString, opts)
 
 	sopt := wait.SuccessOpt{
 		Title:           title,
-		OnEvent:         triggertype.Incoming.String(),
+		OnEvent:         options.IncomingEvent,
 		TargetNS:        randomedString,
 		NumberofPRMatch: 1,
 		SHA:             "",
@@ -169,7 +130,10 @@ func verifyIncomingWebhook(t *testing.T, randomedString string, entries map[stri
 	}
 	assert.Assert(t, prName == "pipelinerun-incoming")
 
-	err = wait.RegexpMatchingInPodLog(context.Background(), runcnx, randomedString, "pipelinesascode.tekton.dev/event-type=incoming", "step-task", *regexp.MustCompile(".*It's a Bird... It's a Plane... It's Superman"), "", 2)
+	err = wait.RegexpMatchingInPodLog(context.Background(),
+		runcnx, randomedString,
+		"pipelinesascode.tekton.dev/event-type=incoming",
+		"step-task", *regexp.MustCompile(".*It's a Bird... It's a Plane... It's Superman"), 2)
 	assert.NilError(t, err, "Error while checking the logs of the pods")
 }
 

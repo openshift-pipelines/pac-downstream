@@ -19,39 +19,29 @@ const (
 	defaultPipelinesAscodeSecretWebhookSecretKey = "webhook.secret"
 )
 
-type SecretFromRepository struct {
-	K8int       kubeinteraction.Interface
-	Config      *info.ProviderConfig
-	Event       *info.Event
-	Repo        *apipac.Repository
-	WebhookType string
-	Namespace   string
-	Logger      *zap.SugaredLogger
-}
-
 // SecretFromRepository grab the secret from the repository CRD.
-func (s *SecretFromRepository) Get(ctx context.Context) error {
+func SecretFromRepository(ctx context.Context, cs *params.Run, k8int kubeinteraction.Interface, config *info.ProviderConfig, event *info.Event, repo *apipac.Repository, logger *zap.SugaredLogger) error {
 	var err error
-	if s.Repo.Spec.GitProvider == nil {
-		return fmt.Errorf("failed to find git_provider details in repository spec: %v/%v", s.Repo.Namespace, s.Repo.Name)
+	if repo.Spec.GitProvider == nil {
+		return fmt.Errorf("failed to find git_provider details in repository spec: %v/%v", repo.Namespace, repo.Name)
 	}
-	if s.Repo.Spec.GitProvider.URL == "" {
-		s.Repo.Spec.GitProvider.URL = s.Config.APIURL
+	if repo.Spec.GitProvider.URL == "" {
+		repo.Spec.GitProvider.URL = config.APIURL
 	} else {
-		s.Event.Provider.URL = s.Repo.Spec.GitProvider.URL
+		event.Provider.URL = repo.Spec.GitProvider.URL
 	}
 
-	if s.Repo.Spec.GitProvider.Secret == nil {
-		return fmt.Errorf("failed to find secret in git_provider section in repository spec: %v/%v", s.Repo.Namespace, s.Repo.Name)
+	if repo.Spec.GitProvider.Secret == nil {
+		return fmt.Errorf("failed to find secret in git_provider section in repository spec: %v/%v", repo.Namespace, repo.Name)
 	}
-	gitProviderSecretKey := s.Repo.Spec.GitProvider.Secret.Key
+	gitProviderSecretKey := repo.Spec.GitProvider.Secret.Key
 	if gitProviderSecretKey == "" {
 		gitProviderSecretKey = DefaultGitProviderSecretKey
 	}
 
-	if s.Event.Provider.Token, err = s.K8int.GetSecret(ctx, ktypes.GetSecretOpt{
-		Namespace: s.Namespace,
-		Name:      s.Repo.Spec.GitProvider.Secret.Name,
+	if event.Provider.Token, err = k8int.GetSecret(ctx, ktypes.GetSecretOpt{
+		Namespace: repo.GetNamespace(),
+		Name:      repo.Spec.GitProvider.Secret.Name,
 		Key:       gitProviderSecretKey,
 	}); err != nil {
 		return err
@@ -59,43 +49,43 @@ func (s *SecretFromRepository) Get(ctx context.Context) error {
 
 	// if we don't have a provider token in repo crd we won't be able to do much with it
 	// let it go and it will fail later on when doing SetClients or success if it was done from a github app
-	if s.Event.Provider.Token == "" {
+	if event.Provider.Token == "" {
 		return nil
 	}
-	s.Event.Provider.User = s.Repo.Spec.GitProvider.User
+	event.Provider.User = repo.Spec.GitProvider.User
 
-	if s.Repo.Spec.GitProvider.WebhookSecret == nil {
+	if repo.Spec.GitProvider.WebhookSecret == nil {
 		// repo.Spec.GitProvider.url/token without a webhook secret is probably going to be bitbucket cloud which
 		// doesn't have webhook support 🙃
 		return nil
 	}
 
-	gitProviderWebhookSecretKey := s.Repo.Spec.GitProvider.WebhookSecret.Key
+	gitProviderWebhookSecretKey := repo.Spec.GitProvider.WebhookSecret.Key
 	if gitProviderWebhookSecretKey == "" {
 		gitProviderWebhookSecretKey = DefaultGitProviderWebhookSecretKey
 	}
 	logmsg := fmt.Sprintf("Using git provider %s: apiurl=%s user=%s token-secret=%s token-key=%s",
-		s.WebhookType,
-		s.Repo.Spec.GitProvider.URL,
-		s.Repo.Spec.GitProvider.User,
-		s.Repo.Spec.GitProvider.Secret.Name,
+		cs.Info.Pac.WebhookType,
+		repo.Spec.GitProvider.URL,
+		repo.Spec.GitProvider.User,
+		repo.Spec.GitProvider.Secret.Name,
 		gitProviderSecretKey)
-	if s.Event.Provider.WebhookSecret, err = s.K8int.GetSecret(ctx, ktypes.GetSecretOpt{
-		Namespace: s.Namespace,
-		Name:      s.Repo.Spec.GitProvider.WebhookSecret.Name,
+	if event.Provider.WebhookSecret, err = k8int.GetSecret(ctx, ktypes.GetSecretOpt{
+		Namespace: repo.GetNamespace(),
+		Name:      repo.Spec.GitProvider.WebhookSecret.Name,
 		Key:       gitProviderWebhookSecretKey,
 	}); err != nil {
 		return err
 	}
-	if s.Event.Provider.WebhookSecret != "" {
-		s.Event.Provider.WebhookSecretFromRepo = true
+	if event.Provider.WebhookSecret != "" {
+		event.Provider.WebhookSecretFromRepo = true
 		logmsg += fmt.Sprintf(" webhook-secret=%s webhook-key=%s",
-			s.Repo.Spec.GitProvider.WebhookSecret.Name,
+			repo.Spec.GitProvider.WebhookSecret.Name,
 			gitProviderWebhookSecretKey)
 	} else {
 		logmsg += " webhook-secret=NOTFOUND"
 	}
-	s.Logger.Infof(logmsg)
+	logger.Infof(logmsg)
 	return nil
 }
 

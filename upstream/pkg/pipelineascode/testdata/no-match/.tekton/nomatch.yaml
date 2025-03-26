@@ -1,7 +1,0 @@
-apiVersion: tekton.dev/v1beta1
-kind: PipelineRun
-metadata:
-  name: no-match
-spec:
-  pipelineRef:
-    name: pipeline1

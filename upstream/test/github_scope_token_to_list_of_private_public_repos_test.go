@@ -15,7 +15,6 @@ import (
 
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	pacv1alpha1 "github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
 	"github.com/openshift-pipelines/pipelines-as-code/test/pkg/configmap"
 	tgithub "github.com/openshift-pipelines/pipelines-as-code/test/pkg/github"
 	"github.com/openshift-pipelines/pipelines-as-code/test/pkg/options"
@@ -99,7 +98,7 @@ func verifyGHTokenScope(t *testing.T, remoteTaskURL, remoteTaskName string, data
 		".tekton/pr.yaml":                              "testdata/pipelinerun_remote_task_annotations.yaml",
 		".tekton/pipeline.yaml":                        "testdata/pipeline_in_tektondir.yaml",
 		".other-tasks/task-referenced-internally.yaml": "testdata/task_referenced_internally.yaml",
-	}, targetNS, options.MainBranch, triggertype.PullRequest.String(), map[string]string{
+	}, targetNS, options.MainBranch, options.PullRequestEvent, map[string]string{
 		"RemoteTaskURL":  remoteTaskURL,
 		"RemoteTaskName": remoteTaskName,
 	})
@@ -157,17 +156,8 @@ func verifyGHTokenScope(t *testing.T, remoteTaskURL, remoteTaskName string, data
 	title := "TestPullRequestRemoteAnnotations - " + targetRefName
 	number, err := tgithub.PRCreate(ctx, runcnx, ghcnx, opts.Organization, opts.Repo, targetRefName, repoinfo.GetDefaultBranch(), title)
 	assert.NilError(t, err)
-	g := tgithub.PRTest{
-		Cnx:             runcnx,
-		Options:         opts,
-		Provider:        ghcnx,
-		TargetNamespace: targetNS,
-		TargetRefName:   targetRefName,
-		PRNumber:        number,
-		SHA:             sha,
-		Logger:          runcnx.Clients.Log,
-	}
-	defer g.TearDown(ctx, t)
+
+	defer tgithub.TearDown(ctx, t, runcnx, ghcnx, number, targetRefName, targetNS, opts)
 
 	runcnx.Clients.Log.Infof("Waiting for Repository to be updated")
 	waitOpts := twait.Opts{
@@ -177,7 +167,7 @@ func verifyGHTokenScope(t *testing.T, remoteTaskURL, remoteTaskName string, data
 		PollTimeout:     twait.DefaultTimeout,
 		TargetSHA:       sha,
 	}
-	_, err = twait.UntilRepositoryUpdated(ctx, runcnx.Clients, waitOpts)
+	err = twait.UntilRepositoryUpdated(ctx, runcnx.Clients, waitOpts)
 	assert.NilError(t, err)
 
 	runcnx.Clients.Log.Infof("Check if we have the repository set as succeeded")
@@ -193,7 +183,7 @@ func verifyGHTokenScope(t *testing.T, remoteTaskURL, remoteTaskName string, data
 	pr, err := runcnx.Clients.Tekton.TektonV1().PipelineRuns(targetNS).Get(ctx, laststatus.PipelineRunName, metav1.GetOptions{})
 	assert.NilError(t, err)
 
-	assert.Equal(t, triggertype.PullRequest.String(), pr.Annotations[keys.EventType])
+	assert.Equal(t, options.PullRequestEvent, pr.Annotations[keys.EventType])
 	assert.Equal(t, repo.GetName(), pr.Annotations[keys.Repository])
 	assert.Equal(t, sha, pr.Annotations[keys.SHA])
 	assert.Equal(t, opts.Organization, pr.Annotations[keys.URLOrg])

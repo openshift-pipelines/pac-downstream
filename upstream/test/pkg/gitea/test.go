@@ -11,13 +11,11 @@ import (
 	"time"
 
 	"code.gitea.io/sdk/gitea"
-	"github.com/google/go-github/v64/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/formatting"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	pgitea "github.com/openshift-pipelines/pipelines-as-code/pkg/provider/gitea"
 	"github.com/openshift-pipelines/pipelines-as-code/test/pkg/cctx"
 	tlogs "github.com/openshift-pipelines/pipelines-as-code/test/pkg/logs"
@@ -43,7 +41,6 @@ type TestOpts struct {
 	YAMLFiles             map[string]string
 	ExtraArgs             map[string]string
 	RepoCRParams          *[]v1alpha1.Params
-	GlobalRepoCRParams    *[]v1alpha1.Params
 	CheckForStatus        string
 	TargetRefName         string
 	CheckForNumberStatus  int
@@ -112,43 +109,15 @@ func TestPR(t *testing.T, topts *TestOpts) (context.Context, func()) {
 	topts.DefaultBranch = repoInfo.DefaultBranch
 	topts.GitHTMLURL = repoInfo.HTMLURL
 
-	topts.Token, err = CreateToken(topts)
-	assert.NilError(t, err)
-
-	gp := &v1alpha1.GitProvider{
-		Type: "gitea",
-		// caveat this assume gitea running on the same cluster, which
-		// we do and need for e2e tests but that may be changed somehow
-		URL:    topts.InternalGiteaURL,
-		Secret: &v1alpha1.Secret{Name: topts.TargetNS, Key: "token"},
-	}
-	spec := v1alpha1.RepositorySpec{
-		URL:              topts.GitHTMLURL,
-		ConcurrencyLimit: topts.ConcurrencyLimit,
-		Params:           topts.RepoCRParams,
-		Settings:         topts.Settings,
-	}
-	if topts.GlobalRepoCRParams == nil {
-		spec.GitProvider = gp
-	} else {
-		spec.GitProvider = &v1alpha1.GitProvider{Type: "gitea"}
-	}
-	assert.NilError(t, CreateCRD(ctx, topts, spec, false))
-
-	// we only test params for global repo settings for now we may change that if we want
-	if topts.GlobalRepoCRParams != nil {
-		spec := v1alpha1.RepositorySpec{
-			Params:      topts.GlobalRepoCRParams,
-			GitProvider: gp,
-		}
-		assert.NilError(t, CreateCRD(ctx, topts, spec, true))
-	}
-
 	cleanup := func() {
 		if os.Getenv("TEST_NOCLEANUP") != "true" {
 			defer TearDown(ctx, t, topts)
 		}
 	}
+	topts.Token, err = CreateToken(topts)
+	assert.NilError(t, err)
+
+	assert.NilError(t, CreateCRD(ctx, topts))
 
 	url, err := scm.MakeGitCloneURL(repoInfo.CloneURL, os.Getenv("TEST_GITEA_USERNAME"), os.Getenv("TEST_GITEA_PASSWORD"))
 	assert.NilError(t, err)
@@ -527,11 +496,8 @@ func GetStandardParams(t *testing.T, topts *TestOpts, eventType string) (repoURL
 			t.Fatalf("pipelinerun has not finished, something is fishy")
 		}
 	}
-	out, err := tlogs.GetPodLog(context.Background(),
-		topts.ParamsRun.Clients.Kube.CoreV1(),
-		topts.TargetNS, fmt.Sprintf("tekton.dev/pipelineRun=%s",
-			prs.Items[0].Name), "step-test-standard-params-value",
-		github.Int64(10))
+	out, err := tlogs.GetPodLog(context.Background(), topts.ParamsRun.Clients.Kube.CoreV1(), topts.TargetNS, fmt.Sprintf("tekton.dev/pipelineRun=%s",
+		prs.Items[0].Name), "step-test-standard-params-value")
 	assert.NilError(t, err)
 	assert.Assert(t, out != "")
 	out = strings.TrimSpace(out)
@@ -546,38 +512,4 @@ func GetStandardParams(t *testing.T, topts *TestOpts, eventType string) (repoURL
 	targetBranch = strings.TrimPrefix(outputDataForPR[3], "\n")
 
 	return repoURL, sourceURL, sourceBranch, targetBranch
-}
-
-func VerifyConcurrency(t *testing.T, topts *TestOpts, globalRepoConcurrencyLimit *int) {
-	t.Helper()
-	ctx := context.Background()
-	topts.ParamsRun, topts.Opts, topts.GiteaCNX, _ = Setup(ctx)
-	assert.NilError(t, topts.ParamsRun.Clients.NewClients(ctx, &topts.ParamsRun.Info))
-	topts.TargetRefName = names.SimpleNameGenerator.RestrictLengthWithRandomSuffix("pac-e2e-test")
-	topts.TargetNS = topts.TargetRefName
-	ctx, err := cctx.GetControllerCtxInfo(ctx, topts.ParamsRun)
-	assert.NilError(t, err)
-	assert.NilError(t, pacrepo.CreateNS(ctx, topts.TargetNS, topts.ParamsRun))
-	globalNs, _, err := params.GetInstallLocation(ctx, topts.ParamsRun)
-	assert.NilError(t, err)
-	ctx = info.StoreNS(ctx, globalNs)
-
-	err = CreateCRD(ctx, topts,
-		v1alpha1.RepositorySpec{
-			ConcurrencyLimit: globalRepoConcurrencyLimit,
-		},
-		true)
-	assert.NilError(t, err)
-
-	defer (func() {
-		if os.Getenv("TEST_NOCLEANUP") != "true" {
-			topts.ParamsRun.Clients.Log.Infof("Cleaning up global repo %s in %s", info.DefaultGlobalRepoName, globalNs)
-			err = topts.ParamsRun.Clients.PipelineAsCode.PipelinesascodeV1alpha1().Repositories(globalNs).Delete(
-				context.Background(), info.DefaultGlobalRepoName, metav1.DeleteOptions{})
-			assert.NilError(t, err)
-		}
-	})()
-
-	_, f := TestPR(t, topts)
-	defer f()
 }

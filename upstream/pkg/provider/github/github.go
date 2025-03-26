@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/go-github/v64/github"
+	"github.com/google/go-github/v56/github"
 	"github.com/jonboulle/clockwork"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
@@ -18,11 +18,9 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/events"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
 	"go.uber.org/zap"
 	"golang.org/x/oauth2"
-	"k8s.io/apimachinery/pkg/util/yaml"
 	"k8s.io/client-go/kubernetes"
 )
 
@@ -44,7 +42,6 @@ type Provider struct {
 	Client        *github.Client
 	Logger        *zap.SugaredLogger
 	Run           *params.Run
-	pacInfo       *info.PacOpts
 	Token, APIURL *string
 	ApplicationID *int64
 	providerName  string
@@ -52,7 +49,7 @@ type Provider struct {
 	RepositoryIDs []int64
 	repo          *v1alpha1.Repository
 	eventEmitter  *events.EventEmitter
-	PaginedNumber int
+	paginedNumber int
 	skippedRun
 }
 
@@ -64,15 +61,11 @@ type skippedRun struct {
 func New() *Provider {
 	return &Provider{
 		APIURL:        github.String(keys.PublicGithubAPIURL),
-		PaginedNumber: defaultPaginedNumber,
+		paginedNumber: defaultPaginedNumber,
 		skippedRun: skippedRun{
 			mutex: &sync.Mutex{},
 		},
 	}
-}
-
-func (v *Provider) SetPacInfo(pacInfo *info.PacOpts) {
-	v.pacInfo = pacInfo
 }
 
 // detectGHERawURL Detect if we have a raw URL in GHE.
@@ -190,7 +183,7 @@ func (v *Provider) GetConfig() *info.ProviderConfig {
 	}
 }
 
-func MakeClient(ctx context.Context, apiURL, token string) (*github.Client, string, *string) {
+func makeClient(ctx context.Context, apiURL, token string) (*github.Client, string, *string) {
 	var client *github.Client
 	ts := oauth2.StaticTokenSource(
 		&oauth2.Token{AccessToken: token},
@@ -240,15 +233,7 @@ func parseTS(headerTS string) (time.Time, error) {
 // but this gives a nice hint to the user into their namespace event of where
 // the issue was.
 func (v *Provider) checkWebhookSecretValidity(ctx context.Context, cw clockwork.Clock) error {
-	rl, resp, err := v.Client.RateLimit.Get(ctx)
-	if resp.StatusCode == http.StatusNotFound {
-		v.Logger.Info("skipping checking if token has expired, rate_limit api is not enabled on token")
-		return nil
-	}
-
-	if err != nil {
-		return fmt.Errorf("error making request to the GitHub API checking rate limit: %w", err)
-	}
+	rl, resp, err := v.Client.RateLimits(ctx)
 	if resp.Header.Get("GitHub-Authentication-Token-Expiration") != "" {
 		ts, err := parseTS(resp.Header.Get("GitHub-Authentication-Token-Expiration"))
 		if err != nil {
@@ -257,8 +242,18 @@ func (v *Provider) checkWebhookSecretValidity(ctx context.Context, cw clockwork.
 
 		if cw.Now().After(ts) {
 			errm := fmt.Sprintf("token has expired at %s", resp.TokenExpiration.Format(time.RFC1123))
-			return fmt.Errorf("%s", errm)
+			return fmt.Errorf(errm)
 		}
+	}
+
+	if resp.StatusCode == http.StatusNotFound {
+		v.Logger.Info("skipping checking if token has expired, rate_limit api is not enabled on token")
+		return nil
+	}
+
+	// some other error happened that is not rate limited related
+	if err != nil {
+		return fmt.Errorf("error using token to access API: %w", err)
 	}
 
 	if rl.SCIM.Remaining == 0 {
@@ -268,7 +263,7 @@ func (v *Provider) checkWebhookSecretValidity(ctx context.Context, cw clockwork.
 }
 
 func (v *Provider) SetClient(ctx context.Context, run *params.Run, event *info.Event, repo *v1alpha1.Repository, eventsEmitter *events.EventEmitter) error {
-	client, providerName, apiURL := MakeClient(ctx, event.Provider.URL, event.Provider.Token)
+	client, providerName, apiURL := makeClient(ctx, event.Provider.URL, event.Provider.Token)
 	v.providerName = providerName
 	v.Run = run
 	v.repo = repo
@@ -278,9 +273,6 @@ func (v *Provider) SetClient(ctx context.Context, run *params.Run, event *info.E
 	// from unittesting.
 	if v.Client == nil {
 		v.Client = client
-	}
-	if v.Client == nil {
-		return fmt.Errorf("no github client has been initialized")
 	}
 
 	v.APIURL = apiURL
@@ -306,7 +298,7 @@ func (v *Provider) GetTektonDir(ctx context.Context, runevent *info.Event, path,
 		revision = runevent.DefaultBranch
 		v.Logger.Infof("Using PipelineRun definition from default_branch: %s", runevent.DefaultBranch)
 	} else {
-		v.Logger.Infof("Using PipelineRun definition from source pull request %s/%s#%d SHA on %s", runevent.Organization, runevent.Repository, runevent.PullRequestNumber, runevent.SHA)
+		v.Logger.Infof("Using PipelineRun definition from source pull request SHA: %s", runevent.SHA)
 	}
 
 	rootobjects, _, err := v.Client.Git.GetTree(ctx, runevent.Organization, runevent.Repository, revision, false)
@@ -410,11 +402,6 @@ func (v *Provider) concatAllYamlFiles(ctx context.Context, objects []*github.Tre
 			if err != nil {
 				return "", err
 			}
-			// validate yaml
-			var i any
-			if err := yaml.Unmarshal(data, &i); err != nil {
-				return "", fmt.Errorf("error unmarshalling yaml file %s: %w", value.GetPath(), err)
-			}
 			if allTemplates != "" && !strings.HasPrefix(string(data), "---") {
 				allTemplates += "---"
 			}
@@ -445,9 +432,7 @@ func (v *Provider) getPullRequest(ctx context.Context, runevent *info.Event) (*i
 	runevent.BaseBranch = pr.GetBase().GetRef()
 	runevent.HeadURL = pr.GetHead().GetRepo().GetHTMLURL()
 	runevent.BaseURL = pr.GetBase().GetRepo().GetHTMLURL()
-	if runevent.EventType == "" {
-		runevent.EventType = triggertype.PullRequest.String()
-	}
+	runevent.EventType = "pull_request"
 
 	v.RepositoryIDs = []int64{
 		pr.GetBase().GetRepo().GetID(),
@@ -457,8 +442,8 @@ func (v *Provider) getPullRequest(ctx context.Context, runevent *info.Event) (*i
 
 // GetFiles get a files from pull request.
 func (v *Provider) GetFiles(ctx context.Context, runevent *info.Event) (changedfiles.ChangedFiles, error) {
-	if runevent.TriggerTarget == triggertype.PullRequest {
-		opt := &github.ListOptions{PerPage: v.PaginedNumber}
+	if runevent.TriggerTarget == "pull_request" {
+		opt := &github.ListOptions{PerPage: v.paginedNumber}
 		changedFiles := changedfiles.ChangedFiles{}
 		for {
 			repoCommit, resp, err := v.Client.PullRequests.ListFiles(ctx, runevent.Organization, runevent.Repository, runevent.PullRequestNumber, opt)
@@ -535,7 +520,7 @@ func ListRepos(ctx context.Context, v *Provider) ([]string, error) {
 			"exiting... (hint: did you forget setting a secret on your repo?)")
 	}
 
-	opt := &github.ListOptions{PerPage: v.PaginedNumber}
+	opt := &github.ListOptions{PerPage: v.paginedNumber}
 	repoURLs := []string{}
 	for {
 		repoList, resp, err := v.Client.Apps.ListRepos(ctx, opt)

@@ -1,5 +1,6 @@
 // Copyright 2017 Gitea Authors. All rights reserved.
-// SPDX-License-Identifier: MIT
+// Use of this source code is governed by a MIT-style
+// license that can be found in the LICENSE file.
 
 package structs
 
@@ -19,7 +20,6 @@ type GPGKey struct {
 	CanEncryptComms   bool           `json:"can_encrypt_comms"`
 	CanEncryptStorage bool           `json:"can_encrypt_storage"`
 	CanCertify        bool           `json:"can_certify"`
-	Verified          bool           `json:"verified"`
 	// swagger:strfmt date-time
 	Created time.Time `json:"created_at,omitempty"`
 	// swagger:strfmt date-time
@@ -40,14 +40,4 @@ type CreateGPGKeyOption struct {
 	// required: true
 	// unique: true
 	ArmoredKey string `json:"armored_public_key" binding:"Required"`
-	Signature  string `json:"armored_signature,omitempty"`
-}
-
-// VerifyGPGKeyOption options verifies user GPG key
-type VerifyGPGKeyOption struct {
-	// An Signature for a GPG key token
-	//
-	// required: true
-	KeyID     string `json:"key_id" binding:"Required"`
-	Signature string `json:"armored_signature" binding:"Required"`
 }

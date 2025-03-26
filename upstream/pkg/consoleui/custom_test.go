@@ -18,14 +18,18 @@ func TestCustomGood(t *testing.T) {
 	consolePRdetail := "https://mycorp.console/{{ namespace }}/{{ pr }}/params/{{ foo }}"
 	consolePRtasklog := "https://mycorp.console/{{ namespace }}/{{ pr }}/{{ task }}/{{ pod }}/{{ firstFailedStep }}/params/{{ foo }}/{{ nonewline }}"
 
-	c := NewCustomConsole(&info.PacOpts{
-		Settings: settings.Settings{
-			CustomConsoleName:      consoleName,
-			CustomConsoleURL:       consoleURL,
-			CustomConsolePRdetail:  consolePRdetail,
-			CustomConsolePRTaskLog: consolePRtasklog,
+	c := CustomConsole{
+		Info: &info.Info{
+			Pac: &info.PacOpts{
+				Settings: &settings.Settings{
+					CustomConsoleName:      consoleName,
+					CustomConsoleURL:       consoleURL,
+					CustomConsolePRdetail:  consolePRdetail,
+					CustomConsolePRTaskLog: consolePRtasklog,
+				},
+			},
 		},
-	})
+	}
 	c.SetParams(map[string]string{
 		"foo":       "bar",
 		"nonewline": "nonewline\n ",
@@ -68,41 +72,55 @@ func TestCustomGood(t *testing.T) {
 	assert.Equal(t, c.TaskLogURL(pr, trStatus), "https://mycorp.console/ns/pr/task/pod/failure/params/bar/nonewline")
 
 	// test if we fallback properly
-	f := NewCustomConsole(&info.PacOpts{
-		Settings: settings.Settings{
-			CustomConsoleName:      consoleName,
-			CustomConsoleURL:       consoleURL,
-			CustomConsolePRdetail:  "{{ notthere}}",
-			CustomConsolePRTaskLog: "{{ notthere}}",
+	f := CustomConsole{
+		Info: &info.Info{
+			Pac: &info.PacOpts{
+				Settings: &settings.Settings{
+					CustomConsoleName:      consoleName,
+					CustomConsoleURL:       consoleURL,
+					CustomConsolePRdetail:  "{{ notthere}}",
+					CustomConsolePRTaskLog: "{{ notthere}}",
+				},
+			},
 		},
-	})
+	}
 	f.SetParams(map[string]string{})
 	assert.Assert(t, strings.Contains(c.DetailURL(pr), consoleURL))
 	assert.Assert(t, strings.Contains(c.TaskLogURL(pr, trStatus), consoleURL))
 
-	o := NewCustomConsole(&info.PacOpts{
-		Settings: settings.Settings{
-			CustomConsoleName:         consoleName,
-			CustomConsoleURL:          consoleURL,
-			CustomConsolePRdetail:     "{{ notthere}}",
-			CustomConsolePRTaskLog:    "{{ notthere}}",
-			CustomConsoleNamespaceURL: "https://mycorp.console/{{ namespace }}",
+	o := CustomConsole{
+		Info: &info.Info{
+			Pac: &info.PacOpts{
+				Settings: &settings.Settings{
+					CustomConsoleName:         consoleName,
+					CustomConsoleURL:          consoleURL,
+					CustomConsolePRdetail:     "{{ notthere}}",
+					CustomConsolePRTaskLog:    "{{ notthere}}",
+					CustomConsoleNamespaceURL: "https://mycorp.console/{{ namespace }}",
+				},
+			},
 		},
-	})
+	}
 	assert.Assert(t, strings.Contains(o.DetailURL(pr), consoleURL))
 	assert.Assert(t, strings.Contains(o.TaskLogURL(pr, trStatus), consoleURL))
 	assert.Assert(t, strings.Contains(o.NamespaceURL(pr), "https://mycorp.console/ns"))
 }
 
 func TestCustomBad(t *testing.T) {
-	c := NewCustomConsole(&info.PacOpts{Settings: settings.Settings{}})
+	c := CustomConsole{
+		Info: &info.Info{
+			Pac: &info.PacOpts{
+				Settings: &settings.Settings{},
+			},
+		},
+	}
 	pr := &tektonv1.PipelineRun{
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: "ns",
 			Name:      "pr",
 		},
 	}
-	assert.Assert(t, strings.Contains(c.GetName(), "is.not.configured"))
+	assert.Assert(t, strings.Contains(c.GetName(), "Not configured"))
 	assert.Assert(t, strings.Contains(c.URL(), "is.not.configured"))
 	assert.Assert(t, strings.Contains(c.DetailURL(pr), "is.not.configured"))
 	assert.Assert(t, strings.Contains(c.TaskLogURL(pr, nil), "is.not.configured"))

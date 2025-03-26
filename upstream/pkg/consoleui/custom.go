@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
-	"sync"
 
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
@@ -16,54 +15,34 @@ import (
 )
 
 type CustomConsole struct {
-	pacInfo              *info.PacOpts
-	namespace, pr, task  string
-	pod, firstFailedStep string
-	extraParams          map[string]string
-	mu                   sync.RWMutex
-}
-
-func NewCustomConsole(pacInfo *info.PacOpts) *CustomConsole {
-	return &CustomConsole{pacInfo: pacInfo}
-}
-
-func (o *CustomConsole) GetName() string {
-	if o.pacInfo.CustomConsoleName == "" {
-		return fmt.Sprintf("https://url.setting.%s.is.not.configured", settings.CustomConsoleNameKey)
-	}
-	return o.pacInfo.CustomConsoleName
-}
-
-func (o *CustomConsole) URL() string {
-	if o.pacInfo.CustomConsoleURL == "" {
-		return fmt.Sprintf("https://url.setting.%s.is.not.configured", settings.CustomConsoleURLKey)
-	}
-	return o.pacInfo.CustomConsoleURL
+	Info   *info.Info
+	params map[string]string
 }
 
 func (o *CustomConsole) SetParams(mt map[string]string) {
-	o.extraParams = mt
+	o.params = mt
+}
+
+func (o *CustomConsole) GetName() string {
+	if o.Info.Pac.CustomConsoleName == "" {
+		return "Not configured"
+	}
+	return o.Info.Pac.CustomConsoleName
+}
+
+func (o *CustomConsole) URL() string {
+	if o.Info.Pac.CustomConsoleURL == "" {
+		return fmt.Sprintf("https://url.setting.%s.is.not.configured", settings.CustomConsoleURLKey)
+	}
+	return o.Info.Pac.CustomConsoleURL
 }
 
 // generateURL will generate a URL from a template, trim some of the spaces and
 // \n we get from yaml
 // return the default URL if there it's not become a proper url or that it has
 // some of the templates like {{}} left.
-func (o *CustomConsole) generateURL(urlTmpl string) string {
-	o.mu.RLock()
-	defer o.mu.RUnlock()
-	dict := map[string]string{
-		"namespace":       o.namespace,
-		"pr":              o.pr,
-		"task":            o.task,
-		"pod":             o.pod,
-		"firstFailedStep": o.firstFailedStep,
-	}
-	for k, v := range o.extraParams {
-		dict[k] = v
-	}
-
-	newurl := templates.ReplacePlaceHoldersVariables(urlTmpl, dict, nil, nil, nil)
+func (o *CustomConsole) generateURL(urlTmpl string, dict map[string]string) string {
+	newurl := templates.ReplacePlaceHoldersVariables(urlTmpl, dict, nil, nil, map[string]interface{}{})
 	// trim new line because yaml parser adds new line at the end of the string
 	newurl = strings.TrimSpace(strings.TrimSuffix(newurl, "\n"))
 	if _, err := url.ParseRequestURI(newurl); err != nil {
@@ -77,24 +56,36 @@ func (o *CustomConsole) generateURL(urlTmpl string) string {
 }
 
 func (o *CustomConsole) DetailURL(pr *tektonv1.PipelineRun) string {
-	if o.pacInfo.CustomConsolePRdetail == "" {
+	if o.Info.Pac.CustomConsolePRdetail == "" {
 		return fmt.Sprintf("https://detailurl.setting.%s.is.not.configured", settings.CustomConsolePRDetailKey)
 	}
-	o.namespace = pr.GetNamespace()
-	o.pr = pr.GetName()
-	return o.generateURL(o.pacInfo.CustomConsolePRdetail)
+	nm := o.params
+	// make sure the map is not nil before setting this up
+	// there is a case where SetParams is not called before DetailURL and this would crash the container
+	if nm == nil {
+		nm = make(map[string]string)
+	}
+	nm["namespace"] = pr.GetNamespace()
+	nm["pr"] = pr.GetName()
+	return o.generateURL(o.Info.Pac.CustomConsolePRdetail, nm)
 }
 
 func (o *CustomConsole) NamespaceURL(pr *tektonv1.PipelineRun) string {
-	if o.pacInfo.CustomConsoleNamespaceURL == "" {
+	if o.Info.Pac.CustomConsoleNamespaceURL == "" {
 		return fmt.Sprintf("https://detailurl.setting.%s.is.not.configured", settings.CustomConsoleNamespaceURLKey)
 	}
-	o.namespace = pr.GetNamespace()
-	return o.generateURL(o.pacInfo.CustomConsoleNamespaceURL)
+	nm := o.params
+	// make sure the map is not nil before setting this up
+	// there is a case where SetParams is not called before DetailURL and this would crash the container
+	if nm == nil {
+		nm = make(map[string]string)
+	}
+	nm["namespace"] = pr.GetNamespace()
+	return o.generateURL(o.Info.Pac.CustomConsoleNamespaceURL, nm)
 }
 
 func (o *CustomConsole) TaskLogURL(pr *tektonv1.PipelineRun, taskRunStatus *tektonv1.PipelineRunTaskRunStatus) string {
-	if o.pacInfo.CustomConsolePRTaskLog == "" {
+	if o.Info.Pac.CustomConsolePRTaskLog == "" {
 		return fmt.Sprintf("https://tasklogurl.setting.%s.is.not.configured", settings.CustomConsolePRTaskLogKey)
 	}
 	firstFailedStep := ""
@@ -106,13 +97,18 @@ func (o *CustomConsole) TaskLogURL(pr *tektonv1.PipelineRun, taskRunStatus *tekt
 		}
 	}
 
-	o.namespace = pr.GetNamespace()
-	o.pr = pr.GetName()
-	o.task = taskRunStatus.PipelineTaskName
-	o.pod = taskRunStatus.Status.PodName
-	o.firstFailedStep = firstFailedStep
-
-	return o.generateURL(o.pacInfo.CustomConsolePRTaskLog)
+	nm := o.params
+	// make sure the map is not nil before setting this up
+	// there is a case where SetParams is not called before DetailURL and this would crash the container
+	if nm == nil {
+		nm = make(map[string]string)
+	}
+	nm["namespace"] = pr.GetNamespace()
+	nm["pr"] = pr.GetName()
+	nm["task"] = taskRunStatus.PipelineTaskName
+	nm["pod"] = taskRunStatus.Status.PodName
+	nm["firstFailedStep"] = firstFailedStep
+	return o.generateURL(o.Info.Pac.CustomConsolePRTaskLog, nm)
 }
 
 func (o *CustomConsole) UI(_ context.Context, _ dynamic.Interface) error {

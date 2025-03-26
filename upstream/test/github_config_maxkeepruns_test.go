@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	ghlib "github.com/google/go-github/v64/github"
+	ghlib "github.com/google/go-github/v56/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	tgithub "github.com/openshift-pipelines/pipelines-as-code/test/pkg/github"
 	twait "github.com/openshift-pipelines/pipelines-as-code/test/pkg/wait"
@@ -18,33 +18,33 @@ import (
 )
 
 func TestGithubMaxKeepRuns(t *testing.T) {
-	ctx := context.Background()
-	g := &tgithub.PRTest{
-		Label:     "Github MaxKeepRun config",
-		YamlFiles: []string{"testdata/pipelinerun-max-keep-run-1.yaml"},
-	}
-	g.RunPullRequest(ctx, t)
-	defer g.TearDown(ctx, t)
+	ctx := context.TODO()
+	runcnx, ghcnx, opts, targetNS, targetRefName, prNumber, sha := tgithub.RunPullRequest(ctx, t,
+		"Github MaxKeepRun config",
+		[]string{"testdata/pipelinerun-max-keep-run-1.yaml"}, false, false)
+	defer tgithub.TearDown(ctx, t, runcnx, ghcnx, prNumber, targetRefName, targetNS, opts)
 
-	g.Cnx.Clients.Log.Infof("Creating /retest in PullRequest")
-	_, _, err := g.Provider.Client.Issues.CreateComment(ctx, g.Options.Organization, g.Options.Repo, g.PRNumber,
+	runcnx.Clients.Log.Infof("Creating /retest in PullRequest")
+	_, _, err := ghcnx.Client.Issues.CreateComment(ctx,
+		opts.Organization,
+		opts.Repo, prNumber,
 		&ghlib.IssueComment{Body: ghlib.String("/retest")})
 	assert.NilError(t, err)
 
-	g.Cnx.Clients.Log.Infof("Wait for the second repository update to be updated")
+	runcnx.Clients.Log.Infof("Wait for the second repository update to be updated")
 	waitOpts := twait.Opts{
-		RepoName:        g.TargetNamespace,
-		Namespace:       g.TargetNamespace,
+		RepoName:        targetNS,
+		Namespace:       targetNS,
 		MinNumberStatus: 2,
 		PollTimeout:     twait.DefaultTimeout,
-		TargetSHA:       g.SHA,
+		TargetSHA:       sha,
 	}
-	_, err = twait.UntilRepositoryUpdated(ctx, g.Cnx.Clients, waitOpts)
+	err = twait.UntilRepositoryUpdated(ctx, runcnx.Clients, waitOpts)
 	assert.NilError(t, err)
 
 	count := 0
 	for {
-		prs, err := g.Cnx.Clients.Tekton.TektonV1().PipelineRuns(g.TargetNamespace).List(ctx, metav1.ListOptions{})
+		prs, err := runcnx.Clients.Tekton.TektonV1().PipelineRuns(targetNS).List(ctx, metav1.ListOptions{})
 		if err == nil && len(prs.Items) == 1 {
 			if prs.Items[0].GetStatusCondition().GetCondition(apis.ConditionSucceeded).GetReason() == "Running" {
 				t.Logf("skipping %s since currently running", prs.Items[0].GetName())
@@ -52,7 +52,7 @@ func TestGithubMaxKeepRuns(t *testing.T) {
 			}
 			// making sure secret is not deleted for existing pipelinerun
 			if secretName, ok := prs.Items[0].GetAnnotations()[keys.GitAuthSecret]; ok {
-				sData, err := g.Cnx.Clients.Kube.CoreV1().Secrets(g.TargetNamespace).Get(ctx, secretName, metav1.GetOptions{})
+				sData, err := runcnx.Clients.Kube.CoreV1().Secrets(targetNS).Get(ctx, secretName, metav1.GetOptions{})
 				assert.NilError(t, err, "Secret should not have been deleted while running pipelinerun")
 				assert.Assert(t, sData.Name != "")
 			}
@@ -60,7 +60,7 @@ func TestGithubMaxKeepRuns(t *testing.T) {
 		}
 		time.Sleep(10 * time.Second)
 		if count > 10 {
-			t.Fatalf("PipelineRun cleanups has not been done, we found %d in %s", len(prs.Items), g.TargetNamespace)
+			t.Fatalf("PipelineRun cleanups has not been done, we found %d in %s", len(prs.Items), targetNS)
 		}
 		count++
 	}

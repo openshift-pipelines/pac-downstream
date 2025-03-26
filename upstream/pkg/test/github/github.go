@@ -13,7 +13,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/google/go-github/v64/github"
+	"github.com/google/go-github/v56/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	"gotest.tools/v3/assert"
 )
@@ -132,7 +132,7 @@ func SetupGitTree(t *testing.T, mux *http.ServeMux, dir string, event *info.Even
 		})
 	}
 	u := fmt.Sprintf("/repos/%v/%v/git/trees/%v", event.Organization, event.Repository, event.SHA)
-	mux.HandleFunc(u, func(rw http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc(u, func(rw http.ResponseWriter, r *http.Request) {
 		tree := &github.Tree{
 			SHA:     &event.SHA,
 			Entries: entries,

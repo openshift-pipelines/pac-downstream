@@ -70,11 +70,11 @@ func TestCheckPolicyAllowing(t *testing.T) {
 				Sender:       "allowedUser",
 			}
 			if tt.listOrgReply != "" {
-				mux.HandleFunc(fmt.Sprintf("/orgs/%s/teams", event.Organization), func(rw http.ResponseWriter, _ *http.Request) {
+				mux.HandleFunc(fmt.Sprintf("/orgs/%s/teams", event.Organization), func(rw http.ResponseWriter, r *http.Request) {
 					fmt.Fprint(rw, tt.listOrgReply)
 				})
 			}
-			mux.HandleFunc(fmt.Sprintf("/teams/1/members/%s", event.Sender), func(rw http.ResponseWriter, _ *http.Request) {
+			mux.HandleFunc(fmt.Sprintf("/teams/1/members/%s", event.Sender), func(rw http.ResponseWriter, r *http.Request) {
 				fmt.Fprint(rw, tt.listTeamMemberships)
 			})
 			ctx, _ := rtesting.SetupFakeContext(t)
@@ -271,26 +271,31 @@ func TestOkToTestComment(t *testing.T) {
 			mux.HandleFunc(fmt.Sprintf("/repos/%s/%s/issues/1/comments", tt.runevent.Organization,
 				tt.runevent.Repository),
 				func(rw http.ResponseWriter,
-					_ *http.Request,
+					r *http.Request,
 				) {
 					fmt.Fprint(rw, tt.commentsReply)
 				})
 			mux.HandleFunc(fmt.Sprintf("/repos/%s/%s/issues/comments/1", tt.runevent.Organization,
 				tt.runevent.Repository),
-				func(rw http.ResponseWriter, _ *http.Request) {
+				func(rw http.ResponseWriter,
+					r *http.Request,
+				) {
 					fmt.Fprint(rw, tt.commentsReply)
 				})
-			mux.HandleFunc("/repos/owner/collaborators", func(rw http.ResponseWriter, _ *http.Request) {
+			mux.HandleFunc("/repos/owner/collaborators", func(rw http.ResponseWriter, r *http.Request) {
 				fmt.Fprint(rw, "[]")
 			})
 			ctx, _ := rtesting.SetupFakeContext(t)
 			gprovider := Provider{
 				Client: fakeclient,
 				Logger: logger,
-				run:    &params.Run{},
-				pacInfo: &info.PacOpts{
-					Settings: settings.Settings{
-						RememberOKToTest: tt.rememberOkToTest,
+				run: &params.Run{
+					Info: info.Info{
+						Pac: &info.PacOpts{
+							Settings: &settings.Settings{
+								RememberOKToTest: tt.rememberOkToTest,
+							},
+						},
 					},
 				},
 			}
@@ -367,7 +372,7 @@ func TestAclCheckAll(t *testing.T) {
 
 			if tt.allowedRules.collabo {
 				mux.HandleFunc(fmt.Sprintf("/repos/%s/%s/collaborators/%s", tt.runevent.Organization,
-					tt.runevent.Repository, tt.runevent.Sender), func(rw http.ResponseWriter, _ *http.Request) {
+					tt.runevent.Repository, tt.runevent.Sender), func(rw http.ResponseWriter, r *http.Request) {
 					rw.WriteHeader(http.StatusNoContent)
 				})
 			}

@@ -4,8 +4,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/google/go-github/v64/github"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/opscomments"
+	"github.com/google/go-github/v56/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	thelp "github.com/openshift-pipelines/pipelines-as-code/pkg/provider/gitlab/test"
@@ -117,7 +116,7 @@ func TestParsePayload(t *testing.T) {
 				payload: sample.NoteEventAsJSON(""),
 			},
 			want: &info.Event{
-				EventType:     opscomments.NoOpsCommentEventType.String(),
+				EventType:     "Note",
 				TriggerTarget: "pull_request",
 				Organization:  "hello-this-is-me-ze",
 				Repository:    "project",
@@ -130,7 +129,7 @@ func TestParsePayload(t *testing.T) {
 				payload: sample.NoteEventAsJSON("/test dummy"),
 			},
 			want: &info.Event{
-				EventType:     opscomments.TestSingleCommentEventType.String(),
+				EventType:     "Note",
 				TriggerTarget: "pull_request",
 				Organization:  "hello-this-is-me-ze",
 				Repository:    "project",
@@ -144,7 +143,7 @@ func TestParsePayload(t *testing.T) {
 				payload: sample.NoteEventAsJSON("/cancel"),
 			},
 			want: &info.Event{
-				EventType:     opscomments.CancelCommentAllEventType.String(),
+				EventType:     "Note",
 				TriggerTarget: "pull_request",
 				Organization:  "hello-this-is-me-ze",
 				Repository:    "project",
@@ -157,7 +156,7 @@ func TestParsePayload(t *testing.T) {
 				payload: sample.NoteEventAsJSON("/cancel dummy"),
 			},
 			want: &info.Event{
-				EventType:     opscomments.CancelCommentSingleEventType.String(),
+				EventType:     "Note",
 				TriggerTarget: "pull_request",
 				Organization:  "hello-this-is-me-ze",
 				Repository:    "project",

@@ -6,7 +6,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"sync"
 	"time"
 
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/consoleui"
@@ -36,12 +35,7 @@ type Clients struct {
 	HTTP              http.Client
 	Log               *zap.SugaredLogger
 	Dynamic           dynamic.Interface
-	consoleUIMutex    *sync.Mutex
-	consoleUI         consoleui.Interface
-}
-
-func (c *Clients) InitClients() {
-	c.consoleUIMutex = &sync.Mutex{}
+	ConsoleUI         consoleui.Interface
 }
 
 func (c *Clients) GetURL(ctx context.Context, url string) ([]byte, error) {
@@ -133,9 +127,6 @@ func (c *Clients) consoleUIClient(ctx context.Context, dynamic dynamic.Interface
 }
 
 func (c *Clients) NewClients(ctx context.Context, info *info.Info) error {
-	if c.consoleUIMutex == nil {
-		c.consoleUIMutex = &sync.Mutex{}
-	}
 	if c.ClientInitialized {
 		return nil
 	}
@@ -180,23 +171,8 @@ func (c *Clients) NewClients(ctx context.Context, info *info.Info) error {
 		return err
 	}
 
-	c.SetConsoleUI(c.consoleUIClient(ctx, c.Dynamic, info))
+	c.ConsoleUI = c.consoleUIClient(ctx, c.Dynamic, info)
 	c.ClientInitialized = true
 
 	return nil
-}
-
-func (c *Clients) ConsoleUI() consoleui.Interface {
-	c.consoleUIMutex.Lock()
-	defer c.consoleUIMutex.Unlock()
-	return c.consoleUI
-}
-
-func (c *Clients) SetConsoleUI(consoleUI consoleui.Interface) {
-	if c.consoleUIMutex == nil {
-		c.consoleUIMutex = &sync.Mutex{}
-	}
-	c.consoleUIMutex.Lock()
-	defer c.consoleUIMutex.Unlock()
-	c.consoleUI = consoleUI
 }

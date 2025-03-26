@@ -12,14 +12,11 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/changedfiles"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/events"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/opscomments"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
 	"github.com/xanzy/go-gitlab"
 	"go.uber.org/zap"
-	"gopkg.in/yaml.v2"
 )
 
 const (
@@ -38,7 +35,6 @@ const (
 </td></tr>
 {{- end }}
 </table>`
-	noClientErrStr = `no gitlab client has been initialized, exiting... (hint: did you forget setting a secret on your repo?)`
 )
 
 var _ provider.Interface = (*Provider)(nil)
@@ -47,7 +43,6 @@ type Provider struct {
 	Client            *gitlab.Client
 	Logger            *zap.SugaredLogger
 	run               *params.Run
-	pacInfo           *info.PacOpts
 	Token             *string
 	targetProjectID   int
 	sourceProjectID   int
@@ -55,12 +50,11 @@ type Provider struct {
 	pathWithNamespace string
 	repoURL           string
 	apiURL            string
-	eventEmitter      *events.EventEmitter
-	repo              *v1alpha1.Repository
 }
 
-func (v *Provider) SetPacInfo(pacInfo *info.PacOpts) {
-	v.pacInfo = pacInfo
+// GetTaskURI TODO: Implement me.
+func (v *Provider) GetTaskURI(_ context.Context, _ *info.Event, _ string) (bool, string, error) {
+	return false, "", nil
 }
 
 // CheckPolicyAllowing TODO: Implement ME.
@@ -106,7 +100,7 @@ func (v *Provider) GetConfig() *info.ProviderConfig {
 	}
 }
 
-func (v *Provider) SetClient(_ context.Context, run *params.Run, runevent *info.Event, repo *v1alpha1.Repository, eventsEmitter *events.EventEmitter) error {
+func (v *Provider) SetClient(_ context.Context, run *params.Run, runevent *info.Event, _ *v1alpha1.Repository, _ *events.EventEmitter) error {
 	var err error
 	if runevent.Provider.Token == "" {
 		return fmt.Errorf("no git_provider.secret has been set in the repo crd")
@@ -154,8 +148,6 @@ func (v *Provider) SetClient(_ context.Context, run *params.Run, runevent *info.
 		runevent.DefaultBranch = projectinfo.DefaultBranch
 	}
 	v.run = run
-	v.eventEmitter = eventsEmitter
-	v.repo = repo
 
 	return nil
 }
@@ -195,31 +187,24 @@ func (v *Provider) CreateStatus(_ context.Context, event *info.Event, statusOpts
 		onPr = "/" + statusOpts.OriginalPipelineRunName
 	}
 	body := fmt.Sprintf("**%s%s** has %s\n\n%s\n\n<small>Full log available [here](%s)</small>",
-		v.pacInfo.ApplicationName, onPr, statusOpts.Title, statusOpts.Text, detailsURL)
+		v.run.Info.Pac.ApplicationName, onPr, statusOpts.Title, statusOpts.Text, detailsURL)
 
+	// in case we have access set the commit status, typically on MR from
+	// another users we won't have it but it would work on push or MR from a
+	// branch on the same repo or if token somehow can have access by other
+	// means.
+	// if we have an error fallback to send a issue comment
 	opt := &gitlab.SetCommitStatusOptions{
 		State:       gitlab.BuildStateValue(statusOpts.Conclusion),
-		Name:        gitlab.Ptr(v.pacInfo.ApplicationName),
+		Name:        gitlab.Ptr(v.run.Info.Pac.ApplicationName),
 		TargetURL:   gitlab.Ptr(detailsURL),
 		Description: gitlab.Ptr(statusOpts.Title),
 	}
-
-	// In case we have access, set the status. Typically, on a Merge Request (MR)
-	// from a fork in an upstream repository, the token needs to have write access
-	// to the fork repository in order to create a status. However, the token set on the
-	// Repository CR usually doesn't have such broad access, preventing from creating
-	// a status comment on it.
-	// This would work on a push or an MR from a branch within the same repo.
-	// Ignoring errors because of the write access issues,
-	if _, _, err := v.Client.Commits.SetCommitStatus(event.SourceProjectID, event.SHA, opt); err != nil {
-		v.eventEmitter.EmitMessage(v.repo, zap.ErrorLevel, "FailedToSetCommitStatus",
-			"cannot set status with the GitLab token because of: "+err.Error())
-	}
+	//nolint: dogsled
+	_, _, _ = v.Client.Commits.SetCommitStatus(event.SourceProjectID, event.SHA, opt)
 
 	// only add a note when we are on a MR
-	if event.EventType == triggertype.PullRequest.String() ||
-		event.EventType == "Merge_Request" || event.EventType == "Merge Request" ||
-		opscomments.IsAnyOpsEventType(event.EventType) {
+	if event.EventType == "pull_request" || event.EventType == "Merge_Request" || event.EventType == "Merge Request" || event.EventType == "Note" {
 		mopt := &gitlab.CreateMergeRequestNoteOptions{Body: gitlab.Ptr(body)}
 		_, _, err := v.Client.Notes.CreateMergeRequestNote(event.TargetProjectID, event.PullRequestNumber, mopt)
 		return err
@@ -245,56 +230,29 @@ func (v *Provider) GetTektonDir(_ context.Context, event *info.Event, path, prov
 		Path:      gitlab.Ptr(path),
 		Ref:       gitlab.Ptr(revision),
 		Recursive: gitlab.Ptr(true),
-		ListOptions: gitlab.ListOptions{
-			OrderBy:    "id",
-			Pagination: "keyset",
-			PerPage:    20,
-			Sort:       "asc",
-		},
 	}
 
-	options := []gitlab.RequestOptionFunc{}
-	nodes := []*gitlab.TreeNode{}
-
-	for {
-		objects, resp, err := v.Client.Repositories.ListTree(v.sourceProjectID, opt, options...)
-		if err != nil {
-			return "", fmt.Errorf("failed to list %s dir: %w", path, err)
-		}
-		if resp != nil && resp.StatusCode == http.StatusNotFound {
-			return "", nil
-		}
-
-		nodes = append(nodes, objects...)
-
-		// Exit the loop when we've seen all pages.
-		if resp.NextLink == "" {
-			break
-		}
-
-		// Otherwise, set param to query the next page
-		options = []gitlab.RequestOptionFunc{
-			gitlab.WithKeysetPaginationParameters(resp.NextLink),
-		}
+	objects, resp, err := v.Client.Repositories.ListTree(v.sourceProjectID, opt)
+	if resp != nil && resp.Response.StatusCode == http.StatusNotFound {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("failed to list %s dir: %w", path, err)
 	}
 
-	return v.concatAllYamlFiles(nodes, event)
+	return v.concatAllYamlFiles(objects, event)
 }
 
 // concatAllYamlFiles concat all yaml files from a directory as one big multi document yaml string.
 func (v *Provider) concatAllYamlFiles(objects []*gitlab.TreeNode, runevent *info.Event) (string, error) {
 	var allTemplates string
+
 	for _, value := range objects {
 		if strings.HasSuffix(value.Name, ".yaml") ||
 			strings.HasSuffix(value.Name, ".yml") {
-			data, _, err := v.getObject(value.Path, runevent.HeadBranch, v.sourceProjectID)
+			data, err := v.getObject(value.Path, runevent.HeadBranch, v.sourceProjectID)
 			if err != nil {
 				return "", err
-			}
-			// validate yaml
-			var i any
-			if err := yaml.Unmarshal(data, &i); err != nil {
-				return "", fmt.Errorf("error unmarshalling yaml file %s: %w", value.Path, err)
 			}
 			if allTemplates != "" && !strings.HasPrefix(string(data), "---") {
 				allTemplates += "---"
@@ -306,22 +264,22 @@ func (v *Provider) concatAllYamlFiles(objects []*gitlab.TreeNode, runevent *info
 	return allTemplates, nil
 }
 
-func (v *Provider) getObject(fname, branch string, pid int) ([]byte, *gitlab.Response, error) {
+func (v *Provider) getObject(fname, branch string, pid int) ([]byte, error) {
 	opt := &gitlab.GetRawFileOptions{
 		Ref: gitlab.Ptr(branch),
 	}
 	file, resp, err := v.Client.RepositoryFiles.GetRawFile(pid, fname, opt)
 	if err != nil {
-		return []byte{}, resp, fmt.Errorf("failed to get filename from api %s dir: %w", fname, err)
+		return []byte{}, fmt.Errorf("failed to get filename from api %s dir: %w", fname, err)
 	}
 	if resp != nil && resp.Response.StatusCode == http.StatusNotFound {
-		return []byte{}, resp, nil
+		return []byte{}, nil
 	}
-	return file, resp, nil
+	return file, nil
 }
 
 func (v *Provider) GetFileInsideRepo(_ context.Context, runevent *info.Event, path, _ string) (string, error) {
-	getobj, _, err := v.getObject(path, runevent.HeadBranch, v.sourceProjectID)
+	getobj, err := v.getObject(path, runevent.HeadBranch, v.sourceProjectID)
 	if err != nil {
 		return "", err
 	}
@@ -330,13 +288,14 @@ func (v *Provider) GetFileInsideRepo(_ context.Context, runevent *info.Event, pa
 
 func (v *Provider) GetCommitInfo(_ context.Context, runevent *info.Event) error {
 	if v.Client == nil {
-		return fmt.Errorf("%s", noClientErrStr)
+		return fmt.Errorf("no gitlab client has been initialized, " +
+			"exiting... (hint: did you forget setting a secret on your repo?)")
 	}
 
 	// if we don't have a SHA (ie: incoming-webhook) then get it from the branch
 	// and populate in the runevent.
 	if runevent.SHA == "" && runevent.HeadBranch != "" {
-		branchinfo, _, err := v.Client.Commits.GetCommit(v.sourceProjectID, runevent.HeadBranch, &gitlab.GetCommitOptions{})
+		branchinfo, _, err := v.Client.Commits.GetCommit(v.sourceProjectID, runevent.HeadBranch)
 		if err != nil {
 			return err
 		}
@@ -353,48 +312,27 @@ func (v *Provider) GetFiles(_ context.Context, runevent *info.Event) (changedfil
 		return changedfiles.ChangedFiles{}, fmt.Errorf("no gitlab client has been initialized, " +
 			"exiting... (hint: did you forget setting a secret on your repo?)")
 	}
-	if runevent.TriggerTarget == triggertype.PullRequest {
-		opt := &gitlab.ListMergeRequestDiffsOptions{
-			ListOptions: gitlab.ListOptions{
-				OrderBy:    "id",
-				Pagination: "keyset",
-				PerPage:    20,
-				Sort:       "asc",
-			},
+	if runevent.TriggerTarget == "pull_request" {
+		//nolint: staticcheck
+		mrchanges, _, err := v.Client.MergeRequests.GetMergeRequestChanges(v.sourceProjectID, runevent.PullRequestNumber, &gitlab.GetMergeRequestChangesOptions{})
+		if err != nil {
+			return changedfiles.ChangedFiles{}, err
 		}
-		options := []gitlab.RequestOptionFunc{}
+
 		changedFiles := changedfiles.ChangedFiles{}
-
-		for {
-			mrchanges, resp, err := v.Client.MergeRequests.ListMergeRequestDiffs(v.targetProjectID, runevent.PullRequestNumber, opt, options...)
-			if err != nil {
-				return changedfiles.ChangedFiles{}, err
+		for _, change := range mrchanges.Changes {
+			changedFiles.All = append(changedFiles.All, change.NewPath)
+			if change.NewFile {
+				changedFiles.Added = append(changedFiles.Added, change.NewPath)
 			}
-
-			for _, change := range mrchanges {
-				changedFiles.All = append(changedFiles.All, change.NewPath)
-				if change.NewFile {
-					changedFiles.Added = append(changedFiles.Added, change.NewPath)
-				}
-				if change.DeletedFile {
-					changedFiles.Deleted = append(changedFiles.Deleted, change.NewPath)
-				}
-				if !change.RenamedFile && !change.DeletedFile && !change.NewFile {
-					changedFiles.Modified = append(changedFiles.Modified, change.NewPath)
-				}
-				if change.RenamedFile {
-					changedFiles.Renamed = append(changedFiles.Renamed, change.NewPath)
-				}
+			if change.DeletedFile {
+				changedFiles.Deleted = append(changedFiles.Deleted, change.NewPath)
 			}
-
-			// Exit the loop when we've seen all pages.
-			if resp.NextLink == "" {
-				break
+			if !change.RenamedFile && !change.DeletedFile && !change.NewFile {
+				changedFiles.Modified = append(changedFiles.Modified, change.NewPath)
 			}
-
-			// Otherwise, set param to query the next page
-			options = []gitlab.RequestOptionFunc{
-				gitlab.WithKeysetPaginationParameters(resp.NextLink),
+			if change.RenamedFile {
+				changedFiles.Renamed = append(changedFiles.Renamed, change.NewPath)
 			}
 		}
 		return changedFiles, nil

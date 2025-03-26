@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/google/go-github/v64/github"
+	"github.com/google/go-github/v56/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/clients"
@@ -32,18 +32,13 @@ func TestGithubProviderCreateCheckRun(t *testing.T) {
 	cnx := Provider{
 		Client: fakeclient,
 		Run:    params.New(),
-		pacInfo: &info.PacOpts{
-			Settings: settings.Settings{
-				ApplicationName: settings.PACApplicationNameDefaultValue,
-			},
-		},
 	}
 	defer teardown()
-	mux.HandleFunc("/repos/check/info/check-runs", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("/repos/check/info/check-runs", func(w http.ResponseWriter, r *http.Request) {
 		_, _ = fmt.Fprint(w, `{"id": 555}`)
 	})
 
-	mux.HandleFunc("/repos/check/info/check-runs/555", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("/repos/check/info/check-runs/555", func(w http.ResponseWriter, r *http.Request) {
 		_, _ = fmt.Fprint(w, `{"id": 555}`)
 	})
 
@@ -60,44 +55,6 @@ func TestGithubProviderCreateCheckRun(t *testing.T) {
 	assert.NilError(t, err)
 }
 
-func TestGetOrUpdateCheckRunStatusForMultipleFailedPipelineRun(t *testing.T) {
-	ctx, _ := rtesting.SetupFakeContext(t)
-	fakeclient, mux, _, teardown := ghtesthelper.SetupGH()
-	cnx := Provider{
-		Client:  fakeclient,
-		Run:     params.New(),
-		pacInfo: &info.PacOpts{},
-	}
-	defer teardown()
-	statusOptionData := []provider.StatusOpts{{
-		PipelineRunName:          "",
-		Title:                    "Failed",
-		InstanceCountForCheckRun: 0,
-	}, {
-		PipelineRunName:          "",
-		Title:                    "Failed",
-		InstanceCountForCheckRun: 1,
-	}}
-	mux.HandleFunc("/repos/check/info/check-runs", func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = fmt.Fprint(w, `{"id": 555}`)
-	})
-
-	mux.HandleFunc("/repos/check/info/check-runs/555", func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = fmt.Fprint(w, `{"id": 555}`)
-	})
-
-	event := &info.Event{
-		Organization: "check",
-		Repository:   "info",
-		SHA:          "createCheckRunSHA",
-	}
-
-	for i := range statusOptionData {
-		err := cnx.getOrUpdateCheckRunStatus(ctx, event, statusOptionData[i])
-		assert.NilError(t, err)
-	}
-}
-
 func TestGetExistingCheckRunIDFromMultiple(t *testing.T) {
 	ctx, _ := rtesting.SetupFakeContext(t)
 	client, mux, _, teardown := ghtesthelper.SetupGH()
@@ -105,7 +62,7 @@ func TestGetExistingCheckRunIDFromMultiple(t *testing.T) {
 
 	cnx := &Provider{
 		Client:        client,
-		PaginedNumber: 1,
+		paginedNumber: 1,
 	}
 	event := &info.Event{
 		Organization: "owner",
@@ -161,7 +118,7 @@ func TestGetExistingPendingApprovalCheckRunID(t *testing.T) {
 
 	chosenOne := "chosenOne"
 	chosenID := int64(55555)
-	mux.HandleFunc(fmt.Sprintf("/repos/%v/%v/commits/%v/check-runs", event.Organization, event.Repository, event.SHA), func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc(fmt.Sprintf("/repos/%v/%v/commits/%v/check-runs", event.Organization, event.Repository, event.SHA), func(w http.ResponseWriter, r *http.Request) {
 		_, _ = fmt.Fprintf(w, `{
 			"total_count": 1,
 			"check_runs": [
@@ -171,45 +128,6 @@ func TestGetExistingPendingApprovalCheckRunID(t *testing.T) {
 					"output": {
 						"title": "Pending approval",
 						"summary": "My CI is waiting for approval"
-					}
-				}
-			]
-		}`, chosenID, chosenOne)
-	})
-
-	id, err := cnx.getExistingCheckRunID(ctx, event, provider.StatusOpts{
-		PipelineRunName: chosenOne,
-	})
-	assert.NilError(t, err)
-	assert.Equal(t, *id, chosenID)
-}
-
-func TestGetExistingFailedCheckRunID(t *testing.T) {
-	ctx, _ := rtesting.SetupFakeContext(t)
-	client, mux, _, teardown := ghtesthelper.SetupGH()
-	defer teardown()
-
-	cnx := New()
-	cnx.Client = client
-
-	event := &info.Event{
-		Organization: "owner",
-		Repository:   "repository",
-		SHA:          "sha",
-	}
-
-	chosenOne := "chosenOne"
-	chosenID := int64(55555)
-	mux.HandleFunc(fmt.Sprintf("/repos/%v/%v/commits/%v/check-runs", event.Organization, event.Repository, event.SHA), func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = fmt.Fprintf(w, `{
-			"total_count": 1,
-			"check_runs": [
-				{
-					"id": %v,
-					"external_id": "%s",
-					"output": {
-						"title": "Failed",
-						"summary": "CI is failed to run"
 					}
 				}
 			]
@@ -379,7 +297,7 @@ func TestGithubProviderCreateStatus(t *testing.T) {
 			gcvs.Logger, _ = logger.GetLogger()
 			gcvs.Run = params.New()
 
-			mux.HandleFunc("/repos/check/run/statuses/sha", func(_ http.ResponseWriter, _ *http.Request) {})
+			mux.HandleFunc("/repos/check/run/statuses/sha", func(rw http.ResponseWriter, r *http.Request) {})
 			mux.HandleFunc(fmt.Sprintf("/repos/check/run/check-runs/%d", checkrunid), func(rw http.ResponseWriter, r *http.Request) {
 				bit, _ := io.ReadAll(r.Body)
 				checkRun := &github.CheckRun{}
@@ -404,7 +322,7 @@ func TestGithubProviderCreateStatus(t *testing.T) {
 			})
 			if tt.addExistingCheckruns {
 				tt.args.runevent.SHA = "sha"
-				mux.HandleFunc(fmt.Sprintf("/repos/%v/%v/commits/%v/check-runs", tt.args.runevent.Organization, tt.args.runevent.Repository, tt.args.runevent.SHA), func(w http.ResponseWriter, _ *http.Request) {
+				mux.HandleFunc(fmt.Sprintf("/repos/%v/%v/commits/%v/check-runs", tt.args.runevent.Organization, tt.args.runevent.Repository, tt.args.runevent.SHA), func(w http.ResponseWriter, r *http.Request) {
 					_, _ = fmt.Fprintf(w, `{
 						"total_count": 1,
 						"check_runs": [
@@ -459,11 +377,6 @@ func TestGithubProviderCreateStatus(t *testing.T) {
 				Tekton: stdata.Pipeline,
 			}
 			gcvs.Run.Clients = fakeClients
-			gcvs.SetPacInfo(&info.PacOpts{
-				Settings: settings.Settings{
-					ApplicationName: settings.PACApplicationNameDefaultValue,
-				},
-			})
 			err := gcvs.CreateStatus(ctx, tt.args.runevent, status)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("GithubProvider.CreateStatus() error = %v, wantErr %v", err, tt.wantErr)
@@ -531,13 +444,13 @@ func TestGithubProvidercreateStatusCommit(t *testing.T) {
 			fakeclient, mux, _, teardown := ghtesthelper.SetupGH()
 			defer teardown()
 			mux.HandleFunc(fmt.Sprintf("/repos/%s/%s/statuses/%s",
-				tt.event.Organization, tt.event.Repository, tt.event.SHA), func(_ http.ResponseWriter, r *http.Request) {
+				tt.event.Organization, tt.event.Repository, tt.event.SHA), func(rw http.ResponseWriter, r *http.Request) {
 				body, _ := io.ReadAll(r.Body)
 				assert.Check(t, strings.Contains(string(body), fmt.Sprintf(`"state":"%s"`, tt.expectedConclusion)))
 			})
 			if tt.status.Status == "completed" {
 				mux.HandleFunc(fmt.Sprintf("/repos/%s/%s/issues/%d/comments",
-					tt.event.Organization, tt.event.Repository, issuenumber), func(_ http.ResponseWriter, r *http.Request) {
+					tt.event.Organization, tt.event.Repository, issuenumber), func(rw http.ResponseWriter, r *http.Request) {
 					body, _ := io.ReadAll(r.Body)
 					assert.Equal(t, fmt.Sprintf(`{"body":"%s<br>%s"}`, tt.status.Summary, tt.status.Text)+"\n", string(body))
 				})
@@ -547,11 +460,6 @@ func TestGithubProvidercreateStatusCommit(t *testing.T) {
 			provider := &Provider{
 				Client: fakeclient,
 				Run:    params.New(),
-				pacInfo: &info.PacOpts{
-					Settings: settings.Settings{
-						ApplicationName: settings.PACApplicationNameDefaultValue,
-					},
-				},
 			}
 
 			if err := provider.createStatusCommit(ctx, tt.event, tt.status); (err != nil) != tt.wantErr {
@@ -577,7 +485,7 @@ func TestGetCheckName(t *testing.T) {
 				status: provider.StatusOpts{
 					OriginalPipelineRunName: "HELLO",
 				},
-				pacopts: &info.PacOpts{Settings: settings.Settings{ApplicationName: ""}},
+				pacopts: &info.PacOpts{Settings: &settings.Settings{ApplicationName: ""}},
 			},
 			want: "HELLO",
 		},
@@ -587,7 +495,7 @@ func TestGetCheckName(t *testing.T) {
 				status: provider.StatusOpts{
 					OriginalPipelineRunName: "MOTO",
 				},
-				pacopts: &info.PacOpts{Settings: settings.Settings{ApplicationName: "HELLO"}},
+				pacopts: &info.PacOpts{Settings: &settings.Settings{ApplicationName: "HELLO"}},
 			},
 			want: "HELLO / MOTO",
 		},
@@ -597,7 +505,7 @@ func TestGetCheckName(t *testing.T) {
 				status: provider.StatusOpts{
 					OriginalPipelineRunName: "",
 				},
-				pacopts: &info.PacOpts{Settings: settings.Settings{ApplicationName: "PAC"}},
+				pacopts: &info.PacOpts{Settings: &settings.Settings{ApplicationName: "PAC"}},
 			},
 			want: "PAC",
 		},
@@ -658,8 +566,8 @@ func TestProviderGetExistingCheckRunID(t *testing.T) {
 			v := &Provider{
 				Client: client,
 			}
-			mux.HandleFunc(fmt.Sprintf("/repos/%v/%v/commits/%v/check-runs", event.Organization, event.Repository, event.SHA), func(w http.ResponseWriter, _ *http.Request) {
-				_, _ = fmt.Fprintf(w, "%s", tt.jsonret)
+			mux.HandleFunc(fmt.Sprintf("/repos/%v/%v/commits/%v/check-runs", event.Organization, event.Repository, event.SHA), func(w http.ResponseWriter, r *http.Request) {
+				_, _ = fmt.Fprintf(w, tt.jsonret)
 			})
 
 			got, err := v.getExistingCheckRunID(ctx, event, provider.StatusOpts{

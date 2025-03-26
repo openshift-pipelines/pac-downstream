@@ -1,35 +1,28 @@
----
-title: KaTeX
----
 # KaTeX
 
 KaTeX shortcode let you render math typesetting in markdown document. See [KaTeX](https://katex.org/)
 
 ## Example
-
-<div class="book-columns flex flex-wrap">
-  <div class="flex-even markdown-inner">
+{{< columns >}}
 
 ```latex
-{{</* katex display=true class="optional" >}}
+{{</*/* katex [display] [class="text-center"] */*/>}}
 f(x) = \int_{-\infty}^\infty\hat f(\xi)\,e^{2 \pi i \xi x}\,d\xi
-{{< /katex */>}}
+{{</*/* /katex */*/>}}
 ```
 
-  </div>
-  <div class="flex-even markdown-inner">
+<--->
 
-{{< katex display=true class="optional" >}}
+{{< katex display >}}
 f(x) = \int_{-\infty}^\infty\hat f(\xi)\,e^{2 \pi i \xi x}\,d\xi
 {{< /katex >}}
 
-  </div>
-</div>
+{{< /columns >}}
 
 ## Display Mode Example
 
 Here is some inline example: {{< katex >}}\pi(x){{< /katex >}}, rendered in the same line. And below is `display` example, having `display: block`
-{{< katex display=true >}}
+{{< katex display >}}
 f(x) = \int_{-\infty}^\infty\hat f(\xi)\,e^{2 \pi i \xi x}\,d\xi
 {{< /katex >}}
 Text continues here.

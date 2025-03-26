@@ -4,11 +4,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/google/go-github/v64/github"
+	"github.com/google/go-github/v56/github"
 	apipac "github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/consoleui"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/events"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/clients"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
@@ -33,6 +32,12 @@ func TestPacRun_checkNeedUpdate(t *testing.T) {
 		needupdate           bool
 	}{
 		{
+			name:                 "old secrets",
+			tmpl:                 `secretName: "pac-git-basic-auth-{{repo_owner}}-{{repo_name}}"`,
+			upgradeMessageSubstr: "old basic auth secret name",
+			needupdate:           true,
+		},
+		{
 			name:       "no need",
 			tmpl:       ` secretName: "foo-bar-foo"`,
 			needupdate: false,
@@ -40,7 +45,7 @@ func TestPacRun_checkNeedUpdate(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			p := NewPacs(nil, nil, &params.Run{Clients: clients.Clients{}}, &info.PacOpts{}, nil, nil, nil)
+			p := NewPacs(nil, nil, &params.Run{Clients: clients.Clients{}}, nil, nil)
 			got, needupdate := p.checkNeedUpdate(tt.tmpl)
 			if tt.upgradeMessageSubstr != "" {
 				assert.Assert(t, strings.Contains(got, tt.upgradeMessageSubstr))
@@ -77,47 +82,20 @@ func TestFilterRunningPipelineRunOnTargetTest(t *testing.T) {
 		},
 	}
 	ret := filterRunningPipelineRunOnTargetTest("", prs)
-	assert.Assert(t, ret == nil)
+	assert.Equal(t, prs[0].GetName(), ret[0].GetName())
 	ret = filterRunningPipelineRunOnTargetTest(testPipeline, prs)
-	assert.Equal(t, prs[0].GetName(), ret.GetName())
+	assert.Equal(t, prs[0].GetName(), ret[0].GetName())
 	prs = []*tektonv1.PipelineRun{}
 	ret = filterRunningPipelineRunOnTargetTest(testPipeline, prs)
 	assert.Assert(t, ret == nil)
 }
 
 func TestGetPipelineRunsFromRepo(t *testing.T) {
-	pullRequestEvent := &info.Event{
-		SHA:           "principale",
-		Organization:  "organizationes",
-		Repository:    "lagaffe",
-		URL:           "https://service/documentation",
-		HeadBranch:    "main",
-		BaseBranch:    "main",
-		Sender:        "fantasio",
-		EventType:     "pull_request",
-		TriggerTarget: "pull_request",
-	}
-	testExplicitNoMatchPREvent := &info.Event{
-		SHA:           "principale",
-		Organization:  "organizationes",
-		Repository:    "lagaffe",
-		URL:           "https://service/documentation",
-		HeadBranch:    "main",
-		BaseBranch:    "main",
-		Sender:        "fantasio",
-		TriggerTarget: "pull_request",
-		State: info.State{
-			TargetTestPipelineRun: "no-match",
-		},
-	}
-
 	tests := []struct {
 		name                  string
 		repositories          *v1alpha1.Repository
 		tektondir             string
 		expectedNumberOfPruns int
-		event                 *info.Event
-		logSnippet            string
 	}{
 		{
 			name: "more than one pipelinerun in .tekton dir",
@@ -130,7 +108,6 @@ func TestGetPipelineRunsFromRepo(t *testing.T) {
 			},
 			tektondir:             "testdata/pull_request_multiplepipelineruns",
 			expectedNumberOfPruns: 2,
-			event:                 pullRequestEvent,
 		},
 		{
 			name: "single pipelinerun in .tekton dir",
@@ -143,62 +120,29 @@ func TestGetPipelineRunsFromRepo(t *testing.T) {
 			},
 			tektondir:             "testdata/pull_request",
 			expectedNumberOfPruns: 1,
-			event:                 pullRequestEvent,
-		},
-		{
-			name: "invalid tekton pipelineruns in directory",
-			repositories: &v1alpha1.Repository{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "testrepo",
-					Namespace: "test",
-				},
-				Spec: v1alpha1.RepositorySpec{},
-			},
-			tektondir:  "testdata/invalid_tekton_yaml",
-			event:      pullRequestEvent,
-			logSnippet: `prun: bad-tekton-yaml tekton validation error: json: cannot unmarshal object into Go struct field PipelineSpec.spec.pipelineSpec.tasks of type []v1beta1.PipelineTask`,
-		},
-		{
-			name: "no-match pipelineruns in .tekton dir, only matched should be returned",
-			repositories: &v1alpha1.Repository{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "testrepo",
-					Namespace: "test",
-				},
-				Spec: v1alpha1.RepositorySpec{},
-			},
-			// we have 3 PR in there 2 that has a match on pull request and 1 that is a no-matching
-			// matching those two that is matching here
-			tektondir:             "testdata/no-match",
-			expectedNumberOfPruns: 2,
-			event:                 pullRequestEvent,
-		},
-		{
-			name: "no-match pipelineruns in .tekton dir, only match the no-match",
-			repositories: &v1alpha1.Repository{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "testrepo",
-					Namespace: "test",
-				},
-				Spec: v1alpha1.RepositorySpec{},
-			},
-			// we have 3 PR in there 2 that has a match on pull request and 1 that is a no-matching
-			// matching that only one here
-			tektondir:             "testdata/no-match",
-			expectedNumberOfPruns: 1,
-			event:                 testExplicitNoMatchPREvent,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			observerCore, logCatcher := zapobserver.New(zap.InfoLevel)
-			logger := zap.New(observerCore).Sugar()
+			observer, _ := zapobserver.New(zap.InfoLevel)
+			logger := zap.New(observer).Sugar()
 			ctx, _ := rtesting.SetupFakeContext(t)
 			fakeclient, mux, _, teardown := ghtesthelper.SetupGH()
 			defer teardown()
 
+			runevent := &info.Event{
+				SHA:           "principale",
+				Organization:  "organizationes",
+				Repository:    "lagaffe",
+				URL:           "https://service/documentation",
+				HeadBranch:    "main",
+				BaseBranch:    "main",
+				Sender:        "fantasio",
+				EventType:     "pull_request",
+				TriggerTarget: "pull_request",
+			}
 			if tt.tektondir != "" {
-				ghtesthelper.SetupGitTree(t, mux, tt.tektondir, tt.event, false)
+				ghtesthelper.SetupGitTree(t, mux, tt.tektondir, runevent, false)
 			}
 
 			stdata, _ := testclient.SeedTestData(t, ctx, testclient.Data{})
@@ -208,9 +152,17 @@ func TestGetPipelineRunsFromRepo(t *testing.T) {
 					Log:            logger,
 					Kube:           stdata.Kube,
 					Tekton:         stdata.Pipeline,
+					ConsoleUI:      consoleui.FallBackConsole{},
+				},
+				Info: info.Info{
+					Pac: &info.PacOpts{
+						Settings: &settings.Settings{
+							SecretAutoCreation: true,
+							RemoteTasks:        true,
+						},
+					},
 				},
 			}
-			cs.Clients.SetConsoleUI(consoleui.FallBackConsole{})
 			k8int := &kitesthelper.KinterfaceTest{
 				ConsoleURL: "https://console.url",
 			}
@@ -219,22 +171,12 @@ func TestGetPipelineRunsFromRepo(t *testing.T) {
 				Token:  github.String("None"),
 				Logger: logger,
 			}
-			pacInfo := &info.PacOpts{
-				Settings: settings.Settings{
-					SecretAutoCreation: true,
-					RemoteTasks:        true,
-				},
-			}
-			p := NewPacs(tt.event, vcx, cs, pacInfo, k8int, logger, nil)
-			p.eventEmitter = events.NewEventEmitter(stdata.Kube, logger)
+			p := NewPacs(runevent, vcx, cs, k8int, logger)
 			matchedPRs, err := p.getPipelineRunsFromRepo(ctx, tt.repositories)
 			assert.NilError(t, err)
 			matchedPRNames := []string{}
 			for i := range matchedPRs {
 				matchedPRNames = append(matchedPRNames, matchedPRs[i].PipelineRun.GetGenerateName())
-			}
-			if tt.logSnippet != "" {
-				assert.Assert(t, logCatcher.FilterMessageSnippet(tt.logSnippet).Len() > 0, logCatcher.All())
 			}
 			assert.Equal(t, len(matchedPRNames), tt.expectedNumberOfPruns)
 		})

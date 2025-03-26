@@ -6,14 +6,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/go-github/v64/github"
+	"github.com/google/go-github/v56/github"
 	apipac "github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	pacv1a1 "github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/formatting"
 	kstatus "github.com/openshift-pipelines/pipelines-as-code/pkg/kubeinteraction/status"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/settings"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/pipelineascode"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/secrets"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/sort"
@@ -44,7 +43,7 @@ func (r *Reconciler) updateRepoRunStatus(ctx context.Context, logger *zap.Sugare
 		SHA:             &event.SHA,
 		SHAURL:          &event.SHAURL,
 		Title:           &event.SHATitle,
-		LogURL:          github.String(r.run.Clients.ConsoleUI().DetailURL(pr)),
+		LogURL:          github.String(r.run.Clients.ConsoleUI.DetailURL(pr)),
 		EventType:       &event.EventType,
 		TargetBranch:    &refsanitized,
 	}
@@ -97,7 +96,7 @@ func (r *Reconciler) getFailureSnippet(ctx context.Context, pr *tektonv1.Pipelin
 	return fmt.Sprintf("task <b>%s</b> has the status <b>\"%s\"</b>:\n<pre>%s</pre>", name, sortedTaskInfos[0].Reason, text)
 }
 
-func (r *Reconciler) postFinalStatus(ctx context.Context, logger *zap.SugaredLogger, pacInfo *info.PacOpts, vcx provider.Interface, event *info.Event, createdPR *tektonv1.PipelineRun) (*tektonv1.PipelineRun, error) {
+func (r *Reconciler) postFinalStatus(ctx context.Context, logger *zap.SugaredLogger, vcx provider.Interface, event *info.Event, createdPR *tektonv1.PipelineRun) (*tektonv1.PipelineRun, error) {
 	pr, err := r.run.Clients.Tekton.TektonV1().PipelineRuns(createdPR.GetNamespace()).Get(
 		ctx, createdPR.GetName(), metav1.GetOptions{},
 	)
@@ -117,19 +116,19 @@ func (r *Reconciler) postFinalStatus(ctx context.Context, logger *zap.SugaredLog
 		taskStatusText = pr.Status.GetCondition(apis.ConditionSucceeded).Message
 	}
 
-	namespaceURL := r.run.Clients.ConsoleUI().NamespaceURL(pr)
-	consoleURL := r.run.Clients.ConsoleUI().DetailURL(pr)
+	namespaceURL := r.run.Clients.ConsoleUI.NamespaceURL(pr)
+	consoleURL := r.run.Clients.ConsoleUI.DetailURL(pr)
 	mt := formatting.MessageTemplate{
 		PipelineRunName: pr.GetName(),
 		Namespace:       pr.GetNamespace(),
 		NamespaceURL:    namespaceURL,
-		ConsoleName:     r.run.Clients.ConsoleUI().GetName(),
+		ConsoleName:     r.run.Clients.ConsoleUI.GetName(),
 		ConsoleURL:      consoleURL,
 		TknBinary:       settings.TknBinaryName,
 		TknBinaryURL:    settings.TknBinaryURL,
 		TaskStatus:      taskStatusText,
 	}
-	if pacInfo.ErrorLogSnippet {
+	if r.run.Info.Pac.ErrorLogSnippet {
 		failures := r.getFailureSnippet(ctx, pr)
 		if failures != "" {
 			secretValues := secrets.GetSecretsAttachedToPipelineRun(ctx, r.kinteract, pr)
@@ -143,12 +142,12 @@ func (r *Reconciler) postFinalStatus(ctx context.Context, logger *zap.SugaredLog
 	}
 
 	status := provider.StatusOpts{
-		Status:                  pipelineascode.CompletedStatus,
+		Status:                  "completed",
 		PipelineRun:             pr,
 		Conclusion:              formatting.PipelineRunStatus(pr),
 		Text:                    tmplStatusText,
 		PipelineRunName:         pr.Name,
-		DetailsURL:              r.run.Clients.ConsoleUI().DetailURL(pr),
+		DetailsURL:              r.run.Clients.ConsoleUI.DetailURL(pr),
 		OriginalPipelineRunName: pr.GetAnnotations()[apipac.OriginalPRName],
 	}
 

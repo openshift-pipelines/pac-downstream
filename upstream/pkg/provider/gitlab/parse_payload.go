@@ -7,16 +7,18 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/opscomments"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
 	"github.com/xanzy/go-gitlab"
 )
 
 func (v *Provider) ParsePayload(_ context.Context, _ *params.Run, request *http.Request,
 	payload string,
 ) (*info.Event, error) {
+	// TODO: parse request to figure out which event
+	var processedEvent *info.Event
+
 	event := request.Header.Get("X-Gitlab-Event")
 	if event == "" {
 		return nil, fmt.Errorf("failed to find event type in request header")
@@ -29,14 +31,9 @@ func (v *Provider) ParsePayload(_ context.Context, _ *params.Run, request *http.
 	}
 	_ = json.Unmarshal(payloadB, &eventInt)
 
-	// Remove the " Hook" suffix so looks better in status, and since we don't
-	// really use it anymore we good to do whatever we want with it for
-	// cosmetics.
-	processedEvent := info.NewEvent()
-	processedEvent.EventType = strings.ReplaceAll(event, " Hook", "")
-	processedEvent.Event = eventInt
 	switch gitEvent := eventInt.(type) {
 	case *gitlab.MergeEvent:
+		processedEvent = info.NewEvent()
 		// Organization:  event.GetRepo().GetOwner().GetLogin(),
 		processedEvent.Sender = gitEvent.User.Username
 		processedEvent.DefaultBranch = gitEvent.Project.DefaultBranch
@@ -56,25 +53,12 @@ func (v *Provider) ParsePayload(_ context.Context, _ *params.Run, request *http.
 
 		v.pathWithNamespace = gitEvent.ObjectAttributes.Target.PathWithNamespace
 		processedEvent.Organization, processedEvent.Repository = getOrgRepo(v.pathWithNamespace)
-		processedEvent.TriggerTarget = triggertype.PullRequest
+		processedEvent.TriggerTarget = "pull_request"
 		processedEvent.SourceProjectID = gitEvent.ObjectAttributes.SourceProjectID
 		processedEvent.TargetProjectID = gitEvent.Project.ID
-		processedEvent.EventType = strings.ReplaceAll(event, " Hook", "")
 	case *gitlab.TagEvent:
-		// GitLab sends same event for both Tag creation and deletion i.e. "Tag Push Hook".
-		// if gitEvent.After is containing all zeros and gitEvent.CheckoutSHA is empty
-		// it is Delete "Tag Push Hook".
-		if isZeroSHA(gitEvent.After) && gitEvent.CheckoutSHA == "" {
-			return nil, fmt.Errorf("event Delete %s is not supported", event)
-		}
-
-		// sometime in gitlab tag push event contains no commit
-		// in this case we're not supposed to process the event.
-		if len(gitEvent.Commits) == 0 {
-			return nil, fmt.Errorf("no commits attached to this %s event", event)
-		}
-
 		lastCommitIdx := len(gitEvent.Commits) - 1
+		processedEvent = info.NewEvent()
 		processedEvent.Sender = gitEvent.UserUsername
 		processedEvent.DefaultBranch = gitEvent.Project.DefaultBranch
 		processedEvent.URL = gitEvent.Project.WebURL
@@ -93,12 +77,12 @@ func (v *Provider) ParsePayload(_ context.Context, _ *params.Run, request *http.
 		v.userID = gitEvent.UserID
 		processedEvent.SourceProjectID = gitEvent.ProjectID
 		processedEvent.TargetProjectID = gitEvent.ProjectID
-		processedEvent.EventType = strings.ReplaceAll(event, " Hook", "")
 	case *gitlab.PushEvent:
 		if len(gitEvent.Commits) == 0 {
 			return nil, fmt.Errorf("no commits attached to this push event")
 		}
 		lastCommitIdx := len(gitEvent.Commits) - 1
+		processedEvent = info.NewEvent()
 		processedEvent.Sender = gitEvent.UserUsername
 		processedEvent.DefaultBranch = gitEvent.Project.DefaultBranch
 		processedEvent.URL = gitEvent.Project.WebURL
@@ -117,23 +101,30 @@ func (v *Provider) ParsePayload(_ context.Context, _ *params.Run, request *http.
 		v.userID = gitEvent.UserID
 		processedEvent.SourceProjectID = gitEvent.ProjectID
 		processedEvent.TargetProjectID = gitEvent.ProjectID
-		processedEvent.EventType = strings.ReplaceAll(event, " Hook", "")
 	case *gitlab.MergeCommentEvent:
+		processedEvent = info.NewEvent()
 		processedEvent.Sender = gitEvent.User.Username
 		processedEvent.DefaultBranch = gitEvent.Project.DefaultBranch
 		processedEvent.URL = gitEvent.Project.WebURL
 		processedEvent.SHA = gitEvent.MergeRequest.LastCommit.ID
 		processedEvent.SHAURL = gitEvent.MergeRequest.LastCommit.URL
-		processedEvent.SHATitle = gitEvent.MergeRequest.LastCommit.Title
+		// TODO: change this back to Title when we get this pr available merged https://github.com/xanzy/go-gitlab/pull/1406/files
+		processedEvent.SHATitle = gitEvent.MergeRequest.LastCommit.Message
 		processedEvent.BaseBranch = gitEvent.MergeRequest.TargetBranch
 		processedEvent.HeadBranch = gitEvent.MergeRequest.SourceBranch
 		processedEvent.BaseURL = gitEvent.MergeRequest.Target.WebURL
 		processedEvent.HeadURL = gitEvent.MergeRequest.Source.WebURL
+		// if it is a /test or /retest comment with pipelinerun name figure out the pipelineRun name
+		if provider.IsTestRetestComment(gitEvent.ObjectAttributes.Note) {
+			processedEvent.TargetTestPipelineRun = provider.GetPipelineRunFromTestComment(gitEvent.ObjectAttributes.Note)
+		}
+		if provider.IsCancelComment(gitEvent.ObjectAttributes.Note) {
+			processedEvent.TargetCancelPipelineRun = provider.GetPipelineRunFromCancelComment(gitEvent.ObjectAttributes.Note)
+		}
 
-		opscomments.SetEventTypeAndTargetPR(processedEvent, gitEvent.ObjectAttributes.Note)
 		v.pathWithNamespace = gitEvent.Project.PathWithNamespace
 		processedEvent.Organization, processedEvent.Repository = getOrgRepo(v.pathWithNamespace)
-		processedEvent.TriggerTarget = triggertype.PullRequest
+		processedEvent.TriggerTarget = "pull_request"
 
 		processedEvent.PullRequestNumber = gitEvent.MergeRequest.IID
 		v.targetProjectID = gitEvent.MergeRequest.TargetProjectID
@@ -145,10 +136,13 @@ func (v *Provider) ParsePayload(_ context.Context, _ *params.Run, request *http.
 		return nil, fmt.Errorf("event %s is not supported", event)
 	}
 
+	processedEvent.Event = eventInt
+
+	// Remove the " Hook" suffix so looks better in status, and since we don't
+	// really use it anymore we good to do whatever we want with it for
+	// cosmetics.
+	processedEvent.EventType = strings.ReplaceAll(event, " Hook", "")
+
 	v.repoURL = processedEvent.URL
 	return processedEvent, nil
-}
-
-func isZeroSHA(sha string) bool {
-	return sha == "0000000000000000000000000000000000000000"
 }

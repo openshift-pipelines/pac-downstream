@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/google/go-github/v64/github"
+	"github.com/google/go-github/v56/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/test/logger"
 	"gotest.tools/v3/assert"
 )
@@ -93,7 +93,7 @@ func TestProvider_Detect(t *testing.T) {
 			},
 			eventType:  "issue_comment",
 			isGH:       true,
-			processReq: true,
+			processReq: false,
 		},
 		{
 			name: "issue comment Event with no valid comment",
@@ -112,7 +112,7 @@ func TestProvider_Detect(t *testing.T) {
 			},
 			eventType:  "issue_comment",
 			isGH:       true,
-			processReq: true,
+			processReq: false,
 		},
 		{
 			name: "issue comment Event with ok-to-test comment",
@@ -193,7 +193,7 @@ func TestProvider_Detect(t *testing.T) {
 		{
 			name: "push event",
 			event: github.PushEvent{
-				Pusher: &github.CommitAuthor{Name: github.String("user")},
+				Pusher: &github.User{ID: github.Int64(11)},
 			},
 			eventType:  "push",
 			isGH:       true,

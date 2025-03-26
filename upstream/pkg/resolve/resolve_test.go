@@ -1,8 +1,6 @@
 package resolve
 
 import (
-	"context"
-	"fmt"
 	"log"
 	"os"
 	"strings"
@@ -99,7 +97,7 @@ func TestPipelineBundlesSkipped(t *testing.T) {
 	assert.Equal(t, string(resolved.Spec.PipelineRef.ResolverRef.Params[0].Name), "bundle")
 }
 
-// TestTaskBundlesSkipped effectively test conversion from beta1 to v1.
+// TestPipelineBundlesSkipped effectively test conversion from beta1 to v1.
 func TestTaskBundlesSkipped(t *testing.T) {
 	resolved, _, err := readTDfile(t, "pipelinerun-task-bundle", false, true)
 	assert.NilError(t, err)
@@ -198,46 +196,18 @@ func TestNotTektonDocumentIgnore(t *testing.T) {
 	assert.NilError(t, err)
 	logs := log.TakeAll()
 	assert.Assert(t, len(logs) > 0)
-	assert.Assert(t, strings.HasPrefix(logs[0].Message, "skipping yaml"), fmt.Sprintf("'%s'", logs[0].Message))
+	assert.Assert(t, strings.HasPrefix(logs[0].Message, "Skipping"))
 	assert.Assert(t, resolved.Spec.PipelineSpec != nil)
 }
 
-func TestReportBadTektonYaml(t *testing.T) {
-	tests := []struct {
-		name           string
-		filename       string
-		wantErr        bool
-		validError     string
-		validErrorName string
-	}{
-		{
-			name:           "bad tekton yaml name",
-			filename:       "bad-tekton-yaml-name",
-			validError:     `json: cannot unmarshal object into Go struct field PipelineSpec.spec.pipelineSpec.tasks of type []v1beta1.PipelineTask`,
-			validErrorName: "bad-name",
-		},
-		{
-			name:           "bad tekton yaml generateName",
-			filename:       "bad-tekton-yaml-generate-name",
-			validError:     `json: cannot unmarshal object into Go struct field PipelineSpec.spec.pipelineSpec.tasks of type []v1beta1.PipelineTask`,
-			validErrorName: "unknown",
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			data, err := os.ReadFile("testdata/" + tt.filename + ".yaml")
-			assert.NilError(t, err)
-			types, err := ReadTektonTypes(context.TODO(), nil, string(data))
-			assert.NilError(t, err)
-			if value, ok := types.ValidationErrors[tt.validErrorName]; ok {
-				assert.Equal(t, value, tt.validError, "error message mismatch")
-			} else {
-				t.Errorf("could not find the task %s in the validation errors: %+v", tt.validErrorName, types.ValidationErrors)
-			}
-		})
-	}
-
-	assert.Equal(t, "", detectAtleastNameOrGenerateNameFromPipelineRun("- babdakdja"))
+func TestNotKubernetesDocumentIgnore(t *testing.T) {
+	resolved, log, err := readTDfile(t, "not-a-kubernetes-yaml", false, true)
+	logs := log.TakeAll()
+	assert.Assert(t, len(logs) > 0)
+	assert.Assert(t, strings.HasPrefix(logs[0].Message, "Skipping"))
+	assert.Assert(t, resolved.Spec.PipelineSpec != nil)
+	assert.NilError(t, err)
+	assert.Assert(t, resolved.Spec.PipelineSpec != nil)
 }
 
 // test if we have the task in .tekton dir not referenced in annotations but taskRef in a task.
@@ -511,15 +481,4 @@ func TestSkippingTask(t *testing.T) {
 
 	// Test case where taskName is not in skippedTasks
 	assert.Equal(t, skippingTask("task2", skippedTasks), false)
-}
-
-func TestTaskRunPassMetadataAnnotations(t *testing.T) {
-	resolved, _, err := readTDfile(t, "pipelinerun-pipelinespec-taskref-pass-annotations", false, true)
-	assert.NilError(t, err)
-	ma := resolved.Spec.PipelineSpec.Tasks[0].TaskSpec.Metadata.Annotations
-	assert.Equal(t, len(ma), 1)
-	assert.Equal(t, ma["random.annotation"], "THIS_SHOULD_BE_HERE")
-	ml := resolved.Spec.PipelineSpec.Tasks[0].TaskSpec.Metadata.Labels
-	assert.Equal(t, len(ml), 1)
-	assert.Equal(t, ml["the.nitpicker.is.called"], "vincent")
 }

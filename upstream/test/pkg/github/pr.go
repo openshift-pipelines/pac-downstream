@@ -5,35 +5,31 @@ import (
 	"encoding/base64"
 	"fmt"
 	"net/http"
-	"os"
 	"path/filepath"
 	"testing"
 
-	ghlib "github.com/google/go-github/v64/github"
+	"github.com/google/go-github/v56/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
 	ghprovider "github.com/openshift-pipelines/pipelines-as-code/pkg/provider/github"
 	"github.com/openshift-pipelines/pipelines-as-code/test/pkg/options"
 	"github.com/openshift-pipelines/pipelines-as-code/test/pkg/payload"
-	"github.com/openshift-pipelines/pipelines-as-code/test/pkg/repository"
 	"github.com/openshift-pipelines/pipelines-as-code/test/pkg/wait"
 	"github.com/tektoncd/pipeline/pkg/names"
-	"go.uber.org/zap"
 	"gotest.tools/v3/assert"
 )
 
-func PushFilesToRef(ctx context.Context, client *ghlib.Client, commitMessage, baseBranch, targetRef, owner, repo string, files map[string]string) (string, *ghlib.Reference, error) {
+func PushFilesToRef(ctx context.Context, client *github.Client, commitMessage, baseBranch, targetRef, owner, repo string, files map[string]string) (string, *github.Reference, error) {
 	maintree, _, err := client.Git.GetTree(ctx, owner, repo, baseBranch, false)
 	if err != nil {
 		return "", nil, fmt.Errorf("error getting tree: %w", err)
 	}
 	mainSha := maintree.GetSHA()
-	entries := []*ghlib.TreeEntry{}
+	entries := []*github.TreeEntry{}
 	defaultMode := "100644"
 	for path, fcontent := range files {
 		content := base64.StdEncoding.EncodeToString([]byte(fcontent))
 		encoding := "base64"
-		blob, _, err := client.Git.CreateBlob(ctx, owner, repo, &ghlib.Blob{
+		blob, _, err := client.Git.CreateBlob(ctx, owner, repo, &github.Blob{
 			Content:  &content,
 			Encoding: &encoding,
 		})
@@ -44,7 +40,7 @@ func PushFilesToRef(ctx context.Context, client *ghlib.Client, commitMessage, ba
 
 		_path := path
 		entries = append(entries,
-			&ghlib.TreeEntry{
+			&github.TreeEntry{
 				Path: &_path,
 				Mode: &defaultMode,
 				SHA:  &sha,
@@ -58,26 +54,26 @@ func PushFilesToRef(ctx context.Context, client *ghlib.Client, commitMessage, ba
 
 	commitAuthor := "OpenShift Pipelines E2E test"
 	commitEmail := "e2e-pipelines@redhat.com"
-	commit, _, err := client.Git.CreateCommit(ctx, owner, repo, &ghlib.Commit{
-		Author: &ghlib.CommitAuthor{
+	commit, _, err := client.Git.CreateCommit(ctx, owner, repo, &github.Commit{
+		Author: &github.CommitAuthor{
 			Name:  &commitAuthor,
 			Email: &commitEmail,
 		},
 		Message: &commitMessage,
 		Tree:    tree,
-		Parents: []*ghlib.Commit{
+		Parents: []*github.Commit{
 			{
 				SHA: &mainSha,
 			},
 		},
-	}, &ghlib.CreateCommitOptions{})
+	}, &github.CreateCommitOptions{})
 	if err != nil {
 		return "", nil, err
 	}
 
-	ref := &ghlib.Reference{
+	ref := &github.Reference{
 		Ref: &targetRef,
-		Object: &ghlib.GitObject{
+		Object: &github.GitObject{
 			SHA: commit.SHA,
 		},
 	}
@@ -90,11 +86,11 @@ func PushFilesToRef(ctx context.Context, client *ghlib.Client, commitMessage, ba
 }
 
 func PRCreate(ctx context.Context, cs *params.Run, ghcnx *ghprovider.Provider, owner, repo, targetRef, defaultBranch, title string) (int, error) {
-	pr, _, err := ghcnx.Client.PullRequests.Create(ctx, owner, repo, &ghlib.NewPullRequest{
+	pr, _, err := ghcnx.Client.PullRequests.Create(ctx, owner, repo, &github.NewPullRequest{
 		Title: &title,
 		Head:  &targetRef,
 		Base:  &defaultBranch,
-		Body:  ghlib.String("Add a new PR for testing"),
+		Body:  github.String("Add a new PR for testing"),
 	})
 	if err != nil {
 		return -1, err
@@ -103,32 +99,14 @@ func PRCreate(ctx context.Context, cs *params.Run, ghcnx *ghprovider.Provider, o
 	return pr.GetNumber(), nil
 }
 
-type PRTest struct {
-	Label            string
-	YamlFiles        []string
-	SecondController bool
-	Webhook          bool
-	NoStatusCheck    bool
-
-	Cnx             *params.Run
-	Options         options.E2E
-	Provider        *ghprovider.Provider
-	TargetNamespace string
-	TargetRefName   string
-	PRNumber        int
-	SHA             string
-	Logger          *zap.SugaredLogger
-}
-
-func (g *PRTest) RunPullRequest(ctx context.Context, t *testing.T) {
+func RunPullRequest(ctx context.Context, t *testing.T, label string, yamlFiles []string, secondcontroller, webhook bool) (*params.Run, *ghprovider.Provider, options.E2E, string, string, int, string) {
 	targetNS := names.SimpleNameGenerator.RestrictLengthWithRandomSuffix("pac-e2e-ns")
 
-	ctx, runcnx, opts, ghcnx, err := Setup(ctx, g.SecondController, g.Webhook)
+	ctx, runcnx, opts, ghcnx, err := Setup(ctx, secondcontroller, webhook)
 	assert.NilError(t, err)
-	g.Logger = runcnx.Clients.Log
 
-	logmsg := fmt.Sprintf("Testing %s with Github APPS integration on %s", g.Label, targetNS)
-	g.Logger.Info(logmsg)
+	logmsg := fmt.Sprintf("Testing %s with Github APPS integration on %s", label, targetNS)
+	runcnx.Clients.Log.Info(logmsg)
 
 	repoinfo, resp, err := ghcnx.Client.Repositories.Get(ctx, opts.Organization, opts.Repo)
 	assert.NilError(t, err)
@@ -140,11 +118,11 @@ func (g *PRTest) RunPullRequest(ctx context.Context, t *testing.T) {
 	assert.NilError(t, err)
 
 	yamlEntries := map[string]string{}
-	for _, v := range g.YamlFiles {
+	for _, v := range yamlFiles {
 		yamlEntries[filepath.Join(".tekton", filepath.Base(v))] = v
 	}
 
-	entries, err := payload.GetEntries(yamlEntries, targetNS, options.MainBranch, triggertype.PullRequest.String(),
+	entries, err := payload.GetEntries(yamlEntries, targetNS, options.MainBranch, options.PullRequestEvent,
 		map[string]string{"TargetURL": repoinfo.GetHTMLURL(), "SourceURL": repoinfo.GetHTMLURL()})
 	assert.NilError(t, err)
 
@@ -154,68 +132,36 @@ func (g *PRTest) RunPullRequest(ctx context.Context, t *testing.T) {
 	sha, vref, err := PushFilesToRef(ctx, ghcnx.Client, logmsg, repoinfo.GetDefaultBranch(), targetRefName,
 		opts.Organization, opts.Repo, entries)
 	assert.NilError(t, err)
-	g.Logger.Infof("Commit %s has been created and pushed to %s", sha, vref.GetURL())
+	runcnx.Clients.Log.Infof("Commit %s has been created and pushed to %s", sha, vref.GetURL())
 	number, err := PRCreate(ctx, runcnx, ghcnx, opts.Organization,
 		opts.Repo, targetRefName, repoinfo.GetDefaultBranch(), logmsg)
 	assert.NilError(t, err)
 
-	if !g.NoStatusCheck {
-		sopt := wait.SuccessOpt{
-			Title:           logmsg,
-			OnEvent:         triggertype.PullRequest.String(),
-			TargetNS:        targetNS,
-			NumberofPRMatch: len(g.YamlFiles),
-			SHA:             sha,
-		}
-		wait.Succeeded(ctx, t, runcnx, opts, sopt)
+	sopt := wait.SuccessOpt{
+		Title:           logmsg,
+		OnEvent:         options.PullRequestEvent,
+		TargetNS:        targetNS,
+		NumberofPRMatch: len(yamlFiles),
+		SHA:             sha,
 	}
-	g.Cnx = runcnx
-	g.Options = opts
-	g.Provider = ghcnx
-	g.TargetNamespace = targetNS
-	g.TargetRefName = targetRefName
-	g.PRNumber = number
-	g.SHA = sha
+	wait.Succeeded(ctx, t, runcnx, opts, sopt)
+	return runcnx, ghcnx, opts, targetNS, targetRefName, number, sha
 }
 
-func (g *PRTest) TearDown(ctx context.Context, t *testing.T) {
-	if os.Getenv("TEST_NOCLEANUP") == "true" {
-		g.Logger.Infof("Not cleaning up and closing PR since TEST_NOCLEANUP is set")
-		return
-	}
-	g.Logger.Infof("Closing PR %d", g.PRNumber)
-	if g.PRNumber != -1 {
-		state := "closed"
-		_, _, err := g.Provider.Client.PullRequests.Edit(ctx,
-			g.Options.Organization, g.Options.Repo, g.PRNumber,
-			&ghlib.PullRequest{State: &state})
-		if err != nil {
-			t.Fatal(err)
-		}
-	}
-	if g.TargetNamespace != "" {
-		repository.NSTearDown(ctx, t, g.Cnx, g.TargetNamespace)
-	}
-	g.Logger.Infof("Deleting Ref %s", g.TargetRefName)
-	_, err := g.Provider.Client.Git.DeleteRef(ctx, g.Options.Organization, g.Options.Repo, g.TargetRefName)
-	assert.NilError(t, err)
-}
-
-func (g *PRTest) RunPushRequest(ctx context.Context, t *testing.T) {
+func RunPushRequest(ctx context.Context, t *testing.T, label string, yamlFiles []string, onSecondController, onWebhook bool) (*params.Run, *ghprovider.Provider, options.E2E, string, string, int, string) {
 	targetNS := names.SimpleNameGenerator.RestrictLengthWithRandomSuffix("pac-e2e-push")
 	targetBranch := targetNS
 	targetEvent := "push"
-	ctx, runcnx, opts, ghcnx, err := Setup(ctx, g.SecondController, g.Webhook)
+	ctx, runcnx, opts, ghcnx, err := Setup(ctx, onSecondController, onWebhook)
 	assert.NilError(t, err)
-	g.Logger = runcnx.Clients.Log
 
 	var logmsg string
-	if g.Webhook {
-		logmsg = fmt.Sprintf("Testing %s with Direct Webhook integration on %s", g.Label, targetNS)
-		g.Logger.Info(logmsg)
+	if onWebhook {
+		logmsg = fmt.Sprintf("Testing %s with Direct Webhook integration on %s", label, targetNS)
+		runcnx.Clients.Log.Info(logmsg)
 	} else {
-		logmsg = fmt.Sprintf("Testing %s with Github APPS integration on %s", g.Label, targetNS)
-		g.Logger.Info(logmsg)
+		logmsg = fmt.Sprintf("Testing %s with Github APPS integration on %s", label, targetNS)
+		runcnx.Clients.Log.Info(logmsg)
 	}
 	repoinfo, resp, err := ghcnx.Client.Repositories.Get(ctx, opts.Organization, opts.Repo)
 	assert.NilError(t, err)
@@ -226,7 +172,7 @@ func (g *PRTest) RunPushRequest(ctx context.Context, t *testing.T) {
 	assert.NilError(t, err)
 
 	yamlEntries := map[string]string{}
-	for _, v := range g.YamlFiles {
+	for _, v := range yamlFiles {
 		yamlEntries[filepath.Join(".tekton", filepath.Base(v))] = v
 	}
 
@@ -236,23 +182,16 @@ func (g *PRTest) RunPushRequest(ctx context.Context, t *testing.T) {
 
 	targetRefName := fmt.Sprintf("refs/heads/%s", targetBranch)
 	sha, vref, err := PushFilesToRef(ctx, ghcnx.Client, logmsg, repoinfo.GetDefaultBranch(), targetRefName, opts.Organization, opts.Repo, entries)
-	g.Logger.Infof("Commit %s has been created and pushed to %s", sha, vref.GetURL())
+	runcnx.Clients.Log.Infof("Commit %s has been created and pushed to %s", sha, vref.GetURL())
 	assert.NilError(t, err)
 
 	sopt := wait.SuccessOpt{
 		Title:           logmsg,
-		OnEvent:         triggertype.Push.String(),
+		OnEvent:         options.PushEvent,
 		TargetNS:        targetNS,
-		NumberofPRMatch: len(g.YamlFiles),
+		NumberofPRMatch: len(yamlFiles),
 		SHA:             sha,
 	}
 	wait.Succeeded(ctx, t, runcnx, opts, sopt)
-
-	g.Cnx = runcnx
-	g.Options = opts
-	g.Provider = ghcnx
-	g.TargetNamespace = targetNS
-	g.TargetRefName = targetRefName
-	g.PRNumber = -1
-	g.SHA = sha
+	return runcnx, ghcnx, opts, targetNS, targetRefName, -1, sha
 }

@@ -15,7 +15,6 @@ import (
 	pacv1alpha1 "github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	tknpacdesc "github.com/openshift-pipelines/pipelines-as-code/pkg/cmd/tknpac/describe"
 	tknpaclist "github.com/openshift-pipelines/pipelines-as-code/pkg/cmd/tknpac/list"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
 	cli2 "github.com/openshift-pipelines/pipelines-as-code/test/pkg/cli"
 	tgithub "github.com/openshift-pipelines/pipelines-as-code/test/pkg/github"
 	"github.com/openshift-pipelines/pipelines-as-code/test/pkg/options"
@@ -54,7 +53,7 @@ spec:
             - name: task
               image: gcr.io/google-containers/busybox
               command: ["/bin/echo", "HELLOMOTO"]
-`, targetNS, options.MainBranch, triggertype.PullRequest.String()),
+`, targetNS, options.MainBranch, options.PullRequestEvent),
 	}
 
 	repoinfo, resp, err := ghprovider.Client.Repositories.Get(ctx, opts.Organization, opts.Repo)
@@ -97,17 +96,7 @@ spec:
 	number, err := tgithub.PRCreate(ctx, runcnx, ghprovider, opts.Organization, opts.Repo, targetRefName, repoinfo.GetDefaultBranch(), title)
 	assert.NilError(t, err)
 
-	g := tgithub.PRTest{
-		Cnx:             runcnx,
-		Options:         opts,
-		Provider:        ghprovider,
-		TargetNamespace: targetNS,
-		TargetRefName:   targetRefName,
-		PRNumber:        number,
-		SHA:             sha,
-		Logger:          runcnx.Clients.Log,
-	}
-	defer g.TearDown(ctx, t)
+	defer tgithub.TearDown(ctx, t, runcnx, ghprovider, number, targetRefName, targetNS, opts)
 
 	runcnx.Clients.Log.Infof("Waiting for Repository to be updated")
 	waitOpts := twait.Opts{
@@ -117,13 +106,13 @@ spec:
 		PollTimeout:     twait.DefaultTimeout,
 		TargetSHA:       sha,
 	}
-	_, err = twait.UntilRepositoryUpdated(ctx, runcnx.Clients, waitOpts)
+	err = twait.UntilRepositoryUpdated(ctx, runcnx.Clients, waitOpts)
 	assert.NilError(t, err)
 
 	runcnx.Clients.Log.Infof("Check if we have the repository set as succeeded")
 
 	counter := 0
-	maxVal := 5
+	max := 5
 	for {
 		output, err = cli2.ExecCommand(runcnx, tknpaclist.Root, "-n", targetNS)
 		if err == nil && strings.Contains(output, "Succeeded") {
@@ -131,12 +120,12 @@ spec:
 			break
 		}
 		counter++
-		if counter > maxVal {
+		if counter > max {
 			runcnx.Clients.Log.Errorf("We have waited for 5 minutes and we still do not have the repository set as succeeded: %s", output)
 			t.Fail()
 			break
 		}
-		runcnx.Clients.Log.Infof("Waiting 30s for tkn pac show success, %d/%d", counter, maxVal)
+		runcnx.Clients.Log.Infof("Waiting 30s for tkn pac show success, %d/%d", counter, max)
 		time.Sleep(30 * time.Second)
 	}
 }

@@ -7,15 +7,24 @@ import (
 	"go.uber.org/zap"
 	zapobserver "go.uber.org/zap/zaptest/observer"
 	"gotest.tools/v3/assert"
-	"gotest.tools/v3/assert/cmp"
 )
+
+func TestSetDefaults(t *testing.T) {
+	config := make(map[string]string)
+	SetDefaults(config)
+	assert.Equal(t, config[RemoteTasksKey], remoteTasksDefaultValue)
+	assert.Equal(t, config[SecretAutoCreateKey], secretAutoCreateDefaultValue)
+	assert.Equal(t, config[BitbucketCloudCheckSourceIPKey], bitbucketCloudCheckSourceIPDefaultValue)
+	assert.Equal(t, config[ApplicationNameKey], PACApplicationNameDefaultValue)
+	assert.Equal(t, config[RememberOKToTestKey], rememberOKToTestValue)
+}
 
 func TestGetCatalogHub(t *testing.T) {
 	hubCatalog := sync.Map{}
 	hubCatalog.Store("custom", HubCatalog{
-		Index: "1",
-		URL:   "https://foo.com",
-		Name:  "tekton",
+		ID:   "custom",
+		URL:  "https://foo.com",
+		Name: "tekton",
 	})
 	tests := []struct {
 		name        string
@@ -84,17 +93,6 @@ func TestGetCatalogHub(t *testing.T) {
 			wantLog:     "CONFIG: hub 1 should have the key catalog-1-url, skipping catalog configuration",
 		},
 		{
-			name: "bad/missing value for custom catalog",
-			config: map[string]string{
-				"catalog-1-id":   "custom",
-				"catalog-1-name": "tekton",
-				"catalog-1-url":  "",
-			},
-			numCatalogs: 1,
-			hubCatalogs: &sync.Map{},
-			wantLog:     "CONFIG: hub 1 catalog configuration have empty value for key catalog-1-url, skipping catalog configuration",
-		},
-		{
 			name: "bad/custom catalog called https",
 			config: map[string]string{
 				"catalog-1-id":   "https",
@@ -134,7 +132,6 @@ func TestGetCatalogHub(t *testing.T) {
 			if tt.wantLog != "" {
 				assert.Assert(t, len(catcher.FilterMessageSnippet(tt.wantLog).TakeAll()) > 0, "could not find log message: got ", catcher)
 			}
-			cmp.Equal(catalogs, tt.hubCatalogs)
 		})
 	}
 }

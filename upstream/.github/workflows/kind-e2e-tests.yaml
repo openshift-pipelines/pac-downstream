@@ -36,23 +36,23 @@ jobs:
         with:
           go-version-file: "go.mod"
 
-      - uses: ko-build/setup-ko@v0.7
-
-      - name: Install gosmee
-        uses: jaxxstorm/action-install-gh-release@v1.12.0
+      - uses: actions/cache@v4
         with:
-          repo: chmouel/gosmee
+          path: |
+            ~/.cache/go-build
+            ~/.cache/pip
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
 
-      - name: Run gosmee
+      - name: Install and run gosmee
         run: |
-          nohup gosmee client --saveDir /tmp/gosmee-replay ${{ secrets.PYSMEE_URL }} "http://${CONTROLLER_DOMAIN_URL}" &
+          go install -v github.com/chmouel/gosmee@main
+          nohup gosmee client --saveDir /tmp/gosmee-replay ${{ secrets.PYSMEE_URL }} http://${CONTROLLER_DOMAIN_URL} &
 
-      - name: Setup tmate session
-        uses: mxschmitt/action-tmate@v3
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.debug_enabled }}
-        with:
-          detached: true
-          limit-access-to-actor: true
+      - name: Install ko
+        run: curl -sfL https://github.com/google/ko/releases/download/v0.14.1/ko_0.14.1_Linux_x86_64.tar.gz -o-|tar xvzf - -C /usr/local/bin ko
 
       - name: Start installing cluster
         run: |
@@ -66,6 +66,13 @@ jobs:
              "${{ secrets.APP_PRIVATE_KEY }}" \
              "${{ secrets.APPLICATION_ID }}" \
              "${{secrets.WEBHOOK_SECRET }}"
+
+      - name: Setup tmate session
+        uses: mxschmitt/action-tmate@v3
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.debug_enabled }}
+        with:
+          detached: true
+          limit-access-to-actor: true
 
       - name: Create second Github APP Controller on GHE
         run: |
@@ -86,7 +93,7 @@ jobs:
            "${{ secrets.TEST_GITHUB_SECOND_TOKEN }}" \
            "${{ secrets.GITLAB_TOKEN }}"
 
-      - name: Run E2E Tests on nightly
+      - name: Run E2E Tests on pull_request
         if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
         run: |
           export NIGHTLY_E2E_TEST="true"
@@ -112,7 +119,7 @@ jobs:
           path: /tmp/logs
 
       - name: Report Status
-        if: ${{ always() && github.ref_name == 'main' && github.event_name == 'schedule' }}
+        if: github.event_name != 'pull_request'
         uses: ravsamhq/notify-slack-action@v2
         with:
           status: ${{ job.status }}

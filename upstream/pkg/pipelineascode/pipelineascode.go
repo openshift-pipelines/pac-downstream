@@ -7,7 +7,6 @@ import (
 
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/action"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/customparams"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/events"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/formatting"
@@ -25,12 +24,7 @@ import (
 )
 
 const (
-	tektonDir         = ".tekton"
-	CompletedStatus   = "completed"
-	inProgressStatus  = "in_progress"
-	queuedStatus      = "queued"
-	failureConclusion = "failure"
-	pendingConclusion = "pending"
+	tektonDir = ".tekton"
 )
 
 type PacRun struct {
@@ -41,13 +35,11 @@ type PacRun struct {
 	logger       *zap.SugaredLogger
 	eventEmitter *events.EventEmitter
 	manager      *ConcurrencyManager
-	pacInfo      *info.PacOpts
-	globalRepo   *v1alpha1.Repository
 }
 
-func NewPacs(event *info.Event, vcx provider.Interface, run *params.Run, pacInfo *info.PacOpts, k8int kubeinteraction.Interface, logger *zap.SugaredLogger, globalRepo *v1alpha1.Repository) PacRun {
+func NewPacs(event *info.Event, vcx provider.Interface, run *params.Run, k8int kubeinteraction.Interface, logger *zap.SugaredLogger) PacRun {
 	return PacRun{
-		event: event, run: run, vcx: vcx, k8int: k8int, pacInfo: pacInfo, logger: logger, globalRepo: globalRepo,
+		event: event, run: run, vcx: vcx, k8int: k8int, logger: logger,
 		eventEmitter: events.NewEventEmitter(run.Clients.Kube, logger),
 		manager:      NewConcurrencyManager(),
 	}
@@ -57,14 +49,14 @@ func (p *PacRun) Run(ctx context.Context) error {
 	matchedPRs, repo, err := p.matchRepoPR(ctx)
 	if err != nil {
 		createStatusErr := p.vcx.CreateStatus(ctx, p.event, provider.StatusOpts{
-			Status:     CompletedStatus,
-			Conclusion: failureConclusion,
+			Status:     "completed",
+			Conclusion: "failure",
 			Text:       fmt.Sprintf("There was an issue validating the commit: %q", err),
-			DetailsURL: p.run.Clients.ConsoleUI().URL(),
+			DetailsURL: p.run.Clients.ConsoleUI.URL(),
 		})
-		p.eventEmitter.EmitMessage(repo, zap.ErrorLevel, "RepositoryCreateStatus", fmt.Sprintf("an error occurred: %s", err))
+		p.eventEmitter.EmitMessage(repo, zap.ErrorLevel, "RepositoryCreateStatus", fmt.Sprintf("There was an error while processing the payload: %s", err))
 		if createStatusErr != nil {
-			p.eventEmitter.EmitMessage(repo, zap.ErrorLevel, "RepositoryCreateStatus", fmt.Sprintf("cannot create status: %s: %s", err, createStatusErr))
+			p.eventEmitter.EmitMessage(repo, zap.ErrorLevel, "RepositoryCreateStatus", fmt.Sprintf("Cannot create status: %s: %s", err, createStatusErr))
 		}
 	}
 	if len(matchedPRs) == 0 {
@@ -81,23 +73,16 @@ func (p *PacRun) Run(ctx context.Context) error {
 		p.eventEmitter.EmitMessage(repo, zap.ErrorLevel, "ParamsError",
 			fmt.Sprintf("error processing repository CR custom params: %s", err.Error()))
 	}
-	p.run.Clients.ConsoleUI().SetParams(maptemplate)
+	p.run.Clients.ConsoleUI.SetParams(maptemplate)
 
 	var wg sync.WaitGroup
-	for i, match := range matchedPRs {
+	for _, match := range matchedPRs {
 		if match.Repo == nil {
 			match.Repo = repo
 		}
-
-		// After matchRepo func fetched repo from k8s api repo is updated and
-		// need to merge global repo again
-		if p.globalRepo != nil {
-			match.Repo.Spec.Merge(p.globalRepo.Spec)
-		}
-
 		wg.Add(1)
 
-		go func(match matcher.Match, i int) {
+		go func(match matcher.Match) {
 			defer wg.Done()
 			pr, err := p.startPR(ctx, match)
 			if err != nil {
@@ -105,18 +90,17 @@ func (p *PacRun) Run(ctx context.Context) error {
 				errMsgM := fmt.Sprintf("There was an error creating the PipelineRun: <b>%s</b>\n\n%s", match.PipelineRun.GetGenerateName(), err.Error())
 				p.eventEmitter.EmitMessage(repo, zap.ErrorLevel, "RepositoryPipelineRun", errMsg)
 				createStatusErr := p.vcx.CreateStatus(ctx, p.event, provider.StatusOpts{
-					Status:                   CompletedStatus,
-					Conclusion:               failureConclusion,
-					Text:                     errMsgM,
-					DetailsURL:               p.run.Clients.ConsoleUI().URL(),
-					InstanceCountForCheckRun: i,
+					Status:     "completed",
+					Conclusion: "failure",
+					Text:       errMsgM,
+					DetailsURL: p.run.Clients.ConsoleUI.URL(),
 				})
 				if createStatusErr != nil {
 					p.eventEmitter.EmitMessage(repo, zap.ErrorLevel, "RepositoryCreateStatus", fmt.Sprintf("Cannot create status: %s: %s", err, createStatusErr))
 				}
 			}
 			p.manager.AddPipelineRun(pr)
-		}(match, i)
+		}(match)
 	}
 	wg.Wait()
 
@@ -143,7 +127,7 @@ func (p *PacRun) startPR(ctx context.Context, match matcher.Match) (*tektonv1.Pi
 	var gitAuthSecretName string
 
 	// Automatically create a secret with the token to be reused by git-clone task
-	if p.pacInfo.SecretAutoCreation {
+	if p.run.Info.Pac.SecretAutoCreation {
 		if annotation, ok := match.PipelineRun.GetAnnotations()[keys.GitAuthSecret]; ok {
 			gitAuthSecretName = annotation
 		} else {
@@ -176,41 +160,24 @@ func (p *PacRun) startPR(ctx context.Context, match matcher.Match) (*tektonv1.Pi
 		match.PipelineRun.Annotations[keys.State] = kubeinteraction.StateQueued
 	}
 
-	// Create the actual pipelineRun
+	// Create the actual pipeline
 	pr, err := p.run.Clients.Tekton.TektonV1().PipelineRuns(match.Repo.GetNamespace()).Create(ctx,
 		match.PipelineRun, metav1.CreateOptions{})
 	if err != nil {
-		// cleanup the gitauth secret because ownerRef isn't set when the pipelineRun creation failed
-		if p.pacInfo.SecretAutoCreation {
-			if errDelSec := p.k8int.DeleteSecret(ctx, p.logger, match.Repo.GetNamespace(), gitAuthSecretName); errDelSec != nil {
-				// don't overshadow the pipelineRun creation error, just log
-				p.logger.Errorf("removing auto created secret: %s in namespace %s has failed: %w ", gitAuthSecretName, match.Repo.GetNamespace(), errDelSec)
-			}
-		}
 		// we need to make difference between markdown error and normal error that goes to namespace/controller stream
 		return nil, fmt.Errorf("creating pipelinerun %s in namespace %s has failed.\n\nTekton Controller has reported this error: ```%w``` ", match.PipelineRun.GetGenerateName(),
 			match.Repo.GetNamespace(), err)
-	}
-
-	// update ownerRef of secret with pipelineRun, so that it gets cleanedUp with pipelineRun
-	if p.pacInfo.SecretAutoCreation {
-		err := p.k8int.UpdateSecretWithOwnerRef(ctx, p.logger, pr.Namespace, gitAuthSecretName, pr)
-		if err != nil {
-			// we still return the created PR with error, and allow caller to decide what to do with the PR, and avoid
-			// unneeded SIGSEGV's
-			return pr, fmt.Errorf("cannot update pipelinerun %s with ownerRef: %w", pr.GetGenerateName(), err)
-		}
 	}
 
 	// Create status with the log url
 	p.logger.Infof("pipelinerun %s has been created in namespace %s for SHA: %s Target Branch: %s",
 		pr.GetName(), match.Repo.GetNamespace(), p.event.SHA, p.event.BaseBranch)
 
-	consoleURL := p.run.Clients.ConsoleUI().DetailURL(pr)
+	consoleURL := p.run.Clients.ConsoleUI.DetailURL(pr)
 	mt := formatting.MessageTemplate{
 		PipelineRunName: pr.GetName(),
 		Namespace:       match.Repo.GetNamespace(),
-		ConsoleName:     p.run.Clients.ConsoleUI().GetName(),
+		ConsoleName:     p.run.Clients.ConsoleUI.GetName(),
 		ConsoleURL:      consoleURL,
 		TknBinary:       settings.TknBinaryName,
 		TknBinaryURL:    settings.TknBinaryURL,
@@ -220,8 +187,8 @@ func (p *PacRun) startPR(ctx context.Context, match matcher.Match) (*tektonv1.Pi
 		return nil, fmt.Errorf("cannot create message template: %w", err)
 	}
 	status := provider.StatusOpts{
-		Status:                  inProgressStatus,
-		Conclusion:              pendingConclusion,
+		Status:                  "in_progress",
+		Conclusion:              "pending",
 		Text:                    msg,
 		DetailsURL:              consoleURL,
 		PipelineRunName:         pr.GetName(),
@@ -231,7 +198,7 @@ func (p *PacRun) startPR(ctx context.Context, match matcher.Match) (*tektonv1.Pi
 
 	// if pipelineRun is in pending state then report status as queued
 	if pr.Spec.Status == tektonv1.PipelineRunSpecStatusPending {
-		status.Status = queuedStatus
+		status.Status = "queued"
 		if status.Text, err = mt.MakeTemplate(formatting.QueuingPipelineRunText); err != nil {
 			return nil, fmt.Errorf("cannot create message template: %w", err)
 		}
@@ -253,6 +220,15 @@ func (p *PacRun) startPR(ctx context.Context, match matcher.Match) (*tektonv1.Pi
 		}
 	}
 
+	// update ownerRef of secret with pipelineRun, so that it gets cleanedUp with pipelineRun
+	if p.run.Info.Pac.SecretAutoCreation {
+		err := p.k8int.UpdateSecretWithOwnerRef(ctx, p.logger, pr.Namespace, gitAuthSecretName, pr)
+		if err != nil {
+			// we still return the created PR with error, and allow caller to decide what to do with the PR, and avoid
+			// unneeded SIGSEGV's
+			return pr, fmt.Errorf("cannot update pipelinerun %s with ownerRef: %w", pr.GetGenerateName(), err)
+		}
+	}
 	return pr, nil
 }
 
@@ -260,7 +236,7 @@ func getLogURLMergePatch(clients clients.Clients, pr *tektonv1.PipelineRun) map[
 	return map[string]interface{}{
 		"metadata": map[string]interface{}{
 			"annotations": map[string]string{
-				keys.LogURL: clients.ConsoleUI().DetailURL(pr),
+				keys.LogURL: clients.ConsoleUI.DetailURL(pr),
 			},
 		},
 	}

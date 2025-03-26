@@ -8,13 +8,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/go-github/v64/github"
+	"github.com/google/go-github/v56/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/action"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/kubeinteraction"
 	kstatus "github.com/openshift-pipelines/pipelines-as-code/pkg/kubeinteraction/status"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
 	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 )
@@ -45,7 +44,7 @@ func getCheckName(status provider.StatusOpts, pacopts *info.PacOpts) string {
 }
 
 func (v *Provider) getExistingCheckRunID(ctx context.Context, runevent *info.Event, status provider.StatusOpts) (*int64, error) {
-	opt := github.ListOptions{PerPage: v.PaginedNumber}
+	opt := github.ListOptions{PerPage: v.paginedNumber}
 	for {
 		res, resp, err := v.Client.Checks.ListCheckRunsForRef(ctx, runevent.Organization, runevent.Repository,
 			runevent.SHA, &github.ListCheckRunsOptions{
@@ -58,7 +57,7 @@ func (v *Provider) getExistingCheckRunID(ctx context.Context, runevent *info.Eve
 
 		for _, checkrun := range res.CheckRuns {
 			// if it is a Pending approval CheckRun then overwrite it
-			if isPendingApprovalCheckrun(checkrun) || isFailedCheckrun(checkrun) {
+			if isPendingApprovalCheckrun(checkrun) {
 				if v.canIUseCheckrunID(checkrun.ID) {
 					return checkrun.ID, nil
 				}
@@ -88,18 +87,6 @@ func isPendingApprovalCheckrun(run *github.CheckRun) bool {
 	return false
 }
 
-func isFailedCheckrun(run *github.CheckRun) bool {
-	if run == nil || run.Output == nil {
-		return false
-	}
-	if run.Output.Title != nil && strings.Contains(*run.Output.Title, "pipelinerun start failure") &&
-		run.Output.Summary != nil &&
-		strings.Contains(*run.Output.Summary, "failed") {
-		return true
-	}
-	return false
-}
-
 func (v *Provider) canIUseCheckrunID(checkrunid *int64) bool {
 	v.mutex.Lock()
 	defer v.mutex.Unlock()
@@ -114,7 +101,7 @@ func (v *Provider) canIUseCheckrunID(checkrunid *int64) bool {
 func (v *Provider) createCheckRunStatus(ctx context.Context, runevent *info.Event, status provider.StatusOpts) (*int64, error) {
 	now := github.Timestamp{Time: time.Now()}
 	checkrunoption := github.CreateCheckRunOptions{
-		Name:       getCheckName(status, v.pacInfo),
+		Name:       getCheckName(status, v.Run.Info.Pac),
 		HeadSHA:    runevent.SHA,
 		Status:     github.String("in_progress"),
 		DetailsURL: github.String(status.DetailsURL),
@@ -195,23 +182,12 @@ func (v *Provider) getFailuresMessageAsAnnotations(ctx context.Context, pr *tekt
 }
 
 // getOrUpdateCheckRunStatus create a status via the checkRun API, which is only
-// available with GitHub apps tokens.
+// available with Github apps tokens.
 func (v *Provider) getOrUpdateCheckRunStatus(ctx context.Context, runevent *info.Event, statusOpts provider.StatusOpts) error {
 	var err error
 	var checkRunID *int64
 	var found bool
-	pacopts := v.pacInfo
-
-	// The purpose of this condition is to limit the generation of checkrun IDs
-	// when multiple pipelineruns fail. In such cases, generate only one checkrun ID,
-	// regardless of the number of failed pipelineruns.
-	if statusOpts.Title == "Failed" && statusOpts.PipelineRunName == "" {
-		// setting different title to handle multiple checkrun cases
-		statusOpts.Title = "pipelinerun start failure"
-		if statusOpts.InstanceCountForCheckRun >= 1 {
-			return nil
-		}
-	}
+	pacopts := v.Run.Info.Pac
 
 	// check if pipelineRun has the label with checkRun-id
 	if statusOpts.PipelineRun != nil {
@@ -323,7 +299,7 @@ func (v *Provider) createStatusCommit(ctx context.Context, runevent *info.Event,
 		State:       github.String(status.Conclusion),
 		TargetURL:   github.String(status.DetailsURL),
 		Description: github.String(status.Title),
-		Context:     github.String(getCheckName(status, v.pacInfo)),
+		Context:     github.String(getCheckName(status, v.Run.Info.Pac)),
 		CreatedAt:   &github.Timestamp{Time: now},
 	}
 
@@ -331,7 +307,7 @@ func (v *Provider) createStatusCommit(ctx context.Context, runevent *info.Event,
 		runevent.Organization, runevent.Repository, runevent.SHA, ghstatus); err != nil {
 		return err
 	}
-	if (status.Status == "completed" || (status.Status == "queued" && status.Title == "Pending approval")) && status.Text != "" && runevent.EventType == triggertype.PullRequest.String() {
+	if (status.Status == "completed" || (status.Status == "queued" && status.Title == "Pending approval")) && status.Text != "" && runevent.EventType == "pull_request" {
 		_, _, err = v.Client.Issues.CreateComment(ctx, runevent.Organization, runevent.Repository,
 			runevent.PullRequestNumber,
 			&github.IssueComment{
@@ -381,7 +357,7 @@ func (v *Provider) CreateStatus(ctx context.Context, runevent *info.Event, statu
 	if statusOpts.OriginalPipelineRunName != "" {
 		onPr = "/" + statusOpts.OriginalPipelineRunName
 	}
-	statusOpts.Summary = fmt.Sprintf("%s%s %s", v.pacInfo.ApplicationName, onPr, statusOpts.Summary)
+	statusOpts.Summary = fmt.Sprintf("%s%s %s", v.Run.Info.Pac.ApplicationName, onPr, statusOpts.Summary)
 
 	// If we have an installationID which mean we have a github apps and we can use the checkRun API
 	if runevent.InstallationID > 0 {

@@ -13,7 +13,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/google/go-github/v64/github"
+	"github.com/google/go-github/v56/github"
 	apipac "github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
@@ -44,7 +44,7 @@ const (
 )
 
 func replyString(mux *http.ServeMux, url, body string) {
-	mux.HandleFunc(url, func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc(url, func(w http.ResponseWriter, r *http.Request) {
 		_, _ = fmt.Fprint(w, body)
 	})
 }
@@ -75,7 +75,7 @@ func testSetupCommonGhReplies(t *testing.T, mux *http.ServeMux, runevent info.Ev
 		jj)
 
 	if !noReplyOrgPublicMembers {
-		mux.HandleFunc("/orgs/"+runevent.Organization+"/members", func(rw http.ResponseWriter, _ *http.Request) {
+		mux.HandleFunc("/orgs/"+runevent.Organization+"/members", func(rw http.ResponseWriter, r *http.Request) {
 			_, _ = fmt.Fprintf(rw, `[{"login": "%s"}]`, runevent.Sender)
 		})
 	}
@@ -85,7 +85,7 @@ func testSetupCommonGhReplies(t *testing.T, mux *http.ServeMux, runevent info.Ev
 		`{"id": 26}`)
 
 	mux.HandleFunc(fmt.Sprintf("/repos/%s/%s/check-runs/26", runevent.Organization, runevent.Repository),
-		func(_ http.ResponseWriter, r *http.Request) {
+		func(w http.ResponseWriter, r *http.Request) {
 			body, _ := io.ReadAll(r.Body)
 			created := github.CreateCheckRunOptions{}
 			err := json.Unmarshal(body, &created)
@@ -104,15 +104,15 @@ func TestRun(t *testing.T) {
 	var hubCatalogs sync.Map
 	hubCatalogs.Store(
 		"default", settings.HubCatalog{
-			Index: "default",
-			URL:   testHubURL,
-			Name:  testCatalogHubName,
+			ID:   "default",
+			URL:  testHubURL,
+			Name: testCatalogHubName,
 		})
 	hubCatalogs.Store(
 		"anotherHub", settings.HubCatalog{
-			Index: "1",
-			URL:   testHubURL,
-			Name:  testCatalogHubName,
+			ID:   "anotherHub",
+			URL:  testHubURL,
+			Name: testCatalogHubName,
 		})
 	observer, log := zapobserver.New(zap.InfoLevel)
 	logger := zap.New(observer).Sugar()
@@ -537,11 +537,14 @@ func TestRun(t *testing.T) {
 					Log:            logger,
 					Kube:           stdata.Kube,
 					Tekton:         stdata.Pipeline,
+					ConsoleUI:      consoleui.FallBackConsole{},
 				},
 				Info: info.Info{
 					Pac: &info.PacOpts{
-						Settings: settings.Settings{
-							HubCatalogs: &hubCatalogs,
+						Settings: &settings.Settings{
+							SecretAutoCreation: true,
+							RemoteTasks:        true,
+							HubCatalogs:        &hubCatalogs,
 						},
 					},
 					Controller: &info.ControllerInfo{
@@ -549,7 +552,6 @@ func TestRun(t *testing.T) {
 					},
 				},
 			}
-			cs.Clients.SetConsoleUI(consoleui.FallBackConsole{})
 			mac := hmac.New(sha256.New, []byte(payloadEncodedSecret))
 			payload := []byte(`{"iam": "batman"}`)
 			mac.Write(payload)
@@ -580,21 +582,13 @@ func TestRun(t *testing.T) {
 				tt.runevent.InstallationID = 0
 			}
 
-			pacInfo := &info.PacOpts{
-				Settings: settings.Settings{
-					SecretAutoCreation: true,
-					RemoteTasks:        true,
-					HubCatalogs:        &hubCatalogs,
-				},
-			}
 			vcx := &ghprovider.Provider{
 				Client: fakeclient,
 				Run:    cs,
 				Token:  github.String("None"),
 				Logger: logger,
 			}
-			vcx.SetPacInfo(pacInfo)
-			p := NewPacs(&tt.runevent, vcx, cs, pacInfo, k8int, logger, nil)
+			p := NewPacs(&tt.runevent, vcx, cs, k8int, logger)
 			err := p.Run(ctx)
 
 			if tt.wantErr != "" {
@@ -624,9 +618,9 @@ func TestRun(t *testing.T) {
 					}
 					logURL, ok := pr.Annotations[filepath.Join(apipac.GroupName, "log-url")]
 					assert.Assert(t, ok, "failed to find log-url label on pipelinerun: %s/%s", pr.GetNamespace(), pr.GetGenerateName())
-					assert.Equal(t, logURL, cs.Clients.ConsoleUI().DetailURL(&pr))
+					assert.Equal(t, logURL, cs.Clients.ConsoleUI.DetailURL(&pr))
 
-					if pacInfo.SecretAutoCreation {
+					if cs.Info.Pac.SecretAutoCreation {
 						secretName, ok := pr.GetAnnotations()[keys.GitAuthSecret]
 						assert.Assert(t, ok, "Cannot find secret %s on annotations", secretName)
 					}
@@ -643,8 +637,9 @@ func TestRun(t *testing.T) {
 
 func TestGetLogURLMergePatch(t *testing.T) {
 	con := consoleui.FallBackConsole{}
-	clients := clients.Clients{}
-	clients.SetConsoleUI(con)
+	clients := clients.Clients{
+		ConsoleUI: con,
+	}
 	pr := &pipelinev1.PipelineRun{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "test-pipeline-run",

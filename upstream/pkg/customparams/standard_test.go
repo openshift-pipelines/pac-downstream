@@ -13,16 +13,15 @@ import (
 
 func TestMakeStandardParamsFromEvent(t *testing.T) {
 	event := &info.Event{
-		SHA:            "1234567890",
-		Organization:   "Org",
-		Repository:     "Repo",
-		BaseBranch:     "main",
-		HeadBranch:     "foo",
-		EventType:      "pull_request",
-		Sender:         "SENDER",
-		URL:            "https://paris.com",
-		HeadURL:        "https://india.com",
-		TriggerComment: "/test me\nHelp me obiwan kenobi",
+		SHA:          "1234567890",
+		Organization: "Org",
+		Repository:   "Repo",
+		BaseBranch:   "main",
+		HeadBranch:   "foo",
+		EventType:    "pull_request",
+		Sender:       "SENDER",
+		URL:          "https://paris.com",
+		HeadURL:      "https://india.com",
 	}
 
 	result := map[string]string{
@@ -36,7 +35,6 @@ func TestMakeStandardParamsFromEvent(t *testing.T) {
 		"source_branch":    "foo",
 		"target_branch":    "main",
 		"target_namespace": "myns",
-		"trigger_comment":  "/test me\\nHelp me obiwan kenobi",
 	}
 
 	repo := &v1alpha1.Repository{

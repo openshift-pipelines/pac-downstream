@@ -21,13 +21,13 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/customparams"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/events"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/formatting"
-	pacapi "github.com/openshift-pipelines/pipelines-as-code/pkg/generated/listers/pipelinesascode/v1alpha1"
+	pipelinesascode "github.com/openshift-pipelines/pipelines-as-code/pkg/generated/listers/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/kubeinteraction"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/metrics"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/settings"
-	pac "github.com/openshift-pipelines/pipelines-as-code/pkg/pipelineascode"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/pipelineascode"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/sync"
 )
@@ -35,14 +35,12 @@ import (
 // Reconciler implements controller.Reconciler for PipelineRun resources.
 type Reconciler struct {
 	run               *params.Run
-	repoLister        pacapi.RepositoryLister
+	repoLister        pipelinesascode.RepositoryLister
 	pipelineRunLister tektonv1lister.PipelineRunLister
 	kinteract         kubeinteraction.Interface
-	qm                sync.QueueManagerInterface
+	qm                *sync.QueueManager
 	metrics           *metrics.Recorder
 	eventEmitter      *events.EventEmitter
-	globalRepo        *v1alpha1.Repository
-	secretNS          string
 }
 
 var (
@@ -67,26 +65,6 @@ func (r *Reconciler) ReconcileKind(ctx context.Context, pr *tektonv1.PipelineRun
 		}
 	}
 
-	// queue pipelines which are in queued state and pending status
-	// if status is not pending, it could be canceled so let it be reported, even if state is queued
-	if state == kubeinteraction.StateQueued && pr.Spec.Status == tektonv1.PipelineRunSpecStatusPending {
-		return r.queuePipelineRun(ctx, logger, pr)
-	}
-
-	if !pr.IsDone() {
-		return nil
-	}
-
-	// make sure we have the latest pipelinerun to reconcile, since there is something updating at the same time
-	lpr, err := r.run.Clients.Tekton.TektonV1().PipelineRuns(pr.GetNamespace()).Get(ctx, pr.GetName(), metav1.GetOptions{})
-	if err != nil {
-		return fmt.Errorf("cannot get pipelineRun: %w", err)
-	}
-
-	if lpr.GetResourceVersion() != pr.GetResourceVersion() {
-		return nil
-	}
-
 	// If we have a controllerInfo annotation, then we need to get the
 	// configmap configuration for it
 	//
@@ -104,8 +82,29 @@ func (r *Reconciler) ReconcileKind(ctx context.Context, pr *tektonv1.PipelineRun
 	} else {
 		r.run.Info.Controller = info.GetControllerInfoFromEnvOrDefault()
 	}
-
+	if err := r.run.UpdatePACInfo(ctx); err != nil {
+		return fmt.Errorf("failed to get information for controller config %v: %w", r.run.Info.Controller, err)
+	}
 	ctx = info.StoreCurrentControllerName(ctx, r.run.Info.Controller.Name)
+
+	// queue pipelines which are in queued state and pending status
+	// if status is not pending, it could be canceled so let it be reported, even if state is queued
+	if state == kubeinteraction.StateQueued && pr.Spec.Status == tektonv1.PipelineRunSpecStatusPending {
+		return r.queuePipelineRun(ctx, logger, pr)
+	}
+
+	if !pr.IsDone() {
+		return nil
+	}
+
+	// make sure we have the latest pipelinerun to reconcile, since there is something updating at the same time
+	lpr, err := r.run.Clients.Tekton.TektonV1().PipelineRuns(pr.GetNamespace()).Get(ctx, pr.GetName(), metav1.GetOptions{})
+	if err != nil {
+		return fmt.Errorf("cannot get pipelineRun: %w", err)
+	}
+	if lpr.GetResourceVersion() != pr.GetResourceVersion() {
+		return nil
+	}
 
 	logger = logger.With(
 		"pipeline-run", pr.GetName(),
@@ -114,18 +113,14 @@ func (r *Reconciler) ReconcileKind(ctx context.Context, pr *tektonv1.PipelineRun
 	logger.Infof("pipelineRun %v/%v is done, reconciling to report status!  ", pr.GetNamespace(), pr.GetName())
 	r.eventEmitter.SetLogger(logger)
 
-	// use same pac opts across the reconciliation
-	pacInfo := r.run.Info.GetPacOpts()
-
 	detectedProvider, event, err := r.detectProvider(ctx, logger, pr)
 	if err != nil {
 		msg := fmt.Sprintf("detectProvider: %v", err)
 		r.eventEmitter.EmitMessage(nil, zap.ErrorLevel, "RepositoryDetectProvider", msg)
 		return nil
 	}
-	detectedProvider.SetPacInfo(&pacInfo)
 
-	if repo, err := r.reportFinalStatus(ctx, logger, &pacInfo, event, pr, detectedProvider); err != nil {
+	if repo, err := r.reportFinalStatus(ctx, logger, event, pr, detectedProvider); err != nil {
 		msg := fmt.Sprintf("report status: %v", err)
 		r.eventEmitter.EmitMessage(repo, zap.ErrorLevel, "RepositoryReportFinalStatus", msg)
 		return err
@@ -133,19 +128,11 @@ func (r *Reconciler) ReconcileKind(ctx context.Context, pr *tektonv1.PipelineRun
 	return nil
 }
 
-func (r *Reconciler) reportFinalStatus(ctx context.Context, logger *zap.SugaredLogger, pacInfo *info.PacOpts, event *info.Event, pr *tektonv1.PipelineRun, provider provider.Interface) (*v1alpha1.Repository, error) {
+func (r *Reconciler) reportFinalStatus(ctx context.Context, logger *zap.SugaredLogger, event *info.Event, pr *tektonv1.PipelineRun, provider provider.Interface) (*v1alpha1.Repository, error) {
 	repoName := pr.GetAnnotations()[keys.Repository]
 	repo, err := r.repoLister.Repositories(pr.Namespace).Get(repoName)
 	if err != nil {
 		return nil, fmt.Errorf("reportFinalStatus: %w", err)
-	}
-
-	r.secretNS = repo.GetNamespace()
-	if r.globalRepo, err = r.repoLister.Repositories(r.run.Info.Kube.Namespace).Get(r.run.Info.Controller.GlobalRepository); err == nil && r.globalRepo != nil {
-		if repo.Spec.GitProvider != nil && repo.Spec.GitProvider.Secret == nil && r.globalRepo.Spec.GitProvider != nil && r.globalRepo.Spec.GitProvider.Secret != nil {
-			r.secretNS = r.globalRepo.GetNamespace()
-		}
-		repo.Spec.Merge(r.globalRepo.Spec)
 	}
 
 	cp := customparams.NewCustomParams(event, repo, r.run, r.kinteract, r.eventEmitter, nil)
@@ -154,21 +141,12 @@ func (r *Reconciler) reportFinalStatus(ctx context.Context, logger *zap.SugaredL
 		r.eventEmitter.EmitMessage(repo, zap.ErrorLevel, "ParamsError",
 			fmt.Sprintf("error processing repository CR custom params: %s", err.Error()))
 	}
-	r.run.Clients.ConsoleUI().SetParams(maptemplate)
+	r.run.Clients.ConsoleUI.SetParams(maptemplate)
 
 	if event.InstallationID > 0 {
-		event.Provider.WebhookSecret, _ = pac.GetCurrentNSWebhookSecret(ctx, r.kinteract, r.run)
+		event.Provider.WebhookSecret, _ = pipelineascode.GetCurrentNSWebhookSecret(ctx, r.kinteract, r.run)
 	} else {
-		secretFromRepo := pac.SecretFromRepository{
-			K8int:       r.kinteract,
-			Config:      provider.GetConfig(),
-			Event:       event,
-			Repo:        repo,
-			WebhookType: pacInfo.WebhookType,
-			Logger:      logger,
-			Namespace:   r.secretNS,
-		}
-		if err := secretFromRepo.Get(ctx); err != nil {
+		if err := pipelineascode.SecretFromRepository(ctx, r.run, r.kinteract, provider.GetConfig(), event, repo, logger); err != nil {
 			return repo, fmt.Errorf("cannot get secret from repository: %w", err)
 		}
 	}
@@ -179,7 +157,7 @@ func (r *Reconciler) reportFinalStatus(ctx context.Context, logger *zap.SugaredL
 	}
 
 	finalState := kubeinteraction.StateCompleted
-	newPr, err := r.postFinalStatus(ctx, logger, pacInfo, provider, event, pr)
+	newPr, err := r.postFinalStatus(ctx, logger, provider, event, pr)
 	if err != nil {
 		logger.Errorf("failed to post final status, moving on: %v", err)
 		finalState = kubeinteraction.StateFailed
@@ -198,27 +176,20 @@ func (r *Reconciler) reportFinalStatus(ctx context.Context, logger *zap.SugaredL
 	}
 
 	// remove pipelineRun from Queue and start the next one
-	for {
-		next := r.qm.RemoveAndTakeItemFromQueue(repo, pr)
-		if next == "" {
-			break
-		}
+	next := r.qm.RemoveFromQueue(repo, pr)
+	if next != "" {
 		key := strings.Split(next, "/")
 		pr, err := r.run.Clients.Tekton.TektonV1().PipelineRuns(key[0]).Get(ctx, key[1], metav1.GetOptions{})
 		if err != nil {
-			logger.Errorf("cannot get pipeline for next in queue: %w", err)
-			continue
+			return repo, fmt.Errorf("cannot get pipeline for next in queue: %w", err)
 		}
 
 		if err := r.updatePipelineRunToInProgress(ctx, logger, repo, pr); err != nil {
-			logger.Errorf("failed to update status: %w", err)
-			_ = r.qm.RemoveFromQueue(sync.RepoKey(repo), sync.PrKey(pr))
-			continue
+			return repo, fmt.Errorf("failed to update status: %w", err)
 		}
-		break
 	}
 
-	if err := r.cleanupPipelineRuns(ctx, logger, pacInfo, repo, pr); err != nil {
+	if err := r.cleanupPipelineRuns(ctx, logger, repo, pr); err != nil {
 		return repo, fmt.Errorf("error cleaning pipelineruns: %w", err)
 	}
 
@@ -230,48 +201,31 @@ func (r *Reconciler) updatePipelineRunToInProgress(ctx context.Context, logger *
 	if err != nil {
 		return fmt.Errorf("cannot update state: %w", err)
 	}
-	pacInfo := r.run.Info.GetPacOpts()
-	detectedProvider, event, err := r.detectProvider(ctx, logger, pr)
+	p, event, err := r.detectProvider(ctx, logger, pr)
 	if err != nil {
 		logger.Error(err)
 		return nil
 	}
-	detectedProvider.SetPacInfo(&pacInfo)
 
 	if event.InstallationID > 0 {
-		event.Provider.WebhookSecret, _ = pac.GetCurrentNSWebhookSecret(ctx, r.kinteract, r.run)
+		event.Provider.WebhookSecret, _ = pipelineascode.GetCurrentNSWebhookSecret(ctx, r.kinteract, r.run)
 	} else {
-		// secretNS is needed when git provider is other than Github.
-		secretNS := repo.GetNamespace()
-		if repo.Spec.GitProvider != nil && repo.Spec.GitProvider.Secret == nil && r.globalRepo != nil && r.globalRepo.Spec.GitProvider != nil && r.globalRepo.Spec.GitProvider.Secret != nil {
-			secretNS = r.globalRepo.GetNamespace()
-		}
-
-		secretFromRepo := pac.SecretFromRepository{
-			K8int:       r.kinteract,
-			Config:      detectedProvider.GetConfig(),
-			Event:       event,
-			Repo:        repo,
-			WebhookType: pacInfo.WebhookType,
-			Logger:      logger,
-			Namespace:   secretNS,
-		}
-		if err := secretFromRepo.Get(ctx); err != nil {
-			return fmt.Errorf("cannot get secret from repository: %w", err)
+		if err := pipelineascode.SecretFromRepository(ctx, r.run, r.kinteract, p.GetConfig(), event, repo, logger); err != nil {
+			return fmt.Errorf("cannot get secret from repo: %w", err)
 		}
 	}
 
-	err = detectedProvider.SetClient(ctx, r.run, event, repo, r.eventEmitter)
+	err = p.SetClient(ctx, r.run, event, repo, r.eventEmitter)
 	if err != nil {
 		return fmt.Errorf("cannot set client: %w", err)
 	}
 
-	consoleURL := r.run.Clients.ConsoleUI().DetailURL(pr)
+	consoleURL := r.run.Clients.ConsoleUI.DetailURL(pr)
 
 	mt := formatting.MessageTemplate{
 		PipelineRunName: pr.GetName(),
 		Namespace:       repo.GetNamespace(),
-		ConsoleName:     r.run.Clients.ConsoleUI().GetName(),
+		ConsoleName:     r.run.Clients.ConsoleUI.GetName(),
 		ConsoleURL:      consoleURL,
 		TknBinary:       settings.TknBinaryName,
 		TknBinaryURL:    settings.TknBinaryURL,
@@ -290,7 +244,7 @@ func (r *Reconciler) updatePipelineRunToInProgress(ctx context.Context, logger *
 		OriginalPipelineRunName: pr.GetAnnotations()[keys.OriginalPRName],
 	}
 
-	if err := createStatusWithRetry(ctx, logger, detectedProvider, event, status); err != nil {
+	if err := createStatusWithRetry(ctx, logger, p, event, status); err != nil {
 		// if failed to report status for running state, let the pipelineRun continue,
 		// pipelineRun is already started so we will try again once it completes
 		logger.Errorf("failed to report status to running on provider continuing! error: %v", err)

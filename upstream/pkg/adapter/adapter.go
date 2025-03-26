@@ -5,13 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"strings"
 	"time"
 
 	cloudevents "github.com/cloudevents/sdk-go/v2"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/kubeinteraction"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
@@ -23,17 +23,11 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/gitlab"
 	"go.uber.org/zap"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"knative.dev/eventing/pkg/adapter/v2"
 	"knative.dev/pkg/logging"
 )
 
 const globalAdapterPort = "8080"
-
-// For incoming webhook requests and GitHub Apps with many installations the handler takes long
-// e.g GitHub App with ~400 installations, it takes ~180s. For OpenShift deployments this also
-// requires matching timeout on the pipelines-as-code-controller route (default is 30s).
-const httpTimeoutHandler = 600 * time.Second
 
 type envConfig struct {
 	adapter.EnvConfig
@@ -58,7 +52,7 @@ type Response struct {
 var _ adapter.Adapter = (*listener)(nil)
 
 func New(run *params.Run, k *kubeinteraction.Interaction) adapter.AdapterConstructor {
-	return func(ctx context.Context, _ adapter.EnvConfigAccessor, _ cloudevents.Client) adapter.Adapter {
+	return func(ctx context.Context, processed adapter.EnvConfigAccessor, ceClient cloudevents.Client) adapter.Adapter {
 		return &listener{
 			logger: logging.FromContext(ctx),
 			run:    run,
@@ -73,10 +67,6 @@ func (l *listener) Start(ctx context.Context) error {
 	if envAdapterPort != "" {
 		adapterPort = envAdapterPort
 	}
-
-	// Start pac config syncer
-	go params.StartConfigSync(ctx, l.run)
-
 	l.logger.Infof("Starting Pipelines as Code version: %s", strings.TrimSpace(version.Version))
 	mux := http.NewServeMux()
 
@@ -92,7 +82,7 @@ func (l *listener) Start(ctx context.Context) error {
 	srv := &http.Server{
 		Addr: ":" + adapterPort,
 		Handler: http.TimeoutHandler(mux,
-			httpTimeoutHandler, "Listener Timeout!\n"),
+			10*time.Second, "Listener Timeout!\n"),
 	}
 
 	enabled, tlsCertFile, tlsKeyFile := l.isTLSEnabled()
@@ -110,6 +100,14 @@ func (l *listener) Start(ctx context.Context) error {
 
 func (l listener) handleEvent(ctx context.Context) http.HandlerFunc {
 	return func(response http.ResponseWriter, request *http.Request) {
+		// we should fix this, this basically reads configmap on every request, is that supposed to be okay?
+		if err := l.run.UpdatePACInfo(ctx); err != nil {
+			log.Fatalf("error getting config and setting from configmaps: %v", err)
+		}
+
+		ninfo := &info.Info{}
+		l.run.Info.DeepCopy(ninfo)
+
 		if request.Method != http.MethodPost {
 			l.writeResponse(response, http.StatusOK, "ok")
 			return
@@ -136,30 +134,23 @@ func (l listener) handleEvent(ctx context.Context) http.HandlerFunc {
 		var logger *zap.SugaredLogger
 
 		l.event = info.NewEvent()
-		pacInfo := l.run.Info.GetPacOpts()
 
-		globalRepo, err := l.run.Clients.PipelineAsCode.PipelinesascodeV1alpha1().Repositories(l.run.Info.Kube.Namespace).Get(
-			ctx, l.run.Info.Controller.GlobalRepository, metav1.GetOptions{},
-		)
-		if err == nil && globalRepo != nil {
-			l.logger.Infof("detected global repository settings named %s in namespace %s", l.run.Info.Controller.GlobalRepository, l.run.Info.Kube.Namespace)
-		} else {
-			globalRepo = &v1alpha1.Repository{}
-		}
-
-		detected, configuring, err := github.ConfigureRepository(ctx, l.run, request, string(payload), &pacInfo, l.logger)
-		if detected {
-			if configuring && err == nil {
-				l.writeResponse(response, http.StatusCreated, "configured")
+		// if repository auto configuration is enabled then check if its a valid event
+		if l.run.Info.Pac.AutoConfigureNewGitHubRepo {
+			detected, configuring, err := github.ConfigureRepository(ctx, l.run, request, string(payload), l.logger)
+			if detected {
+				if configuring && err == nil {
+					l.writeResponse(response, http.StatusCreated, "configured")
+					return
+				}
+				if configuring && err != nil {
+					l.logger.Errorf("repository auto-configure has failed, err: %v", err)
+					l.writeResponse(response, http.StatusOK, "failed to configure")
+					return
+				}
+				l.writeResponse(response, http.StatusOK, "skipped event")
 				return
 			}
-			if configuring && err != nil {
-				l.logger.Errorf("repository auto-configure has failed, err: %v", err)
-				l.writeResponse(response, http.StatusOK, "failed to configure")
-				return
-			}
-			l.writeResponse(response, http.StatusOK, "skipped event")
-			return
 		}
 
 		isIncoming, targettedRepo, err := l.detectIncoming(ctx, request, payload)
@@ -179,17 +170,14 @@ func (l listener) handleEvent(ctx context.Context) http.HandlerFunc {
 			l.writeResponse(response, http.StatusOK, err.Error())
 			return
 		}
-		gitProvider.SetPacInfo(&pacInfo)
 
 		s := sinker{
-			run:        l.run,
-			vcx:        gitProvider,
-			kint:       l.kint,
-			event:      l.event,
-			logger:     logger,
-			payload:    payload,
-			pacInfo:    &pacInfo,
-			globalRepo: globalRepo,
+			run:     l.run,
+			vcx:     gitProvider,
+			kint:    l.kint,
+			event:   l.event,
+			logger:  logger,
+			payload: payload,
 		}
 
 		// clone the request to use it further
@@ -214,13 +202,13 @@ func (l listener) processRes(processEvent bool, provider provider.Interface, log
 	if err != nil {
 		errStr := fmt.Sprintf("got error while processing : %v", err)
 		logger.Error(errStr)
-		return nil, logger, fmt.Errorf("%s", errStr)
+		return nil, logger, fmt.Errorf(errStr)
 	}
 
 	if skipReason != "" {
-		logger.Debugf("skipping non supported event: %s", skipReason)
+		logger.Infof("skipping event: %s", skipReason)
 	}
-	return nil, logger, fmt.Errorf("skipping non supported event")
+	return nil, logger, fmt.Errorf("skipping event")
 }
 
 func (l listener) detectProvider(req *http.Request, reqBody string) (provider.Interface, *zap.SugaredLogger, error) {

@@ -16,7 +16,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/go-github/v64/github"
+	"github.com/google/go-github/v56/github"
 	"github.com/jonboulle/clockwork"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
@@ -76,10 +76,10 @@ func TestGetTaskURI(t *testing.T) {
 			event := info.NewEvent()
 			event.HeadBranch = "main"
 			event.URL = tt.eventURL
-			mux.HandleFunc("/repos/owner/repo/contents/file", func(rw http.ResponseWriter, _ *http.Request) {
+			mux.HandleFunc("/repos/owner/repo/contents/file", func(rw http.ResponseWriter, r *http.Request) {
 				fmt.Fprintf(rw, `{"sha": "%s"}`, sha)
 			})
-			mux.HandleFunc(fmt.Sprintf("/repos/%s/%s/git/blobs/%s", "owner", "repo", sha), func(rw http.ResponseWriter, _ *http.Request) {
+			mux.HandleFunc(fmt.Sprintf("/repos/%s/%s/git/blobs/%s", "owner", "repo", sha), func(rw http.ResponseWriter, r *http.Request) {
 				fmt.Fprintf(rw, `{"content": "%s"}`, content)
 			})
 			allowed, content, err := provider.GetTaskURI(ctx, event, tt.uri)
@@ -231,7 +231,6 @@ func TestGetTektonDir(t *testing.T) {
 		expectedString       string
 		provenance           string
 		filterMessageSnippet string
-		wantErr              string
 	}{
 		{
 			name: "test no subtree",
@@ -242,7 +241,7 @@ func TestGetTektonDir(t *testing.T) {
 			},
 			expectedString:       "PipelineRun",
 			treepath:             "testdata/tree/simple",
-			filterMessageSnippet: "Using PipelineRun definition from source pull request tekton/cat#0",
+			filterMessageSnippet: "Using PipelineRun definition from source pull request SHA",
 		},
 		{
 			name: "test provenance default_branch ",
@@ -266,17 +265,6 @@ func TestGetTektonDir(t *testing.T) {
 			expectedString: "FROMSUBTREE",
 			treepath:       "testdata/tree/subdir",
 		},
-		{
-			name: "test with badly formatted yaml",
-			event: &info.Event{
-				Organization: "tekton",
-				Repository:   "cat",
-				SHA:          "123",
-			},
-			expectedString: "FROMSUBTREE",
-			treepath:       "testdata/tree/badyaml",
-			wantErr:        "error unmarshalling yaml file badyaml.yaml: error converting YAML to JSON: yaml: line 2: did not find expected key",
-		},
 	}
 	for _, tt := range testGetTektonDir {
 		t.Run(tt.name, func(t *testing.T) {
@@ -298,11 +286,6 @@ func TestGetTektonDir(t *testing.T) {
 			ghtesthelper.SetupGitTree(t, mux, tt.treepath, tt.event, false)
 
 			got, err := gvcs.GetTektonDir(ctx, tt.event, ".tekton", tt.provenance)
-			if tt.wantErr != "" {
-				assert.Assert(t, err != nil, "we should have get an error here")
-				assert.Equal(t, tt.wantErr, err.Error())
-				return
-			}
 			assert.NilError(t, err)
 			assert.Assert(t, strings.Contains(got, tt.expectedString), "expected %s, got %s", tt.expectedString, got)
 			if tt.filterMessageSnippet != "" {
@@ -440,7 +423,7 @@ func TestCheckSenderOrgMembership(t *testing.T) {
 			gprovider := Provider{
 				Client: fakeclient,
 			}
-			mux.HandleFunc(fmt.Sprintf("/orgs/%s/members", tt.runevent.Organization), func(rw http.ResponseWriter, _ *http.Request) {
+			mux.HandleFunc(fmt.Sprintf("/orgs/%s/members", tt.runevent.Organization), func(rw http.ResponseWriter, r *http.Request) {
 				fmt.Fprint(rw, tt.apiReturn)
 			})
 
@@ -485,7 +468,7 @@ func TestGetStringPullRequestComment(t *testing.T) {
 			gprovider := Provider{
 				Client: fakeclient,
 			}
-			mux.HandleFunc(fmt.Sprintf("/repos/issues/%s/comments", filepath.Base(tt.runevent.URL)), func(rw http.ResponseWriter, _ *http.Request) {
+			mux.HandleFunc(fmt.Sprintf("/repos/issues/%s/comments", filepath.Base(tt.runevent.URL)), func(rw http.ResponseWriter, r *http.Request) {
 				fmt.Fprint(rw, tt.apiReturn)
 			})
 
@@ -543,9 +526,9 @@ func TestGithubGetCommitInfo(t *testing.T) {
 			fakeclient, mux, _, teardown := ghtesthelper.SetupGH()
 			defer teardown()
 			mux.HandleFunc(fmt.Sprintf("/repos/%s/%s/git/commits/%s",
-				tt.event.Organization, tt.event.Repository, tt.event.SHA), func(rw http.ResponseWriter, _ *http.Request) {
+				tt.event.Organization, tt.event.Repository, tt.event.SHA), func(rw http.ResponseWriter, r *http.Request) {
 				if tt.apiReply != "" {
-					fmt.Fprintf(rw, "%s", tt.apiReply)
+					fmt.Fprintf(rw, tt.apiReply)
 					return
 				}
 				fmt.Fprintf(rw, `{"html_url": "%s", "message": "%s"}`, tt.shaurl, tt.shatitle)
@@ -790,7 +773,7 @@ func TestGetFiles(t *testing.T) {
 			}
 			if tt.event.TriggerTarget == "push" {
 				mux.HandleFunc(fmt.Sprintf("/repos/%s/%s/commits/%s",
-					tt.event.Organization, tt.event.Repository, tt.event.SHA), func(rw http.ResponseWriter, _ *http.Request) {
+					tt.event.Organization, tt.event.Repository, tt.event.SHA), func(rw http.ResponseWriter, r *http.Request) {
 					c := &github.RepositoryCommit{
 						Files: pushCommitFiles,
 					}
@@ -802,7 +785,7 @@ func TestGetFiles(t *testing.T) {
 			ctx, _ := rtesting.SetupFakeContext(t)
 			provider := &Provider{
 				Client:        fakeclient,
-				PaginedNumber: 1,
+				paginedNumber: 1,
 			}
 			changedFiles, err := provider.GetFiles(ctx, tt.event)
 			assert.NilError(t, err, nil)
@@ -836,7 +819,6 @@ func TestProvider_checkWebhookSecretValidity(t *testing.T) {
 		expHeaderSet   bool
 		apiNotEnabled  bool
 		wantLogSnippet string
-		report500      bool
 	}{
 		{
 			name:         "remaining scim calls",
@@ -867,11 +849,6 @@ func TestProvider_checkWebhookSecretValidity(t *testing.T) {
 			wantSubErr: "token is ratelimited",
 		},
 		{
-			name:       "api error",
-			wantSubErr: "error making request to the GitHub API checking rate limit",
-			report500:  true,
-		},
-		{
 			name:           "not enabled",
 			apiNotEnabled:  true,
 			wantLogSnippet: "skipping checking",
@@ -884,11 +861,7 @@ func TestProvider_checkWebhookSecretValidity(t *testing.T) {
 			logger, observer := logger.GetLogger()
 
 			if !tt.apiNotEnabled {
-				mux.HandleFunc("/rate_limit", func(rw http.ResponseWriter, _ *http.Request) {
-					if tt.report500 {
-						rw.WriteHeader(http.StatusInternalServerError)
-						return
-					}
+				mux.HandleFunc("/rate_limit", func(rw http.ResponseWriter, r *http.Request) {
 					s := &github.RateLimits{
 						SCIM: &github.Rate{
 							Remaining: tt.remaining,
@@ -967,7 +940,7 @@ func TestListRepos(t *testing.T) {
 	fakeclient, mux, _, teardown := ghtesthelper.SetupGH()
 	defer teardown()
 
-	mux.HandleFunc("user/installations/1/repositories/2", func(rw http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("user/installations/1/repositories/2", func(rw http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(rw)
 	})
 
@@ -983,7 +956,7 @@ func TestListRepos(t *testing.T) {
 	})
 
 	ctx, _ := rtesting.SetupFakeContext(t)
-	provider := &Provider{Client: fakeclient, PaginedNumber: 1}
+	provider := &Provider{Client: fakeclient, paginedNumber: 1}
 	data, err := ListRepos(ctx, provider)
 	assert.NilError(t, err)
 	assert.Equal(t, data[0], "https://matched/by/incoming")
@@ -1063,7 +1036,7 @@ func TestCreateToken(t *testing.T) {
 	fakeclient, mux, _, teardown := ghtesthelper.SetupGH()
 	defer teardown()
 
-	extraRepoInstallIDs := map[string]string{"owner/project1": "789", "owner/project2": "10112"}
+	extraRepoInstallIds := map[string]string{"owner/project1": "789", "owner/project2": "10112"}
 	urlData := []string{}
 	for _, r := range repos {
 		if r.Spec.Settings != nil {
@@ -1072,8 +1045,8 @@ func TestCreateToken(t *testing.T) {
 	}
 	for _, v := range urlData {
 		split := strings.Split(v, "/")
-		mux.HandleFunc(fmt.Sprintf("/repos/%s/%s", split[0], split[1]), func(w http.ResponseWriter, _ *http.Request) {
-			sid := extraRepoInstallIDs[fmt.Sprintf("%s/%s", split[0], split[1])]
+		mux.HandleFunc(fmt.Sprintf("/repos/%s/%s", split[0], split[1]), func(w http.ResponseWriter, r *http.Request) {
+			sid := extraRepoInstallIds[fmt.Sprintf("%s/%s", split[0], split[1])]
 			_, _ = fmt.Fprintf(w, `{"id": %s}`, sid)
 		})
 	}
@@ -1114,7 +1087,7 @@ func TestGetBranch(t *testing.T) {
 			defer teardown()
 
 			mux.HandleFunc(fmt.Sprintf("/repos/%s/%s/branches/test1",
-				runEvent.Organization, runEvent.Repository), func(rw http.ResponseWriter, _ *http.Request) {
+				runEvent.Organization, runEvent.Repository), func(rw http.ResponseWriter, r *http.Request) {
 				_, err := fmt.Fprintf(rw, `{
 			"name": "test1",
 			"commit": {

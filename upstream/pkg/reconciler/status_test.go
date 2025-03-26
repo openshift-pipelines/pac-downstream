@@ -9,7 +9,6 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/clients"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/settings"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
 	testclient "github.com/openshift-pipelines/pipelines-as-code/pkg/test/clients"
 	tprovider "github.com/openshift-pipelines/pipelines-as-code/pkg/test/provider"
@@ -60,16 +59,11 @@ func TestPostFinalStatus(t *testing.T) {
 		Kube:   stdata.Kube,
 		Tekton: stdata.Pipeline,
 	}
-	run.Clients.SetConsoleUI(consoleui.FallBackConsole{})
+	run.Clients.ConsoleUI = consoleui.FallBackConsole{}
 
 	r := &Reconciler{
 		run: run,
 	}
-	pacInfo := &info.PacOpts{
-		Settings: settings.Settings{
-			ErrorLogSnippet: false,
-		},
-	}
-	_, err := r.postFinalStatus(ctx, fakelogger, pacInfo, vcx, info.NewEvent(), pr1)
+	_, err := r.postFinalStatus(ctx, fakelogger, vcx, info.NewEvent(), pr1)
 	assert.NilError(t, err)
 }
