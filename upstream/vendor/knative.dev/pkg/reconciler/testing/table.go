@@ -20,7 +20,6 @@ import (
 	"context"
 	"path"
 	"reflect"
-	"slices"
 	"strings"
 	"testing"
 
@@ -169,8 +168,7 @@ func (r *TableRow) Test(t *testing.T, factory Factory) {
 		t.Errorf("Error capturing actions by verb: %q", err)
 	}
 
-	effectiveOpts := slices.Concat(r.CmpOpts, defaultCmpOpts)
-
+	effectiveOpts := append(r.CmpOpts, defaultCmpOpts...)
 	// Previous state is used to diff resource expected state for update requests that were missed.
 	objPrevState := make(map[string]runtime.Object, len(r.Objects))
 	for _, o := range r.Objects {
@@ -291,7 +289,7 @@ func (r *TableRow) Test(t *testing.T, factory Factory) {
 	// Build a set of unique strings that represent type-name{-namespace}.
 	// Adding type will help catch the bugs where several similarly named
 	// resources are deleted (and some should or should not).
-	gotDeletes := make(sets.Set[string], len(actions.Deletes))
+	gotDeletes := make(sets.String, len(actions.Deletes))
 	for _, w := range actions.Deletes {
 		n := w.GetResource().Resource + "~~" + w.GetName()
 		if !r.SkipNamespaceValidation {
@@ -299,7 +297,7 @@ func (r *TableRow) Test(t *testing.T, factory Factory) {
 		}
 		gotDeletes.Insert(n)
 	}
-	wantDeletes := make(sets.Set[string], len(actions.Deletes))
+	wantDeletes := make(sets.String, len(actions.Deletes))
 	for _, w := range r.WantDeletes {
 		n := w.GetResource().Resource + "~~" + w.GetName()
 		if !r.SkipNamespaceValidation {
@@ -365,8 +363,7 @@ func (r *TableRow) Test(t *testing.T, factory Factory) {
 
 func filterUpdatesWithSubresource(
 	subresource string,
-	actions []clientgotesting.UpdateAction,
-) (result []clientgotesting.UpdateAction) {
+	actions []clientgotesting.UpdateAction) (result []clientgotesting.UpdateAction) {
 	for _, action := range actions {
 		if action.GetSubresource() == subresource {
 			result = append(result, action)

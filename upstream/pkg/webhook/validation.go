@@ -2,6 +2,7 @@ package webhook
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	pac "github.com/openshift-pipelines/pipelines-as-code/pkg/generated/listers/pipelinesascode/v1alpha1"
@@ -33,7 +34,7 @@ func (ac *reconciler) Admit(_ context.Context, request *v1.AdmissionRequest) *v1
 	}
 
 	if exist {
-		return webhook.MakeErrorStatus("repository already exists with URL: %s", repo.Spec.URL)
+		return webhook.MakeErrorStatus(fmt.Sprintf("repository already exist with url: %s", repo.Spec.URL))
 	}
 
 	if repo.Spec.ConcurrencyLimit != nil && *repo.Spec.ConcurrencyLimit == 0 {
