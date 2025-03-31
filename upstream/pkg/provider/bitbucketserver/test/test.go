@@ -25,7 +25,7 @@ var (
 	buildAPIURL   = "/build-status/1.0"
 )
 
-func SetupBBServerClient(ctx context.Context) (*bbv1.APIClient, *http.ServeMux, func(), string) {
+func SetupBBServerClient(ctx context.Context) (*bbv1.APIClient, *http.ServeMux, func()) {
 	mux := http.NewServeMux()
 	apiHandler := http.NewServeMux()
 	apiHandler.Handle(defaultAPIURL+"/", http.StripPrefix(defaultAPIURL, mux))
@@ -49,7 +49,7 @@ func SetupBBServerClient(ctx context.Context) (*bbv1.APIClient, *http.ServeMux, 
 	cfg := bbv1.NewConfiguration(server.URL)
 	cfg.HTTPClient = server.Client()
 	client := bbv1.NewAPIClient(ctx, cfg)
-	return client, mux, tearDown, server.URL
+	return client, mux, tearDown
 }
 
 func MuxCreateComment(t *testing.T, mux *http.ServeMux, event *info.Event, expectedCommentSubstr string, prID int) {
@@ -105,7 +105,7 @@ func MakeEvent(event *info.Event) *info.Event {
 	}
 	if rev.Event == nil {
 		rev.Event = &types.PullRequestEvent{
-			PullRequest: bbv1.PullRequest{ID: 666},
+			PulRequest: bbv1.PullRequest{ID: 666},
 		}
 	}
 	return rev
@@ -269,9 +269,8 @@ func MakePREvent(event *info.Event, comment string) *types.PullRequestEvent {
 	iii, _ := strconv.Atoi(event.AccountID)
 
 	pr := &types.PullRequestEvent{
-		Actor: bbv1.UserWithLinks{ID: iii, Name: event.Sender},
-		PullRequest: bbv1.PullRequest{
-			ID: 1,
+		Actor: types.EventActor{ID: iii, Name: event.Sender},
+		PulRequest: bbv1.PullRequest{
 			ToRef: bbv1.PullRequestRef{
 				Repository: bbv1.Repository{
 					Project: &bbv1.Project{Key: event.Organization},
@@ -285,18 +284,14 @@ func MakePREvent(event *info.Event, comment string) *types.PullRequestEvent {
 								Href: event.URL,
 							},
 						},
-						Clone: []bbv1.CloneLink{{Href: event.URL}},
 					},
 				},
-				DisplayID:    "base",
-				LatestCommit: "abcd",
+				DisplayID: "base",
 			},
 			FromRef: bbv1.PullRequestRef{
 				DisplayID:    "head",
 				LatestCommit: event.SHA,
 				Repository: bbv1.Repository{
-					Project: &bbv1.Project{Key: event.Organization},
-					Name:    event.Repository,
 					Links: &struct {
 						Clone []bbv1.CloneLink `json:"clone,omitempty"`
 						Self  []bbv1.SelfLink  `json:"self,omitempty"`
@@ -318,7 +313,7 @@ func MakePREvent(event *info.Event, comment string) *types.PullRequestEvent {
 		},
 	}
 	if comment != "" {
-		pr.Comment = bbv1.ActivityComment{
+		pr.Comment = bbv1.Comment{
 			Text: comment,
 		}
 	}
@@ -329,7 +324,7 @@ func MakePushEvent(event *info.Event) *types.PushRequestEvent {
 	iii, _ := strconv.Atoi(event.AccountID)
 
 	return &types.PushRequestEvent{
-		Actor: bbv1.UserWithLinks{ID: iii, Name: event.Sender},
+		Actor: types.EventActor{ID: iii, Name: event.Sender},
 		Repository: bbv1.Repository{
 			Project: &bbv1.Project{
 				Key: event.Organization,

@@ -38,7 +38,7 @@ type Reconciler struct {
 	repoLister        pacapi.RepositoryLister
 	pipelineRunLister tektonv1lister.PipelineRunLister
 	kinteract         kubeinteraction.Interface
-	qm                sync.QueueManagerInterface
+	qm                *sync.QueueManager
 	metrics           *metrics.Recorder
 	eventEmitter      *events.EventEmitter
 	globalRepo        *v1alpha1.Repository
@@ -198,24 +198,17 @@ func (r *Reconciler) reportFinalStatus(ctx context.Context, logger *zap.SugaredL
 	}
 
 	// remove pipelineRun from Queue and start the next one
-	for {
-		next := r.qm.RemoveAndTakeItemFromQueue(repo, pr)
-		if next == "" {
-			break
-		}
+	next := r.qm.RemoveFromQueue(repo, pr)
+	if next != "" {
 		key := strings.Split(next, "/")
 		pr, err := r.run.Clients.Tekton.TektonV1().PipelineRuns(key[0]).Get(ctx, key[1], metav1.GetOptions{})
 		if err != nil {
-			logger.Errorf("cannot get pipeline for next in queue: %w", err)
-			continue
+			return repo, fmt.Errorf("cannot get pipeline for next in queue: %w", err)
 		}
 
 		if err := r.updatePipelineRunToInProgress(ctx, logger, repo, pr); err != nil {
-			logger.Errorf("failed to update status: %w", err)
-			_ = r.qm.RemoveFromQueue(sync.RepoKey(repo), sync.PrKey(pr))
-			continue
+			return repo, fmt.Errorf("failed to update status: %w", err)
 		}
-		break
 	}
 
 	if err := r.cleanupPipelineRuns(ctx, logger, pacInfo, repo, pr); err != nil {
@@ -241,12 +234,6 @@ func (r *Reconciler) updatePipelineRunToInProgress(ctx context.Context, logger *
 	if event.InstallationID > 0 {
 		event.Provider.WebhookSecret, _ = pac.GetCurrentNSWebhookSecret(ctx, r.kinteract, r.run)
 	} else {
-		// secretNS is needed when git provider is other than Github.
-		secretNS := repo.GetNamespace()
-		if repo.Spec.GitProvider != nil && repo.Spec.GitProvider.Secret == nil && r.globalRepo != nil && r.globalRepo.Spec.GitProvider != nil && r.globalRepo.Spec.GitProvider.Secret != nil {
-			secretNS = r.globalRepo.GetNamespace()
-		}
-
 		secretFromRepo := pac.SecretFromRepository{
 			K8int:       r.kinteract,
 			Config:      detectedProvider.GetConfig(),
@@ -254,7 +241,7 @@ func (r *Reconciler) updatePipelineRunToInProgress(ctx context.Context, logger *
 			Repo:        repo,
 			WebhookType: pacInfo.WebhookType,
 			Logger:      logger,
-			Namespace:   secretNS,
+			Namespace:   r.secretNS,
 		}
 		if err := secretFromRepo.Get(ctx); err != nil {
 			return fmt.Errorf("cannot get secret from repository: %w", err)

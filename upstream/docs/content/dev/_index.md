@@ -224,32 +224,27 @@ make pre-commit
 
 ## Developing the Documentation
 
-Documentation is important to us. Most of the time, new features or changes in
-behavior need to include documentation as part of the Pull Request.
+Documentation is important to us, most of the time new features or change of
+behaviour needs to include documentation part of the Pull Request.
 
-We use [hugo](https://gohugo.io). If you want to preview the changes you made
-locally while developing, you can run this command:
+We use hugo, if you want to preview your change, you need to install
+[hugo](https://gohugo.io) and do a :
 
 ```shell
-make dev-docs
+make docs-dev
 ```
 
-This will download a version of Hugo that is the same as what we use on
-Cloudflare Pages (where [pipelinesascode.com](https://pipelinesascode.com) is
-generated) and start the Hugo server with a live preview of the docs on:
+this will start a hugo server with live preview of the docs on :
 
 <https://localhost:1313>
 
-When we push the release, the docs gets rebuilt automatically by CloudFare pages.
+When we push the release, the docs get rebuilt by CloudFare.
 
 By default the website <https://pipelinesascode.com> only contains the "stable"
 documentation. If you want to preview the dev documentation as from `main` you
 need to go to this URL:
 
 <https://main.pipelines-as-code.pages.dev>
-
-There is a drop-down at the bottom of the page to let you change the older
-major version.
 
 ## Documentation when we are doing the Release Process
 
@@ -281,7 +276,6 @@ to the tektoncd/pipeline version.
 
   ```shell
   find -name '*.go'|xargs sed -i 's,github.com/google/go-github/v56,github.com/google/go-github/v59,'
-  ```
 
 - This will update everything, sometime the library ghinstallation is not
 updated with the new version, so you will need to keep the old version kept in
