@@ -1,5 +1,6 @@
 // Copyright 2016 The Gitea Authors. All rights reserved.
-// SPDX-License-Identifier: MIT
+// Use of this source code is governed by a MIT-style
+// license that can be found in the LICENSE file.
 
 package structs
 
@@ -15,10 +16,8 @@ type Release struct {
 	Title        string `json:"name"`
 	Note         string `json:"body"`
 	URL          string `json:"url"`
-	HTMLURL      string `json:"html_url"`
 	TarURL       string `json:"tarball_url"`
 	ZipURL       string `json:"zipball_url"`
-	UploadURL    string `json:"upload_url"`
 	IsDraft      bool   `json:"draft"`
 	IsPrerelease bool   `json:"prerelease"`
 	// swagger:strfmt date-time

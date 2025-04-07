@@ -24,4 +24,3 @@ exceptions:
   - "upstream/downstream"
   - "z/OS"
   - "z/OSMF"
-  - "[Kk]ey/value"

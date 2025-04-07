@@ -305,7 +305,7 @@ func newSSHSigner(sshSigner ssh.Signer, algo Algorithm, dAlgo DigestAlgorithm, h
 
 	s, err := signerFromSSHSigner(sshSigner, string(algo))
 	if err != nil {
-		return nil, fmt.Errorf("no crypto implementation available for ssh algo %q: %s", algo, err)
+		return nil, fmt.Errorf("no crypto implementation available for ssh algo %q", algo)
 	}
 
 	a := &asymmSSHSigner{
@@ -346,7 +346,7 @@ func newSigner(algo Algorithm, dAlgo DigestAlgorithm, headers []string, scheme S
 	}
 	m, err := macerFromString(string(algo))
 	if err != nil {
-		return nil, fmt.Errorf("no crypto implementation available for %q: %s", algo, err)
+		return nil, fmt.Errorf("no crypto implementation available for %q", algo)
 	}
 	c := &macSigner{
 		m:            m,

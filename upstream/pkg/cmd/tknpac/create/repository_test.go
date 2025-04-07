@@ -263,53 +263,29 @@ func TestCleanUpURL(t *testing.T) {
 }
 
 func TestGenerateTemplate(t *testing.T) {
-	tests := []struct {
-		name     string
-		gitInfo  *git.Info
-		eventURL string
-	}{
-		{
-			name: "WithGitInfo",
-			gitInfo: &git.Info{
-				URL: "https://url/tartanpion",
-			},
-			eventURL: "",
-		},
-		{
-			name:     "WithoutGitInfo",
-			gitInfo:  &git.Info{},
-			eventURL: "https://url/tartanpion",
-		},
+	askStubs := func(as *prompt.AskStubber) {
+		as.StubOne("Yes")
 	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			askStubs := func(as *prompt.AskStubber) {
-				as.StubOne("Yes")
-			}
-			//nolint
-			io, _, _, _ := cli.IOTest()
-			createOpts := &RepoOptions{
-				GitInfo:   tt.gitInfo,
-				IoStreams: io,
-				cliOpts:   &cli.PacCliOpts{},
-				Event: &info.Event{
-					URL: tt.eventURL,
-				},
-			}
-			as, teardown := prompt.InitAskStubber()
-			defer teardown()
-			askStubs(as)
-			gopt := generate.MakeOpts()
-			tmpfile := testfs.NewFile(t, t.Name())
-			defer tmpfile.Remove()
-			assert.NilError(t, os.Remove(tmpfile.Path()))
-			gopt.FileName = tmpfile.Path()
-			err := createOpts.generateTemplate(gopt)
-			assert.NilError(t, err)
-			content, err := os.ReadFile(tmpfile.Path())
-			assert.NilError(t, err)
-			golden.Assert(t, string(content), strings.ReplaceAll(fmt.Sprintf("%s.golden", t.Name()), "/", "-"))
-		})
+	//nolint
+	io, _, _, _ := cli.IOTest()
+	createOpts := &RepoOptions{
+		GitInfo: &git.Info{
+			URL: "https://url/tartanpion",
+		},
+		IoStreams: io,
+		cliOpts:   &cli.PacCliOpts{},
 	}
+	as, teardown := prompt.InitAskStubber()
+	defer teardown()
+	askStubs(as)
+	gopt := generate.MakeOpts()
+	tmpfile := testfs.NewFile(t, t.Name())
+	defer tmpfile.Remove()
+	assert.NilError(t, os.Remove(tmpfile.Path()))
+	gopt.FileName = tmpfile.Path()
+	err := createOpts.generateTemplate(gopt)
+	assert.NilError(t, err)
+	content, err := os.ReadFile(tmpfile.Path())
+	assert.NilError(t, err)
+	golden.Assert(t, string(content), strings.ReplaceAll(fmt.Sprintf("%s.golden", t.Name()), "/", "-"))
 }

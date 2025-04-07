@@ -99,7 +99,7 @@ func TestPipelineBundlesSkipped(t *testing.T) {
 	assert.Equal(t, string(resolved.Spec.PipelineRef.ResolverRef.Params[0].Name), "bundle")
 }
 
-// TestTaskBundlesSkipped effectively test conversion from beta1 to v1.
+// TestPipelineBundlesSkipped effectively test conversion from beta1 to v1.
 func TestTaskBundlesSkipped(t *testing.T) {
 	resolved, _, err := readTDfile(t, "pipelinerun-task-bundle", false, true)
 	assert.NilError(t, err)
