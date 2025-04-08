@@ -17,7 +17,7 @@ metadata:
       ".tekton/pac-downstream-1-14-cli-pull-request.yaml".pathChanged())
   creationTimestamp: null
   labels:
-    appstudio.openshift.io/application: openshift-pipelines-1-14
+    appstudio.openshift.io/application: openshift-pipelines-core-1-14
     appstudio.openshift.io/component: pac-downstream-1-14-cli
     pipelines.appstudio.openshift.io/type: build
   name: pac-downstream-1-14-cli-on-pull-request
