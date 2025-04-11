@@ -2,7 +2,6 @@ package resolve
 
 import (
 	"fmt"
-	"os"
 	"strings"
 	"testing"
 
@@ -64,9 +63,6 @@ func TestRemote(t *testing.T) {
 	pipelineTaskRef := []tektonv1.PipelineTask{
 		{
 			Name: remoteTaskName,
-			TaskRef: &tektonv1.TaskRef{
-				Name: remoteTaskName,
-			},
 		},
 	}
 	pipelinewithTaskRef := ttkn.MakePipeline(remotePipelineName, pipelineTaskRef, map[string]string{
@@ -84,16 +80,16 @@ func TestRemote(t *testing.T) {
 	assert.NilError(t, err)
 
 	tests := []struct {
-		name                 string
-		pipelineruns         []*tektonv1.PipelineRun
-		tasks                []*tektonv1.Task
-		pipelines            []*tektonv1.Pipeline
-		wantErrSnippet       string
-		remoteURLS           map[string]map[string]string
-		expectedLogsSnippets []string
-		expectedTaskSpec     tektonv1.TaskSpec
-		expectedPipelineRun  string
-		noPipelineRun        bool
+		name                   string
+		pipelineruns           []*tektonv1.PipelineRun
+		tasks                  []*tektonv1.Task
+		pipelines              []*tektonv1.Pipeline
+		wantErrSnippet         string
+		remoteURLS             map[string]map[string]string
+		expectedLogsSnippets   []string
+		expectedTaskSpec       tektonv1.TaskSpec
+		expectedPipelinesFetch int
+		expectedTaskFetch      int
 	}{
 		{
 			name: "remote pipeline with remote task from pipeline",
@@ -127,7 +123,8 @@ func TestRemote(t *testing.T) {
 				fmt.Sprintf("successfully fetched %s from remote https url", remotePipelineURL),
 				fmt.Sprintf("successfully fetched %s from remote https url", remoteTaskURL),
 			},
-			expectedPipelineRun: "remote-pipeline-with-remote-task-from-pipeline.yaml",
+			expectedPipelinesFetch: 1,
+			expectedTaskFetch:      1,
 		},
 		{
 			name: "remote pipeline with remote task in pipeline overridden from pipelinerun",
@@ -159,10 +156,11 @@ func TestRemote(t *testing.T) {
 				},
 			},
 			expectedLogsSnippets: []string{
-				fmt.Sprintf("successfully fetched %s from remote https url", remotePipelineURL),
 				fmt.Sprintf("successfully fetched %s from remote https url", taskFromPipelineRunURL),
+				fmt.Sprintf("successfully fetched %s from remote https url", remotePipelineURL),
 			},
-			expectedPipelineRun: "remote-pipeline-with-remote-task-from-pipelinerun.yaml",
+			expectedPipelinesFetch: 1,
+			expectedTaskFetch:      1,
 		},
 		{
 			name: "remote pipelinerun no annotations",
@@ -175,11 +173,10 @@ func TestRemote(t *testing.T) {
 					},
 				),
 			},
-			noPipelineRun: true,
 		},
 		{
 			name:           "error/remote pipelinerun is 404",
-			wantErrSnippet: "error getting remote pipeline \"" + remotePipelineURL + "\"",
+			wantErrSnippet: "error getting remote pipeline " + remotePipelineURL,
 			pipelineruns: []*tektonv1.PipelineRun{
 				ttkn.MakePR(randomPipelineRunName, map[string]string{
 					apipac.Pipeline: remotePipelineURL,
@@ -193,7 +190,7 @@ func TestRemote(t *testing.T) {
 			},
 		},
 		{
-			name: "skip fetching multiple tasks of the same name from pipelinerun annotations and pipeline annotation",
+			name: "skipping/multiple tasks of the same name from pipelinerun annotations and pipeline annotation",
 			pipelineruns: []*tektonv1.PipelineRun{
 				ttkn.MakePR(randomPipelineRunName, map[string]string{
 					apipac.Pipeline:    remotePipelineURL,
@@ -219,13 +216,16 @@ func TestRemote(t *testing.T) {
 			},
 			expectedTaskSpec: taskFromPipelineSpec,
 			expectedLogsSnippets: []string{
+				fmt.Sprintf("successfully fetched %s from remote https url", remoteTaskURL),
+				fmt.Sprintf("successfully fetched %s from remote https url", remoteTaskURL),
 				fmt.Sprintf("successfully fetched %s from remote https url", remotePipelineURL),
 				fmt.Sprintf("successfully fetched %s from remote https url", remoteTaskURL),
 			},
-			expectedPipelineRun: "skip-fetching-multiple-tasks-of-the-same-name-from-pipelinerun-annotations-and-pipeline-annotation.yaml",
+			expectedPipelinesFetch: 1,
+			expectedTaskFetch:      1,
 		},
 		{
-			name: "skip fetching multiple tasks of the same name from pipelinerun annotations and tektondir",
+			name: "skipping/multiple tasks of the same name from pipelinerun annotations and tektondir",
 			pipelineruns: []*tektonv1.PipelineRun{
 				ttkn.MakePR(randomPipelineRunName, map[string]string{
 					apipac.Pipeline: remotePipelineURL,
@@ -253,15 +253,17 @@ func TestRemote(t *testing.T) {
 			},
 			expectedTaskSpec: taskFromPipelineSpec,
 			expectedLogsSnippets: []string{
+				fmt.Sprintf("successfully fetched %s from remote https url", remoteTaskURL),
 				fmt.Sprintf("successfully fetched %s from remote https url", remotePipelineURL),
 				fmt.Sprintf("successfully fetched %s from remote https url", remoteTaskURL),
-				fmt.Sprintf("skipping remote task %s as already fetched task %s for pipelinerun %s", remoteTaskURL, remoteTaskName, randomPipelineRunName),
-				fmt.Sprintf("overriding task %s coming from .tekton directory by an annotation task for pipelinerun %s", remoteTaskName, randomPipelineRunName),
+				fmt.Sprintf("skipping remote task %s from remote pipeline %s as already defined in pipelinerun", remoteTaskName, remotePipelineName),
+				fmt.Sprintf("overriding task %s coming from tekton directory by an annotation task on the pipeline or pipelinerun", remoteTaskName),
 			},
-			expectedPipelineRun: "skip-fetching-multiple-tasks-of-the-same-name-from-pipelinerun-annotations-and-tektondir.yaml",
+			expectedPipelinesFetch: 1,
+			expectedTaskFetch:      1,
 		},
 		{
-			name: "skip fetching multiple pipelines of the same name from pipelinerun annotations and tektondir",
+			name: "skipping/multiple pipelines of the same name from pipelinerun annotations and tektondir",
 			pipelineruns: []*tektonv1.PipelineRun{
 				ttkn.MakePR(randomPipelineRunName, map[string]string{
 					apipac.Pipeline: remotePipelineURL,
@@ -289,11 +291,14 @@ func TestRemote(t *testing.T) {
 			},
 			expectedTaskSpec: taskFromPipelineSpec,
 			expectedLogsSnippets: []string{
+				fmt.Sprintf("successfully fetched %s from remote https url", remoteTaskURL),
 				fmt.Sprintf("successfully fetched %s from remote https url", remotePipelineURL),
 				fmt.Sprintf("successfully fetched %s from remote https url", remoteTaskURL),
-				fmt.Sprintf("skipping remote task %s as already fetched task %s for pipelinerun %s", remoteTaskURL, remoteTaskName, randomPipelineRunName),
+				fmt.Sprintf("skipping remote task %s from remote pipeline %s as already defined in pipelinerun", remoteTaskName, remotePipelineName),
+				fmt.Sprintf("overriding pipeline %s coming from tekton directory by the annotation pipelinerun", remotePipelineName),
 			},
-			expectedPipelineRun: "skip-fetching-multiple-pipelines-of-the-same-name-from-pipelinerun-annotations-and-tektondir.yaml",
+			expectedPipelinesFetch: 1,
+			expectedTaskFetch:      1,
 		},
 	}
 	for _, tt := range tests {
@@ -318,28 +323,32 @@ func TestRemote(t *testing.T) {
 					},
 				},
 			}
-			ret, err := resolveRemoteResources(ctx, rt, tktype, &Opts{RemoteTasks: true, GenerateName: true})
+			ret, err := getRemotes(ctx, rt, tktype)
 			if tt.wantErrSnippet != "" {
 				assert.ErrorContains(t, err, tt.wantErrSnippet)
 				return
 			}
 			assert.NilError(t, err)
 
+			allPipelinesNames := []string{}
+			for _, task := range ret.Pipelines {
+				allPipelinesNames = append(allPipelinesNames, task.GetName())
+			}
+			assert.Equal(t, len(ret.Pipelines), tt.expectedPipelinesFetch, allPipelinesNames)
+
+			allTasksNames := []string{}
+			for _, task := range ret.Tasks {
+				allTasksNames = append(allTasksNames, task.GetName())
+			}
+			assert.Equal(t, len(ret.Tasks), tt.expectedTaskFetch, allTasksNames)
+
 			for k, snippet := range tt.expectedLogsSnippets {
 				logmsg := log.AllUntimed()[k].Message
 				assert.Assert(t, strings.Contains(logmsg, snippet), "\n on index: %d\n we want: %s\n we  got: %s", k, snippet, logmsg)
 			}
-
-			if tt.noPipelineRun {
-				assert.Assert(t, len(ret) == 0, "not expecting any pipelinerun")
-				return
+			if tt.expectedTaskFetch > 0 {
+				assert.DeepEqual(t, tt.expectedTaskSpec, ret.Tasks[0].Spec)
 			}
-			expectedData, err := os.ReadFile("testdata/" + tt.expectedPipelineRun)
-			assert.NilError(t, err)
-			pipelineRun := &tektonv1.PipelineRun{}
-			err = yaml.Unmarshal(expectedData, pipelineRun)
-			assert.NilError(t, err)
-			assert.DeepEqual(t, pipelineRun, ret[0])
 		})
 	}
 }

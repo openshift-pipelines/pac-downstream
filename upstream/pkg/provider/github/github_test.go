@@ -16,7 +16,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/go-github/v64/github"
+	"github.com/google/go-github/v61/github"
 	"github.com/jonboulle/clockwork"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
@@ -545,7 +545,7 @@ func TestGithubGetCommitInfo(t *testing.T) {
 			mux.HandleFunc(fmt.Sprintf("/repos/%s/%s/git/commits/%s",
 				tt.event.Organization, tt.event.Repository, tt.event.SHA), func(rw http.ResponseWriter, _ *http.Request) {
 				if tt.apiReply != "" {
-					fmt.Fprintf(rw, "%s", tt.apiReply)
+					fmt.Fprintf(rw, tt.apiReply)
 					return
 				}
 				fmt.Fprintf(rw, `{"html_url": "%s", "message": "%s"}`, tt.shaurl, tt.shatitle)
