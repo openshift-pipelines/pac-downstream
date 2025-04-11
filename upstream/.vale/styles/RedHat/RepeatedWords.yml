@@ -6,11 +6,7 @@ link: https://redhat-documentation.github.io/vale-at-red-hat/docs/main/reference
 ignorecase: false
 alpha: true
 action:
-  name: edit
-  params:
-    - regex
-    - '(\w+)(\s\w+)' # pattern
-    - "$1" # replace
+  name: remove
 tokens:
   - '[^\s\.]+'
   - '[^\s]+'

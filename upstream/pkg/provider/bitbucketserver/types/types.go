@@ -10,16 +10,9 @@ type EventActor struct {
 }
 
 type PullRequestEvent struct {
-	Actor       bbv1.UserWithLinks `json:"actor"`
-	PullRequest bbv1.PullRequest   `json:"pullRequest"`
-	EventKey    string             `json:"eventKey"`
-
-	// Comment should be used when event is `pr:comment:added` or `pr:comment:edited`.
-	Comment bbv1.ActivityComment `json:"comment"`
-
-	// CommentParentID and PreviousComment should be used when event is `pr:comment:edited`.
-	CommentParentID string `json:"commentParentId"`
-	PreviousComment string `json:"previousComment"`
+	Actor      EventActor
+	PulRequest bbv1.PullRequest `json:"pullRequest"`
+	Comment    bbv1.Comment     `json:"comment"`
 }
 
 type PushRequestEventChange struct {
@@ -28,8 +21,7 @@ type PushRequestEventChange struct {
 }
 
 type PushRequestEvent struct {
-	Actor      bbv1.UserWithLinks       `json:"actor"`
+	Actor      EventActor               `json:"actor"`
 	Repository bbv1.Repository          `json:"repository"`
 	Changes    []PushRequestEventChange `json:"changes"`
-	Commits    []bbv1.Commit            `json:"commits"`
 }
