@@ -30,7 +30,7 @@ spec:
   - name: output-image
     value: quay.io/redhat-user-workloads/tekton-ecosystem-tenant/1-15/pipelines-as-code-cli-rhel8:{{revision}}
   - name: dockerfile
-    value: .konflux/dockerfiles/cli.Dockerfile      
+    value: .konflux/dockerfiles/cli.Dockerfile
   - name: prefetch-input
     value: |
       {"type": "rpm", "path": ".konflux/rpms"}
