@@ -93,7 +93,7 @@ github.com/evanphx/json-patch/v5/internal/json
 # github.com/fvbommel/sortorder v1.1.0
 ## explicit; go 1.13
 github.com/fvbommel/sortorder
-# github.com/gfleury/go-bitbucket-v1 v0.0.0-20240131155556-0b41d7863037
+# github.com/gfleury/go-bitbucket-v1 v0.0.0-20240917142304-df385efaac68
 ## explicit; go 1.14
 github.com/gfleury/go-bitbucket-v1
 # github.com/go-fed/httpsig v1.1.0
