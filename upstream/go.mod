@@ -1,6 +1,8 @@
 module github.com/openshift-pipelines/pipelines-as-code
 
-go 1.21
+go 1.23.0
+
+toolchain go1.23.8
 
 require (
 	code.gitea.io/gitea/modules/structs v0.0.0-20190610152049-835b53fc259c
@@ -12,8 +14,8 @@ require (
 	github.com/gfleury/go-bitbucket-v1 v0.0.0-20240131155556-0b41d7863037
 	github.com/gobwas/glob v0.2.3
 	github.com/google/cel-go v0.20.1
-	github.com/google/go-cmp v0.6.0
-	github.com/google/go-github/scrape v0.0.0-20240403195118-24209f034709
+	github.com/google/go-cmp v0.7.0
+	github.com/google/go-github/scrape v0.0.0-20250413102143-462cda4535c1
 	github.com/google/go-github/v60 v60.0.0
 	github.com/google/go-github/v61 v61.0.0
 	github.com/hako/durafmt v0.0.0-20210608085754-5c1018a4e16b
@@ -33,8 +35,8 @@ require (
 	go.uber.org/zap v1.27.0
 	golang.org/x/exp v0.0.0-20240325151524-a685a6edb6d8
 	golang.org/x/oauth2 v0.18.0
-	golang.org/x/sync v0.6.0
-	golang.org/x/text v0.14.0
+	golang.org/x/sync v0.12.0
+	golang.org/x/text v0.23.0
 	gopkg.in/yaml.v2 v2.4.0
 	gotest.tools/v3 v3.5.1
 	k8s.io/api v0.29.3
@@ -49,6 +51,7 @@ require (
 require (
 	github.com/coreos/go-oidc/v3 v3.9.0 // indirect
 	github.com/go-jose/go-jose/v3 v3.0.3 // indirect
+	github.com/google/go-github/v71 v71.0.0 // indirect
 )
 
 replace (
@@ -66,8 +69,8 @@ require (
 	contrib.go.opencensus.io/exporter/ocagent v0.7.1-0.20200907061046-05415f1de66d // indirect
 	contrib.go.opencensus.io/exporter/prometheus v0.4.2 // indirect
 	contrib.go.opencensus.io/exporter/zipkin v0.1.2 // indirect
-	github.com/PuerkitoBio/goquery v1.9.1 // indirect
-	github.com/andybalholm/cascadia v1.3.2 // indirect
+	github.com/PuerkitoBio/goquery v1.10.2 // indirect
+	github.com/andybalholm/cascadia v1.3.3 // indirect
 	github.com/antlr4-go/antlr/v4 v4.13.0 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/blang/semver/v4 v4.0.0 // indirect
@@ -131,10 +134,10 @@ require (
 	go.uber.org/atomic v1.11.0 // indirect
 	go.uber.org/automaxprocs v1.5.3 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
-	golang.org/x/crypto v0.21.0 // indirect
-	golang.org/x/net v0.23.0 // indirect
-	golang.org/x/sys v0.20.0 // indirect
-	golang.org/x/term v0.18.0 // indirect
+	golang.org/x/crypto v0.36.0 // indirect
+	golang.org/x/net v0.38.0 // indirect
+	golang.org/x/sys v0.31.0 // indirect
+	golang.org/x/term v0.30.0 // indirect
 	golang.org/x/time v0.5.0 // indirect
 	gomodules.xyz/jsonpatch/v2 v2.4.0 // indirect
 	google.golang.org/api v0.172.0 // indirect
