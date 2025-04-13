@@ -4,7 +4,7 @@ code.gitea.io/gitea/modules/structs
 # code.gitea.io/sdk/gitea v0.16.0
 ## explicit; go 1.13
 code.gitea.io/sdk/gitea
-# contrib.go.opencensus.io/exporter/ocagent v0.7.1-0.20200907061046-05415f1de66d
+# contrib.go.opencensus.io/exporter/ocagent v0.7.1-0.20230502190836-7399e0f8ee5e
 ## explicit; go 1.13
 contrib.go.opencensus.io/exporter/ocagent
 # contrib.go.opencensus.io/exporter/prometheus v0.4.2
