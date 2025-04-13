@@ -33,9 +33,9 @@ require (
 	gitlab.com/gitlab-org/api/client-go v0.124.0
 	go.opencensus.io v0.24.0
 	go.uber.org/zap v1.27.0
-	golang.org/x/exp v0.0.0-20250228200357-dead58393ab7
+	golang.org/x/exp v0.0.0-20250408133849-7e4ce0ab07d0
 	golang.org/x/oauth2 v0.27.0
-	golang.org/x/sync v0.11.0
+	golang.org/x/sync v0.13.0
 	golang.org/x/text v0.22.0
 	gopkg.in/yaml.v2 v2.4.0
 	gotest.tools/v3 v3.5.2
