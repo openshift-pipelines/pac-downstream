@@ -5,7 +5,7 @@ metadata:
   annotations:
     pipelinesascode.tekton.dev/cancel-in-progress: "true" # Cancel in-progress pipelines
     pipelinesascode.tekton.dev/pipeline: "https://raw.githubusercontent.com/openshift-pipelines/operator/refs/heads/main/.tekton/docker-build-ta.yaml"
-    build.appstudio.openshift.io/repo: https://github.com/openshift-pipelines/pac-downstream?rev={{revision}}
+    build.appstudio.openshift.io/repo: https://github.com/openshift-pipelines/pac-downstream.git?rev={{revision}}
     build.appstudio.redhat.com/commit_sha: '{{revision}}'
     build.appstudio.redhat.com/target_branch: '{{target_branch}}'
     pipelinesascode.tekton.dev/max-keep-runs: "3"
@@ -16,7 +16,7 @@ metadata:
       ".tekton/pac-downstream-next-cli-push.yaml".pathChanged())
   creationTimestamp: null
   labels:
-    appstudio.openshift.io/application: pac-downstream-next
+    appstudio.openshift.io/application: openshift-pipelines-core-next
     appstudio.openshift.io/component: pac-downstream-next-cli
     pipelines.appstudio.openshift.io/type: build
   name: pac-downstream-next-cli-on-push
@@ -31,6 +31,10 @@ spec:
     value: quay.io/redhat-user-workloads/tekton-ecosystem-tenant/next/pipelines-as-code-cli-rhel9:{{revision}}
   - name: dockerfile
     value: .konflux/dockerfiles/cli.Dockerfile
+  - name: build-platforms
+    value:
+      - linux/x86_64
+      - linux-m2xlarge/arm64
   - name: prefetch-input
     value: |
       {"type": "rpm", "path": ".konflux/rpms"}
