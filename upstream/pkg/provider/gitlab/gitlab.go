@@ -130,6 +130,10 @@ func (v *Provider) SetClient(_ context.Context, run *params.Run, runevent *info.
 		// this really should not happen but let's just hope this is it
 		apiURL = apiPublicURL
 	}
+	_, err = url.Parse(apiURL)
+	if err != nil {
+		return fmt.Errorf("failed to parse api url %s: %w", apiURL, err)
+	}
 	v.apiURL = apiURL
 
 	v.Client, err = gitlab.NewClient(runevent.Provider.Token, gitlab.WithBaseURL(apiURL))
@@ -325,7 +329,7 @@ func (v *Provider) getObject(fname, branch string, pid int) ([]byte, *gitlab.Res
 	if err != nil {
 		return []byte{}, resp, fmt.Errorf("failed to get filename from api %s dir: %w", fname, err)
 	}
-	if resp != nil && resp.Response.StatusCode == http.StatusNotFound {
+	if resp != nil && resp.StatusCode == http.StatusNotFound {
 		return []byte{}, resp, nil
 	}
 	return file, resp, nil
