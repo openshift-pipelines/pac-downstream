@@ -46,7 +46,7 @@ spec:
                 resolver: http
                 params:
                   - name: url
-                    value: https://raw.githubusercontent.com/openshift-pipelines/tekton-caches/main/tekton/cache-fetch.yaml
+                    value: https://raw.githubusercontent.com/openshift-pipelines/pipelines-as-code/refs/heads/main/.tekton/tasks/cache-fetch.yaml
               params:
                 - name: patterns
                   value: ["$(workspaces.source.path)/README.md"]
@@ -58,7 +58,7 @@ spec:
                   value: $(workspaces.source.path)
 
             - name: hugo-gen
-              image: golang:1.22
+              image: golang:1.23
               workingDir: $(workspaces.source.path)
               env:
                 - name: UPLOADER_PUBLIC_URL
@@ -113,7 +113,7 @@ spec:
                 resolver: http
                 params:
                   - name: url
-                    value: https://raw.githubusercontent.com/openshift-pipelines/tekton-caches/main/tekton/cache-upload.yaml
+                    value: https://raw.githubusercontent.com/openshift-pipelines/pipelines-as-code/refs/heads/main/.tekton/tasks/cache-upload.yaml
               params:
                 - name: patterns
                   value: ["$(workspaces.source.path)/README.md"]

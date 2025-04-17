@@ -66,8 +66,12 @@ func MuxDisallowUserID(mux *http.ServeMux, projectID, userID int) {
 	})
 }
 
-func MuxListTektonDir(_ *testing.T, mux *http.ServeMux, pid int, ref, prs string) {
+func MuxListTektonDir(_ *testing.T, mux *http.ServeMux, pid int, ref, prs string, wantTreeAPIErr, wantFilesAPIErr bool) {
 	mux.HandleFunc(fmt.Sprintf("/projects/%d/repository/tree", pid), func(rw http.ResponseWriter, r *http.Request) {
+		if wantTreeAPIErr {
+			rw.WriteHeader(http.StatusUnauthorized)
+			return
+		}
 		if r.URL.Query().Get("pagination") == "keyset" {
 			if r.URL.Query().Get("ref") == ref {
 				if r.URL.Query().Get("page_token") != "page2" {
@@ -87,8 +91,8 @@ func MuxListTektonDir(_ *testing.T, mux *http.ServeMux, pid int, ref, prs string
 		}
 	})
 
-	MuxGetFile(mux, pid, "pr.yaml", prs)
-	MuxGetFile(mux, pid, "random.yaml", `foo:bar`)
+	MuxGetFile(mux, pid, "pr.yaml", prs, wantFilesAPIErr)
+	MuxGetFile(mux, pid, "random.yaml", `foo:bar`, wantTreeAPIErr)
 }
 
 func MuxDiscussionsNoteEmpty(mux *http.ServeMux, pid, mrID int) {
@@ -120,8 +124,12 @@ func MuxDiscussionsNote(mux *http.ServeMux, pid, mrID int, author string, author
 	})
 }
 
-func MuxGetFile(mux *http.ServeMux, pid int, fname, content string) {
+func MuxGetFile(mux *http.ServeMux, pid int, fname, content string, wantErr bool) {
 	mux.HandleFunc(fmt.Sprintf("/projects/%d/repository/files/%s/raw", pid, fname), func(rw http.ResponseWriter, _ *http.Request) {
+		if wantErr {
+			rw.WriteHeader(http.StatusUnauthorized)
+			return
+		}
 		fmt.Fprint(rw, content)
 	})
 }
@@ -238,4 +246,32 @@ func (t TEvent) MREventAsJSON(action, extraStuff string) string {
 		t.SourceProjectID, t.SHAtitle, t.Headbranch, t.Basebranch, t.SHA, t.SHAurl, t.PathWithNameSpace,
 		t.BaseURL,
 		t.HeadURL, extraStuff)
+}
+
+func (t TEvent) CommitNoteEventAsJSON(comment, action, repository string) string {
+	//nolint:misspell
+	return fmt.Sprintf(`{
+	"object_kind": "note",
+	"event_type": "note",
+    "object_attributes": {
+	    "commit_id": "%s",
+        "noteable_type": "Commit",
+	    "note": "%s",
+	    "action": "%s"
+    },
+    "user": {
+	    "id": %d,
+        "username": "%s"
+    },
+	"project_id": %d,
+    "project": {
+        "default_branch": "%s",
+        "web_url": "%s",
+        "path_with_namespace": "%s"
+    },
+    "repository": %s,
+    "commit": {
+        "title": "test title"
+    }
+}`, t.SHA, comment, action, t.UserID, t.Username, t.SourceProjectID, t.DefaultBranch, t.URL, t.PathWithNameSpace, repository)
 }

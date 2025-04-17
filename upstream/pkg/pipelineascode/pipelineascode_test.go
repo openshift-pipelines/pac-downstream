@@ -13,7 +13,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/google/go-github/v68/github"
+	"github.com/google/go-github/v70/github"
 	apipac "github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
@@ -669,7 +669,7 @@ func TestGetLogURLMergePatch(t *testing.T) {
 		},
 	}
 	result := getLogURLMergePatch(clients, pr)
-	m, ok := result["metadata"].(map[string]interface{})
+	m, ok := result["metadata"].(map[string]any)
 	assert.Assert(t, ok)
 	a, ok := m["annotations"].(map[string]string)
 	assert.Assert(t, ok)

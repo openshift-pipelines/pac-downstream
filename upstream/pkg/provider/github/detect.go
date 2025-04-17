@@ -5,14 +5,14 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/google/go-github/v68/github"
+	"github.com/google/go-github/v70/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
 	"go.uber.org/zap"
 )
 
 var (
-	pullRequestOpenSyncEvent = []string{"opened", "synchronize", "synchronized", "reopened"}
+	pullRequestOpenSyncEvent = []string{"opened", "synchronize", "synchronized", "reopened", "ready_for_review"}
 	pullRequestLabelEvent    = []string{"labeled"}
 )
 
@@ -102,12 +102,13 @@ func (v *Provider) detectTriggerTypeFromPayload(ghEventType string, eventInt any
 			if provider.IsTestRetestComment(event.GetComment().GetBody()) {
 				return triggertype.Retest, ""
 			}
-			if provider.IsOkToTestComment(event.GetComment().GetBody()) {
-				return triggertype.OkToTest, ""
-			}
 			if provider.IsCancelComment(event.GetComment().GetBody()) {
 				return triggertype.Cancel, ""
 			}
+			// Here, the `/ok-to-test` command is ignored because it is intended for pull requests.
+			// For unauthorized users, it has no relevance to pushed commits, as only authorized users
+			// are allowed to run CI on pushed commits. Therefore, the `ok-to-test` command holds no significance in this context.
+			// However, it is left to be processed by the `on-comment` annotation rather than returning an error.
 		}
 		return triggertype.Comment, ""
 	}

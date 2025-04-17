@@ -47,7 +47,7 @@ func (p *PacRun) verifyRepoAndUser(ctx context.Context) (*v1alpha1.Repository, e
 	// Match the Event URL to a Repository URL,
 	repo, err := matcher.MatchEventURLRepo(ctx, p.run, p.event, "")
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("error matching Repository for event: %w", err)
 	}
 
 	if repo == nil {
@@ -136,10 +136,11 @@ is that what you want? make sure you use -n when generating the secret, eg: echo
 	// trigger CI on the repository, as any user is able to comment on a pushed commit in open-source repositories.
 	if p.event.TriggerTarget == triggertype.Push && opscomments.IsAnyOpsEventType(p.event.EventType) {
 		status := provider.StatusOpts{
-			Status:     CompletedStatus,
-			Title:      "Permission denied",
-			Conclusion: failureConclusion,
-			DetailsURL: p.event.URL,
+			Status:       CompletedStatus,
+			Title:        "Permission denied",
+			Conclusion:   failureConclusion,
+			DetailsURL:   p.event.URL,
+			AccessDenied: true,
 		}
 		if allowed, err := p.checkAccessOrErrror(ctx, repo, status, "by GitOps comment on push commit"); !allowed {
 			return nil, err
@@ -151,10 +152,11 @@ is that what you want? make sure you use -n when generating the secret, eg: echo
 	// on comment we skip it for now, we are going to check later on
 	if p.event.TriggerTarget != triggertype.Push && p.event.EventType != opscomments.NoOpsCommentEventType.String() {
 		status := provider.StatusOpts{
-			Status:     queuedStatus,
-			Title:      "Pending approval, waiting for an /ok-to-test",
-			Conclusion: pendingConclusion,
-			DetailsURL: p.event.URL,
+			Status:       queuedStatus,
+			Title:        "Pending approval, waiting for an /ok-to-test",
+			Conclusion:   pendingConclusion,
+			DetailsURL:   p.event.URL,
+			AccessDenied: true,
 		}
 		if allowed, err := p.checkAccessOrErrror(ctx, repo, status, "via "+p.event.TriggerTarget.String()); !allowed {
 			return nil, err
@@ -266,10 +268,11 @@ func (p *PacRun) getPipelineRunsFromRepo(ctx context.Context, repo *v1alpha1.Rep
 	// we skipped previously so we can get the match from the event to the pipelineruns
 	if p.event.EventType == opscomments.NoOpsCommentEventType.String() || p.event.EventType == opscomments.OnCommentEventType.String() {
 		status := provider.StatusOpts{
-			Status:     queuedStatus,
-			Title:      "Pending approval, waiting for an /ok-to-test",
-			Conclusion: pendingConclusion,
-			DetailsURL: p.event.URL,
+			Status:       queuedStatus,
+			Title:        "Pending approval, waiting for an /ok-to-test",
+			Conclusion:   pendingConclusion,
+			DetailsURL:   p.event.URL,
+			AccessDenied: true,
 		}
 		if allowed, err := p.checkAccessOrErrror(ctx, repo, status, "by GitOps comment on push commit"); !allowed {
 			return nil, err
@@ -319,7 +322,7 @@ func (p *PacRun) getPipelineRunsFromRepo(ctx context.Context, repo *v1alpha1.Rep
 		}
 	}
 
-	err = changeSecret(pipelineRuns)
+	err = p.changePipelineRun(ctx, repo, pipelineRuns)
 	if err != nil {
 		return nil, err
 	}
@@ -354,12 +357,13 @@ func filterRunningPipelineRunOnTargetTest(testPipeline string, prs []*tektonv1.P
 	return nil
 }
 
-// changeSecret we need to go in each pipelinerun,
-// change the secret template variable with a random one as generated from GetBasicAuthSecretName
-// and store in the annotations so we can create one delete after.
-func changeSecret(prs []*tektonv1.PipelineRun) error {
-	for k, p := range prs {
-		b, err := json.Marshal(p)
+// changePipelineRun go over each pipelineruns and modify things into it.
+//
+// - the secret template variable with a random one as generated from GetBasicAuthSecretName
+// - the template variable with the one from the event (this includes the remote pipeline that has template variables).
+func (p *PacRun) changePipelineRun(ctx context.Context, repo *v1alpha1.Repository, prs []*tektonv1.PipelineRun) error {
+	for k, pr := range prs {
+		b, err := json.Marshal(pr)
 		if err != nil {
 			return err
 		}
@@ -367,7 +371,8 @@ func changeSecret(prs []*tektonv1.PipelineRun) error {
 		name := secrets.GenerateBasicAuthSecretName()
 		processed := templates.ReplacePlaceHoldersVariables(string(b), map[string]string{
 			"git_auth_secret": name,
-		}, nil, nil, map[string]interface{}{})
+		}, nil, nil, map[string]any{})
+		processed = p.makeTemplate(ctx, repo, processed)
 
 		var np *tektonv1.PipelineRun
 		err = json.Unmarshal([]byte(processed), &np)
@@ -379,6 +384,7 @@ func changeSecret(prs []*tektonv1.PipelineRun) error {
 			np.Annotations = map[string]string{}
 		}
 		np.Annotations[apipac.GitAuthSecret] = name
+
 		prs[k] = np
 	}
 	return nil
@@ -399,7 +405,7 @@ func (p *PacRun) checkNeedUpdate(_ string) (string, bool) {
 func (p *PacRun) checkAccessOrErrror(ctx context.Context, repo *v1alpha1.Repository, status provider.StatusOpts, viamsg string) (bool, error) {
 	allowed, err := p.vcx.IsAllowed(ctx, p.event)
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("unable to verify event authorization: %w", err)
 	}
 	if allowed {
 		return true, nil
@@ -410,6 +416,7 @@ func (p *PacRun) checkAccessOrErrror(ctx context.Context, repo *v1alpha1.Reposit
 	}
 	p.eventEmitter.EmitMessage(repo, zap.InfoLevel, "RepositoryPermissionDenied", msg)
 	status.Text = msg
+
 	if err := p.vcx.CreateStatus(ctx, p.event, status); err != nil {
 		return false, fmt.Errorf("failed to run create status, user is not allowed to run the CI:: %w", err)
 	}

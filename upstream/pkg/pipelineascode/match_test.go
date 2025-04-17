@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/google/go-github/v68/github"
+	"github.com/google/go-github/v70/github"
 	apipac "github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/consoleui"
@@ -50,18 +50,30 @@ func TestPacRun_checkNeedUpdate(t *testing.T) {
 	}
 }
 
-func TestChangeSecret(t *testing.T) {
+func TestChangePipelineRun(t *testing.T) {
 	prs := []*tektonv1.PipelineRun{
 		{
 			ObjectMeta: metav1.ObjectMeta{
-				Name: "{{git_auth_secret}}",
+				Name:      "{{git_auth_secret}}",
+				Namespace: "{{ repo_name }}",
 			},
 		},
 	}
-	err := changeSecret(prs)
+	event := info.NewEvent()
+	event.Repository = "testrepo"
+	p := &PacRun{event: event}
+	repo := &v1alpha1.Repository{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "testrepo",
+			Namespace: "test",
+		},
+	}
+	ctx, _ := rtesting.SetupFakeContext(t)
+	err := p.changePipelineRun(ctx, repo, prs)
 	assert.NilError(t, err)
 	assert.Assert(t, strings.HasPrefix(prs[0].GetName(), "pac-gitauth"), prs[0].GetName(), "has no pac-gitauth prefix")
 	assert.Assert(t, prs[0].GetAnnotations()[apipac.GitAuthSecret] != "")
+	assert.Assert(t, prs[0].GetNamespace() == "testrepo", "namespace should be testrepo: %v", prs[0].GetNamespace())
 }
 
 func TestFilterRunningPipelineRunOnTargetTest(t *testing.T) {

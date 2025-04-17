@@ -318,7 +318,7 @@ func (v *Provider) GetCommitInfo(_ context.Context, runevent *info.Event) error 
 }
 
 func ShouldGetNextPage(resp *gitea.Response, currentPage int) (bool, int) {
-	val, exists := resp.Response.Header[http.CanonicalHeaderKey("x-pagecount")]
+	val, exists := resp.Header[http.CanonicalHeaderKey("x-pagecount")]
 	if !exists {
 		return false, 0
 	}
@@ -402,4 +402,8 @@ func (v *Provider) GetFiles(_ context.Context, runevent *info.Event) (changedfil
 
 func (v *Provider) CreateToken(_ context.Context, _ []string, _ *info.Event) (string, error) {
 	return "", nil
+}
+
+func (v *Provider) GetTemplate(commentType provider.CommentType) string {
+	return provider.GetHTMLTemplate(commentType)
 }

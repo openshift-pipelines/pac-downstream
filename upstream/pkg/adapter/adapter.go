@@ -18,7 +18,7 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/version"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/bitbucketcloud"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/bitbucketserver"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/bitbucketdatacenter"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/gitea"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/gitlab"
@@ -29,7 +29,7 @@ import (
 	"knative.dev/pkg/system"
 )
 
-const globalAdapterPort = "8080"
+const globalAdapterPort = "8082"
 
 // For incoming webhook requests and GitHub Apps with many installations the handler takes long
 // e.g GitHub App with ~400 installations, it takes ~180s. For OpenShift deployments this also
@@ -128,7 +128,7 @@ func (l listener) handleEvent(ctx context.Context) http.HandlerFunc {
 			return
 		}
 
-		var event map[string]interface{}
+		var event map[string]any
 		if string(payload) != "" {
 			if err := json.Unmarshal(payload, &event); err != nil {
 				l.logger.Errorf("Invalid event body format format: %s", err)
@@ -232,7 +232,7 @@ func (l listener) detectProvider(req *http.Request, reqBody string) (provider.In
 	log := *l.logger
 
 	// payload validation
-	var event map[string]interface{}
+	var event map[string]any
 	if err := json.Unmarshal([]byte(reqBody), &event); err != nil {
 		return nil, &log, fmt.Errorf("invalid event body format: %w", err)
 	}
@@ -250,7 +250,7 @@ func (l listener) detectProvider(req *http.Request, reqBody string) (provider.In
 		return l.processRes(processReq, zegitea, logger, reason, err)
 	}
 
-	bitServer := &bitbucketserver.Provider{}
+	bitServer := &bitbucketdatacenter.Provider{}
 	isBitServer, processReq, logger, reason, err := bitServer.Detect(req, reqBody, &log)
 	if isBitServer {
 		return l.processRes(processReq, bitServer, logger, reason, err)
