@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/go-github/v68/github"
+	"github.com/google/go-github/v70/github"
 	"github.com/jonboulle/clockwork"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
@@ -21,13 +21,10 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
 	ghprovider "github.com/openshift-pipelines/pipelines-as-code/pkg/provider/github"
-	glprovider "github.com/openshift-pipelines/pipelines-as-code/pkg/provider/gitlab"
-	gltesthelper "github.com/openshift-pipelines/pipelines-as-code/pkg/provider/gitlab/test"
 	testclient "github.com/openshift-pipelines/pipelines-as-code/pkg/test/clients"
 	ghtesthelper "github.com/openshift-pipelines/pipelines-as-code/pkg/test/github"
 	testnewrepo "github.com/openshift-pipelines/pipelines-as-code/pkg/test/repository"
 	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
-	gitlab "gitlab.com/gitlab-org/api/client-go"
 	"go.uber.org/zap"
 	zapobserver "go.uber.org/zap/zaptest/observer"
 	"gotest.tools/v3/assert"
@@ -196,7 +193,7 @@ func TestMatchPipelinerunAnnotationAndRepositories(t *testing.T) {
 					EventType:     "pull_request",
 					BaseBranch:    mainBranch,
 					HeadBranch:    "unittests",
-					Event: map[string]interface{}{
+					Event: map[string]any{
 						"foo": "bar",
 					},
 				},
@@ -1398,53 +1395,11 @@ func TestMatchPipelinerunAnnotationAndRepositories(t *testing.T) {
 			ghCs, _ := testclient.SeedTestData(t, ctx, tt.args.data)
 			runTest(ctx, t, tt, vcx, ghCs)
 
-			glFakeClient, glMux, glTeardown := gltesthelper.Setup(t)
-			defer glTeardown()
-			glVcx := &glprovider.Provider{
-				Client: glFakeClient,
-				Token:  github.Ptr("None"),
-			}
-			if len(tt.args.fileChanged) > 0 {
-				commitFiles := []*gitlab.MergeRequestDiff{}
-				pushFileChanges := []*gitlab.Diff{}
-				if tt.args.runevent.TriggerTarget == "push" {
-					for _, v := range tt.args.fileChanged {
-						pushFileChanges = append(pushFileChanges, &gitlab.Diff{
-							NewPath:     v.FileName,
-							RenamedFile: v.RenamedFile,
-							DeletedFile: v.DeletedFile,
-							NewFile:     v.NewFile,
-						})
-					}
-					glMux.HandleFunc(fmt.Sprintf("/projects/0/repository/commits/%s/diff",
-						tt.args.runevent.SHA), func(rw http.ResponseWriter, _ *http.Request) {
-						jeez, err := json.Marshal(pushFileChanges)
-						assert.NilError(t, err)
-						_, _ = rw.Write(jeez)
-					})
-				} else {
-					for _, v := range tt.args.fileChanged {
-						commitFiles = append(commitFiles, &gitlab.MergeRequestDiff{
-							NewPath:     v.FileName,
-							RenamedFile: v.RenamedFile,
-							DeletedFile: v.DeletedFile,
-							NewFile:     v.NewFile,
-						})
-					}
-					url := fmt.Sprintf("/projects/0/merge_requests/%d/diffs", tt.args.runevent.PullRequestNumber)
-					glMux.HandleFunc(url, func(w http.ResponseWriter, _ *http.Request) {
-						jeez, err := json.Marshal(commitFiles)
-						assert.NilError(t, err)
-						_, _ = w.Write(jeez)
-					})
-				}
-			}
-
 			tt.args.runevent.Provider = &info.Provider{
 				Token: "NONE",
 			}
 
-			runTest(ctx, t, tt, glVcx, ghCs)
+			runTest(ctx, t, tt, vcx, ghCs)
 		})
 	}
 }
@@ -1683,6 +1638,37 @@ func TestMatchPipelinerunByAnnotation(t *testing.T) {
 			wantErr: false,
 			wantLog: []string{
 				"matching pipelineruns to event: URL=https://hello/moto, target-branch=main, source-branch=source, target-event=pull_request, labels=documentation, pull-request=10",
+			},
+		},
+		{
+			name: "no-on-label-annotation-on-pr",
+			args: args{
+				pruns: []*tektonv1.PipelineRun{
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: "pipeline-label",
+							Annotations: map[string]string{
+								keys.OnEvent:        "[pull_request]",
+								keys.OnTargetBranch: "[main]",
+							},
+						},
+					},
+					pipelineGood,
+				},
+				runevent: info.Event{
+					URL:               "https://hello/moto",
+					TriggerTarget:     triggertype.PullRequest,
+					EventType:         string(triggertype.LabelUpdate),
+					HeadBranch:        "source",
+					BaseBranch:        "main",
+					PullRequestNumber: 10,
+					PullRequestLabel:  []string{"documentation"},
+				},
+			},
+			wantErr: true,
+			wantLog: []string{
+				"label update event, PipelineRun pipeline-label does not have a on-label for any of those labels: documentation",
+				"label update event, PipelineRun pipeline-good does not have a on-label for any of those labels: documentation",
 			},
 		},
 		{

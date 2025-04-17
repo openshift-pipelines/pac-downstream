@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/google/go-github/v68/github"
+	"github.com/google/go-github/v70/github"
 	"gotest.tools/v3/assert"
 	"gotest.tools/v3/env"
 	corev1 "k8s.io/api/core/v1"
@@ -97,11 +97,11 @@ func TestParsePayLoad(t *testing.T) {
 		name                       string
 		wantErrString              string
 		eventType                  string
-		payloadEventStruct         interface{}
+		payloadEventStruct         any
 		jeez                       string
 		triggerTarget              string
 		githubClient               bool
-		muxReplies                 map[string]interface{}
+		muxReplies                 map[string]any
 		shaRet                     string
 		targetPipelinerun          string
 		targetCancelPipelinerun    string
@@ -145,7 +145,7 @@ func TestParsePayLoad(t *testing.T) {
 		},
 		{
 			name:               "bad/issue comment retest only with github apps",
-			wantErrString:      "only supported with github apps",
+			wantErrString:      "no github client has been initialized",
 			eventType:          "issue_comment",
 			triggerTarget:      "pull_request",
 			payloadEventStruct: github.IssueCommentEvent{Action: github.Ptr("created")},
@@ -219,7 +219,7 @@ func TestParsePayLoad(t *testing.T) {
 					},
 				},
 			},
-			muxReplies: map[string]interface{}{"/repos/owner/reponame/pulls/54321": samplePR},
+			muxReplies: map[string]any{"/repos/owner/reponame/pulls/54321": samplePR},
 			shaRet:     "samplePRsha",
 		},
 		// all checks in a check_suite
@@ -235,7 +235,7 @@ func TestParsePayLoad(t *testing.T) {
 					PullRequests: []*github.PullRequest{&samplePR},
 				},
 			},
-			muxReplies: map[string]interface{}{"/repos/owner/reponame/pulls/54321": samplePR},
+			muxReplies: map[string]any{"/repos/owner/reponame/pulls/54321": samplePR},
 			shaRet:     "samplePRsha",
 		},
 		{
@@ -275,7 +275,7 @@ func TestParsePayLoad(t *testing.T) {
 				},
 				Repo: sampleRepo,
 			},
-			muxReplies: map[string]interface{}{"/repos/owner/reponame/pulls/666": samplePR},
+			muxReplies: map[string]any{"/repos/owner/reponame/pulls/666": samplePR},
 			shaRet:     "samplePRsha",
 		},
 		{
@@ -322,7 +322,7 @@ func TestParsePayLoad(t *testing.T) {
 					Body: github.Ptr("/retest dummy"),
 				},
 			},
-			muxReplies:        map[string]interface{}{"/repos/owner/reponame/pulls/777": samplePR},
+			muxReplies:        map[string]any{"/repos/owner/reponame/pulls/777": samplePR},
 			shaRet:            "samplePRsha",
 			targetPipelinerun: "dummy",
 		},
@@ -343,7 +343,7 @@ func TestParsePayLoad(t *testing.T) {
 					Body: github.Ptr("/cancel"),
 				},
 			},
-			muxReplies: map[string]interface{}{"/repos/owner/reponame/pulls/999": samplePR},
+			muxReplies: map[string]any{"/repos/owner/reponame/pulls/999": samplePR},
 			shaRet:     "samplePRsha",
 		},
 		{
@@ -363,16 +363,43 @@ func TestParsePayLoad(t *testing.T) {
 					Body: github.Ptr("/cancel dummy"),
 				},
 			},
-			muxReplies:              map[string]interface{}{"/repos/owner/reponame/pulls/888": samplePR},
+			muxReplies:              map[string]any{"/repos/owner/reponame/pulls/888": samplePR},
 			shaRet:                  "samplePRsha",
 			targetCancelPipelinerun: "dummy",
 		},
 		{
 			name:               "bad/commit comment retest only with github apps",
-			wantErrString:      "only supported with github apps",
+			wantErrString:      "no github client has been initialized",
 			eventType:          "commit_comment",
 			triggerTarget:      "push",
 			payloadEventStruct: github.CommitCommentEvent{Action: github.Ptr("created")},
+		},
+		{
+			name:               "bad/commit comment for event has no repository reference",
+			wantErrString:      "error parsing payload the repository should not be nil",
+			eventType:          "commit_comment",
+			triggerTarget:      "push",
+			githubClient:       true,
+			payloadEventStruct: github.CommitCommentEvent{},
+		},
+		{
+			name:          "bad/commit comment for /test command does not contain branch keyword",
+			wantErrString: "the GitOps comment dummy rbanch does not contain a branch word",
+			eventType:     "commit_comment",
+			triggerTarget: "push",
+			githubClient:  true,
+			payloadEventStruct: github.CommitCommentEvent{
+				Repo: sampleRepo,
+				Comment: &github.RepositoryComment{
+					CommitID: github.Ptr("samplePRsha"),
+					HTMLURL:  github.Ptr("/777"),
+					Body:     github.Ptr("/test dummy rbanch:test"), // rbanch is wrong word for branch 🙂
+				},
+			},
+			muxReplies:        map[string]any{"/repos/owner/reponame/pulls/777": samplePR},
+			shaRet:            "samplePRsha",
+			targetPipelinerun: "dummy",
+			wantedBranchName:  "main",
 		},
 		{
 			name:          "good/commit comment for retest a pr",
@@ -387,7 +414,7 @@ func TestParsePayLoad(t *testing.T) {
 					Body:     github.Ptr("/retest dummy"),
 				},
 			},
-			muxReplies:        map[string]interface{}{"/repos/owner/reponame/pulls/777": samplePR},
+			muxReplies:        map[string]any{"/repos/owner/reponame/pulls/777": samplePR},
 			shaRet:            "samplePRsha",
 			targetPipelinerun: "dummy",
 			wantedBranchName:  "main",
@@ -405,7 +432,7 @@ func TestParsePayLoad(t *testing.T) {
 					Body:     github.Ptr("/retest"),
 				},
 			},
-			muxReplies:       map[string]interface{}{"/repos/owner/reponame/pulls/777": samplePR},
+			muxReplies:       map[string]any{"/repos/owner/reponame/pulls/777": samplePR},
 			shaRet:           "samplePRsha",
 			wantedBranchName: "main",
 		},
@@ -422,7 +449,7 @@ func TestParsePayLoad(t *testing.T) {
 					Body:     github.Ptr("/cancel"),
 				},
 			},
-			muxReplies:                 map[string]interface{}{"/repos/owner/reponame/pulls/999": samplePR},
+			muxReplies:                 map[string]any{"/repos/owner/reponame/pulls/999": samplePR},
 			shaRet:                     "samplePRsha",
 			wantedBranchName:           "main",
 			isCancelPipelineRunEnabled: true,
@@ -440,7 +467,7 @@ func TestParsePayLoad(t *testing.T) {
 					Body:     github.Ptr("/cancel dummy"),
 				},
 			},
-			muxReplies:                 map[string]interface{}{"/repos/owner/reponame/pulls/888": samplePR},
+			muxReplies:                 map[string]any{"/repos/owner/reponame/pulls/888": samplePR},
 			shaRet:                     "samplePRsha",
 			targetCancelPipelinerun:    "dummy",
 			wantedBranchName:           "main",
@@ -459,7 +486,7 @@ func TestParsePayLoad(t *testing.T) {
 					Body:     github.Ptr("/retest dummy branch:test1"),
 				},
 			},
-			muxReplies:                 map[string]interface{}{"/repos/owner/reponame/pulls/7771": samplePR},
+			muxReplies:                 map[string]any{"/repos/owner/reponame/pulls/7771": samplePR},
 			shaRet:                     "samplePRsha",
 			targetPipelinerun:          "dummy",
 			wantedBranchName:           "test1",
@@ -478,7 +505,7 @@ func TestParsePayLoad(t *testing.T) {
 					Body:     github.Ptr("/cancel branch:test1"),
 				},
 			},
-			muxReplies:                 map[string]interface{}{"/repos/owner/reponame/pulls/9991": samplePR},
+			muxReplies:                 map[string]any{"/repos/owner/reponame/pulls/9991": samplePR},
 			shaRet:                     "samplePRsha",
 			wantedBranchName:           "test1",
 			isCancelPipelineRunEnabled: true,
@@ -496,14 +523,14 @@ func TestParsePayLoad(t *testing.T) {
 					Body:     github.Ptr("/cancel dummy branch:test1"),
 				},
 			},
-			muxReplies:                 map[string]interface{}{"/repos/owner/reponame/pulls/8881": samplePR},
+			muxReplies:                 map[string]any{"/repos/owner/reponame/pulls/8881": samplePR},
 			shaRet:                     "samplePRsha",
 			targetCancelPipelinerun:    "dummy",
 			wantedBranchName:           "test1",
 			isCancelPipelineRunEnabled: true,
 		},
 		{
-			name:          "good/commit comment for cancel a pr with invalid branch name",
+			name:          "bad/commit comment for cancel a pr with invalid branch name",
 			eventType:     "commit_comment",
 			triggerTarget: "push",
 			githubClient:  true,
@@ -515,7 +542,7 @@ func TestParsePayLoad(t *testing.T) {
 					Body:     github.Ptr("/cancel dummy branch:test2"),
 				},
 			},
-			muxReplies:                 map[string]interface{}{"/repos/owner/reponame/pulls/8881": samplePR},
+			muxReplies:                 map[string]any{"/repos/owner/reponame/pulls/8881": samplePR},
 			shaRet:                     "samplePRsha",
 			targetCancelPipelinerun:    "dummy",
 			wantedBranchName:           "test2",
@@ -523,7 +550,7 @@ func TestParsePayLoad(t *testing.T) {
 			wantErrString:              "404 Not Found",
 		},
 		{
-			name:          "commit comment to retest a pr with a SHA that does not exist in the main branch",
+			name:          "commit comment to retest a pr with a SHA is not HEAD commit of the main branch",
 			eventType:     "commit_comment",
 			triggerTarget: "push",
 			githubClient:  true,
@@ -535,7 +562,7 @@ func TestParsePayLoad(t *testing.T) {
 					Body:     github.Ptr("/retest dummy"),
 				},
 			},
-			muxReplies:        map[string]interface{}{"/repos/owner/reponame/pulls/777": samplePRAnother},
+			muxReplies:        map[string]any{"/repos/owner/reponame/pulls/777": samplePRAnother},
 			shaRet:            "samplePRshanew",
 			targetPipelinerun: "dummy",
 			wantedBranchName:  "main",

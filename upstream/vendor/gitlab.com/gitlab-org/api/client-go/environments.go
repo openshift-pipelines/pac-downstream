@@ -22,13 +22,27 @@ import (
 	"time"
 )
 
-// EnvironmentsService handles communication with the environment related methods
-// of the GitLab API.
-//
-// GitLab API docs: https://docs.gitlab.com/ee/api/environments.html
-type EnvironmentsService struct {
-	client *Client
-}
+type (
+	// EnvironmentsServiceInterface defines all the API methods for the EnvironmentsService
+	EnvironmentsServiceInterface interface {
+		ListEnvironments(pid interface{}, opts *ListEnvironmentsOptions, options ...RequestOptionFunc) ([]*Environment, *Response, error)
+		GetEnvironment(pid interface{}, environment int, options ...RequestOptionFunc) (*Environment, *Response, error)
+		CreateEnvironment(pid interface{}, opt *CreateEnvironmentOptions, options ...RequestOptionFunc) (*Environment, *Response, error)
+		EditEnvironment(pid interface{}, environment int, opt *EditEnvironmentOptions, options ...RequestOptionFunc) (*Environment, *Response, error)
+		DeleteEnvironment(pid interface{}, environment int, options ...RequestOptionFunc) (*Response, error)
+		StopEnvironment(pid interface{}, environmentID int, opt *StopEnvironmentOptions, options ...RequestOptionFunc) (*Environment, *Response, error)
+	}
+
+	// EnvironmentsService handles communication with the environment related methods
+	// of the GitLab API.
+	//
+	// GitLab API docs: https://docs.gitlab.com/ee/api/environments.html
+	EnvironmentsService struct {
+		client *Client
+	}
+)
+
+var _ EnvironmentsServiceInterface = (*EnvironmentsService)(nil)
 
 // Environment represents a GitLab environment.
 //
@@ -48,6 +62,8 @@ type Environment struct {
 	ClusterAgent        *Agent      `json:"cluster_agent"`
 	KubernetesNamespace string      `json:"kubernetes_namespace"`
 	FluxResourcePath    string      `json:"flux_resource_path"`
+	AutoStopAt          *time.Time  `json:"auto_stop_at"`
+	AutoStopSetting     string      `json:"auto_stop_setting"`
 }
 
 func (env Environment) String() string {
@@ -128,6 +144,7 @@ type CreateEnvironmentOptions struct {
 	ClusterAgentID      *int    `url:"cluster_agent_id,omitempty" json:"cluster_agent_id,omitempty"`
 	KubernetesNamespace *string `url:"kubernetes_namespace,omitempty" json:"kubernetes_namespace,omitempty"`
 	FluxResourcePath    *string `url:"flux_resource_path,omitempty" json:"flux_resource_path,omitempty"`
+	AutoStopSetting     *string `url:"auto_stop_setting,omitempty" json:"auto_stop_setting,omitempty"`
 }
 
 // CreateEnvironment adds an environment to a project. This is an idempotent
@@ -170,6 +187,7 @@ type EditEnvironmentOptions struct {
 	ClusterAgentID      *int    `url:"cluster_agent_id,omitempty" json:"cluster_agent_id,omitempty"`
 	KubernetesNamespace *string `url:"kubernetes_namespace,omitempty" json:"kubernetes_namespace,omitempty"`
 	FluxResourcePath    *string `url:"flux_resource_path,omitempty" json:"flux_resource_path,omitempty"`
+	AutoStopSetting     *string `url:"auto_stop_setting,omitempty" json:"auto_stop_setting,omitempty"`
 }
 
 // EditEnvironment updates a project team environment to a specified access level..

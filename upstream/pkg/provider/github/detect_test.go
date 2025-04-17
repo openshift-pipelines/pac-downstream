@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/google/go-github/v68/github"
+	"github.com/google/go-github/v70/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/test/logger"
 	"gotest.tools/v3/assert"
 )
@@ -18,7 +18,7 @@ func TestProvider_Detect(t *testing.T) {
 		wantErrString string
 		isGH          bool
 		processReq    bool
-		event         interface{}
+		event         any
 		eventType     string
 		wantReason    string
 	}{
@@ -210,6 +210,15 @@ func TestProvider_Detect(t *testing.T) {
 			processReq: true,
 		},
 		{
+			name: "pull request event converted from draft to active",
+			event: github.PullRequestEvent{
+				Action: github.Ptr("ready_for_review"),
+			},
+			eventType:  "pull_request",
+			isGH:       true,
+			processReq: true,
+		},
+		{
 			name: "pull request event not supported action",
 			event: github.PullRequestEvent{
 				Action: github.Ptr("deleted"),
@@ -290,6 +299,19 @@ func TestProvider_Detect(t *testing.T) {
 					ID: &idd,
 				},
 				Comment: &github.RepositoryComment{Body: github.Ptr("/test")},
+			},
+			eventType:  "commit_comment",
+			isGH:       true,
+			processReq: true,
+		},
+		{
+			name: "commit comment Event with /ok-to-test being ignore as GitOps command on pushed commits",
+			event: github.CommitCommentEvent{
+				Action: github.Ptr("created"),
+				Installation: &github.Installation{
+					ID: &idd,
+				},
+				Comment: &github.RepositoryComment{Body: github.Ptr("/ok-to-test")},
 			},
 			eventType:  "commit_comment",
 			isGH:       true,

@@ -123,8 +123,8 @@ func formatStatus(status *v1alpha1.RepositoryRunStatus, cs *cli.ColorScheme, c c
 	}
 
 	reason := "UNKNOWN"
-	if len(status.Status.Conditions) > 0 {
-		reason = status.Status.Conditions[0].Reason
+	if len(status.Conditions) > 0 {
+		reason = status.Conditions[0].Reason
 	}
 	return fmt.Sprintf("%s\t%s", s, cs.HyperLink(cs.ColorStatus(reason), *status.LogURL))
 }
@@ -161,6 +161,10 @@ func list(ctx context.Context, cs *params.Run, opts *cli.PacCliOpts, ioStreams *
 			rs.Status = &statuses[0]
 		}
 		repoStatuses = append(repoStatuses, rs)
+	}
+
+	if len(repoStatuses) == 0 {
+		return fmt.Errorf("no repo found")
 	}
 
 	w := ansiterm.NewTabWriter(ioStreams.Out, 0, 5, 3, ' ', tabwriter.TabIndent)

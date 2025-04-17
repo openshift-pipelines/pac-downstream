@@ -130,6 +130,10 @@ func (v *Provider) SetClient(_ context.Context, run *params.Run, runevent *info.
 		// this really should not happen but let's just hope this is it
 		apiURL = apiPublicURL
 	}
+	_, err = url.Parse(apiURL)
+	if err != nil {
+		return fmt.Errorf("failed to parse api url %s: %w", apiURL, err)
+	}
 	v.apiURL = apiURL
 
 	v.Client, err = gitlab.NewClient(runevent.Provider.Token, gitlab.WithBaseURL(apiURL))
@@ -142,8 +146,8 @@ func (v *Provider) SetClient(_ context.Context, run *params.Run, runevent *info.
 	// repository, runevent.SourceProjectID will not be 0 when SetClient is called from the pac-watcher code.
 	// This is because, in the controller, SourceProjectID is set in the annotation of the pull request,
 	// and runevent.SourceProjectID is set before SetClient is called. Therefore, we need to take
-	// the ID from runevent.SourceProjectID.
-	if runevent.SourceProjectID > 0 {
+	// the ID from runevent.SourceProjectID when v.sourceProject is 0 (nil).
+	if v.sourceProjectID == 0 && runevent.SourceProjectID > 0 {
 		v.sourceProjectID = runevent.SourceProjectID
 	}
 
@@ -228,7 +232,9 @@ func (v *Provider) CreateStatus(_ context.Context, event *info.Event, statusOpts
 	}
 
 	eventType := triggertype.IsPullRequestType(event.EventType)
-	if opscomments.IsAnyOpsEventType(eventType.String()) {
+	// When a GitOps command is sent on a pushed commit, it mistakenly treats it as a pull_request
+	// and attempts to create a note, but notes are not intended for pushed commits.
+	if event.TriggerTarget == triggertype.PullRequest && opscomments.IsAnyOpsEventType(event.EventType) {
 		eventType = triggertype.PullRequest
 	}
 	// only add a note when we are on a MR
@@ -291,16 +297,16 @@ func (v *Provider) GetTektonDir(_ context.Context, event *info.Event, path, prov
 		}
 	}
 
-	return v.concatAllYamlFiles(nodes, event)
+	return v.concatAllYamlFiles(nodes, revision)
 }
 
 // concatAllYamlFiles concat all yaml files from a directory as one big multi document yaml string.
-func (v *Provider) concatAllYamlFiles(objects []*gitlab.TreeNode, runevent *info.Event) (string, error) {
+func (v *Provider) concatAllYamlFiles(objects []*gitlab.TreeNode, revision string) (string, error) {
 	var allTemplates string
 	for _, value := range objects {
 		if strings.HasSuffix(value.Name, ".yaml") ||
 			strings.HasSuffix(value.Name, ".yml") {
-			data, _, err := v.getObject(value.Path, runevent.HeadBranch, v.sourceProjectID)
+			data, _, err := v.getObject(value.Path, revision, v.sourceProjectID)
 			if err != nil {
 				return "", err
 			}
@@ -325,7 +331,7 @@ func (v *Provider) getObject(fname, branch string, pid int) ([]byte, *gitlab.Res
 	if err != nil {
 		return []byte{}, resp, fmt.Errorf("failed to get filename from api %s dir: %w", fname, err)
 	}
-	if resp != nil && resp.Response.StatusCode == http.StatusNotFound {
+	if resp != nil && resp.StatusCode == http.StatusNotFound {
 		return []byte{}, resp, nil
 	}
 	return file, resp, nil
@@ -439,4 +445,26 @@ func (v *Provider) GetFiles(_ context.Context, runevent *info.Event) (changedfil
 
 func (v *Provider) CreateToken(_ context.Context, _ []string, _ *info.Event) (string, error) {
 	return "", nil
+}
+
+// isHeadCommitOfBranch validates that branch exists and the SHA is HEAD commit of the branch.
+func (v *Provider) isHeadCommitOfBranch(runevent *info.Event, branchName string) error {
+	if v.Client == nil {
+		return fmt.Errorf("no gitlab client has been initialized, " +
+			"exiting... (hint: did you forget setting a secret on your repo?)")
+	}
+	branch, _, err := v.Client.Branches.GetBranch(v.sourceProjectID, branchName)
+	if err != nil {
+		return err
+	}
+
+	if branch.Commit.ID == runevent.SHA {
+		return nil
+	}
+
+	return fmt.Errorf("provided SHA %s is not the HEAD commit of the branch %s", runevent.SHA, branchName)
+}
+
+func (v *Provider) GetTemplate(commentType provider.CommentType) string {
+	return provider.GetHTMLTemplate(commentType)
 }

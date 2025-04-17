@@ -25,7 +25,7 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/clients"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/bitbucketcloud"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/bitbucketserver"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/bitbucketdatacenter"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/gitea"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/gitlab"
@@ -755,15 +755,15 @@ func Test_listener_processIncoming(t *testing.T) {
 			},
 		},
 		{
-			name:     "process/bitbucketserver",
-			want:     &bitbucketserver.Provider{},
+			name:     "process/bitbucketdatacenter",
+			want:     &bitbucketdatacenter.Provider{},
 			wantOrg:  "owner",
 			wantRepo: "repo",
 			targetRepo: &v1alpha1.Repository{
 				Spec: v1alpha1.RepositorySpec{
 					URL: "https://forge/owner/repo",
 					GitProvider: &v1alpha1.GitProvider{
-						Type: "bitbucket-server",
+						Type: "bitbucket-datacenter",
 					},
 				},
 			},
@@ -898,7 +898,7 @@ func TestApplyIncomingParams(t *testing.T) {
 			contentType: "application/json",
 			payloadBody: []byte(`{"params": {"key": "value", "other": "value"}}`),
 			params:      []string{"key", "other"},
-			expected:    apincoming.Payload{Params: map[string]interface{}{"key": "value", "other": "value"}},
+			expected:    apincoming.Payload{Params: map[string]any{"key": "value", "other": "value"}},
 		},
 	}
 

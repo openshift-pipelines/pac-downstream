@@ -8,7 +8,7 @@ import (
 
 type Event struct {
 	State
-	Event interface{}
+	Event any
 
 	// EventType is what coming from the provider header, i.e:
 	// GitHub -> pull_request
@@ -56,8 +56,8 @@ type Event struct {
 	AccountID string
 
 	// TODO: move out inside the provider
-	// Bitbucket Server
-	CloneURL string // bitbucket server has a different url for cloning the repo than normal public html url
+	// Bitbucket Data Center
+	CloneURL string // bitbucket data center has a different url for cloning the repo than normal public html url
 	Provider *Provider
 
 	// Gitlab

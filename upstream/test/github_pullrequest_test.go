@@ -1,6 +1,3 @@
-//go:build e2e
-// +build e2e
-
 package test
 
 import (
@@ -12,7 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/go-github/v68/github"
+	"github.com/google/go-github/v70/github"
+	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 	"gotest.tools/v3/assert"
 	"gotest.tools/v3/assert/cmp"
 	"gotest.tools/v3/golden"
@@ -393,6 +391,91 @@ func TestGithubSecondCancelInProgressPRClosed(t *testing.T) {
 	assert.Equal(t, resp.StatusCode, 200)
 
 	assert.Equal(t, res.CheckRuns[0].GetConclusion(), "cancelled")
+}
+
+func TestGithubPullRequestNoOnLabelAnnotation(t *testing.T) {
+	ctx := context.Background()
+	g := &tgithub.PRTest{
+		Label:     "Github PullRequest",
+		YamlFiles: []string{"testdata/pipelinerun-pr-cel-expression.yaml"},
+	}
+	g.RunPullRequest(ctx, t)
+	defer g.TearDown(ctx, t)
+
+	g.Cnx.Clients.Log.Infof("Creating a label bug on PullRequest")
+	_, _, err := g.Provider.Client.Issues.AddLabelsToIssue(ctx,
+		g.Options.Organization,
+		g.Options.Repo, g.PRNumber,
+		[]string{"bug"})
+	assert.NilError(t, err)
+
+	// let's wait 10 secs and check every second that a PipelineRun is created or not.
+	for i := 0; i < 10; i++ {
+		prs, err := g.Cnx.Clients.Tekton.TektonV1().PipelineRuns(g.TargetNamespace).List(ctx, metav1.ListOptions{})
+		assert.NilError(t, err)
+		// after adding a label on the PR we need to make sure that it doesn't trigger another PipelineRun.
+		assert.Equal(t, len(prs.Items), 1)
+		time.Sleep(1 * time.Second)
+	}
+}
+
+func TestGithubPullRequestNoPipelineRunCancelledOnPRClosed(t *testing.T) {
+	ctx := context.Background()
+	g := &tgithub.PRTest{
+		Label:         "Github PullRequest",
+		YamlFiles:     []string{"testdata/pipelinerun-gitops.yaml"},
+		NoStatusCheck: true,
+	}
+	g.RunPullRequest(ctx, t)
+	defer g.TearDown(ctx, t)
+
+	g.Cnx.Clients.Log.Infof("Waiting for the two pipelinerun to be created")
+	waitOpts := twait.Opts{
+		RepoName:        g.TargetNamespace,
+		Namespace:       g.TargetNamespace,
+		MinNumberStatus: 1,
+		PollTimeout:     twait.DefaultTimeout,
+		TargetSHA:       g.SHA,
+	}
+	err := twait.UntilPipelineRunCreated(ctx, g.Cnx.Clients, waitOpts)
+	assert.NilError(t, err)
+
+	g.Cnx.Clients.Log.Infof("Closing the PullRequest")
+	_, _, err = g.Provider.Client.PullRequests.Edit(ctx, g.Options.Organization, g.Options.Repo, g.PRNumber, &github.PullRequest{
+		State: github.Ptr("closed"),
+	})
+	assert.NilError(t, err)
+
+	isCancelled := false
+	var prReason string
+
+	for range 10 {
+		prs, err := g.Cnx.Clients.Tekton.TektonV1().PipelineRuns(g.TargetNamespace).List(ctx, metav1.ListOptions{})
+		if err != nil {
+			t.Logf("failed to list PipelineRuns: %v", err)
+			time.Sleep(1 * time.Second)
+			continue // try again
+		}
+		if len(prs.Items) != 1 {
+			t.Logf("expected 1 PipelineRun, got %d", len(prs.Items))
+			time.Sleep(1 * time.Second)
+			continue // try again
+		}
+		// Check all conditions, get the right one
+		conditions := prs.Items[0].Status.GetConditions()
+		for _, c := range conditions {
+			if c.Type == apis.ConditionSucceeded {
+				prReason = c.Reason
+				if prReason != string(tektonv1.PipelineRunReasonRunning) {
+					isCancelled = true
+					t.Logf("expected PipelineRun `Running`, got %s", prReason)
+					break
+				}
+			}
+		}
+		time.Sleep(1 * time.Second)
+	}
+	assert.Equal(t, false, isCancelled, fmt.Sprintf("PipelineRun got cancelled while we wanted it `Running`, last reason: %v", prReason))
 }
 
 // Local Variables:

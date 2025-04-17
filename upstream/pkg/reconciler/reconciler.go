@@ -276,7 +276,7 @@ func (r *Reconciler) updatePipelineRunToInProgress(ctx context.Context, logger *
 		TknBinary:       settings.TknBinaryName,
 		TknBinaryURL:    settings.TknBinaryURL,
 	}
-	msg, err := mt.MakeTemplate(formatting.StartingPipelineRunText)
+	msg, err := mt.MakeTemplate(detectedProvider.GetTemplate(provider.StartingPipelineType))
 	if err != nil {
 		return fmt.Errorf("cannot create message template: %w", err)
 	}
@@ -302,8 +302,8 @@ func (r *Reconciler) updatePipelineRunToInProgress(ctx context.Context, logger *
 }
 
 func (r *Reconciler) updatePipelineRunState(ctx context.Context, logger *zap.SugaredLogger, pr *tektonv1.PipelineRun, state string) (*tektonv1.PipelineRun, error) {
-	mergePatch := map[string]interface{}{
-		"metadata": map[string]interface{}{
+	mergePatch := map[string]any{
+		"metadata": map[string]any{
 			"labels": map[string]string{
 				keys.State: state,
 			},
@@ -314,7 +314,7 @@ func (r *Reconciler) updatePipelineRunState(ctx context.Context, logger *zap.Sug
 	}
 	// if state is started then remove pipelineRun pending status
 	if state == kubeinteraction.StateStarted {
-		mergePatch["spec"] = map[string]interface{}{
+		mergePatch["spec"] = map[string]any{
 			"status": "",
 		}
 	}

@@ -42,7 +42,7 @@ projects, _, err := git.Projects.ListProjects(opt)
 
 ### Examples
 
-The [examples](https://gitlab.com/gitlab-org/api/client-go/tree/master/examples) directory
+The [examples](/examples) directory
 contains a couple for clear examples, of which one is partially listed here as well:
 
 ```go
@@ -89,10 +89,55 @@ func main() {
 
 For complete usage of go-gitlab, see the full [package docs](https://godoc.org/gitlab.com/gitlab-org/api/client-go).
 
+## Testing
+
+The `client-go` project comes with a `testing` package at `gitlab.com/gitlab-org/api/client-go/testing`
+which contains a `TestClient` with [gomock](https://github.com/uber-go/mock) mocks for the individual services.
+
+You can use them like this:
+
+```go
+func Test_MyApp(t *testing.T) {
+    client := testing.NewTestClient(t)
+
+    // Setup expectations
+    client.MockClusterAgents.EXPECT().
+        List(gomock.Any(), 123, nil).
+        Return([]*gitlab.ClusterAgent{{ID: 1}}, nil)
+
+    // Use the client in your test
+    // You'd probably call your own code here that gets the client injected.
+    // You can also retrieve a `gitlab.Client` object from `client.Client`.
+    agents, err := client.ClusterAgents.List(ctx, 123, nil)
+    assert.NoError(t, err)
+    assert.Len(t, agents, 1)
+}
+```
+
+### I want to generate my own mocks
+
+You can! You can set up your own `TestClient` with mocks pretty easily:
+
+```go
+func NewTestClient(t *testing.T) {
+    // generate your mocks or instantiate a fake or whatever you like
+    mockClusterAgentsService := newMockClusterAgentsService(t)
+	client := &gitlab.Client{
+		ClusterAgents: mockClusterAgentsService
+	}
+
+	return tc
+}
+```
+
+The `newMockClusterAgentsService` must return a type that implements `gitlab.ClusterAgentsInterface`.
+
+You can have a look at [`testing/client.go`](/testing.client.go) how it's implemented for `gomock`.
+
 ## Contributing
 
 Contributions are always welcome. For more information, check out the
-[contributing guide](https://gitlab.com/gitlab-org/api/client-go/-/blob/main/CONTRIBUTING.md).
+[contributing guide](/CONTRIBUTING.md).
 
 ## Maintenance
 

@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"code.gitea.io/sdk/gitea"
-	"github.com/google/go-github/v68/github"
+	"github.com/google/go-github/v70/github"
 	"github.com/tektoncd/pipeline/pkg/apis/pipeline/v1beta1"
 	"github.com/tektoncd/pipeline/pkg/names"
 	yaml "gopkg.in/yaml.v2"
@@ -139,6 +139,30 @@ func TestGiteaPullRequestResolvePipelineOnlyAssociatedWithPipelineRunFilterted(t
 	defer f()
 }
 
+// TestGiteaPullRequestResolvedTektonParamsRemotePipeline see
+// https://issues.redhat.com/browse/SRVKP-4070 for details
+func TestGiteaPullRequestResolvedTektonParamsRemotePipeline(t *testing.T) {
+	topts := &tgitea.TestOpts{
+		Regexp:      successRegexp,
+		TargetEvent: triggertype.PullRequest.String(),
+		YAMLFiles: map[string]string{
+			".tekton/pr.yaml":       "testdata/pipelinerun_with_tekton_params.yaml",
+			".tekton/pipeline.yaml": "testdata/pipeline_with_tekton_params.yaml",
+		},
+		ExpectEvents:   false,
+		CheckForStatus: "success",
+	}
+	_, f := tgitea.TestPR(t, topts)
+	defer f()
+
+	// check the output of the PipelineRun logs
+	err := twait.RegexpMatchingInPodLog(context.Background(),
+		topts.ParamsRun,
+		topts.TargetNS, "pipelinesascode.tekton.dev/event-type=pull_request", "step-task",
+		*regexp.MustCompile("Hello " + topts.TargetRepoName), "", 2)
+	assert.NilError(t, err)
+}
+
 func TestGiteaPullRequestPrivateRepository(t *testing.T) {
 	topts := &tgitea.TestOpts{
 		Regexp:      successRegexp,
@@ -151,9 +175,9 @@ func TestGiteaPullRequestPrivateRepository(t *testing.T) {
 	}
 	ctx, f := tgitea.TestPR(t, topts)
 	defer f()
-	reg := regexp.MustCompile(".*fetched git-clone task")
-	maxLines := int64(20)
-	err := twait.RegexpMatchingInControllerLog(ctx, topts.ParamsRun, *reg, 10, "controller", &maxLines)
+	reg := regexp.MustCompile(".*successfully fetched git-clone task from default configured catalog HUB")
+	maxLines := int64(100)
+	err := twait.RegexpMatchingInControllerLog(ctx, topts.ParamsRun, *reg, 20, "controller", &maxLines)
 	assert.NilError(t, err)
 	tgitea.WaitForSecretDeletion(t, topts, topts.TargetRefName)
 }
@@ -1047,7 +1071,8 @@ func verifyProvenance(t *testing.T, topts *tgitea.TestOpts, expectedOutput, cNam
 	tgitea.WaitForStatus(t, topts, "heads/"+targetRef, "", false)
 
 	// check the output of the PipelineRun logs
-	err = twait.RegexpMatchingInPodLog(context.Background(), topts.ParamsRun, topts.TargetNS, "pipelinesascode.tekton.dev/event-type=pull_request", cName, *regexp.MustCompile(expectedOutput), "", 2)
+	err = twait.RegexpMatchingInPodLog(context.Background(), topts.ParamsRun, topts.TargetNS, "pipelinesascode.tekton.dev/event-type=pull_request",
+		cName, *regexp.MustCompile(expectedOutput), "", 2)
 	assert.NilError(t, err)
 }
 

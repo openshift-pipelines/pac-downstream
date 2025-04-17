@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/google/go-github/v68/github"
+	"github.com/google/go-github/v70/github"
 	pipelinev1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 	"go.uber.org/zap"
 	zapobserver "go.uber.org/zap/zaptest/observer"
@@ -354,7 +354,7 @@ func TestCancelInProgressMatchingPR(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      "pr-foo",
 						Namespace: "foo",
-						Labels:    fooRepoLabels,
+						Labels:    map[string]string{},
 						Annotations: map[string]string{
 							keys.CancelInProgress: "true",
 						},
@@ -523,9 +523,10 @@ func TestCancelInProgressMatchingPR(t *testing.T) {
 						Namespace: "foo",
 						Labels:    fooRepoLabels,
 						Annotations: map[string]string{
-							keys.CancelInProgress: "true", keys.OriginalPRName: "pr-foo",
-							keys.Repository:   "foo",
-							keys.SourceBranch: "head",
+							keys.CancelInProgress: "true",
+							keys.OriginalPRName:   "pr-foo",
+							keys.Repository:       "foo",
+							keys.SourceBranch:     "head",
 						},
 					},
 					Spec: pipelinev1.PipelineRunSpec{},
@@ -536,6 +537,54 @@ func TestCancelInProgressMatchingPR(t *testing.T) {
 				"pr-foo-1": true,
 			},
 			wantLog: "cancel-in-progress: cancelling pipelinerun foo/",
+		},
+		{
+			name: "match/cancel in progress on PipelineRun generateName",
+			event: &info.Event{
+				Repository:        "foo",
+				SHA:               "foosha",
+				HeadBranch:        "head",
+				EventType:         string(triggertype.PullRequest),
+				TriggerTarget:     triggertype.PullRequest,
+				PullRequestNumber: pullReqNumber,
+			},
+			pipelineRuns: []*pipelinev1.PipelineRun{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						GenerateName: "pr-foo-",
+						Name:         "pr-foo-1",
+						Namespace:    "foo",
+						Labels:       fooRepoLabels,
+						Annotations: map[string]string{
+							keys.CancelInProgress: "true",
+							keys.OriginalPRName:   "pr-foo",
+							keys.Repository:       "foo",
+							keys.SourceBranch:     "head",
+						},
+					},
+					Spec: pipelinev1.PipelineRunSpec{},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						GenerateName: "pr-foo-",
+						Name:         "pr-foo-2",
+						Namespace:    "foo",
+						Labels:       fooRepoLabels,
+						Annotations: map[string]string{
+							keys.CancelInProgress: "true",
+							keys.OriginalPRName:   "pr-foo",
+							keys.Repository:       "foo",
+							keys.SourceBranch:     "head",
+						},
+					},
+					Spec: pipelinev1.PipelineRunSpec{},
+				},
+			},
+			repo: fooRepo,
+			cancelledPipelineRuns: map[string]bool{
+				"pr-foo-2": true,
+			},
+			wantLog: "cancel-in-progress: cancelling pipelinerun foo/pr-foo-2",
 		},
 		{
 			name: "match/cancel in progress from /retest",
@@ -818,7 +867,7 @@ func TestCancelInProgressMatchingPR(t *testing.T) {
 	}
 }
 
-func TestCancelAllInProgressBelongingToPullRequest(t *testing.T) {
+func TestCancelAllInProgressBelongingToClosedPullRequest(t *testing.T) {
 	observer, _ := zapobserver.New(zap.InfoLevel)
 	logger := zap.New(observer).Sugar()
 
@@ -830,7 +879,7 @@ func TestCancelAllInProgressBelongingToPullRequest(t *testing.T) {
 		cancelledPipelineRuns map[string]bool
 	}{
 		{
-			name: "cancel all in progress PipelineRuns",
+			name: "cancel all in progress PipelineRuns with annotation set to true",
 			event: &info.Event{
 				Repository:        "foo",
 				TriggerTarget:     "pull_request",
@@ -842,7 +891,14 @@ func TestCancelAllInProgressBelongingToPullRequest(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      "pr-foo-1",
 						Namespace: "foo",
-						Labels:    fooRepoLabels,
+						Labels: map[string]string{
+							keys.OriginalPRName:   "pr-foo",
+							keys.URLRepository:    formatting.CleanValueKubernetes("foo"),
+							keys.SHA:              formatting.CleanValueKubernetes("foosha"),
+							keys.PullRequest:      strconv.Itoa(pullReqNumber),
+							keys.EventType:        string(triggertype.PullRequest),
+							keys.CancelInProgress: "true",
+						},
 					},
 					Spec: pipelinev1.PipelineRunSpec{},
 				},
@@ -850,7 +906,14 @@ func TestCancelAllInProgressBelongingToPullRequest(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      "pr-foo-2",
 						Namespace: "foo",
-						Labels:    fooRepoLabels,
+						Labels: map[string]string{
+							keys.OriginalPRName:   "pr-foo",
+							keys.URLRepository:    formatting.CleanValueKubernetes("foo"),
+							keys.SHA:              formatting.CleanValueKubernetes("foosha"),
+							keys.PullRequest:      strconv.Itoa(pullReqNumber),
+							keys.EventType:        string(triggertype.PullRequest),
+							keys.CancelInProgress: "true",
+						},
 					},
 					Spec: pipelinev1.PipelineRunSpec{},
 				},
@@ -859,6 +922,88 @@ func TestCancelAllInProgressBelongingToPullRequest(t *testing.T) {
 				"pr-foo-1": true,
 				"pr-foo-2": true,
 			},
+		},
+		{
+			name: "cancel all in progress PipelineRuns with annotation set to false",
+			event: &info.Event{
+				Repository:        "foo",
+				TriggerTarget:     "pull_request",
+				PullRequestNumber: pullReqNumber,
+			},
+			repo: fooRepo,
+			pipelineRuns: []*pipelinev1.PipelineRun{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "pr-foo-1",
+						Namespace: "foo",
+						Labels: map[string]string{
+							keys.OriginalPRName:   "pr-foo",
+							keys.URLRepository:    formatting.CleanValueKubernetes("foo"),
+							keys.SHA:              formatting.CleanValueKubernetes("foosha"),
+							keys.PullRequest:      strconv.Itoa(pullReqNumber),
+							keys.EventType:        string(triggertype.PullRequest),
+							keys.CancelInProgress: "false",
+						},
+					},
+					Spec: pipelinev1.PipelineRunSpec{},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "pr-foo-2",
+						Namespace: "foo",
+						Labels: map[string]string{
+							keys.OriginalPRName:   "pr-foo",
+							keys.URLRepository:    formatting.CleanValueKubernetes("foo"),
+							keys.SHA:              formatting.CleanValueKubernetes("foosha"),
+							keys.PullRequest:      strconv.Itoa(pullReqNumber),
+							keys.EventType:        string(triggertype.PullRequest),
+							keys.CancelInProgress: "false",
+						},
+					},
+					Spec: pipelinev1.PipelineRunSpec{},
+				},
+			},
+			cancelledPipelineRuns: map[string]bool{},
+		},
+		{
+			name: "cancel all in progress PipelineRuns with no annotation",
+			event: &info.Event{
+				Repository:        "foo",
+				TriggerTarget:     "pull_request",
+				PullRequestNumber: pullReqNumber,
+			},
+			repo: fooRepo,
+			pipelineRuns: []*pipelinev1.PipelineRun{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "pr-foo-1",
+						Namespace: "foo",
+						Labels: map[string]string{
+							keys.OriginalPRName: "pr-foo",
+							keys.URLRepository:  formatting.CleanValueKubernetes("foo"),
+							keys.SHA:            formatting.CleanValueKubernetes("foosha"),
+							keys.PullRequest:    strconv.Itoa(pullReqNumber),
+							keys.EventType:      string(triggertype.PullRequest),
+						},
+					},
+					Spec: pipelinev1.PipelineRunSpec{},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "pr-foo-2",
+						Namespace: "foo",
+						Labels: map[string]string{
+							keys.OriginalPRName: "pr-foo",
+							keys.URLRepository:  formatting.CleanValueKubernetes("foo"),
+							keys.SHA:            formatting.CleanValueKubernetes("foosha"),
+							keys.PullRequest:    strconv.Itoa(pullReqNumber),
+							keys.EventType:      string(triggertype.PullRequest),
+						},
+					},
+					Spec: pipelinev1.PipelineRunSpec{},
+				},
+			},
+			cancelledPipelineRuns: map[string]bool{},
 		},
 		{
 			name: "no PipelineRuns to cancel",
@@ -889,7 +1034,7 @@ func TestCancelAllInProgressBelongingToPullRequest(t *testing.T) {
 				},
 			}
 			pac := NewPacs(tt.event, nil, cs, &info.PacOpts{}, nil, logger, nil)
-			err := pac.cancelAllInProgressBelongingToPullRequest(ctx, tt.repo)
+			err := pac.cancelAllInProgressBelongingToClosedPullRequest(ctx, tt.repo)
 			assert.NilError(t, err)
 
 			got, err := cs.Clients.Tekton.TektonV1().PipelineRuns("foo").List(ctx, metav1.ListOptions{})

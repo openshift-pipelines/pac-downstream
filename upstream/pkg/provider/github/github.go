@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/go-github/v68/github"
+	"github.com/google/go-github/v70/github"
 	"github.com/jonboulle/clockwork"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
@@ -52,6 +52,7 @@ type Provider struct {
 	repo          *v1alpha1.Repository
 	eventEmitter  *events.EventEmitter
 	PaginedNumber int
+	userType      string // The type of user i.e bot or not
 	skippedRun
 }
 
@@ -586,8 +587,8 @@ func uniqueRepositoryID(repoIDs []int64, id int64) []int64 {
 	return r
 }
 
-// isBranchContainsCommit checks whether provided branch has sha or not.
-func (v *Provider) isBranchContainsCommit(ctx context.Context, runevent *info.Event, branchName string) error {
+// isHeadCommitOfBranch checks whether provided branch is valid or not and SHA is HEAD commit of the branch.
+func (v *Provider) isHeadCommitOfBranch(ctx context.Context, runevent *info.Event, branchName string) error {
 	if v.Client == nil {
 		return fmt.Errorf("no github client has been initialized, " +
 			"exiting... (hint: did you forget setting a secret on your repo?)")
@@ -601,4 +602,8 @@ func (v *Provider) isBranchContainsCommit(ctx context.Context, runevent *info.Ev
 		return nil
 	}
 	return fmt.Errorf("provided SHA %s is not the HEAD commit of the branch %s", runevent.SHA, branchName)
+}
+
+func (v *Provider) GetTemplate(commentType provider.CommentType) string {
+	return provider.GetHTMLTemplate(commentType)
 }
