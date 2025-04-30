@@ -46,7 +46,7 @@ spec:
             - name: source
           steps:
             - name: push-release-to-branch
-              image: registry.access.redhat.com/ubi9/python-311
+              image: registry.access.redhat.com/ubi9/python-312
               workingDir: $(workspaces.source.path)
               env:
                 - name: HUB_TOKEN
@@ -137,4 +137,4 @@ spec:
             - ReadWriteOnce
           resources:
             requests:
-              storage: 1Gi
+              storage: 3Gi
