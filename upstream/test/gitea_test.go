@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"code.gitea.io/sdk/gitea"
-	"github.com/google/go-github/v61/github"
+	"github.com/google/go-github/v64/github"
 	pacapi "github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	tknpacdelete "github.com/openshift-pipelines/pipelines-as-code/pkg/cmd/tknpac/deleterepo"
@@ -65,6 +65,21 @@ func TestGiteaPullRequestTaskAnnotations(t *testing.T) {
 	defer f()
 }
 
+func TestGiteaPullRequestTaskAnnotationsSameTaskDifferentVersion(t *testing.T) {
+	topts := &tgitea.TestOpts{
+		Regexp:      successRegexp,
+		TargetEvent: triggertype.PullRequest.String(),
+		YAMLFiles: map[string]string{
+			".tekton/pr1.yaml": "testdata/pipelinerun-with-yq-3.yaml",
+			".tekton/pr2.yaml": "testdata/pipelinerun-with-yq-4.yaml",
+		},
+		CheckForNumberStatus: 2,
+		CheckForStatus:       "success",
+	}
+	_, f := tgitea.TestPR(t, topts)
+	defer f()
+}
+
 func TestGiteaUseDisplayName(t *testing.T) {
 	topts := &tgitea.TestOpts{
 		Regexp:      regexp.MustCompile(`.*The Task name is Task.*`),
@@ -100,6 +115,27 @@ func TestGiteaPullRequestPipelineAnnotations(t *testing.T) {
 	defer f()
 }
 
+func TestGiteaPullRequestResolvePipelineOnlyAssociatedWithPipelineRunFilterted(t *testing.T) {
+	topts := &tgitea.TestOpts{
+		Regexp:      successRegexp,
+		TargetEvent: triggertype.PullRequest.String(),
+		YAMLFiles: map[string]string{
+			".tekton/pr1.yaml":       "testdata/pipelinerun1_remote_task_annotations.yaml",
+			".tekton/pr2.yaml":       "testdata/pipelinerun2_remote_task_annotations.yaml",
+			".tekton/pipeline1.yaml": "testdata/pipeline1_in_tektondir.yaml",
+			".tekton/pipeline2.yaml": "testdata/pipeline2_in_tektondir.yaml",
+		},
+		ExpectEvents:   false,
+		CheckForStatus: "success",
+		ExtraArgs: map[string]string{
+			"RemoteTaskURL":  options.RemoteTaskURL,
+			"RemoteTaskName": options.RemoteTaskName,
+		},
+	}
+	_, f := tgitea.TestPR(t, topts)
+	defer f()
+}
+
 func TestGiteaPullRequestPrivateRepository(t *testing.T) {
 	topts := &tgitea.TestOpts{
 		Regexp:      successRegexp,
@@ -118,6 +154,21 @@ func TestGiteaPullRequestPrivateRepository(t *testing.T) {
 	tgitea.WaitForSecretDeletion(t, topts, topts.TargetRefName)
 }
 
+func TestGiteaStepActions(t *testing.T) {
+	topts := &tgitea.TestOpts{
+		Regexp:      successRegexp,
+		TargetEvent: triggertype.PullRequest.String(),
+		YAMLFiles: map[string]string{
+			".tekton/pipelinerun-stepaction.yaml": "testdata/pipelinerun-stepactions.yaml",
+		},
+		ExpectEvents:   false,
+		CheckForStatus: "success",
+	}
+	_, f := tgitea.TestPR(t, topts)
+	defer f()
+	tgitea.WaitForSecretDeletion(t, topts, topts.TargetRefName)
+}
+
 // TestGiteaBadYaml we can't check pr status but this shows up in the
 // controller, so let's dig ourself in there....  TargetNS is a random string, so
 // it can only success if it matches it.
@@ -132,6 +183,21 @@ func TestGiteaBadYaml(t *testing.T) {
 	defer f()
 	assert.NilError(t, twait.RegexpMatchingInControllerLog(ctx, topts.ParamsRun, *regexp.MustCompile(
 		"pipelinerun.*has failed.*expected exactly one, got neither: spec.pipelineRef, spec.pipelineSpec"), 10, "controller", github.Int64(20)))
+}
+
+// TestGiteaInvalidSpecValues tests invalid field values of a PipelinRun and ensures that these
+// validation errors are reported on UI.
+func TestGiteaInvalidSpecValues(t *testing.T) {
+	topts := &tgitea.TestOpts{
+		TargetEvent:    triggertype.PullRequest.String(),
+		YAMLFiles:      map[string]string{".tekton/pr-bad-format.yaml": "testdata/failures/invalid-timeouts-values-pipelinerun.yaml"},
+		CheckForStatus: "failure",
+		ExpectEvents:   true,
+		Regexp:         regexp.MustCompile(options.InvalidYamlErrorPattern),
+	}
+
+	_, f := tgitea.TestPR(t, topts)
+	defer f()
 }
 
 // don't test concurrency limit here, just parallel pipeline.
@@ -595,13 +661,111 @@ func TestGiteaBadLinkOfTask(t *testing.T) {
 	assert.NilError(t, twait.RegexpMatchingInControllerLog(ctx, topts.ParamsRun, *errre, 10, "controller", github.Int64(20)))
 }
 
-// TestGiteaProvenance will test the provenance feature of the pipeline run if we check from the default branch (ie main).
-func TestGiteaProvenance(t *testing.T) {
+// TestGiteaPipelineRunWithSameName checks that we fail properly with the error from the
+// tekton pipelines controller. We check on the UI interface that we display
+// and inside the pac controller.
+func TestGiteaPipelineRunWithSameName(t *testing.T) {
+	topts := &tgitea.TestOpts{
+		TargetEvent: triggertype.PullRequest.String(),
+		YAMLFiles: map[string]string{
+			".tekton/pr1.yaml": "testdata/failures/pipelinerun_same_name_on_pull.yaml",
+			".tekton/pr2.yaml": "testdata/failures/pipelinerun_same_name_on_push.yaml",
+		},
+		CheckForStatus: "failure",
+		ExpectEvents:   true,
+		Regexp:         regexp.MustCompile(".*found multiple pipelinerun in .tekton with the same name*"),
+	}
+	ctx, f := tgitea.TestPR(t, topts)
+	defer f()
+	errre := regexp.MustCompile("found multiple pipelinerun in .tekton with the same name")
+	assert.NilError(t, twait.RegexpMatchingInControllerLog(ctx, topts.ParamsRun, *errre, 10, "controller", github.Int64(20)))
+}
+
+// TestGiteaProvenanceForDefaultBranch tests the provenance feature of the PipelineRun.
+// It fetches the PipelineRun definition from the default branch of the repository
+// as configured on the git platform (e.g., main).
+func TestGiteaProvenanceForDefaultBranch(t *testing.T) {
 	topts := &tgitea.TestOpts{
 		SkipEventsCheck:       true,
 		TargetEvent:           triggertype.PullRequest.String(),
 		Settings:              &v1alpha1.Settings{PipelineRunProvenance: "default_branch"},
 		NoPullRequestCreation: true,
+	}
+	verifyProvinance(t, topts, "HELLOMOTO", "step-task", false)
+}
+
+// TestGiteaProvenanceForSource tests the provenance feature of the PipelineRun.
+// It fetches the PipelineRun definition from the source branch of where the event has been triggered.
+func TestGiteaProvenanceForSource(t *testing.T) {
+	topts := &tgitea.TestOpts{
+		SkipEventsCheck:       true,
+		TargetEvent:           triggertype.PullRequest.String(),
+		Settings:              &v1alpha1.Settings{PipelineRunProvenance: "source"},
+		NoPullRequestCreation: true,
+	}
+	verifyProvinance(t, topts, "testing provenance for source", "step-source-provenance-test", false)
+}
+
+// TestGiteaGlobalRepoProvenanceForDefaultBranch tests the provenance feature of the PipelineRun.
+// It fetches the PipelineRun definition from the default branch of the repository
+// as configured on the git platform (e.g., main).
+// In this test, the provenance is enabled using a global repository instead of a local repository.
+func TestGiteaGlobalRepoProvenanceForDefaultBranch(t *testing.T) {
+	topts := &tgitea.TestOpts{
+		SkipEventsCheck:       true,
+		TargetEvent:           triggertype.PullRequest.String(),
+		NoPullRequestCreation: true,
+		Settings:              &v1alpha1.Settings{},
+	}
+
+	verifyProvinance(t, topts, "HELLOMOTO", "step-task", true)
+}
+
+// TestGiteaGlobalAndLocalRepoProvenance verifies the provenance feature of the PipelineRun,
+// ensuring that when provenance is configured at both the global and local repository levels,
+// the local repository settings take precedence. This end-to-end test confirms that behavior.
+func TestGiteaGlobalAndLocalRepoProvenance(t *testing.T) {
+	topts := &tgitea.TestOpts{
+		SkipEventsCheck:       true,
+		TargetEvent:           triggertype.PullRequest.String(),
+		NoPullRequestCreation: true,
+		Settings: &v1alpha1.Settings{
+			PipelineRunProvenance: "source",
+		},
+	}
+
+	verifyProvinance(t, topts, "testing provenance for source", "step-source-provenance-test", true)
+}
+
+func verifyProvinance(t *testing.T, topts *tgitea.TestOpts, expectedOutput, cName string, isGlobal bool) {
+	if isGlobal {
+		ctx := context.Background()
+		topts.ParamsRun, topts.Opts, topts.GiteaCNX, _ = tgitea.Setup(ctx)
+		assert.NilError(t, topts.ParamsRun.Clients.NewClients(ctx, &topts.ParamsRun.Info))
+		topts.TargetRefName = names.SimpleNameGenerator.RestrictLengthWithRandomSuffix("pac-e2e-test")
+		topts.TargetNS = topts.TargetRefName
+		ctx, err := cctx.GetControllerCtxInfo(ctx, topts.ParamsRun)
+		assert.NilError(t, err)
+		assert.NilError(t, pacrepo.CreateNS(ctx, topts.TargetNS, topts.ParamsRun))
+
+		globalNs := info.GetNS(ctx)
+		err = tgitea.CreateCRD(ctx, topts,
+			v1alpha1.RepositorySpec{
+				Settings: &v1alpha1.Settings{
+					PipelineRunProvenance: "default_branch",
+				},
+			},
+			isGlobal)
+		assert.NilError(t, err)
+
+		defer (func() {
+			if os.Getenv("TEST_NOCLEANUP") != "true" {
+				topts.ParamsRun.Clients.Log.Infof("Cleaning up global repo %s in %s", info.DefaultGlobalRepoName, globalNs)
+				err = topts.ParamsRun.Clients.PipelineAsCode.PipelinesascodeV1alpha1().Repositories(globalNs).Delete(
+					context.Background(), info.DefaultGlobalRepoName, metav1.DeleteOptions{})
+				assert.NilError(t, err)
+			}
+		})()
 	}
 	_, f := tgitea.TestPR(t, topts)
 	defer f()
@@ -612,14 +776,15 @@ func TestGiteaProvenance(t *testing.T) {
 	topts.TargetRefName = topts.DefaultBranch
 
 	scmOpts := &scm.Opts{
-		GitURL:        topts.GitCloneURL,
-		Log:           topts.ParamsRun.Clients.Log,
-		WebURL:        topts.GitHTMLURL,
-		TargetRefName: topts.DefaultBranch,
-		BaseRefName:   topts.DefaultBranch,
+		GitURL:             topts.GitCloneURL,
+		Log:                topts.ParamsRun.Clients.Log,
+		WebURL:             topts.GitHTMLURL,
+		TargetRefName:      topts.DefaultBranch,
+		BaseRefName:        topts.DefaultBranch,
+		NoCheckOutFromBase: true,
 	}
 	scm.PushFilesToRefGit(t, scmOpts, entries)
-	prmap = map[string]string{"notgonnatobetested.yaml": "testdata/pipelinerun.yaml"}
+	prmap = map[string]string{".tekton/notgonnatobetested.yaml": "testdata/pipelinerun-provenance-test.yaml"}
 	entries, err = payload.GetEntries(prmap, topts.TargetNS, topts.DefaultBranch, topts.TargetEvent, map[string]string{})
 	assert.NilError(t, err)
 	scmOpts.TargetRefName = targetRef
@@ -635,6 +800,50 @@ func TestGiteaProvenance(t *testing.T) {
 	topts.ParamsRun.Clients.Log.Infof("PullRequest %s has been created", pr.HTMLURL)
 	topts.CheckForStatus = "success"
 	tgitea.WaitForStatus(t, topts, "heads/"+targetRef, "", false)
+
+	// check the output of the PipelineRun logs
+	err = twait.RegexpMatchingInPodLog(context.Background(), topts.ParamsRun, topts.TargetNS, "pipelinesascode.tekton.dev/event-type=pull_request", cName, *regexp.MustCompile(expectedOutput), "", 2)
+	assert.NilError(t, err)
+}
+
+// TestGiteaGlobalRepoConcurrencyLimit tests the concurrency_limit feature of the PipelineRun.
+// It fetches the PipelineRun definition from the default branch of the repository
+// as configured on the git platform (e.g., main).
+// In this test, the concurrency_limit is enabled using a global repository instead of a local repository.
+func TestGiteaGlobalRepoConcurrencyLimit(t *testing.T) {
+	numPipelines := 10
+	yamlFiles := map[string]string{}
+	for i := 0; i < numPipelines; i++ {
+		yamlFiles[fmt.Sprintf(".tekton/pr%d.yaml", i)] = "testdata/pipelinerun.yaml"
+	}
+	topts := &tgitea.TestOpts{
+		TargetEvent:          triggertype.PullRequest.String(),
+		YAMLFiles:            yamlFiles,
+		CheckForNumberStatus: numPipelines,
+		CheckForStatus:       "success",
+	}
+
+	tgitea.VerifyConcurrency(t, topts, github.Int(2))
+}
+
+// TestGiteaGlobalAndLocalRepoConcurrencyLimit verifies the concurrency_limit feature of the PipelineRun,
+// ensuring that when concurrency_limit is defined in both global and local repository,
+// the local repository limit takes precedence. This end-to-end test confirms that behavior.
+func TestGiteaGlobalAndLocalRepoConcurrencyLimit(t *testing.T) {
+	numPipelines := 10
+	yamlFiles := map[string]string{}
+	for i := 0; i < numPipelines; i++ {
+		yamlFiles[fmt.Sprintf(".tekton/pr%d.yaml", i)] = "testdata/pipelinerun.yaml"
+	}
+	topts := &tgitea.TestOpts{
+		TargetEvent:          triggertype.PullRequest.String(),
+		YAMLFiles:            yamlFiles,
+		CheckForNumberStatus: numPipelines,
+		ConcurrencyLimit:     github.Int(3),
+		CheckForStatus:       "success",
+	}
+
+	tgitea.VerifyConcurrency(t, topts, github.Int(2))
 }
 
 func TestGiteaPushToTagGreedy(t *testing.T) {

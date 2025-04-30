@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/google/go-github/v61/github"
+	"github.com/google/go-github/v64/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/clients"
@@ -659,7 +659,7 @@ func TestProviderGetExistingCheckRunID(t *testing.T) {
 				Client: client,
 			}
 			mux.HandleFunc(fmt.Sprintf("/repos/%v/%v/commits/%v/check-runs", event.Organization, event.Repository, event.SHA), func(w http.ResponseWriter, _ *http.Request) {
-				_, _ = fmt.Fprintf(w, tt.jsonret)
+				_, _ = fmt.Fprintf(w, "%s", tt.jsonret)
 			})
 
 			got, err := v.getExistingCheckRunID(ctx, event, provider.StatusOpts{
