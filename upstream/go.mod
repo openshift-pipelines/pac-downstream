@@ -15,7 +15,7 @@ require (
 	github.com/gobwas/glob v0.2.3
 	github.com/google/cel-go v0.24.1
 	github.com/google/go-cmp v0.7.0
-	github.com/google/go-github/scrape v0.0.0-20250303143553-470d43a8b2fe
+	github.com/google/go-github/scrape c9e1ad0d3b65
 	github.com/google/go-github/v69 v69.2.0
 	github.com/hako/durafmt v0.0.0-20210608085754-5c1018a4e16b
 	github.com/jenkins-x/go-scm v1.14.56
