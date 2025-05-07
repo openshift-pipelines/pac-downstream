@@ -14,25 +14,26 @@ func TestReplacePlaceHoldersVariables(t *testing.T) {
 		expected     string
 		dicto        map[string]string
 		headers      http.Header
-		changedFiles map[string]interface{}
+		changedFiles map[string]any
 		rawEvent     any
 	}{
 		{
 			name:     "Test Replace standard",
-			template: `revision: {{ revision }}} url: {{ url }} bar: {{ bar}}`,
-			expected: `revision: master} url: https://chmouel.com bar: {{ bar}}`,
+			template: `revision: {{ revision }}} url: {{ url }} bar: {{ bar}} tag: {{ git_tag }}`,
+			expected: `revision: master} url: https://chmouel.com bar: {{ bar}} tag: v1.0`,
 			dicto: map[string]string{
 				"revision": "master",
 				"url":      "https://chmouel.com",
+				"git_tag":  "v1.0",
 			},
-			changedFiles: map[string]interface{}{},
+			changedFiles: map[string]any{},
 		},
 		{
 			name:         "Test Replace with CEL body",
 			template:     `hello: {{ body.hello }}`,
 			expected:     `hello: world`,
 			dicto:        map[string]string{},
-			changedFiles: map[string]interface{}{},
+			changedFiles: map[string]any{},
 			headers:      http.Header{},
 			rawEvent: map[string]string{
 				"hello": "world",
@@ -43,7 +44,7 @@ func TestReplacePlaceHoldersVariables(t *testing.T) {
 			template:     `Is this {{ body.hello == 'world' }}`,
 			expected:     `Is this true`,
 			dicto:        map[string]string{},
-			changedFiles: map[string]interface{}{},
+			changedFiles: map[string]any{},
 			headers:      http.Header{},
 			rawEvent: map[string]string{
 				"hello": "world",
@@ -54,7 +55,7 @@ func TestReplacePlaceHoldersVariables(t *testing.T) {
 			template:     `header: {{ headers["X-Hello"] }}`,
 			expected:     `header: World`,
 			dicto:        map[string]string{},
-			changedFiles: map[string]interface{}{},
+			changedFiles: map[string]any{},
 			headers: http.Header{
 				"X-Hello": []string{"World"},
 			},
@@ -65,7 +66,7 @@ func TestReplacePlaceHoldersVariables(t *testing.T) {
 			template: `changed: {{ files.all[0] }}`,
 			expected: `changed: changed.txt`,
 			dicto:    map[string]string{},
-			changedFiles: map[string]interface{}{
+			changedFiles: map[string]any{
 				"all": []string{"changed.txt"},
 			},
 			headers:  http.Header{},

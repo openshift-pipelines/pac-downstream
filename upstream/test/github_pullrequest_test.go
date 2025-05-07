@@ -1,6 +1,3 @@
-//go:build e2e
-// +build e2e
-
 package test
 
 import (
@@ -12,20 +9,22 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/go-github/v69/github"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/opscomments"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/settings"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
+	"github.com/openshift-pipelines/pipelines-as-code/test/pkg/configmap"
+	tgithub "github.com/openshift-pipelines/pipelines-as-code/test/pkg/github"
+	"github.com/openshift-pipelines/pipelines-as-code/test/pkg/options"
+	twait "github.com/openshift-pipelines/pipelines-as-code/test/pkg/wait"
+
+	"github.com/google/go-github/v71/github"
+	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 	"gotest.tools/v3/assert"
 	"gotest.tools/v3/assert/cmp"
 	"gotest.tools/v3/golden"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"knative.dev/pkg/apis"
-
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/opscomments"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/settings"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
-	tgithub "github.com/openshift-pipelines/pipelines-as-code/test/pkg/github"
-	"github.com/openshift-pipelines/pipelines-as-code/test/pkg/options"
-	twait "github.com/openshift-pipelines/pipelines-as-code/test/pkg/wait"
 )
 
 func TestGithubPullRequest(t *testing.T) {
@@ -89,7 +88,7 @@ func TestGithubPullRequestOnLabel(t *testing.T) {
 	time.Sleep(5 * time.Second)
 
 	g.Cnx.Clients.Log.Infof("Creating a label bug on PullRequest")
-	_, _, err := g.Provider.Client.Issues.AddLabelsToIssue(ctx,
+	_, _, err := g.Provider.Client().Issues.AddLabelsToIssue(ctx,
 		g.Options.Organization,
 		g.Options.Repo, g.PRNumber,
 		[]string{"bug"})
@@ -109,7 +108,7 @@ func TestGithubPullRequestOnLabel(t *testing.T) {
 	resp := &github.Response{}
 	counter := 0
 	for {
-		res, resp, err = g.Provider.Client.Checks.ListCheckRunsForRef(ctx, g.Options.Organization, g.Options.Repo, g.SHA, &github.ListCheckRunsOptions{
+		res, resp, err = g.Provider.Client().Checks.ListCheckRunsForRef(ctx, g.Options.Organization, g.Options.Repo, g.SHA, &github.ListCheckRunsOptions{
 			AppID:       g.Provider.ApplicationID,
 			ListOptions: opt,
 		})
@@ -160,10 +159,10 @@ func TestGithubPullRequestWebhook(t *testing.T) {
 	defer g.TearDown(ctx, t)
 }
 
-func TestGithubPullRequestSecondBadYaml(t *testing.T) {
+func TestGithubSecondPullRequestBadYaml(t *testing.T) {
 	ctx := context.Background()
 	g := &tgithub.PRTest{
-		Label:            "Github Rerequest",
+		Label:            "Github PullRequest Bad Yaml",
 		YamlFiles:        []string{"testdata/failures/bad-yaml.yaml"},
 		SecondController: true,
 		NoStatusCheck:    true,
@@ -171,33 +170,24 @@ func TestGithubPullRequestSecondBadYaml(t *testing.T) {
 	g.RunPullRequest(ctx, t)
 	defer g.TearDown(ctx, t)
 
-	opt := github.ListOptions{}
-	res := &github.ListCheckRunsResults{}
-	resp := &github.Response{}
-	var err error
-	counter := 0
-	for {
-		res, resp, err = g.Provider.Client.Checks.ListCheckRunsForRef(ctx, g.Options.Organization, g.Options.Repo, g.SHA, &github.ListCheckRunsOptions{
-			AppID:       g.Provider.ApplicationID,
-			ListOptions: opt,
-		})
+	maxLoop := 10
+	for i := 0; i < maxLoop; i++ {
+		comments, _, err := g.Provider.Client().Issues.ListComments(
+			ctx, g.Options.Organization, g.Options.Repo, g.PRNumber,
+			&github.IssueListCommentsOptions{})
 		assert.NilError(t, err)
-		assert.Equal(t, resp.StatusCode, 200)
-		if len(res.CheckRuns) > 0 {
-			break
+
+		if len(comments) > 0 {
+			assert.Assert(t, len(comments) == 1, "Should have only one comment created we got way too many: %+v", comments)
+			golden.Assert(t, comments[0].GetBody(), strings.ReplaceAll(fmt.Sprintf("%s.golden", t.Name()), "/", "-"))
+			return
 		}
-		g.Cnx.Clients.Log.Infof("Waiting for the check run to be created")
-		if counter > 10 {
-			t.Errorf("Check run not created after 10 tries")
-			break
-		}
-		time.Sleep(5 * time.Second)
+
+		g.Cnx.Clients.Log.Infof("Looping %d/%d waiting for a comment to appear", i, maxLoop)
+		time.Sleep(6 * time.Second)
 	}
-	assert.Equal(t, len(res.CheckRuns), 1)
-	assert.Equal(t, res.CheckRuns[0].GetOutput().GetTitle(), "pipelinerun start failure")
-	// may be fragile if we change the application name, but life goes on if it fails and we fix the name if that happen
-	assert.Equal(t, res.CheckRuns[0].GetOutput().GetSummary(), "Pipelines as Code GHE has <b>failed</b>.")
-	golden.Assert(t, res.CheckRuns[0].GetOutput().GetText(), strings.ReplaceAll(fmt.Sprintf("%s.golden", t.Name()), "/", "-"))
+
+	t.Fatal("No comments with the pipelinerun error found on the pull request")
 }
 
 // TestGithubPullRequestInvalidSpecValues tests invalid field values of a PipelinRun and
@@ -222,7 +212,7 @@ func TestGithubPullRequestInvalidSpecValues(t *testing.T) {
 	var err error
 	counter := 0
 	for {
-		res, resp, err = g.Provider.Client.Checks.ListCheckRunsForRef(ctx, g.Options.Organization, g.Options.Repo, g.SHA, &github.ListCheckRunsOptions{
+		res, resp, err = g.Provider.Client().Checks.ListCheckRunsForRef(ctx, g.Options.Organization, g.Options.Repo, g.SHA, &github.ListCheckRunsOptions{
 			AppID:       g.Provider.ApplicationID,
 			Status:      github.Ptr("completed"),
 			ListOptions: opt,
@@ -260,7 +250,7 @@ func TestGithubSecondTestExplicitelyNoMatchedPipelineRun(t *testing.T) {
 	defer g.TearDown(ctx, t)
 
 	g.Cnx.Clients.Log.Infof("Creating /test no-match on PullRequest")
-	_, _, err := g.Provider.Client.Issues.CreateComment(ctx,
+	_, _, err := g.Provider.Client().Issues.CreateComment(ctx,
 		g.Options.Organization,
 		g.Options.Repo, g.PRNumber,
 		&github.IssueComment{Body: github.Ptr("/test no-match")})
@@ -298,7 +288,7 @@ func TestGithubSecondCancelInProgress(t *testing.T) {
 	time.Sleep(10 * time.Second)
 
 	g.Cnx.Clients.Log.Infof("Creating /retest on PullRequest")
-	_, _, err = g.Provider.Client.Issues.CreateComment(ctx, g.Options.Organization, g.Options.Repo, g.PRNumber,
+	_, _, err = g.Provider.Client().Issues.CreateComment(ctx, g.Options.Organization, g.Options.Repo, g.PRNumber,
 		&github.IssueComment{Body: github.Ptr("/retest")})
 	assert.NilError(t, err)
 
@@ -369,7 +359,7 @@ func TestGithubSecondCancelInProgressPRClosed(t *testing.T) {
 	assert.NilError(t, err)
 
 	g.Cnx.Clients.Log.Infof("Closing the PullRequest")
-	_, _, err = g.Provider.Client.PullRequests.Edit(ctx, g.Options.Organization, g.Options.Repo, g.PRNumber, &github.PullRequest{
+	_, _, err = g.Provider.Client().PullRequests.Edit(ctx, g.Options.Organization, g.Options.Repo, g.PRNumber, &github.PullRequest{
 		State: github.Ptr("closed"),
 	})
 	assert.NilError(t, err)
@@ -385,7 +375,7 @@ func TestGithubSecondCancelInProgressPRClosed(t *testing.T) {
 
 	assert.Equal(t, prs.Items[0].GetStatusCondition().GetCondition(apis.ConditionSucceeded).GetReason(), "Cancelled", "should have been canceled")
 
-	res, resp, err := g.Provider.Client.Checks.ListCheckRunsForRef(ctx, g.Options.Organization, g.Options.Repo, g.SHA, &github.ListCheckRunsOptions{
+	res, resp, err := g.Provider.Client().Checks.ListCheckRunsForRef(ctx, g.Options.Organization, g.Options.Repo, g.SHA, &github.ListCheckRunsOptions{
 		AppID:       g.Provider.ApplicationID,
 		ListOptions: github.ListOptions{},
 	})
@@ -393,6 +383,182 @@ func TestGithubSecondCancelInProgressPRClosed(t *testing.T) {
 	assert.Equal(t, resp.StatusCode, 200)
 
 	assert.Equal(t, res.CheckRuns[0].GetConclusion(), "cancelled")
+}
+
+func TestGithubPullRequestNoOnLabelAnnotation(t *testing.T) {
+	ctx := context.Background()
+	g := &tgithub.PRTest{
+		Label:     "Github PullRequest",
+		YamlFiles: []string{"testdata/pipelinerun-pr-cel-expression.yaml"},
+	}
+	g.RunPullRequest(ctx, t)
+	defer g.TearDown(ctx, t)
+
+	g.Cnx.Clients.Log.Infof("Creating a label bug on PullRequest")
+	_, _, err := g.Provider.Client().Issues.AddLabelsToIssue(ctx,
+		g.Options.Organization,
+		g.Options.Repo, g.PRNumber,
+		[]string{"bug"})
+	assert.NilError(t, err)
+
+	// let's wait 10 secs and check every second that a PipelineRun is created or not.
+	for i := 0; i < 10; i++ {
+		prs, err := g.Cnx.Clients.Tekton.TektonV1().PipelineRuns(g.TargetNamespace).List(ctx, metav1.ListOptions{})
+		assert.NilError(t, err)
+		// after adding a label on the PR we need to make sure that it doesn't trigger another PipelineRun.
+		assert.Equal(t, len(prs.Items), 1)
+		time.Sleep(1 * time.Second)
+	}
+}
+
+func TestGithubPullRequestNoPipelineRunCancelledOnPRClosed(t *testing.T) {
+	ctx := context.Background()
+	g := &tgithub.PRTest{
+		Label:         "Github PullRequest",
+		YamlFiles:     []string{"testdata/pipelinerun-gitops.yaml"},
+		NoStatusCheck: true,
+	}
+	g.RunPullRequest(ctx, t)
+	defer g.TearDown(ctx, t)
+
+	g.Cnx.Clients.Log.Infof("Waiting for the two pipelinerun to be created")
+	waitOpts := twait.Opts{
+		RepoName:        g.TargetNamespace,
+		Namespace:       g.TargetNamespace,
+		MinNumberStatus: 1,
+		PollTimeout:     twait.DefaultTimeout,
+		TargetSHA:       g.SHA,
+	}
+	err := twait.UntilPipelineRunCreated(ctx, g.Cnx.Clients, waitOpts)
+	assert.NilError(t, err)
+
+	g.Cnx.Clients.Log.Infof("Closing the PullRequest")
+	_, _, err = g.Provider.Client().PullRequests.Edit(ctx, g.Options.Organization, g.Options.Repo, g.PRNumber, &github.PullRequest{
+		State: github.Ptr("closed"),
+	})
+	assert.NilError(t, err)
+
+	isCancelled := false
+	var prReason string
+
+	for range 10 {
+		prs, err := g.Cnx.Clients.Tekton.TektonV1().PipelineRuns(g.TargetNamespace).List(ctx, metav1.ListOptions{})
+		if err != nil {
+			t.Logf("failed to list PipelineRuns: %v", err)
+			time.Sleep(1 * time.Second)
+			continue // try again
+		}
+		if len(prs.Items) != 1 {
+			t.Logf("expected 1 PipelineRun, got %d", len(prs.Items))
+			time.Sleep(1 * time.Second)
+			continue // try again
+		}
+		// Check all conditions, get the right one
+		conditions := prs.Items[0].Status.GetConditions()
+		for _, c := range conditions {
+			if c.Type == apis.ConditionSucceeded {
+				prReason = c.Reason
+				if prReason != string(tektonv1.PipelineRunReasonRunning) {
+					isCancelled = true
+					t.Logf("expected PipelineRun `Running`, got %s", prReason)
+					break
+				}
+			}
+		}
+		time.Sleep(1 * time.Second)
+	}
+	assert.Equal(t, false, isCancelled, fmt.Sprintf("PipelineRun got cancelled while we wanted it `Running`, last reason: %v", prReason))
+}
+
+func TestGithubCancelInProgressSettingFromConfigMapOnPR(t *testing.T) {
+	ctx := context.Background()
+	ctx, runcnx, _, _, err := tgithub.Setup(ctx, false, false)
+	assert.NilError(t, err)
+
+	patchData := map[string]string{
+		"enable-cancel-in-progress-on-pull-requests": "true",
+	}
+
+	configMapTearDown := configmap.ChangeGlobalConfig(ctx, t, runcnx, patchData)
+	defer configMapTearDown()
+
+	g := &tgithub.PRTest{
+		Label:         "Github PullRequest",
+		YamlFiles:     []string{"testdata/pipelinerun-gitops.yaml"},
+		NoStatusCheck: true,
+	}
+	g.RunPullRequest(ctx, t)
+	defer g.TearDown(ctx, t)
+
+	_, _, err = g.Provider.Client().Issues.CreateComment(ctx,
+		g.Options.Organization,
+		g.Options.Repo, g.PRNumber,
+		&github.IssueComment{Body: github.Ptr("/retest")})
+	assert.NilError(t, err)
+
+	g.Cnx.Clients.Log.Infof("Waiting for the two pipelinerun to be created")
+	waitOpts := twait.Opts{
+		RepoName:        g.TargetNamespace,
+		Namespace:       g.TargetNamespace,
+		MinNumberStatus: 2,
+		PollTimeout:     twait.DefaultTimeout,
+		TargetSHA:       g.SHA,
+	}
+
+	err = twait.UntilPipelineRunCreated(ctx, g.Cnx.Clients, waitOpts)
+	assert.NilError(t, err)
+
+	// we want one PipelineRun to be cancelled
+	waitOpts.MinNumberStatus = 1
+
+	err = twait.UntilPipelineRunHasReason(ctx, g.Cnx.Clients, tektonv1.PipelineRunReasonCancelled, waitOpts)
+	assert.NilError(t, err)
+}
+
+func TestGithubCancelInProgressSettingFromConfigMapOnPush(t *testing.T) {
+	ctx := context.Background()
+	ctx, runcnx, _, _, err := tgithub.Setup(ctx, false, false)
+	assert.NilError(t, err)
+
+	patchData := map[string]string{
+		"enable-cancel-in-progress-on-push": "true",
+	}
+
+	configMapTearDown := configmap.ChangeGlobalConfig(ctx, t, runcnx, patchData)
+	defer configMapTearDown()
+
+	g := &tgithub.PRTest{
+		Label:         "Github PullRequest",
+		YamlFiles:     []string{"testdata/pipelinerun-gitops.yaml"},
+		NoStatusCheck: true,
+	}
+	g.RunPushRequest(ctx, t)
+	defer g.TearDown(ctx, t)
+
+	comment := fmt.Sprintf("/retest branch:%s", g.TargetNamespace)
+	_, _, err = g.Provider.Client().Repositories.CreateComment(ctx,
+		g.Options.Organization,
+		g.Options.Repo, g.SHA,
+		&github.RepositoryComment{Body: github.Ptr(comment)})
+	assert.NilError(t, err)
+
+	g.Cnx.Clients.Log.Infof("Waiting for the two pipelinerun to be created")
+	waitOpts := twait.Opts{
+		RepoName:        g.TargetNamespace,
+		Namespace:       g.TargetNamespace,
+		MinNumberStatus: 2,
+		PollTimeout:     twait.DefaultTimeout,
+		TargetSHA:       g.SHA,
+	}
+
+	err = twait.UntilPipelineRunCreated(ctx, g.Cnx.Clients, waitOpts)
+	assert.NilError(t, err)
+
+	// we want one PipelineRun to be cancelled
+	waitOpts.MinNumberStatus = 1
+
+	err = twait.UntilPipelineRunHasReason(ctx, g.Cnx.Clients, tektonv1.PipelineRunReasonCancelled, waitOpts)
+	assert.NilError(t, err)
 }
 
 // Local Variables:

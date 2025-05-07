@@ -159,6 +159,11 @@ func (v *Provider) ParsePayload(_ context.Context, _ *params.Run, request *http.
 		processedEvent.EventType = triggertype.Push.String()
 		processedEvent.Organization = e.Repository.Project.Key
 		processedEvent.Repository = e.Repository.Slug
+
+		if len(e.Changes) == 0 {
+			return nil, fmt.Errorf("push event contains no commits under 'changes'; cannot proceed")
+		}
+
 		processedEvent.SHA = e.Changes[0].ToHash
 		processedEvent.URL = e.Repository.Links.Self[0].Href
 		processedEvent.BaseBranch = e.Changes[0].RefID
@@ -193,7 +198,7 @@ func (v *Provider) ParsePayload(_ context.Context, _ *params.Run, request *http.
 	return processedEvent, nil
 }
 
-func parsePayloadType(event string) (interface{}, error) {
+func parsePayloadType(event string) (any, error) {
 	// bitbucket data center event type has `pr:` prefix for pull request
 	// but in case of push event it is `repo:` prefix for both bitbucket data center
 	// and cloud, so we check the event name directly
@@ -209,7 +214,7 @@ func parsePayloadType(event string) (interface{}, error) {
 		localEvent = "push"
 	}
 
-	var intfType interface{}
+	var intfType any
 	switch localEvent {
 	case triggertype.PullRequest.String():
 		intfType = &types.PullRequestEvent{}

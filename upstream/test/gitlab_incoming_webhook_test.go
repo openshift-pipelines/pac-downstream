@@ -36,7 +36,7 @@ func TestGitlabIncomingWebhook(t *testing.T) {
 	ctx, err = cctx.GetControllerCtxInfo(ctx, runcnx)
 	assert.NilError(t, err)
 	runcnx.Clients.Log.Info("Testing with Gitlab")
-	projectinfo, resp, err := glprovider.Client.Projects.GetProject(opts.ProjectID, nil)
+	projectinfo, resp, err := glprovider.Client().Projects.GetProject(opts.ProjectID, nil)
 	assert.NilError(t, err)
 	if resp != nil && resp.StatusCode == http.StatusNotFound {
 		t.Errorf("Repository %s not found in %s", opts.Organization, opts.Repo)
@@ -53,7 +53,7 @@ func TestGitlabIncomingWebhook(t *testing.T) {
 		},
 	}
 
-	err = tgitlab.CreateCRD(ctx, projectinfo, runcnx, randomedString, incoming)
+	err = tgitlab.CreateCRD(ctx, projectinfo, runcnx, opts, randomedString, incoming)
 	assert.NilError(t, err)
 
 	err = secret.Create(ctx, runcnx, map[string]string{"incoming": incomingSecreteValue}, randomedString, incomingSecretName)

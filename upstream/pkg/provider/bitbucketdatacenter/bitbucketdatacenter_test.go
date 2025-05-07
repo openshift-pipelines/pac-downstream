@@ -21,7 +21,7 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
 	bbtest "github.com/openshift-pipelines/pipelines-as-code/pkg/provider/bitbucketdatacenter/test"
 
-	bbv1 "github.com/gfleury/go-bitbucket-v1"
+	"github.com/jenkins-x/go-scm/scm"
 	"go.uber.org/zap"
 	zapobserver "go.uber.org/zap/zaptest/observer"
 	"gotest.tools/v3/assert"
@@ -67,7 +67,7 @@ func TestGetTektonDir(t *testing.T) {
 			path:          ".tekton",
 			testDirPath:   "../../pipelineascode/testdata/pull_request/.tekton",
 			wantDirAPIErr: true,
-			wantErr:       "cannot list content of .tekton directory: not Authorized",
+			wantErr:       "cannot list content of .tekton directory: No message available",
 		},
 		{
 			name:            "bad/get files api error",
@@ -75,7 +75,7 @@ func TestGetTektonDir(t *testing.T) {
 			path:            ".tekton",
 			testDirPath:     "../../pipelineascode/testdata/pull_request/.tekton",
 			wantFilesAPIErr: true,
-			wantErr:         "cannot find .tekton/pipeline.yaml inside the repo repository: not Authorized",
+			wantErr:         "cannot find .tekton/pipeline.yaml inside the repo repository: No message available",
 		},
 	}
 	for _, tt := range tests {
@@ -85,7 +85,7 @@ func TestGetTektonDir(t *testing.T) {
 			ctx, _ := rtesting.SetupFakeContext(t)
 			_, client, mux, tearDown, tURL := bbtest.SetupBBDataCenterClient(ctx)
 			defer tearDown()
-			v := &Provider{Logger: logger, baseURL: tURL, ScmClient: client, projectKey: tt.event.Organization}
+			v := &Provider{Logger: logger, baseURL: tURL, scmClient: client, projectKey: tt.event.Organization}
 			bbtest.MuxDirContent(t, mux, tt.event, tt.testDirPath, tt.path, tt.wantDirAPIErr, tt.wantFilesAPIErr)
 			content, err := v.GetTektonDir(ctx, tt.event, tt.path, "")
 			if tt.wantErr != "" {
@@ -203,7 +203,7 @@ func TestCreateStatus(t *testing.T) {
 			event.Provider.Token = "token"
 			v := &Provider{
 				baseURL:           tURL,
-				ScmClient:         client,
+				scmClient:         client,
 				pullRequestNumber: pullRequestNumber,
 				projectKey:        event.Organization,
 				run:               &params.Run{},
@@ -260,7 +260,7 @@ func TestGetFileInsideRepo(t *testing.T) {
 				"foo/file.txt": "hello moto",
 			},
 			targetbranch: "yolo",
-			wantErr:      "cannot find foo/file.txt inside the repo repository: not Authorized",
+			wantErr:      "cannot find foo/file.txt inside the repo repository: No message available",
 		},
 	}
 	for _, tt := range tests {
@@ -268,7 +268,7 @@ func TestGetFileInsideRepo(t *testing.T) {
 			ctx, _ := rtesting.SetupFakeContext(t)
 			_, client, mux, tearDown, tURL := bbtest.SetupBBDataCenterClient(ctx)
 			defer tearDown()
-			v := &Provider{ScmClient: client, baseURL: tURL, defaultBranchLatestCommit: "1234", projectKey: tt.event.Organization}
+			v := &Provider{scmClient: client, baseURL: tURL, defaultBranchLatestCommit: "1234", projectKey: tt.event.Organization}
 			bbtest.MuxFiles(t, mux, tt.event, tt.targetbranch, filepath.Dir(tt.path), tt.filescontents, tt.wantErr != "")
 			fc, err := v.GetFileInsideRepo(ctx, tt.event, tt.path, tt.targetbranch)
 			if tt.wantErr != "" {
@@ -368,7 +368,7 @@ func TestSetClient(t *testing.T) {
 			if tt.muxUser != nil {
 				mux.HandleFunc("/users/foo", tt.muxUser)
 			}
-			v := &Provider{ScmClient: client, baseURL: tURL}
+			v := &Provider{scmClient: client, baseURL: tURL}
 			err := v.SetClient(ctx, nil, tt.opts, nil, nil)
 			if tt.wantErrSubstr != "" {
 				assert.ErrorContains(t, err, tt.wantErrSubstr)
@@ -384,7 +384,7 @@ func TestGetCommitInfo(t *testing.T) {
 	tests := []struct {
 		name          string
 		event         *info.Event
-		commit        bbv1.Commit
+		commit        scm.Commit
 		defaultBranch string
 		latestCommit  string
 	}{
@@ -396,7 +396,7 @@ func TestGetCommitInfo(t *testing.T) {
 				SHA:          "sha",
 			},
 			defaultBranch: "branchmain",
-			commit: bbv1.Commit{
+			commit: scm.Commit{
 				Message: "hello moto",
 			},
 			latestCommit: "latestcommit",
@@ -406,11 +406,11 @@ func TestGetCommitInfo(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx, _ := rtesting.SetupFakeContext(t)
-			bbclient, _, mux, tearDown, tURL := bbtest.SetupBBDataCenterClient(ctx)
+			_, scmClient, mux, tearDown, tURL := bbtest.SetupBBDataCenterClient(ctx)
 			bbtest.MuxCommitInfo(t, mux, tt.event, tt.commit)
 			bbtest.MuxDefaultBranch(t, mux, tt.event, tt.defaultBranch, tt.latestCommit)
 			defer tearDown()
-			v := &Provider{Client: bbclient, baseURL: tURL, projectKey: tt.event.Organization}
+			v := &Provider{scmClient: scmClient, baseURL: tURL, projectKey: tt.event.Organization}
 			err := v.GetCommitInfo(ctx, tt.event)
 			assert.NilError(t, err)
 			assert.Equal(t, tt.defaultBranch, tt.event.DefaultBranch)
@@ -658,7 +658,7 @@ func TestGetFiles(t *testing.T) {
 			wantModifiedFilesCount: 0,
 			wantRenamedFilesCount:  0,
 			wantError:              true,
-			errMsg:                 "failed to list changes for commit IAMSHA123: not Authorized",
+			errMsg:                 "failed to list changes for commit IAMSHA123: No message available",
 		},
 		{
 			name:                   "good/pull_request event",
@@ -677,7 +677,7 @@ func TestGetFiles(t *testing.T) {
 			wantModifiedFilesCount: 0,
 			wantRenamedFilesCount:  0,
 			wantError:              true,
-			errMsg:                 "failed to list changes for pull request: not Authorized",
+			errMsg:                 "failed to list changes for pull request: No message available",
 		},
 	}
 	for _, tt := range tests {
@@ -710,7 +710,7 @@ func TestGetFiles(t *testing.T) {
 					}
 				})
 			}
-			v := &Provider{ScmClient: client, baseURL: tURL}
+			v := &Provider{scmClient: client, baseURL: tURL}
 			changedFiles, err := v.GetFiles(ctx, tt.event)
 			if tt.wantError {
 				assert.Equal(t, err.Error(), tt.errMsg)

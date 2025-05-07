@@ -13,10 +13,8 @@ import (
 	"time"
 
 	"code.gitea.io/sdk/gitea"
-	"github.com/google/go-github/v69/github"
-	"github.com/tektoncd/pipeline/pkg/apis/pipeline/v1beta1"
+	"github.com/google/go-github/v71/github"
 	"github.com/tektoncd/pipeline/pkg/names"
-	yaml "gopkg.in/yaml.v2"
 	"gotest.tools/v3/assert"
 	"gotest.tools/v3/env"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -30,7 +28,6 @@ import (
 	tknpaclist "github.com/openshift-pipelines/pipelines-as-code/pkg/cmd/tknpac/list"
 	tknpacresolve "github.com/openshift-pipelines/pipelines-as-code/pkg/cmd/tknpac/resolve"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/git"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/settings"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
@@ -139,6 +136,30 @@ func TestGiteaPullRequestResolvePipelineOnlyAssociatedWithPipelineRunFilterted(t
 	defer f()
 }
 
+// TestGiteaPullRequestResolvedTektonParamsRemotePipeline see
+// https://issues.redhat.com/browse/SRVKP-4070 for details
+func TestGiteaPullRequestResolvedTektonParamsRemotePipeline(t *testing.T) {
+	topts := &tgitea.TestOpts{
+		Regexp:      successRegexp,
+		TargetEvent: triggertype.PullRequest.String(),
+		YAMLFiles: map[string]string{
+			".tekton/pr.yaml":       "testdata/pipelinerun_with_tekton_params.yaml",
+			".tekton/pipeline.yaml": "testdata/pipeline_with_tekton_params.yaml",
+		},
+		ExpectEvents:   false,
+		CheckForStatus: "success",
+	}
+	_, f := tgitea.TestPR(t, topts)
+	defer f()
+
+	// check the output of the PipelineRun logs
+	err := twait.RegexpMatchingInPodLog(context.Background(),
+		topts.ParamsRun,
+		topts.TargetNS, "pipelinesascode.tekton.dev/event-type=pull_request", "step-task",
+		*regexp.MustCompile("Hello " + topts.TargetRepoName), "", 2)
+	assert.NilError(t, err)
+}
+
 func TestGiteaPullRequestPrivateRepository(t *testing.T) {
 	topts := &tgitea.TestOpts{
 		Regexp:      successRegexp,
@@ -173,13 +194,57 @@ func TestGiteaStepActions(t *testing.T) {
 	tgitea.WaitForSecretDeletion(t, topts, topts.TargetRefName)
 }
 
+// TestGiteaBadYamlReportingOnPR makes sure that we can catch a bad yaml file
+// and report on PR, we only do updates and not creating a new comment all the
+// time.
+func TestGiteaBadYamlReportingOnPR(t *testing.T) {
+	topts := &tgitea.TestOpts{
+		TargetEvent:  triggertype.PullRequest.String(),
+		YAMLFiles:    map[string]string{".tekton/pr-bad-validation.yaml": "testdata/failures/pipeline-validation.yaml"},
+		ExpectEvents: true,
+	}
+
+	_, f := tgitea.TestPR(t, topts)
+	defer f()
+	topts.Regexp = regexp.MustCompile(`.*bad-valid | .json: cannot unmarshal array into Go struct field PipelineRunSpec.spec.pipelineSpec of type v1.PipelineSpec.*`)
+	tgitea.WaitForPullRequestCommentMatch(t, topts)
+
+	comments, _, err := topts.GiteaCNX.Client().ListRepoIssueComments(topts.PullRequest.Base.Repository.Owner.UserName, topts.PullRequest.Base.Repository.Name, gitea.ListIssueCommentOptions{})
+	assert.NilError(t, err)
+	assert.Equal(t, len(comments), 1, "should have only one comment")
+
+	// sending a second time the comment should have been updated
+	scmOpts := &scm.Opts{
+		GitURL:        topts.GitCloneURL,
+		Log:           topts.ParamsRun.Clients.Log,
+		WebURL:        topts.GitHTMLURL,
+		TargetRefName: topts.TargetRefName,
+		BaseRefName:   topts.DefaultBranch,
+		PushForce:     true,
+	}
+	processed, err := payload.ApplyTemplate("testdata/failures/pipeline-validation.yaml", map[string]string{
+		"TargetNamespace": topts.TargetNS,
+		"TargetBranch":    topts.DefaultBranch,
+		"TargetEvent":     topts.TargetEvent,
+		"PipelineName":    "pr-a-second-time",
+		"Command":         "sleep 10",
+	})
+	assert.NilError(t, err)
+	entries := map[string]string{".tekton/pr-bad-validation.yaml": processed}
+	_ = scm.PushFilesToRefGit(t, scmOpts, entries)
+
+	comments, _, err = topts.GiteaCNX.Client().ListRepoIssueComments(topts.PullRequest.Base.Repository.Owner.UserName, topts.PullRequest.Base.Repository.Name, gitea.ListIssueCommentOptions{})
+	assert.NilError(t, err)
+	assert.Equal(t, len(comments), 1, "should have only one comment")
+}
+
 // TestGiteaBadYaml we can't check pr status but this shows up in the
 // controller, so let's dig ourself in there....  TargetNS is a random string, so
 // it can only success if it matches it.
-func TestGiteaBadYaml(t *testing.T) {
+func TestGiteaBadYamlValidation(t *testing.T) {
 	topts := &tgitea.TestOpts{
 		TargetEvent:  triggertype.PullRequest.String(),
-		YAMLFiles:    map[string]string{".tekton/pr-bad-format.yaml": "testdata/failures/pipeline_bad_format.yaml"},
+		YAMLFiles:    map[string]string{".tekton/pr-bad-format.yaml": "testdata/failures/bad-yaml.yaml"},
 		ExpectEvents: true,
 	}
 
@@ -187,7 +252,8 @@ func TestGiteaBadYaml(t *testing.T) {
 	defer f()
 	maxLines := int64(20)
 	assert.NilError(t, twait.RegexpMatchingInControllerLog(ctx, topts.ParamsRun, *regexp.MustCompile(
-		"pipelinerun.*has failed.*expected exactly one, got neither: spec.pipelineRef, spec.pipelineSpec"), 10, "controller", &maxLines))
+		"cannot read the PipelineRun: pr-bad-format.yaml, error: line 3: could not find expected ':'"),
+		10, "controller", &maxLines))
 }
 
 // TestGiteaInvalidSpecValues tests invalid field values of a PipelinRun and ensures that these
@@ -421,7 +487,7 @@ func TestGiteaConfigCancelInProgress(t *testing.T) {
 	}
 	_ = scm.PushFilesToRefGit(t, scmOpts, entries)
 
-	pr, _, err := topts.GiteaCNX.Client.CreatePullRequest(topts.Opts.Organization, topts.Opts.Repo, gitea.CreatePullRequestOption{
+	pr, _, err := topts.GiteaCNX.Client().CreatePullRequest(topts.Opts.Organization, topts.Opts.Repo, gitea.CreatePullRequestOption{
 		Title: "Test Pull Request - " + targetRef,
 		Head:  targetRef,
 		Base:  topts.DefaultBranch,
@@ -484,7 +550,7 @@ func TestGiteaConfigCancelInProgressAfterPRClosed(t *testing.T) {
 	assert.NilError(t, err)
 
 	closed := gitea.StateClosed
-	_, _, err = topts.GiteaCNX.Client.EditPullRequest(topts.Opts.Organization, topts.Opts.Repo, topts.PullRequest.Index, gitea.EditPullRequestOption{
+	_, _, err = topts.GiteaCNX.Client().EditPullRequest(topts.Opts.Organization, topts.Opts.Repo, topts.PullRequest.Index, gitea.EditPullRequestOption{
 		State: &closed,
 	})
 	assert.NilError(t, err)
@@ -511,7 +577,7 @@ func TestGiteaPush(t *testing.T) {
 	}
 	_, f := tgitea.TestPR(t, topts)
 	defer f()
-	merged, resp, err := topts.GiteaCNX.Client.MergePullRequest(topts.Opts.Organization, topts.Opts.Repo, topts.PullRequest.Index,
+	merged, resp, err := topts.GiteaCNX.Client().MergePullRequest(topts.Opts.Organization, topts.Opts.Repo, topts.PullRequest.Index,
 		gitea.MergePullRequestOption{
 			Title: "Merged with Panache",
 			Style: "merge",
@@ -869,22 +935,6 @@ func TestGiteaErrorSnippetWithSecret(t *testing.T) {
 	tgitea.WaitForPullRequestCommentMatch(t, topts)
 }
 
-// TestGiteaNotExistingClusterTask checks that the pipeline run fails if the clustertask does not exist
-// This will test properly if we error the reason in UI see bug #1160.
-func TestGiteaNotExistingClusterTask(t *testing.T) {
-	topts := &tgitea.TestOpts{
-		Regexp:      regexp.MustCompile(`.*clustertasks.tekton.dev "foo-bar" not found`),
-		TargetEvent: triggertype.PullRequest.String(),
-		YAMLFiles: map[string]string{
-			".tekton/pr.yaml": "testdata/failures/not-existing-clustertask.yaml",
-		},
-		CheckForStatus: "failure",
-		ExpectEvents:   false,
-	}
-	_, f := tgitea.TestPR(t, topts)
-	defer f()
-}
-
 // TestGiteaBadLinkOfTask checks that we fail properly with the error from the
 // tekton pipelines controller. We check on the UI interface that we display
 // and inside the pac controller.
@@ -1035,7 +1085,7 @@ func verifyProvenance(t *testing.T, topts *tgitea.TestOpts, expectedOutput, cNam
 	scmOpts.TargetRefName = targetRef
 	_ = scm.PushFilesToRefGit(t, scmOpts, entries)
 
-	pr, _, err := topts.GiteaCNX.Client.CreatePullRequest(topts.Opts.Organization, targetRef, gitea.CreatePullRequestOption{
+	pr, _, err := topts.GiteaCNX.Client().CreatePullRequest(topts.Opts.Organization, targetRef, gitea.CreatePullRequestOption{
 		Title: "Test Pull Request - " + targetRef,
 		Head:  targetRef,
 		Base:  options.MainBranch,
@@ -1047,7 +1097,8 @@ func verifyProvenance(t *testing.T, topts *tgitea.TestOpts, expectedOutput, cNam
 	tgitea.WaitForStatus(t, topts, "heads/"+targetRef, "", false)
 
 	// check the output of the PipelineRun logs
-	err = twait.RegexpMatchingInPodLog(context.Background(), topts.ParamsRun, topts.TargetNS, "pipelinesascode.tekton.dev/event-type=pull_request", cName, *regexp.MustCompile(expectedOutput), "", 2)
+	err = twait.RegexpMatchingInPodLog(context.Background(), topts.ParamsRun, topts.TargetNS, "pipelinesascode.tekton.dev/event-type=pull_request",
+		cName, *regexp.MustCompile(expectedOutput), "", 2)
 	assert.NilError(t, err)
 }
 
@@ -1126,65 +1177,6 @@ func TestGiteaPushToTagGreedy(t *testing.T) {
 	}
 	_, err = twait.UntilRepositoryUpdated(context.Background(), topts.ParamsRun.Clients, waitOpts)
 	assert.NilError(t, err)
-}
-
-// TestGiteaClusterTasks is a test to verify that we can use cluster tasks with PaaC.
-func TestGiteaClusterTasks(t *testing.T) {
-	// we need to verify sure to create clustertask before pushing the files
-	// so we have to create a new client and do more manual things we get for free in TestPR
-	topts := &tgitea.TestOpts{
-		TargetEvent: "pull_request, push",
-		YAMLFiles: map[string]string{
-			".tekton/prcluster.yaml": "testdata/pipelinerunclustertasks.yaml",
-		},
-		ExpectEvents: false,
-	}
-	topts.TargetRefName = names.SimpleNameGenerator.RestrictLengthWithRandomSuffix("pac-e2e-test")
-	topts.TargetNS = topts.TargetRefName
-
-	// create first the cluster tasks
-	ctname := fmt.Sprintf(".tekton/%s.yaml", topts.TargetNS)
-	newyamlFiles := map[string]string{ctname: "testdata/clustertask.yaml"}
-	entries, err := payload.GetEntries(newyamlFiles, topts.TargetNS, "main", "pull_request", map[string]string{})
-	assert.NilError(t, err)
-	//nolint: staticcheck
-	ct := v1beta1.ClusterTask{}
-	assert.NilError(t, yaml.Unmarshal([]byte(entries[ctname]), &ct))
-	ct.Name = "clustertask-" + topts.TargetNS
-
-	run := params.New()
-	ctx := context.Background()
-	assert.NilError(t, run.Clients.NewClients(ctx, &run.Info))
-	// TODO(chmou): this is for v1beta1, we need to figure out a way how to do that on v1
-	_, err = run.Clients.Tekton.TektonV1beta1().ClusterTasks().Create(context.TODO(), &ct, metav1.CreateOptions{})
-	assert.NilError(t, err)
-	assert.NilError(t, pacrepo.CreateNS(ctx, topts.TargetNS, run))
-	run.Clients.Log.Infof("%s has been created", ct.GetName())
-	defer (func() {
-		assert.NilError(t, topts.ParamsRun.Clients.Tekton.TektonV1beta1().ClusterTasks().Delete(context.TODO(), ct.Name, metav1.DeleteOptions{}))
-		run.Clients.Log.Infof("%s is deleted", ct.GetName())
-	})()
-
-	// start PR
-	_, f := tgitea.TestPR(t, topts)
-	defer f()
-
-	// wait for it
-	waitOpts := twait.Opts{
-		RepoName:  topts.TargetNS,
-		Namespace: topts.TargetNS,
-		// 0 means 1 🙃 (we test for >, while we actually should do >=, but i
-		// need to go all over the code to verify it's not going to break
-		// anything else)
-		MinNumberStatus: 0,
-		PollTimeout:     twait.DefaultTimeout,
-		TargetSHA:       topts.PullRequest.Head.Sha,
-	}
-	_, err = twait.UntilRepositoryUpdated(context.Background(), topts.ParamsRun.Clients, waitOpts)
-	assert.NilError(t, err)
-
-	topts.CheckForStatus = "success"
-	tgitea.WaitForStatus(t, topts, topts.TargetRefName, "", true)
 }
 
 // Local Variables:

@@ -4,7 +4,6 @@ kind: PipelineRun
 metadata:
   name: go-testing
   annotations:
-    pipelinesascode.tekton.dev/task: "[git-clone]"
     pipelinesascode.tekton.dev/max-keep-runs: "2"
     pipelinesascode.tekton.dev/cancel-in-progress: "true"
     pipelinesascode.tekton.dev/on-event: "pull_request"
@@ -122,6 +121,8 @@ spec:
                   value: ["**go.mod", "**go.sum"]
                 - name: target
                   value: oci://image-registry.openshift-image-registry.svc:5000/$(context.pipelineRun.namespace)/cache-go:{{hash}}
+                - name: fetched
+                  value: $(tasks.cached-fetch.results.fetched)
                 - name: cachePath
                   value: $(workspaces.source.path)/go-build-cache
                 - name: workingdir

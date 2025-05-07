@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/google/go-github/v69/github"
+	"github.com/google/go-github/v71/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
@@ -89,7 +89,7 @@ func TestCheckPolicyAllowing(t *testing.T) {
 				Settings: &v1alpha1.Settings{},
 			}}
 			gprovider := Provider{
-				Client:        fakeclient,
+				ghClient:      fakeclient,
 				repo:          repo,
 				Logger:        logger,
 				PaginedNumber: 1,
@@ -326,7 +326,7 @@ func TestOkToTestComment(t *testing.T) {
 				},
 			}
 			gprovider := Provider{
-				Client:        fakeclient,
+				ghClient:      fakeclient,
 				repo:          repo,
 				Logger:        logger,
 				PaginedNumber: 1,
@@ -403,7 +403,7 @@ func TestAclCheckAll(t *testing.T) {
 	logger := zap.New(observer).Sugar()
 	ctx, _ := rtesting.SetupFakeContext(t)
 	gprovider := Provider{
-		Client:        fakeclient,
+		ghClient:      fakeclient,
 		Logger:        logger,
 		PaginedNumber: 1,
 	}
@@ -593,8 +593,8 @@ func TestIfPullRequestIsForSameRepoWithoutFork(t *testing.T) {
 				Settings: &v1alpha1.Settings{},
 			}}
 			gprovider := Provider{
-				Client: fakeclient,
-				repo:   repo,
+				ghClient: fakeclient,
+				repo:     repo,
 			}
 
 			got, err := gprovider.aclCheckAll(ctx, tt.event)

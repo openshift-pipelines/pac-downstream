@@ -228,7 +228,7 @@ func TestCreateStatus(t *testing.T) {
 
 			if tt.wantClient {
 				client, mux, tearDown := thelp.Setup(t)
-				v.Client = client
+				v.SetGitLabClient(client)
 				defer tearDown()
 				thelp.MuxNotePost(t, mux, v.targetProjectID, tt.args.event.PullRequestNumber, tt.args.postStr)
 			}
@@ -243,7 +243,7 @@ func TestCreateStatus(t *testing.T) {
 func TestGetCommitInfo(t *testing.T) {
 	ctx, _ := rtesting.SetupFakeContext(t)
 	client, _, tearDown := thelp.Setup(t)
-	v := &Provider{Client: client}
+	v := &Provider{gitlabClient: client}
 
 	defer tearDown()
 	assert.NilError(t, v.GetCommitInfo(ctx, info.NewEvent()))
@@ -265,7 +265,7 @@ func TestSetClient(t *testing.T) {
 
 	client, _, tearDown := thelp.Setup(t)
 	defer tearDown()
-	vv := &Provider{Client: client}
+	vv := &Provider{gitlabClient: client}
 	err := vv.SetClient(ctx, nil, &info.Event{
 		Provider: &info.Provider{
 			Token: "hello",
@@ -276,33 +276,140 @@ func TestSetClient(t *testing.T) {
 }
 
 func TestSetClientDetectAPIURL(t *testing.T) {
-	fakehost := "https://fakehost.com"
 	ctx, _ := rtesting.SetupFakeContext(t)
-	client, _, tearDown := thelp.Setup(t)
+	mockClient, _, tearDown := thelp.Setup(t)
 	defer tearDown()
-	v := &Provider{Client: client}
-	event := info.NewEvent()
-	err := v.SetClient(ctx, nil, event, nil, nil)
-	assert.ErrorContains(t, err, "no git_provider.secret has been set")
 
-	event.Provider.Token = "hello"
-	event.TargetProjectID = 10
-	event.SourceProjectID = 10
+	// Define test cases
+	tests := []struct {
+		name              string
+		providerToken     string
+		providerURL       string // input: event.Provider.URL
+		repoURL           string // input: v.repoURL
+		pathWithNamespace string // input: v.pathWithNamespace (needed if repoURL is used)
+		eventURL          string // input: event.URL
+		// Define expected outcomes
+		expectedAPIURL string
+		expectedError  string // Substring expected in the error message, "" for no error
+	}{
+		{
+			name:          "Error: No token provided",
+			providerToken: "",
+			expectedError: "no git_provider.secret has been set",
+		},
+		{
+			name:              "Success: API URL from event.Provider.URL (highest precedence)",
+			providerToken:     "token",
+			providerURL:       "https://provider.example.com",
+			repoURL:           "https://repo.example.com/foo/bar", // Should be ignored
+			pathWithNamespace: "foo/bar",
+			eventURL:          "https://event.example.com/foo/bar", // Should be ignored
+			expectedAPIURL:    "https://provider.example.com",
+			expectedError:     "",
+		},
+		{
+			name:              "Success: API URL from v.repoURL (non-public)",
+			providerToken:     "token",
+			providerURL:       "", // This must be empty to test the next case
+			repoURL:           "https://private-gitlab.com/my/repo",
+			pathWithNamespace: "my/repo",
+			eventURL:          "https://event.example.com/my/repo", // Should be ignored
+			expectedAPIURL:    "https://private-gitlab.com/",
+			expectedError:     "",
+		},
+		{
+			name:           "Success: API URL from event.URL",
+			providerToken:  "token",
+			providerURL:    "", // This must be empty
+			repoURL:        "", // This must be empty
+			eventURL:       "https://event-url.com/org/project",
+			expectedAPIURL: "https://event-url.com",
+			expectedError:  "",
+		},
+		{
+			name:           "Success: Fallback to default public API URL",
+			providerToken:  "token",
+			providerURL:    "",
+			repoURL:        "",
+			eventURL:       "",
+			expectedAPIURL: apiPublicURL, // Default case
+			expectedError:  "",
+		},
+		{
+			name:              "Success: Default URL when repoURL is public GitLab",
+			providerToken:     "token",
+			providerURL:       "",
+			repoURL:           apiPublicURL + "/public/repo", // Starts with public URL, so skipped
+			pathWithNamespace: "public/repo",
+			eventURL:          "", // Falls through to default
+			expectedAPIURL:    apiPublicURL,
+			expectedError:     "",
+		},
+		{
+			name:          "Error: Invalid URL from event.URL",
+			providerToken: "token",
+			providerURL:   "",
+			repoURL:       "",
+			eventURL:      "://bad-schema",
+			expectedError: "parse \"://bad-schema\": missing protocol scheme", // Specific error from url.Parse
+		},
+		{
+			name:          "Error: Invalid URL from event.Provider.URL (final parse)",
+			providerToken: "token",
+			providerURL:   "ht tp://invalid host", // Invalid URL format
+			repoURL:       "",
+			eventURL:      "",
+			expectedError: "failed to parse api url", // Wrapper error message
+		},
+		{
+			name:              "Error: Invalid URL from v.repoURL (final parse)",
+			providerToken:     "token",
+			providerURL:       "",
+			repoURL:           "ht tp://invalid.repo.url/foo/bar", // Invalid format
+			pathWithNamespace: "foo/bar",
+			eventURL:          "",
+			// Note: The calculated apiURL would be "ht tp://invalid.repo.url" before parsing
+			expectedError: "failed to parse api url",
+		},
+	}
 
-	v.repoURL, event.URL, event.Provider.URL = "", "", ""
-	event.URL = fmt.Sprintf("%s/hello-this-is-me-ze/project", fakehost)
-	err = v.SetClient(ctx, nil, event, nil, nil)
-	assert.NilError(t, err)
-	assert.Equal(t, fakehost, v.apiURL)
+	// Run test cases
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Setup specific to this test case
+			v := &Provider{
+				gitlabClient:      mockClient, // Use the shared mock client
+				repoURL:           tc.repoURL,
+				pathWithNamespace: tc.pathWithNamespace,
+			}
+			event := info.NewEvent()
+			event.Provider.Token = tc.providerToken
+			event.Provider.URL = tc.providerURL
+			event.URL = tc.eventURL
+			// Set some default IDs to avoid potential nil pointer issues or side effects
+			// if the GetProject part of SetClient is reached unexpectedly.
+			event.TargetProjectID = 1
+			event.SourceProjectID = 1
 
-	v.repoURL, event.URL, event.Provider.URL = "", "", ""
-	event.Provider.URL = fmt.Sprintf("%s/hello-this-is-me-ze/anotherproject", fakehost)
-	assert.Equal(t, fakehost, v.apiURL)
+			// Execute the function under test
+			// Using placeholder nil values for arguments not directly related to URL detection
+			err := v.SetClient(ctx, nil, event, nil, nil)
 
-	v.repoURL = fmt.Sprintf("%s/hello-this-is-me-ze/anotherproject", fakehost)
-	v.pathWithNamespace = "hello-this-is-me-ze/anotherproject"
-	event.URL, event.Provider.URL = "", ""
-	assert.Equal(t, fakehost, v.apiURL)
+			// Assertions
+			if tc.expectedError != "" {
+				assert.ErrorContains(t, err, tc.expectedError)
+				// If an error is expected, we usually don't check the apiURL state,
+				// as it might be indeterminate or irrelevant.
+			} else {
+				assert.NilError(t, err)
+				// Only check the resulting apiURL if no error was expected
+				assert.Equal(t, tc.expectedAPIURL, v.apiURL)
+				// Optionally, check if the client was actually set (if no error)
+				assert.Assert(t, v.Client() != nil)
+				assert.Assert(t, v.Token != nil && *v.Token == tc.providerToken)
+			}
+		})
+	}
 }
 
 func TestGetTektonDir(t *testing.T) {
@@ -446,7 +553,7 @@ func TestGetTektonDir(t *testing.T) {
 			}
 			if tt.wantClient {
 				client, mux, tearDown := thelp.Setup(t)
-				v.Client = client
+				v.SetGitLabClient(client)
 				muxbranch := tt.args.event.HeadBranch
 				if tt.args.provenance == "default_branch" {
 					muxbranch = tt.args.event.DefaultBranch
@@ -485,7 +592,7 @@ func TestGetFileInsideRepo(t *testing.T) {
 	}
 	v := Provider{
 		sourceProjectID: 10,
-		Client:          client,
+		gitlabClient:    client,
 	}
 	thelp.MuxListTektonDir(t, mux, v.sourceProjectID, event.HeadBranch, content, false, false)
 	got, err := v.GetFileInsideRepo(ctx, event, "pr.yaml", "")
@@ -714,7 +821,7 @@ func TestGetFiles(t *testing.T) {
 					})
 			}
 
-			providerInfo := &Provider{Client: fakeclient, sourceProjectID: tt.sourceProjectID, targetProjectID: tt.targetProjectID}
+			providerInfo := &Provider{gitlabClient: fakeclient, sourceProjectID: tt.sourceProjectID, targetProjectID: tt.targetProjectID}
 			changedFiles, err := providerInfo.GetFiles(ctx, tt.event)
 			if tt.wantError != true {
 				assert.NilError(t, err, nil)
@@ -788,7 +895,7 @@ func TestIsHeadCommitOfBranch(t *testing.T) {
 			defer teardown()
 			glProvider := &Provider{sourceProjectID: 1}
 			if tt.wantClient {
-				glProvider.Client = fakeclient
+				glProvider.SetGitLabClient(fakeclient)
 				mux.HandleFunc("/projects/1/repository/branches/cool-branch",
 					func(rw http.ResponseWriter, _ *http.Request) {
 						if tt.errStatusCode != 0 {
@@ -806,6 +913,110 @@ func TestIsHeadCommitOfBranch(t *testing.T) {
 				return
 			}
 			assert.NilError(t, err)
+		})
+	}
+}
+
+func TestGitLabCreateComment(t *testing.T) {
+	tests := []struct {
+		name          string
+		event         *info.Event
+		commit        string
+		updateMarker  string
+		mockResponses map[string]func(rw http.ResponseWriter, _ *http.Request)
+		wantErr       string
+		clientNil     bool
+	}{
+		{
+			name:      "nil client error",
+			clientNil: true,
+			event:     &info.Event{PullRequestNumber: 123},
+			wantErr:   "no gitlab client has been initialized",
+		},
+		{
+			name:    "not a merge request error",
+			event:   &info.Event{PullRequestNumber: 0},
+			wantErr: "create comment only works on merge requests",
+		},
+		{
+			name:         "create new comment",
+			event:        &info.Event{PullRequestNumber: 123},
+			commit:       "New Comment",
+			updateMarker: "",
+			mockResponses: map[string]func(rw http.ResponseWriter, _ *http.Request){
+				"/projects/666/merge_requests/123/notes": func(rw http.ResponseWriter, r *http.Request) {
+					assert.Equal(t, r.Method, http.MethodPost)
+					rw.WriteHeader(http.StatusCreated)
+					fmt.Fprint(rw, `{}`)
+				},
+			},
+		},
+		{
+			name:         "update existing comment",
+			event:        &info.Event{PullRequestNumber: 123},
+			commit:       "Updated Comment",
+			updateMarker: "MARKER",
+			mockResponses: map[string]func(rw http.ResponseWriter, _ *http.Request){
+				"/projects/666/merge_requests/123/notes": func(rw http.ResponseWriter, r *http.Request) {
+					if r.Method == http.MethodGet {
+						fmt.Fprint(rw, `[{"id": 555, "body": "MARKER"}]`)
+						return
+					}
+				},
+				"/projects/666/merge_requests/123/notes/555": func(rw http.ResponseWriter, r *http.Request) {
+					assert.Equal(t, r.Method, "PUT")
+					rw.WriteHeader(http.StatusOK)
+					fmt.Fprint(rw, `{}`)
+				},
+			},
+		},
+		{
+			name:         "no matching comment creates new",
+			event:        &info.Event{PullRequestNumber: 123},
+			commit:       "New Comment",
+			updateMarker: "MARKER",
+			mockResponses: map[string]func(rw http.ResponseWriter, _ *http.Request){
+				"/projects/666/merge_requests/123/notes": func(rw http.ResponseWriter, r *http.Request) {
+					if r.Method == http.MethodGet {
+						fmt.Fprint(rw, `[{"id": 555, "body": "NO_MATCH"}]`)
+						return
+					}
+					assert.Equal(t, r.Method, http.MethodPost)
+					rw.WriteHeader(http.StatusCreated)
+					fmt.Fprint(rw, `{}`)
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fakeclient, mux, teardown := thelp.Setup(t)
+			defer teardown()
+
+			if tt.clientNil {
+				p := &Provider{
+					sourceProjectID: 666,
+				}
+				err := p.CreateComment(context.Background(), tt.event, tt.commit, tt.updateMarker)
+				assert.ErrorContains(t, err, tt.wantErr)
+				return
+			}
+
+			for endpoint, handler := range tt.mockResponses {
+				mux.HandleFunc(endpoint, handler)
+			}
+
+			p := &Provider{
+				sourceProjectID: 666,
+				gitlabClient:    fakeclient,
+			}
+			err := p.CreateComment(context.Background(), tt.event, tt.commit, tt.updateMarker)
+			if tt.wantErr != "" {
+				assert.ErrorContains(t, err, tt.wantErr)
+			} else {
+				assert.NilError(t, err)
+			}
 		})
 	}
 }

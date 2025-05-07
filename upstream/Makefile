@@ -9,7 +9,7 @@ OUTPUT_DIR=bin
 GO           = go
 TIMEOUT_UNIT = 20m
 TIMEOUT_E2E  = 45m
-DEFAULT_GO_TEST_FLAGS := -v -race -failfast
+DEFAULT_GO_TEST_FLAGS := -race -failfast
 GO_TEST_FLAGS :=
 
 SHELL := bash
@@ -99,7 +99,7 @@ lint-md: ## runs markdownlint and vale on all markdown files
 	@echo "Linting markdown files..."
 	@markdownlint $(MD_FILES)
 	@echo "Grammar check with vale of documentation..."
-	@vale docs/content *.md --minAlertLevel=error --output=line
+	@vale docs/content --output=line --glob='*.md'
 	@echo "CodeSpell on docs content"
 	@codespell docs/content
 

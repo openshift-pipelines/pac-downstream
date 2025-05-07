@@ -19,36 +19,36 @@ package gitlab
 import (
 	"fmt"
 	"net/http"
-	"time"
 )
 
-// GroupAccessTokensService handles communication with the
-// groups access tokens related methods of the GitLab API.
-//
-// GitLab API docs:
-// https://docs.gitlab.com/api/group_access_tokens/
-type GroupAccessTokensService struct {
-	client *Client
-}
+type (
+	// GroupAccessTokensServiceInterface defines all the API methods for the GroupAccessTokensService
+	GroupAccessTokensServiceInterface interface {
+		ListGroupAccessTokens(gid interface{}, opt *ListGroupAccessTokensOptions, options ...RequestOptionFunc) ([]*GroupAccessToken, *Response, error)
+		GetGroupAccessToken(gid interface{}, id int, options ...RequestOptionFunc) (*GroupAccessToken, *Response, error)
+		CreateGroupAccessToken(gid interface{}, opt *CreateGroupAccessTokenOptions, options ...RequestOptionFunc) (*GroupAccessToken, *Response, error)
+		RotateGroupAccessToken(gid interface{}, id int, opt *RotateGroupAccessTokenOptions, options ...RequestOptionFunc) (*GroupAccessToken, *Response, error)
+		RotateGroupAccessTokenSelf(gid interface{}, opt *RotateGroupAccessTokenOptions, options ...RequestOptionFunc) (*GroupAccessToken, *Response, error)
+		RevokeGroupAccessToken(gid interface{}, id int, options ...RequestOptionFunc) (*Response, error)
+	}
+
+	// GroupAccessTokensService handles communication with the
+	// groups access tokens related methods of the GitLab API.
+	//
+	// GitLab API docs:
+	// https://docs.gitlab.com/api/group_access_tokens/
+	GroupAccessTokensService struct {
+		client *Client
+	}
+)
+
+var _ GroupAccessTokensServiceInterface = (*GroupAccessTokensService)(nil)
 
 // GroupAccessToken represents a GitLab group access token.
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/group_access_tokens/
-type GroupAccessToken struct {
-	ID          int              `json:"id"`
-	UserID      int              `json:"user_id"`
-	Name        string           `json:"name"`
-	Description string           `json:"description"`
-	Scopes      []string         `json:"scopes"`
-	CreatedAt   *time.Time       `json:"created_at"`
-	ExpiresAt   *ISOTime         `json:"expires_at"`
-	LastUsedAt  *time.Time       `json:"last_used_at"`
-	Active      bool             `json:"active"`
-	Revoked     bool             `json:"revoked"`
-	Token       string           `json:"token"`
-	AccessLevel AccessLevelValue `json:"access_level"`
-}
+type GroupAccessToken resourceAccessToken
 
 func (v GroupAccessToken) String() string {
 	return Stringify(v)
@@ -169,6 +169,31 @@ func (s *GroupAccessTokensService) RotateGroupAccessToken(gid interface{}, id in
 		return nil, nil, err
 	}
 	u := fmt.Sprintf("groups/%s/access_tokens/%d/rotate", PathEscape(groups), id)
+	req, err := s.client.NewRequest(http.MethodPost, u, opt, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	gat := new(GroupAccessToken)
+	resp, err := s.client.Do(req, gat)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return gat, resp, nil
+}
+
+// RotateGroupAccessTokenSelf revokes the group access token used for the request
+// and returns a new group access token that expires in one week per default.
+//
+// GitLab API docs:
+// https://docs.gitlab.com/api/group_access_tokens/#self-rotate
+func (s *GroupAccessTokensService) RotateGroupAccessTokenSelf(gid interface{}, opt *RotateGroupAccessTokenOptions, options ...RequestOptionFunc) (*GroupAccessToken, *Response, error) {
+	groups, err := parseID(gid)
+	if err != nil {
+		return nil, nil, err
+	}
+	u := fmt.Sprintf("groups/%s/access_tokens/self/rotate", PathEscape(groups))
 	req, err := s.client.NewRequest(http.MethodPost, u, opt, options)
 	if err != nil {
 		return nil, nil, err

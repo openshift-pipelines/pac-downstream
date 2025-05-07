@@ -12,7 +12,7 @@ import (
 	"strings"
 
 	ghinstallation "github.com/bradleyfalzon/ghinstallation/v2"
-	"github.com/google/go-github/v69/github"
+	"github.com/google/go-github/v71/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/opscomments"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
@@ -73,10 +73,10 @@ func (v *Provider) GetAppToken(ctx context.Context, kube kubernetes.Interface, g
 			gheURL = "https://" + gheURL
 		}
 		uploadURL := gheURL + "/api/uploads"
-		v.Client, _ = github.NewClient(&http.Client{Transport: itr}).WithEnterpriseURLs(gheURL, uploadURL)
-		itr.BaseURL = strings.TrimSuffix(v.Client.BaseURL.String(), "/")
+		v.ghClient, _ = github.NewClient(&http.Client{Transport: itr}).WithEnterpriseURLs(gheURL, uploadURL)
+		itr.BaseURL = strings.TrimSuffix(v.Client().BaseURL.String(), "/")
 	} else {
-		v.Client = github.NewClient(&http.Client{Transport: itr})
+		v.ghClient = github.NewClient(&http.Client{Transport: itr})
 	}
 
 	// Get a token ASAP because we need it for setting private repos
@@ -208,7 +208,7 @@ func (v *Provider) ParsePayload(ctx context.Context, run *params.Run, request *h
 	return processedEvent, nil
 }
 
-func (v *Provider) processEvent(ctx context.Context, event *info.Event, eventInt interface{}) (*info.Event, error) {
+func (v *Provider) processEvent(ctx context.Context, event *info.Event, eventInt any) (*info.Event, error) {
 	var processedEvent *info.Event
 	var err error
 
@@ -216,7 +216,7 @@ func (v *Provider) processEvent(ctx context.Context, event *info.Event, eventInt
 
 	switch gitEvent := eventInt.(type) {
 	case *github.CheckRunEvent:
-		if v.Client == nil {
+		if v.ghClient == nil {
 			return nil, fmt.Errorf("check run rerequest is only supported with github apps integration")
 		}
 
@@ -225,7 +225,7 @@ func (v *Provider) processEvent(ctx context.Context, event *info.Event, eventInt
 		}
 		return v.handleReRequestEvent(ctx, gitEvent)
 	case *github.CheckSuiteEvent:
-		if v.Client == nil {
+		if v.ghClient == nil {
 			return nil, fmt.Errorf("check suite rerequest is only supported with github apps integration")
 		}
 
@@ -234,7 +234,7 @@ func (v *Provider) processEvent(ctx context.Context, event *info.Event, eventInt
 		}
 		return v.handleCheckSuites(ctx, gitEvent)
 	case *github.IssueCommentEvent:
-		if v.Client == nil {
+		if v.ghClient == nil {
 			return nil, fmt.Errorf("no github client has been initialized, " +
 				"exiting... (hint: did you forget setting a secret on your repo?)")
 		}
@@ -246,7 +246,7 @@ func (v *Provider) processEvent(ctx context.Context, event *info.Event, eventInt
 			return nil, err
 		}
 	case *github.CommitCommentEvent:
-		if v.Client == nil {
+		if v.ghClient == nil {
 			return nil, fmt.Errorf("no github client has been initialized, " +
 				"exiting... (hint: did you forget setting a secret on your repo?)")
 		}
@@ -258,6 +258,16 @@ func (v *Provider) processEvent(ctx context.Context, event *info.Event, eventInt
 		if gitEvent.GetRepo() == nil {
 			return nil, errors.New("error parsing payload the repository should not be nil")
 		}
+
+		// When a branch is deleted via repository UI, it triggers a push event.
+		// However, Pipelines as Code does not support handling branch delete events,
+		// so we return an error here to indicate this unsupported operation.
+		if gitEvent.After != nil {
+			if provider.IsZeroSHA(*gitEvent.After) {
+				return nil, fmt.Errorf("branch %s has been deleted, exiting", gitEvent.GetRef())
+			}
+		}
+
 		processedEvent.Organization = gitEvent.GetRepo().GetOwner().GetLogin()
 		processedEvent.Repository = gitEvent.GetRepo().GetName()
 		processedEvent.DefaultBranch = gitEvent.GetRepo().GetDefaultBranch()

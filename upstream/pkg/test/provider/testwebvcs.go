@@ -48,6 +48,10 @@ func (v *TestProviderImp) IsAllowedOwnersFile(_ context.Context, _ *info.Event) 
 	return v.AllowedInOwnersFile, nil
 }
 
+func (v *TestProviderImp) CreateComment(_ context.Context, _ *info.Event, _, _ string) error {
+	return nil
+}
+
 func (v *TestProviderImp) SetLogger(_ *zap.SugaredLogger) {
 }
 
@@ -119,4 +123,8 @@ func (v *TestProviderImp) GetFiles(_ context.Context, _ *info.Event) (changedfil
 
 func (v *TestProviderImp) CreateToken(_ context.Context, _ []string, _ *info.Event) (string, error) {
 	return "", nil
+}
+
+func (v *TestProviderImp) GetTemplate(commentType provider.CommentType) string {
+	return provider.GetHTMLTemplate(commentType)
 }
