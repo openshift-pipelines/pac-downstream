@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
@@ -17,6 +18,7 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
+	providerMetrics "github.com/openshift-pipelines/pipelines-as-code/pkg/provider/metrics"
 	gitlab "gitlab.com/gitlab-org/api/client-go"
 	"go.uber.org/zap"
 )
@@ -45,7 +47,7 @@ var anyMergeRequestEventType = []string{"Merge Request", "MergeRequest"}
 var _ provider.Interface = (*Provider)(nil)
 
 type Provider struct {
-	Client            *gitlab.Client
+	gitlabClient      *gitlab.Client
 	Logger            *zap.SugaredLogger
 	run               *params.Run
 	pacInfo           *info.PacOpts
@@ -58,10 +60,66 @@ type Provider struct {
 	apiURL            string
 	eventEmitter      *events.EventEmitter
 	repo              *v1alpha1.Repository
+	triggerEvent      string
+}
+
+func (v *Provider) Client() *gitlab.Client {
+	providerMetrics.RecordAPIUsage(
+		v.Logger,
+		// URL used instead of "gitlab" to differentiate in the case of a CI cluster which
+		// serves multiple GitLab instances
+		v.apiURL,
+		v.triggerEvent,
+		v.repo,
+	)
+	return v.gitlabClient
+}
+
+func (v *Provider) SetGitLabClient(client *gitlab.Client) {
+	v.gitlabClient = client
 }
 
 func (v *Provider) SetPacInfo(pacInfo *info.PacOpts) {
 	v.pacInfo = pacInfo
+}
+
+func (v *Provider) CreateComment(_ context.Context, event *info.Event, commit, updateMarker string) error {
+	if v.gitlabClient == nil {
+		return fmt.Errorf("no gitlab client has been initialized")
+	}
+
+	if event.PullRequestNumber == 0 {
+		return fmt.Errorf("create comment only works on merge requests")
+	}
+
+	// List comments of the merge request
+	if updateMarker != "" {
+		comments, _, err := v.Client().Notes.ListMergeRequestNotes(v.sourceProjectID, event.PullRequestNumber, &gitlab.ListMergeRequestNotesOptions{
+			ListOptions: gitlab.ListOptions{
+				Page:    1,
+				PerPage: 100,
+			},
+		})
+		if err != nil {
+			return err
+		}
+
+		re := regexp.MustCompile(updateMarker)
+		for _, comment := range comments {
+			if re.MatchString(comment.Body) {
+				_, _, err := v.Client().Notes.UpdateMergeRequestNote(v.sourceProjectID, event.PullRequestNumber, comment.ID, &gitlab.UpdateMergeRequestNoteOptions{
+					Body: &commit,
+				})
+				return err
+			}
+		}
+	}
+
+	_, _, err := v.Client().Notes.CreateMergeRequestNote(v.sourceProjectID, event.PullRequestNumber, &gitlab.CreateMergeRequestNoteOptions{
+		Body: &commit,
+	})
+
+	return err
 }
 
 // CheckPolicyAllowing TODO: Implement ME.
@@ -130,9 +188,13 @@ func (v *Provider) SetClient(_ context.Context, run *params.Run, runevent *info.
 		// this really should not happen but let's just hope this is it
 		apiURL = apiPublicURL
 	}
+	_, err = url.Parse(apiURL)
+	if err != nil {
+		return fmt.Errorf("failed to parse api url %s: %w", apiURL, err)
+	}
 	v.apiURL = apiURL
 
-	v.Client, err = gitlab.NewClient(runevent.Provider.Token, gitlab.WithBaseURL(apiURL))
+	v.gitlabClient, err = gitlab.NewClient(runevent.Provider.Token, gitlab.WithBaseURL(apiURL))
 	if err != nil {
 		return err
 	}
@@ -151,7 +213,7 @@ func (v *Provider) SetClient(_ context.Context, run *params.Run, runevent *info.
 	// it ASAP if we can.
 	if v.sourceProjectID == 0 && runevent.Organization != "" && runevent.Repository != "" {
 		projectSlug := filepath.Join(runevent.Organization, runevent.Repository)
-		projectinfo, _, err := v.Client.Projects.GetProject(projectSlug, &gitlab.GetProjectOptions{})
+		projectinfo, _, err := v.Client().Projects.GetProject(projectSlug, &gitlab.GetProjectOptions{})
 		if err != nil {
 			return err
 		}
@@ -165,6 +227,7 @@ func (v *Provider) SetClient(_ context.Context, run *params.Run, runevent *info.
 	v.run = run
 	v.eventEmitter = eventsEmitter
 	v.repo = repo
+	v.triggerEvent = runevent.EventType
 
 	return nil
 }
@@ -172,7 +235,7 @@ func (v *Provider) SetClient(_ context.Context, run *params.Run, runevent *info.
 func (v *Provider) CreateStatus(_ context.Context, event *info.Event, statusOpts provider.StatusOpts,
 ) error {
 	var detailsURL string
-	if v.Client == nil {
+	if v.gitlabClient == nil {
 		return fmt.Errorf("no gitlab client has been initialized, " +
 			"exiting... (hint: did you forget setting a secret on your repo?)")
 	}
@@ -222,7 +285,7 @@ func (v *Provider) CreateStatus(_ context.Context, event *info.Event, statusOpts
 	// a status comment on it.
 	// This would work on a push or an MR from a branch within the same repo.
 	// Ignoring errors because of the write access issues,
-	if _, _, err := v.Client.Commits.SetCommitStatus(event.SourceProjectID, event.SHA, opt); err != nil {
+	if _, _, err := v.Client().Commits.SetCommitStatus(event.SourceProjectID, event.SHA, opt); err != nil {
 		v.eventEmitter.EmitMessage(v.repo, zap.ErrorLevel, "FailedToSetCommitStatus",
 			"cannot set status with the GitLab token because of: "+err.Error())
 	}
@@ -233,17 +296,29 @@ func (v *Provider) CreateStatus(_ context.Context, event *info.Event, statusOpts
 	if event.TriggerTarget == triggertype.PullRequest && opscomments.IsAnyOpsEventType(event.EventType) {
 		eventType = triggertype.PullRequest
 	}
-	// only add a note when we are on a MR
-	if eventType == triggertype.PullRequest || provider.Valid(event.EventType, anyMergeRequestEventType) {
-		mopt := &gitlab.CreateMergeRequestNoteOptions{Body: gitlab.Ptr(body)}
-		_, _, err := v.Client.Notes.CreateMergeRequestNote(event.TargetProjectID, event.PullRequestNumber, mopt)
-		return err
+
+	var commentStrategy string
+
+	if v.repo != nil && v.repo.Spec.Settings != nil && v.repo.Spec.Settings.Gitlab != nil {
+		commentStrategy = v.repo.Spec.Settings.Gitlab.CommentStrategy
 	}
+	switch commentStrategy {
+	case "disable_all":
+		v.Logger.Warn("Comments related to PipelineRuns status have been disabled for GitLab merge requests")
+		return nil
+	default:
+		if eventType == triggertype.PullRequest || provider.Valid(event.EventType, anyMergeRequestEventType) {
+			mopt := &gitlab.CreateMergeRequestNoteOptions{Body: gitlab.Ptr(body)}
+			_, _, err := v.Client().Notes.CreateMergeRequestNote(event.TargetProjectID, event.PullRequestNumber, mopt)
+			return err
+		}
+	}
+
 	return nil
 }
 
 func (v *Provider) GetTektonDir(_ context.Context, event *info.Event, path, provenance string) (string, error) {
-	if v.Client == nil {
+	if v.gitlabClient == nil {
 		return "", fmt.Errorf("no gitlab client has been initialized, " +
 			"exiting... (hint: did you forget setting a secret on your repo?)")
 	}
@@ -272,7 +347,7 @@ func (v *Provider) GetTektonDir(_ context.Context, event *info.Event, path, prov
 	nodes := []*gitlab.TreeNode{}
 
 	for {
-		objects, resp, err := v.Client.Repositories.ListTree(v.sourceProjectID, opt, options...)
+		objects, resp, err := v.Client().Repositories.ListTree(v.sourceProjectID, opt, options...)
 		if err != nil {
 			return "", fmt.Errorf("failed to list %s dir: %w", path, err)
 		}
@@ -323,11 +398,11 @@ func (v *Provider) getObject(fname, branch string, pid int) ([]byte, *gitlab.Res
 	opt := &gitlab.GetRawFileOptions{
 		Ref: gitlab.Ptr(branch),
 	}
-	file, resp, err := v.Client.RepositoryFiles.GetRawFile(pid, fname, opt)
+	file, resp, err := v.Client().RepositoryFiles.GetRawFile(pid, fname, opt)
 	if err != nil {
 		return []byte{}, resp, fmt.Errorf("failed to get filename from api %s dir: %w", fname, err)
 	}
-	if resp != nil && resp.Response.StatusCode == http.StatusNotFound {
+	if resp != nil && resp.StatusCode == http.StatusNotFound {
 		return []byte{}, resp, nil
 	}
 	return file, resp, nil
@@ -342,14 +417,14 @@ func (v *Provider) GetFileInsideRepo(_ context.Context, runevent *info.Event, pa
 }
 
 func (v *Provider) GetCommitInfo(_ context.Context, runevent *info.Event) error {
-	if v.Client == nil {
+	if v.gitlabClient == nil {
 		return fmt.Errorf("%s", noClientErrStr)
 	}
 
 	// if we don't have a SHA (ie: incoming-webhook) then get it from the branch
 	// and populate in the runevent.
 	if runevent.SHA == "" && runevent.HeadBranch != "" {
-		branchinfo, _, err := v.Client.Commits.GetCommit(v.sourceProjectID, runevent.HeadBranch, &gitlab.GetCommitOptions{})
+		branchinfo, _, err := v.Client().Commits.GetCommit(v.sourceProjectID, runevent.HeadBranch, &gitlab.GetCommitOptions{})
 		if err != nil {
 			return err
 		}
@@ -362,7 +437,7 @@ func (v *Provider) GetCommitInfo(_ context.Context, runevent *info.Event) error 
 }
 
 func (v *Provider) GetFiles(_ context.Context, runevent *info.Event) (changedfiles.ChangedFiles, error) {
-	if v.Client == nil {
+	if v.gitlabClient == nil {
 		return changedfiles.ChangedFiles{}, fmt.Errorf("no gitlab client has been initialized, " +
 			"exiting... (hint: did you forget setting a secret on your repo?)")
 	}
@@ -379,7 +454,7 @@ func (v *Provider) GetFiles(_ context.Context, runevent *info.Event) (changedfil
 		changedFiles := changedfiles.ChangedFiles{}
 
 		for {
-			mrchanges, resp, err := v.Client.MergeRequests.ListMergeRequestDiffs(v.targetProjectID, runevent.PullRequestNumber, opt, options...)
+			mrchanges, resp, err := v.Client().MergeRequests.ListMergeRequestDiffs(v.targetProjectID, runevent.PullRequestNumber, opt, options...)
 			if err != nil {
 				return changedfiles.ChangedFiles{}, err
 			}
@@ -414,7 +489,7 @@ func (v *Provider) GetFiles(_ context.Context, runevent *info.Event) (changedfil
 	}
 
 	if runevent.TriggerTarget == "push" {
-		pushChanges, _, err := v.Client.Commits.GetCommitDiff(v.sourceProjectID, runevent.SHA, &gitlab.GetCommitDiffOptions{})
+		pushChanges, _, err := v.Client().Commits.GetCommitDiff(v.sourceProjectID, runevent.SHA, &gitlab.GetCommitDiffOptions{})
 		if err != nil {
 			return changedfiles.ChangedFiles{}, err
 		}
@@ -445,11 +520,11 @@ func (v *Provider) CreateToken(_ context.Context, _ []string, _ *info.Event) (st
 
 // isHeadCommitOfBranch validates that branch exists and the SHA is HEAD commit of the branch.
 func (v *Provider) isHeadCommitOfBranch(runevent *info.Event, branchName string) error {
-	if v.Client == nil {
+	if v.gitlabClient == nil {
 		return fmt.Errorf("no gitlab client has been initialized, " +
 			"exiting... (hint: did you forget setting a secret on your repo?)")
 	}
-	branch, _, err := v.Client.Branches.GetBranch(v.sourceProjectID, branchName)
+	branch, _, err := v.Client().Branches.GetBranch(v.sourceProjectID, branchName)
 	if err != nil {
 		return err
 	}
@@ -459,4 +534,8 @@ func (v *Provider) isHeadCommitOfBranch(runevent *info.Event, branchName string)
 	}
 
 	return fmt.Errorf("provided SHA %s is not the HEAD commit of the branch %s", runevent.SHA, branchName)
+}
+
+func (v *Provider) GetTemplate(commentType provider.CommentType) string {
+	return provider.GetHTMLTemplate(commentType)
 }

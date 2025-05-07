@@ -10,10 +10,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/go-github/v69/github"
+	"github.com/google/go-github/v71/github"
 	"github.com/jonboulle/clockwork"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/events"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/opscomments"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/clients"
@@ -193,7 +194,7 @@ func TestMatchPipelinerunAnnotationAndRepositories(t *testing.T) {
 					EventType:     "pull_request",
 					BaseBranch:    mainBranch,
 					HeadBranch:    "unittests",
-					Event: map[string]interface{}{
+					Event: map[string]any{
 						"foo": "bar",
 					},
 				},
@@ -1350,9 +1351,9 @@ func TestMatchPipelinerunAnnotationAndRepositories(t *testing.T) {
 			fakeclient, mux, ghTestServerURL, teardown := ghtesthelper.SetupGH()
 			defer teardown()
 			vcx := &ghprovider.Provider{
-				Client: fakeclient,
-				Token:  github.Ptr("None"),
+				Token: github.Ptr("None"),
 			}
+			vcx.SetGithubClient(fakeclient)
 			if tt.args.runevent.Request == nil {
 				tt.args.runevent.Request = &info.Request{Header: http.Header{}, Payload: nil}
 			}
@@ -1414,9 +1415,10 @@ func runTest(ctx context.Context, t *testing.T, tt annotationTest, vcx provider.
 		Info:    info.Info{},
 	}
 
+	eventEmitter := events.NewEventEmitter(cs.Kube, logger)
 	matches, err := MatchPipelinerunByAnnotation(ctx, logger,
 		tt.args.pruns,
-		client, &tt.args.runevent, vcx,
+		client, &tt.args.runevent, vcx, eventEmitter, nil,
 	)
 
 	if tt.wantLog != "" {
@@ -1533,6 +1535,7 @@ func TestMatchPipelinerunByAnnotation(t *testing.T) {
 		wantErr    bool
 		wantPrName string
 		wantLog    []string
+		logLevel   int
 	}{
 		{
 			name: "good-match-with-only-one",
@@ -1610,6 +1613,38 @@ func TestMatchPipelinerunByAnnotation(t *testing.T) {
 			wantPrName: pipelineCel.GetName(),
 		},
 		{
+			name: "cel-expression-takes-precedence-over-annotations",
+			args: args{
+				pruns: []*tektonv1.PipelineRun{
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: "pipeline-on-cel-test",
+							Annotations: map[string]string{
+								keys.OnEvent:         "[pull_request]",
+								keys.OnTargetBranch:  "[main]",
+								keys.OnCelExpression: `event == "pull_request" && target_branch == "main" && source_branch == "warn-for-cel"`,
+							},
+						},
+					},
+				},
+				runevent: info.Event{
+					URL:               "https://hello/moto",
+					TriggerTarget:     "pull_request",
+					EventType:         "pull_request",
+					BaseBranch:        "main",
+					HeadBranch:        "warn-for-cel",
+					PullRequestNumber: 10,
+					Request: &info.Request{
+						Header: http.Header{},
+					},
+				},
+			},
+			wantErr: false,
+			wantLog: []string{
+				`Warning: The Pipelinerun 'pipeline-on-cel-test' has 'on-cel-expression' defined along with [on-event, on-target-branch] annotation(s). The 'on-cel-expression' will take precedence and these annotations will be ignored`,
+			},
+		},
+		{
 			name: "no-match-on-label",
 			args: args{
 				pruns: []*tektonv1.PipelineRun{
@@ -1638,6 +1673,37 @@ func TestMatchPipelinerunByAnnotation(t *testing.T) {
 			wantErr: false,
 			wantLog: []string{
 				"matching pipelineruns to event: URL=https://hello/moto, target-branch=main, source-branch=source, target-event=pull_request, labels=documentation, pull-request=10",
+			},
+		},
+		{
+			name: "no-on-label-annotation-on-pr",
+			args: args{
+				pruns: []*tektonv1.PipelineRun{
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: "pipeline-label",
+							Annotations: map[string]string{
+								keys.OnEvent:        "[pull_request]",
+								keys.OnTargetBranch: "[main]",
+							},
+						},
+					},
+					pipelineGood,
+				},
+				runevent: info.Event{
+					URL:               "https://hello/moto",
+					TriggerTarget:     triggertype.PullRequest,
+					EventType:         string(triggertype.LabelUpdate),
+					HeadBranch:        "source",
+					BaseBranch:        "main",
+					PullRequestNumber: 10,
+					PullRequestLabel:  []string{"documentation"},
+				},
+			},
+			wantErr: true,
+			wantLog: []string{
+				"label update event, PipelineRun pipeline-label does not have a on-label for any of those labels: documentation",
+				"label update event, PipelineRun pipeline-good does not have a on-label for any of those labels: documentation",
 			},
 		},
 		{
@@ -1883,7 +1949,9 @@ func TestMatchPipelinerunByAnnotation(t *testing.T) {
 				Clients: clients.Clients{},
 				Info:    info.Info{},
 			}
-			matches, err := MatchPipelinerunByAnnotation(ctx, logger, tt.args.pruns, cs, &tt.args.runevent, &ghprovider.Provider{})
+
+			eventEmitter := events.NewEventEmitter(cs.Clients.Kube, logger)
+			matches, err := MatchPipelinerunByAnnotation(ctx, logger, tt.args.pruns, cs, &tt.args.runevent, &ghprovider.Provider{}, eventEmitter, nil)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("MatchPipelinerunByAnnotation() error = %v, wantErr %v", err, tt.wantErr)
 				return

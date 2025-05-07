@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"path"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -19,6 +20,7 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
+	providerMetrics "github.com/openshift-pipelines/pipelines-as-code/pkg/provider/metrics"
 	"go.uber.org/zap"
 )
 
@@ -43,7 +45,7 @@ const (
 var _ provider.Interface = (*Provider)(nil)
 
 type Provider struct {
-	Client           *gitea.Client
+	giteaClient      *gitea.Client
 	Logger           *zap.SugaredLogger
 	pacInfo          *info.PacOpts
 	Token            *string
@@ -53,6 +55,57 @@ type Provider struct {
 	repo         *v1alpha1.Repository
 	eventEmitter *events.EventEmitter
 	run          *params.Run
+	triggerEvent string
+}
+
+func (v *Provider) Client() *gitea.Client {
+	providerMetrics.RecordAPIUsage(
+		v.Logger,
+		// URL used instead of "gitea" to differentiate in the case of a CI cluster which
+		// serves multiple Gitea instances
+		v.giteaInstanceURL,
+		v.triggerEvent,
+		v.repo,
+	)
+	return v.giteaClient
+}
+
+func (v *Provider) SetGiteaClient(client *gitea.Client) {
+	v.giteaClient = client
+}
+
+func (v *Provider) CreateComment(_ context.Context, event *info.Event, commit, updateMarker string) error {
+	if v.giteaClient == nil {
+		return fmt.Errorf("no gitea client has been initialized")
+	}
+
+	if event.PullRequestNumber == 0 {
+		return fmt.Errorf("create comment only works on pull requests")
+	}
+
+	// List comments of the PR
+	if updateMarker != "" {
+		comments, _, err := v.Client().ListIssueComments(event.Organization, event.Repository, int64(event.PullRequestNumber), gitea.ListIssueCommentOptions{})
+		if err != nil {
+			return err
+		}
+
+		re := regexp.MustCompile(updateMarker)
+		for _, comment := range comments {
+			if re.MatchString(comment.Body) {
+				_, _, err := v.Client().EditIssueComment(event.Organization, event.Repository, comment.ID, gitea.EditIssueCommentOption{
+					Body: commit,
+				})
+				return err
+			}
+		}
+	}
+
+	_, _, err := v.Client().CreateIssueComment(event.Organization, event.Repository, int64(event.PullRequestNumber), gitea.CreateIssueCommentOption{
+		Body: commit,
+	})
+
+	return err
 }
 
 func (v *Provider) SetPacInfo(pacInfo *info.PacOpts) {
@@ -96,12 +149,12 @@ func (v *Provider) SetClient(_ context.Context, run *params.Run, runevent *info.
 	apiURL := runevent.Provider.URL
 	// password is not exposed to CRD, it's only used from the e2e tests
 	if v.Password != "" && runevent.Provider.User != "" {
-		v.Client, err = gitea.NewClient(apiURL, gitea.SetBasicAuth(runevent.Provider.User, v.Password))
+		v.giteaClient, err = gitea.NewClient(apiURL, gitea.SetBasicAuth(runevent.Provider.User, v.Password))
 	} else {
 		if runevent.Provider.Token == "" {
 			return fmt.Errorf("no git_provider.secret has been set in the repo crd")
 		}
-		v.Client, err = gitea.NewClient(apiURL, gitea.SetToken(runevent.Provider.Token))
+		v.giteaClient, err = gitea.NewClient(apiURL, gitea.SetToken(runevent.Provider.Token))
 	}
 	if err != nil {
 		return err
@@ -110,11 +163,12 @@ func (v *Provider) SetClient(_ context.Context, run *params.Run, runevent *info.
 	v.eventEmitter = emitter
 	v.repo = repo
 	v.run = run
+	v.triggerEvent = runevent.EventType
 	return nil
 }
 
 func (v *Provider) CreateStatus(_ context.Context, event *info.Event, statusOpts provider.StatusOpts) error {
-	if v.Client == nil {
+	if v.giteaClient == nil {
 		return fmt.Errorf("cannot set status on gitea no token or url set")
 	}
 	switch statusOpts.Conclusion {
@@ -171,7 +225,7 @@ func (v *Provider) createStatusCommit(event *info.Event, pacopts *info.PacOpts, 
 		Description: status.Title,
 		Context:     provider.GetCheckName(status, pacopts),
 	}
-	if _, _, err := v.Client.CreateStatus(event.Organization, event.Repository, event.SHA, gStatus); err != nil {
+	if _, _, err := v.Client().CreateStatus(event.Organization, event.Repository, event.SHA, gStatus); err != nil {
 		return err
 	}
 
@@ -181,7 +235,7 @@ func (v *Provider) createStatusCommit(event *info.Event, pacopts *info.PacOpts, 
 	}
 	if status.Text != "" && (eventType == triggertype.PullRequest || event.TriggerTarget == triggertype.PullRequest) {
 		status.Text = strings.ReplaceAll(strings.TrimSpace(status.Text), "<br>", "\n")
-		_, _, err := v.Client.CreateIssueComment(event.Organization, event.Repository,
+		_, _, err := v.Client().CreateIssueComment(event.Organization, event.Repository,
 			int64(event.PullRequestNumber), gitea.CreateIssueCommentOption{
 				Body: fmt.Sprintf("%s\n%s", status.Summary, status.Text),
 			},
@@ -204,7 +258,11 @@ func (v *Provider) GetTektonDir(_ context.Context, event *info.Event, path, prov
 	}
 
 	tektonDirSha := ""
-	rootobjects, _, err := v.Client.GetTrees(event.Organization, event.Repository, revision, false)
+	opt := gitea.ListTreeOptions{
+		Ref:       revision,
+		Recursive: false,
+	}
+	rootobjects, _, err := v.Client().GetTrees(event.Organization, event.Repository, opt)
 	if err != nil {
 		return "", err
 	}
@@ -223,7 +281,8 @@ func (v *Provider) GetTektonDir(_ context.Context, event *info.Event, path, prov
 	}
 	// Get all files in the .tekton directory recursively
 	// TODO: figure out if there is a object limit we need to handle here
-	tektonDirObjects, _, err := v.Client.GetTrees(event.Organization, event.Repository, tektonDirSha, true)
+	opts := gitea.ListTreeOptions{Recursive: false, Ref: tektonDirSha}
+	tektonDirObjects, _, err := v.Client().GetTrees(event.Organization, event.Repository, opts)
 	if err != nil {
 		return "", err
 	}
@@ -255,7 +314,7 @@ func (v *Provider) concatAllYamlFiles(objects []gitea.GitEntry, event *info.Even
 }
 
 func (v *Provider) getObject(sha string, event *info.Event) ([]byte, error) {
-	blob, _, err := v.Client.GetBlob(event.Organization, event.Repository, sha)
+	blob, _, err := v.Client().GetBlob(event.Organization, event.Repository, sha)
 	if err != nil {
 		return nil, err
 	}
@@ -272,7 +331,7 @@ func (v *Provider) GetFileInsideRepo(_ context.Context, runevent *info.Event, pa
 		ref = runevent.BaseBranch
 	}
 
-	content, _, err := v.Client.GetContents(runevent.Organization, runevent.Repository, ref, path)
+	content, _, err := v.Client().GetContents(runevent.Organization, runevent.Repository, ref, path)
 	if err != nil {
 		return "", err
 	}
@@ -285,20 +344,20 @@ func (v *Provider) GetFileInsideRepo(_ context.Context, runevent *info.Event, pa
 }
 
 func (v *Provider) GetCommitInfo(_ context.Context, runevent *info.Event) error {
-	if v.Client == nil {
+	if v.giteaClient == nil {
 		return fmt.Errorf("no gitea client has been initialized, " +
 			"exiting... (hint: did you forget setting a secret on your repo?)")
 	}
 
 	sha := runevent.SHA
 	if sha == "" && runevent.HeadBranch != "" {
-		branchinfo, _, err := v.Client.GetRepoBranch(runevent.Organization, runevent.Repository, runevent.HeadBranch)
+		branchinfo, _, err := v.Client().GetRepoBranch(runevent.Organization, runevent.Repository, runevent.HeadBranch)
 		if err != nil {
 			return err
 		}
 		sha = branchinfo.Commit.ID
 	} else if sha == "" && runevent.PullRequestNumber != 0 {
-		pr, _, err := v.Client.GetPullRequest(runevent.Organization, runevent.Repository, int64(runevent.PullRequestNumber))
+		pr, _, err := v.Client().GetPullRequest(runevent.Organization, runevent.Repository, int64(runevent.PullRequestNumber))
 		if err != nil {
 			return err
 		}
@@ -307,7 +366,7 @@ func (v *Provider) GetCommitInfo(_ context.Context, runevent *info.Event) error 
 		runevent.BaseBranch = pr.Base.Ref
 		sha = pr.Head.Sha
 	}
-	commit, _, err := v.Client.GetSingleCommit(runevent.Organization, runevent.Repository, sha)
+	commit, _, err := v.Client().GetSingleCommit(runevent.Organization, runevent.Repository, sha)
 	if err != nil {
 		return err
 	}
@@ -318,7 +377,7 @@ func (v *Provider) GetCommitInfo(_ context.Context, runevent *info.Event) error 
 }
 
 func ShouldGetNextPage(resp *gitea.Response, currentPage int) (bool, int) {
-	val, exists := resp.Response.Header[http.CanonicalHeaderKey("x-pagecount")]
+	val, exists := resp.Header[http.CanonicalHeaderKey("x-pagecount")]
 	if !exists {
 		return false, 0
 	}
@@ -345,7 +404,7 @@ func (v *Provider) GetFiles(_ context.Context, runevent *info.Event) (changedfil
 		opt := gitea.ListPullRequestFilesOptions{ListOptions: gitea.ListOptions{Page: 1, PageSize: 50}}
 		shouldGetNextPage := false
 		for {
-			prChangedFiles, resp, err := v.Client.ListPullRequestFiles(runevent.Organization, runevent.Repository, int64(runevent.PullRequestNumber), opt)
+			prChangedFiles, resp, err := v.Client().ListPullRequestFiles(runevent.Organization, runevent.Repository, int64(runevent.PullRequestNumber), opt)
 			if err != nil {
 				return changedfiles.ChangedFiles{}, err
 			}
@@ -402,4 +461,8 @@ func (v *Provider) GetFiles(_ context.Context, runevent *info.Event) (changedfil
 
 func (v *Provider) CreateToken(_ context.Context, _ []string, _ *info.Event) (string, error) {
 	return "", nil
+}
+
+func (v *Provider) GetTemplate(commentType provider.CommentType) string {
+	return provider.GetHTMLTemplate(commentType)
 }

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/google/go-github/v69/github"
+	"github.com/google/go-github/v71/github"
 	"github.com/jonboulle/clockwork"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
@@ -66,9 +66,10 @@ func TestReconciler_ReconcileKind(t *testing.T) {
 	defer teardown()
 
 	vcx := &ghprovider.Provider{
-		Client: fakeclient,
-		Token:  github.Ptr("None"),
+		Token: github.Ptr("None"),
 	}
+
+	vcx.SetGithubClient(fakeclient)
 
 	tests := []struct {
 		name          string

@@ -9,11 +9,12 @@ import (
 	"io"
 	"net/http"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
 
-	"github.com/google/go-github/v69/github"
+	"github.com/google/go-github/v71/github"
 	apipac "github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
@@ -61,11 +62,6 @@ func testSetupCommonGhReplies(t *testing.T, mux *http.ServeMux, runevent info.Ev
 
 	replyString(mux,
 		fmt.Sprintf("/repos/%s/%s/statuses/%s", runevent.Organization, runevent.Repository, runevent.SHA),
-		"{}")
-
-	// using 666 as pull request number
-	replyString(mux,
-		fmt.Sprintf("/repos/%s/%s/issues/666/comments", runevent.Organization, runevent.Repository),
 		"{}")
 
 	jj := fmt.Sprintf(`{"sha": "%s", "html_url": "https://git.commit.url/%s", "message": "commit message"}`,
@@ -131,6 +127,7 @@ func TestRun(t *testing.T) {
 		PayloadEncodedSecret         string
 		concurrencyLimit             int
 		expectedLogSnippet           string
+		expectedPostedComment        string // TODO: multiple posted comments when we need it
 	}{
 		{
 			name: "pull request/fail-to-start-apps",
@@ -148,6 +145,23 @@ func TestRun(t *testing.T) {
 			tektondir:       "testdata/pull_request",
 			finalStatus:     "failure",
 			finalStatusText: "we need at least one pipelinerun to start with",
+		},
+		{
+			name: "pull request/bad-yaml",
+			runevent: info.Event{
+				SHA:               "principale",
+				Organization:      "owner",
+				Repository:        "lagaffe",
+				URL:               "https://service/documentation",
+				HeadBranch:        "press",
+				BaseBranch:        "main",
+				Sender:            "owner",
+				EventType:         "pull_request",
+				TriggerTarget:     "pull_request",
+				PullRequestNumber: 666,
+			},
+			tektondir:             "testdata/bad_yaml",
+			expectedPostedComment: ".*There are some errors in your PipelineRun template.*line 2: did not find expected key",
 		},
 		{
 			name: "pull request/unknown-remotetask-but-fail-on-matching",
@@ -548,6 +562,19 @@ func TestRun(t *testing.T) {
 				ghtesthelper.SetupGitTree(t, mux, tt.tektondir, &tt.runevent, false)
 			}
 
+			mux.HandleFunc(fmt.Sprintf("/repos/%s/%s/issues/%d/comments", tt.runevent.Organization, tt.runevent.Repository, tt.runevent.PullRequestNumber),
+				func(w http.ResponseWriter, req *http.Request) {
+					if req.Method == http.MethodPost {
+						_, _ = fmt.Fprintf(w, `{"id": %d}`, tt.runevent.PullRequestNumber)
+						// read body and compare it
+						body, _ := io.ReadAll(req.Body)
+						expectedRegexp := regexp.MustCompile(tt.expectedPostedComment)
+						assert.Assert(t, expectedRegexp.Match(body), "expected comment %s, got %s", tt.expectedPostedComment, string(body))
+						return
+					}
+					_, _ = fmt.Fprint(w, `[]`)
+				})
+
 			stdata, _ := testclient.SeedTestData(t, ctx, tdata)
 			cs := &params.Run{
 				Clients: clients.Clients{
@@ -606,11 +633,11 @@ func TestRun(t *testing.T) {
 				},
 			}
 			vcx := &ghprovider.Provider{
-				Client: fakeclient,
 				Run:    cs,
 				Token:  github.Ptr("None"),
 				Logger: logger,
 			}
+			vcx.SetGithubClient(fakeclient)
 			vcx.SetPacInfo(pacInfo)
 			p := NewPacs(&tt.runevent, vcx, cs, pacInfo, k8int, logger, nil)
 			err := p.Run(ctx)
@@ -669,7 +696,7 @@ func TestGetLogURLMergePatch(t *testing.T) {
 		},
 	}
 	result := getLogURLMergePatch(clients, pr)
-	m, ok := result["metadata"].(map[string]interface{})
+	m, ok := result["metadata"].(map[string]any)
 	assert.Assert(t, ok)
 	a, ok := m["annotations"].(map[string]string)
 	assert.Assert(t, ok)

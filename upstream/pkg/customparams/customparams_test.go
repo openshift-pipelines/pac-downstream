@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/google/go-github/v69/github"
+	"github.com/google/go-github/v71/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/incoming"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/events"
@@ -35,7 +35,7 @@ func TestApplyIncomingParams(t *testing.T) {
 				"key1": "value1",
 			},
 			payload: &incoming.Payload{
-				Params: map[string]interface{}{
+				Params: map[string]any{
 					"key2": "value2",
 				},
 			},
@@ -49,7 +49,7 @@ func TestApplyIncomingParams(t *testing.T) {
 				"key1": "value1",
 			},
 			payload: &incoming.Payload{
-				Params: map[string]interface{}{
+				Params: map[string]any{
 					"key1": "value2",
 				},
 			},
@@ -72,7 +72,7 @@ func TestApplyIncomingParams(t *testing.T) {
 				"key1": "value1",
 			},
 			payload: &incoming.Payload{
-				Params: map[string]interface{}{
+				Params: map[string]any{
 					"key2": 1,
 				},
 			},
@@ -153,6 +153,7 @@ func TestProcessTemplates(t *testing.T) {
 				"sender":                "",
 				"source_branch":         "",
 				"source_url":            "",
+				"git_tag":               "",
 				"target_branch":         "",
 				"target_namespace":      "",
 				"trigger_comment":       "",

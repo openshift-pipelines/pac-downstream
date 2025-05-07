@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/google/go-github/v69/github"
+	"github.com/google/go-github/v71/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/test/logger"
 	"gotest.tools/v3/assert"
 )
@@ -18,7 +18,7 @@ func TestProvider_Detect(t *testing.T) {
 		wantErrString string
 		isGH          bool
 		processReq    bool
-		event         interface{}
+		event         any
 		eventType     string
 		wantReason    string
 	}{

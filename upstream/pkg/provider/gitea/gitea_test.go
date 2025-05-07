@@ -139,8 +139,8 @@ func TestProvider_CreateStatus(t *testing.T) {
 			defer teardown()
 			run := params.New()
 			p := &Provider{
-				Client: fakeclient, // Set this to a valid client for the tests where wantErr is false
-				run:    run,
+				giteaClient: fakeclient, // Set this to a valid client for the tests where wantErr is false
+				run:         run,
 				pacInfo: &info.PacOpts{
 					Settings: settings.Settings{
 						ApplicationName: settings.PACApplicationNameDefaultValue,
@@ -247,9 +247,9 @@ func TestProvider_GetFiles(t *testing.T) {
 				Settings: &v1alpha1.Settings{},
 			}}
 			gprovider := Provider{
-				Client: fakeclient,
-				repo:   repo,
-				Logger: logger,
+				giteaClient: fakeclient,
+				repo:        repo,
+				Logger:      logger,
 			}
 
 			got, err := gprovider.GetFiles(ctx, tt.args.runevent)
@@ -464,7 +464,7 @@ func TestProvider_CreateStatusCommit(t *testing.T) {
 			})
 
 			v := &Provider{
-				Client: fakeclient,
+				giteaClient: fakeclient,
 			}
 
 			if err := v.createStatusCommit(tt.args.event, tt.args.pacopts, tt.args.status); (err != nil) != tt.wantErr {
@@ -503,8 +503,8 @@ func TestGetTektonDir(t *testing.T) {
 			fakeclient, mux, teardown := tgitea.Setup(t)
 			defer teardown()
 			gvcs := Provider{
-				Client: fakeclient,
-				Logger: fakelogger,
+				giteaClient: fakeclient,
+				Logger:      fakelogger,
 			}
 			if tt.provenance == "default_branch" {
 				tt.event.SHA = tt.event.DefaultBranch
@@ -522,6 +522,104 @@ func TestGetTektonDir(t *testing.T) {
 			}
 			assert.NilError(t, err)
 			assert.Assert(t, strings.Contains(got, tt.expectedString), "expected %s, got %s", tt.expectedString, got)
+		})
+	}
+}
+
+func TestCreateComment(t *testing.T) {
+	tests := []struct {
+		name          string
+		event         *info.Event
+		commit        string
+		updateMarker  string
+		mockResponses map[string]func(rw http.ResponseWriter, _ *http.Request)
+		wantErr       string
+		clientNil     bool
+	}{
+		{
+			name:      "nil client error",
+			clientNil: true,
+			event:     &info.Event{PullRequestNumber: 123},
+			wantErr:   "no gitea client has been initialized",
+		},
+		{
+			name:    "not a pull request error",
+			event:   &info.Event{PullRequestNumber: 0},
+			wantErr: "create comment only works on pull requests",
+		},
+		{
+			name:         "create new comment",
+			event:        &info.Event{Organization: "org", Repository: "repo", PullRequestNumber: 123},
+			commit:       "New Comment",
+			updateMarker: "",
+			mockResponses: map[string]func(rw http.ResponseWriter, _ *http.Request){
+				"/repos/org/repo/issues/123/comments": func(rw http.ResponseWriter, r *http.Request) {
+					assert.Equal(t, r.Method, http.MethodPost)
+					fmt.Fprint(rw, `{}`)
+				},
+			},
+		},
+		{
+			name:         "update existing comment",
+			event:        &info.Event{Organization: "org", Repository: "repo", PullRequestNumber: 123},
+			commit:       "Updated Comment",
+			updateMarker: "MARKER",
+			mockResponses: map[string]func(rw http.ResponseWriter, _ *http.Request){
+				"/repos/org/repo/issues/123/comments": func(rw http.ResponseWriter, r *http.Request) {
+					if r.Method == http.MethodGet {
+						fmt.Fprint(rw, `[{"id": 555, "body": "MARKER"}]`)
+						return
+					}
+				},
+				"/repos/org/repo/issues/comments/555": func(rw http.ResponseWriter, r *http.Request) {
+					assert.Equal(t, r.Method, "PATCH")
+					rw.WriteHeader(http.StatusOK)
+					fmt.Fprint(rw, `{}`)
+				},
+			},
+		},
+		{
+			name:         "no matching comment creates new",
+			event:        &info.Event{Organization: "org", Repository: "repo", PullRequestNumber: 123},
+			commit:       "New Comment",
+			updateMarker: "MARKER",
+			mockResponses: map[string]func(rw http.ResponseWriter, _ *http.Request){
+				"/repos/org/repo/issues/123/comments": func(rw http.ResponseWriter, r *http.Request) {
+					if r.Method == http.MethodGet {
+						fmt.Fprint(rw, `[{"id": 555, "body": "NO_MATCH"}]`)
+						return
+					}
+					assert.Equal(t, r.Method, http.MethodPost)
+					rw.WriteHeader(http.StatusCreated)
+					fmt.Fprint(rw, `{}`)
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fakeclient, mux, teardown := tgitea.Setup(t)
+			defer teardown()
+
+			if tt.clientNil {
+				p := &Provider{}
+				err := p.CreateComment(context.Background(), tt.event, tt.commit, tt.updateMarker)
+				assert.ErrorContains(t, err, tt.wantErr)
+				return
+			}
+
+			for endpoint, handler := range tt.mockResponses {
+				mux.HandleFunc(endpoint, handler)
+			}
+
+			p := &Provider{giteaClient: fakeclient}
+			err := p.CreateComment(context.Background(), tt.event, tt.commit, tt.updateMarker)
+			if tt.wantErr != "" {
+				assert.ErrorContains(t, err, tt.wantErr)
+			} else {
+				assert.NilError(t, err)
+			}
 		})
 	}
 }

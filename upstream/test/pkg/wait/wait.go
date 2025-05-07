@@ -16,12 +16,13 @@ import (
 )
 
 type Opts struct {
-	RepoName        string
-	Namespace       string
-	MinNumberStatus int
-	PollTimeout     time.Duration
-	AdminNS         string
-	TargetSHA       string
+	RepoName            string
+	Namespace           string
+	MinNumberStatus     int
+	PollTimeout         time.Duration
+	AdminNS             string
+	TargetSHA           string
+	FailOnRepoCondition corev1.ConditionStatus
 }
 
 func UntilMinPRAppeared(ctx context.Context, clients clients.Clients, opts Opts, minNumber int) error {
@@ -58,7 +59,11 @@ func UntilRepositoryUpdated(ctx context.Context, clients clients.Clients, opts O
 		}
 		if len(prs.Items) > 0 {
 			prConditions := prs.Items[0].Status.Conditions
-			if len(prConditions) != 0 && prConditions[0].Status == corev1.ConditionFalse {
+			if opts.FailOnRepoCondition == "" {
+				opts.FailOnRepoCondition = corev1.ConditionFalse
+			}
+
+			if len(prConditions) != 0 && prConditions[0].Status == opts.FailOnRepoCondition {
 				return true, fmt.Errorf("pipelinerun has failed")
 			}
 		}
@@ -81,7 +86,7 @@ func UntilPipelineRunCreated(ctx context.Context, clients clients.Clients, opts 
 			return true, err
 		}
 
-		clients.Log.Info("still waiting for pipelinerun to be created")
+		clients.Log.Infof("waiting for pipelinerun to be created: selector %s=%s, MinNumberStatus=%d pr.Items=%d", keys.SHA, opts.TargetSHA, opts.MinNumberStatus, len(prs.Items))
 		return len(prs.Items) == opts.MinNumberStatus, nil
 	})
 }

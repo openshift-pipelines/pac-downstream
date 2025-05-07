@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/google/go-github/v69/github"
+	"github.com/google/go-github/v71/github"
 	"gotest.tools/v3/assert"
 	"gotest.tools/v3/env"
 	corev1 "k8s.io/api/core/v1"
@@ -97,11 +97,11 @@ func TestParsePayLoad(t *testing.T) {
 		name                       string
 		wantErrString              string
 		eventType                  string
-		payloadEventStruct         interface{}
+		payloadEventStruct         any
 		jeez                       string
 		triggerTarget              string
 		githubClient               bool
-		muxReplies                 map[string]interface{}
+		muxReplies                 map[string]any
 		shaRet                     string
 		targetPipelinerun          string
 		targetCancelPipelinerun    string
@@ -205,6 +205,20 @@ func TestParsePayLoad(t *testing.T) {
 			wantErrString:      "error parsing payload the repository should not be nil",
 		},
 		{
+			name:          "branch/deleted",
+			eventType:     "push",
+			triggerTarget: triggertype.Push.String(),
+			payloadEventStruct: github.PushEvent{
+				Repo: &github.PushEventRepository{
+					Owner: &github.User{Login: github.Ptr("foo")},
+					Name:  github.Ptr("pushRepo"),
+				},
+				Ref:   github.Ptr("test"),
+				After: github.Ptr("0000000000000000000000000000000000000000"),
+			},
+			wantErrString: "branch test has been deleted, exiting",
+		},
+		{
 			// specific run from a check_suite
 			name:          "good/rerequest check_run on pull request",
 			eventType:     "check_run",
@@ -219,7 +233,7 @@ func TestParsePayLoad(t *testing.T) {
 					},
 				},
 			},
-			muxReplies: map[string]interface{}{"/repos/owner/reponame/pulls/54321": samplePR},
+			muxReplies: map[string]any{"/repos/owner/reponame/pulls/54321": samplePR},
 			shaRet:     "samplePRsha",
 		},
 		// all checks in a check_suite
@@ -235,7 +249,7 @@ func TestParsePayLoad(t *testing.T) {
 					PullRequests: []*github.PullRequest{&samplePR},
 				},
 			},
-			muxReplies: map[string]interface{}{"/repos/owner/reponame/pulls/54321": samplePR},
+			muxReplies: map[string]any{"/repos/owner/reponame/pulls/54321": samplePR},
 			shaRet:     "samplePRsha",
 		},
 		{
@@ -275,7 +289,7 @@ func TestParsePayLoad(t *testing.T) {
 				},
 				Repo: sampleRepo,
 			},
-			muxReplies: map[string]interface{}{"/repos/owner/reponame/pulls/666": samplePR},
+			muxReplies: map[string]any{"/repos/owner/reponame/pulls/666": samplePR},
 			shaRet:     "samplePRsha",
 		},
 		{
@@ -322,7 +336,7 @@ func TestParsePayLoad(t *testing.T) {
 					Body: github.Ptr("/retest dummy"),
 				},
 			},
-			muxReplies:        map[string]interface{}{"/repos/owner/reponame/pulls/777": samplePR},
+			muxReplies:        map[string]any{"/repos/owner/reponame/pulls/777": samplePR},
 			shaRet:            "samplePRsha",
 			targetPipelinerun: "dummy",
 		},
@@ -343,7 +357,7 @@ func TestParsePayLoad(t *testing.T) {
 					Body: github.Ptr("/cancel"),
 				},
 			},
-			muxReplies: map[string]interface{}{"/repos/owner/reponame/pulls/999": samplePR},
+			muxReplies: map[string]any{"/repos/owner/reponame/pulls/999": samplePR},
 			shaRet:     "samplePRsha",
 		},
 		{
@@ -363,7 +377,7 @@ func TestParsePayLoad(t *testing.T) {
 					Body: github.Ptr("/cancel dummy"),
 				},
 			},
-			muxReplies:              map[string]interface{}{"/repos/owner/reponame/pulls/888": samplePR},
+			muxReplies:              map[string]any{"/repos/owner/reponame/pulls/888": samplePR},
 			shaRet:                  "samplePRsha",
 			targetCancelPipelinerun: "dummy",
 		},
@@ -396,7 +410,7 @@ func TestParsePayLoad(t *testing.T) {
 					Body:     github.Ptr("/test dummy rbanch:test"), // rbanch is wrong word for branch 🙂
 				},
 			},
-			muxReplies:        map[string]interface{}{"/repos/owner/reponame/pulls/777": samplePR},
+			muxReplies:        map[string]any{"/repos/owner/reponame/pulls/777": samplePR},
 			shaRet:            "samplePRsha",
 			targetPipelinerun: "dummy",
 			wantedBranchName:  "main",
@@ -414,7 +428,7 @@ func TestParsePayLoad(t *testing.T) {
 					Body:     github.Ptr("/retest dummy"),
 				},
 			},
-			muxReplies:        map[string]interface{}{"/repos/owner/reponame/pulls/777": samplePR},
+			muxReplies:        map[string]any{"/repos/owner/reponame/pulls/777": samplePR},
 			shaRet:            "samplePRsha",
 			targetPipelinerun: "dummy",
 			wantedBranchName:  "main",
@@ -432,7 +446,7 @@ func TestParsePayLoad(t *testing.T) {
 					Body:     github.Ptr("/retest"),
 				},
 			},
-			muxReplies:       map[string]interface{}{"/repos/owner/reponame/pulls/777": samplePR},
+			muxReplies:       map[string]any{"/repos/owner/reponame/pulls/777": samplePR},
 			shaRet:           "samplePRsha",
 			wantedBranchName: "main",
 		},
@@ -449,7 +463,7 @@ func TestParsePayLoad(t *testing.T) {
 					Body:     github.Ptr("/cancel"),
 				},
 			},
-			muxReplies:                 map[string]interface{}{"/repos/owner/reponame/pulls/999": samplePR},
+			muxReplies:                 map[string]any{"/repos/owner/reponame/pulls/999": samplePR},
 			shaRet:                     "samplePRsha",
 			wantedBranchName:           "main",
 			isCancelPipelineRunEnabled: true,
@@ -467,7 +481,7 @@ func TestParsePayLoad(t *testing.T) {
 					Body:     github.Ptr("/cancel dummy"),
 				},
 			},
-			muxReplies:                 map[string]interface{}{"/repos/owner/reponame/pulls/888": samplePR},
+			muxReplies:                 map[string]any{"/repos/owner/reponame/pulls/888": samplePR},
 			shaRet:                     "samplePRsha",
 			targetCancelPipelinerun:    "dummy",
 			wantedBranchName:           "main",
@@ -486,7 +500,7 @@ func TestParsePayLoad(t *testing.T) {
 					Body:     github.Ptr("/retest dummy branch:test1"),
 				},
 			},
-			muxReplies:                 map[string]interface{}{"/repos/owner/reponame/pulls/7771": samplePR},
+			muxReplies:                 map[string]any{"/repos/owner/reponame/pulls/7771": samplePR},
 			shaRet:                     "samplePRsha",
 			targetPipelinerun:          "dummy",
 			wantedBranchName:           "test1",
@@ -505,7 +519,7 @@ func TestParsePayLoad(t *testing.T) {
 					Body:     github.Ptr("/cancel branch:test1"),
 				},
 			},
-			muxReplies:                 map[string]interface{}{"/repos/owner/reponame/pulls/9991": samplePR},
+			muxReplies:                 map[string]any{"/repos/owner/reponame/pulls/9991": samplePR},
 			shaRet:                     "samplePRsha",
 			wantedBranchName:           "test1",
 			isCancelPipelineRunEnabled: true,
@@ -523,7 +537,7 @@ func TestParsePayLoad(t *testing.T) {
 					Body:     github.Ptr("/cancel dummy branch:test1"),
 				},
 			},
-			muxReplies:                 map[string]interface{}{"/repos/owner/reponame/pulls/8881": samplePR},
+			muxReplies:                 map[string]any{"/repos/owner/reponame/pulls/8881": samplePR},
 			shaRet:                     "samplePRsha",
 			targetCancelPipelinerun:    "dummy",
 			wantedBranchName:           "test1",
@@ -542,7 +556,7 @@ func TestParsePayLoad(t *testing.T) {
 					Body:     github.Ptr("/cancel dummy branch:test2"),
 				},
 			},
-			muxReplies:                 map[string]interface{}{"/repos/owner/reponame/pulls/8881": samplePR},
+			muxReplies:                 map[string]any{"/repos/owner/reponame/pulls/8881": samplePR},
 			shaRet:                     "samplePRsha",
 			targetCancelPipelinerun:    "dummy",
 			wantedBranchName:           "test2",
@@ -562,7 +576,7 @@ func TestParsePayLoad(t *testing.T) {
 					Body:     github.Ptr("/retest dummy"),
 				},
 			},
-			muxReplies:        map[string]interface{}{"/repos/owner/reponame/pulls/777": samplePRAnother},
+			muxReplies:        map[string]any{"/repos/owner/reponame/pulls/777": samplePRAnother},
 			shaRet:            "samplePRshanew",
 			targetPipelinerun: "dummy",
 			wantedBranchName:  "main",
@@ -617,8 +631,8 @@ func TestParsePayLoad(t *testing.T) {
 			}
 			logger, _ := logger.GetLogger()
 			gprovider := Provider{
-				Client: ghClient,
-				Logger: logger,
+				ghClient: ghClient,
+				Logger:   logger,
 				pacInfo: &info.PacOpts{
 					Settings: settings.Settings{},
 				},
@@ -801,8 +815,8 @@ func TestAppTokenGeneration(t *testing.T) {
 			jeez, _ := json.Marshal(samplePRevent)
 			logger, _ := logger.GetLogger()
 			gprovider := Provider{
-				Logger: logger,
-				Client: fakeghclient,
+				Logger:   logger,
+				ghClient: fakeghclient,
 				pacInfo: &info.PacOpts{
 					Settings: settings.Settings{},
 				},
@@ -856,7 +870,7 @@ func TestAppTokenGeneration(t *testing.T) {
 			}
 			assert.NilError(t, err)
 			if tt.nilClient {
-				assert.Assert(t, gprovider.Client == nil)
+				assert.Assert(t, gprovider.Client() == nil)
 				return
 			}
 
@@ -878,9 +892,9 @@ func TestAppTokenGeneration(t *testing.T) {
 				assert.Assert(t, found, "Could not find %s in %s", extraIDInt, tt.extraRepoInstallIDs)
 			}
 
-			assert.Assert(t, gprovider.Client != nil)
+			assert.Assert(t, gprovider.Client() != nil)
 			if tt.resultBaseURL != "" {
-				assert.Equal(t, gprovider.Client.BaseURL.String(), tt.resultBaseURL)
+				assert.Equal(t, gprovider.Client().BaseURL.String(), tt.resultBaseURL)
 			}
 		})
 	}

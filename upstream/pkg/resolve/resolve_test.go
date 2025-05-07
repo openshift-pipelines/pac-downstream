@@ -85,11 +85,11 @@ func TestPipelineRunPipelineMiddle(t *testing.T) {
 func TestGenerateName(t *testing.T) {
 	resolved, _, err := readTDfile(t, "pipelinerun-pipeline-task", true, true)
 	assert.NilError(t, err)
-	assert.Assert(t, resolved.ObjectMeta.GenerateName != "")
+	assert.Assert(t, resolved.GenerateName != "")
 
 	resolved, _, err = readTDfile(t, "with-generatename", true, true)
 	assert.NilError(t, err)
-	assert.Assert(t, resolved.ObjectMeta.GenerateName != "")
+	assert.Assert(t, resolved.GenerateName != "")
 }
 
 // TestPipelineBundlesSkipped effectively test conversion from beta1 to v1.
@@ -118,13 +118,6 @@ func TestPipelineResolverSkipped(t *testing.T) {
 	assert.NilError(t, err)
 	assert.Equal(t, string(resolved.Spec.PipelineRef.Resolver), "resolver")
 	assert.Equal(t, resolved.Spec.PipelineRef.Params[0].Value.StringVal, "task")
-}
-
-func TestClusterTasksSkipped(t *testing.T) {
-	resolved, _, err := readTDfile(t, "pipelinerun-with-a-clustertasks", false, true)
-	assert.NilError(t, err)
-	assert.Equal(t, resolved.Spec.PipelineSpec.Tasks[0].Name, "clustertask")
-	assert.Equal(t, string(resolved.Spec.PipelineSpec.Tasks[0].TaskRef.Kind), "ClusterTask")
 }
 
 func TestCustomTasksSkipped(t *testing.T) {

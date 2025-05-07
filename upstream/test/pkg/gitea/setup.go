@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/google/go-github/v69/github"
+	"github.com/google/go-github/v71/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/gitea"
@@ -80,7 +80,7 @@ func TearDown(ctx context.Context, t *testing.T, topts *TestOpts) {
 		return
 	}
 	repository.NSTearDown(ctx, t, topts.ParamsRun, topts.TargetNS)
-	_, err := topts.GiteaCNX.Client.DeleteRepo(topts.Opts.Organization, topts.TargetNS)
+	_, err := topts.GiteaCNX.Client().DeleteRepo(topts.Opts.Organization, topts.TargetNS)
 	if err != nil {
 		t.Logf("Error deleting gitea repo %s/%s: %s", topts.Opts.Organization, topts.TargetNS, err)
 	} else {

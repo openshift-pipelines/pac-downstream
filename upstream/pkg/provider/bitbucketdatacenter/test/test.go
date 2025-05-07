@@ -62,7 +62,7 @@ func MuxCreateComment(t *testing.T, mux *http.ServeMux, event *info.Event, expec
 
 	path := fmt.Sprintf("/projects/%s/repos/%s/pull-requests/%d/comments", event.Organization, event.Repository, prID)
 	mux.HandleFunc(path, func(rw http.ResponseWriter, r *http.Request) {
-		cso := &bbv1.Comment{}
+		cso := &Comment{}
 		bit, _ := io.ReadAll(r.Body)
 		err := json.Unmarshal(bit, cso)
 		assert.NilError(t, err)
@@ -110,7 +110,7 @@ func MakeEvent(event *info.Event) *info.Event {
 	}
 	if rev.Event == nil {
 		rev.Event = &types.PullRequestEvent{
-			PullRequest: bbv1.PullRequest{ID: 666},
+			PullRequest: types.PullRequest{ID: 666},
 		}
 	}
 	return rev
@@ -141,7 +141,7 @@ func MuxDirContent(t *testing.T, mux *http.ServeMux, event *info.Event, testDir,
 	MuxFiles(t, mux, event, event.HeadBranch, targetDirName, filecontents, wantFilesErr)
 }
 
-func MuxCommitInfo(t *testing.T, mux *http.ServeMux, event *info.Event, commit bbv1.Commit) {
+func MuxCommitInfo(t *testing.T, mux *http.ServeMux, event *info.Event, commit scm.Commit) {
 	path := fmt.Sprintf("/projects/%s/repos/%s/commits/%s", event.Organization, event.Repository, event.SHA)
 
 	mux.HandleFunc(path, func(rw http.ResponseWriter, _ *http.Request) {
@@ -154,7 +154,7 @@ func MuxCommitInfo(t *testing.T, mux *http.ServeMux, event *info.Event, commit b
 func MuxDefaultBranch(t *testing.T, mux *http.ServeMux, event *info.Event, defaultBranch, latestCommit string) {
 	path := fmt.Sprintf("/projects/%s/repos/%s/branches/default", event.Organization, event.Repository)
 	mux.HandleFunc(path, func(rw http.ResponseWriter, _ *http.Request) {
-		resp := &bbv1.Branch{
+		resp := &Branch{
 			LatestCommit: latestCommit,
 			DisplayID:    defaultBranch,
 		}
@@ -191,7 +191,7 @@ func MuxListDir(t *testing.T, mux *http.ServeMux, event *info.Event, path string
 
 		// as pagination of jenkins-x/go-scm is not like previous one
 		// it doesn't work as it did with previous lib.
-		resp := map[string]interface{}{
+		resp := map[string]any{
 			"start":         0,
 			"isLastPage":    true,
 			"values":        files,
@@ -207,13 +207,13 @@ func MuxListDir(t *testing.T, mux *http.ServeMux, event *info.Event, path string
 func MuxCreateAndTestCommitStatus(t *testing.T, mux *http.ServeMux, event *info.Event, expectedDescSubstr string, expStatus provider.StatusOpts) {
 	path := fmt.Sprintf("/commits/%s", event.SHA)
 	mux.HandleFunc(path, func(rw http.ResponseWriter, r *http.Request) {
-		cso := &bbv1.BuildStatus{}
+		cso := &BuildStatus{}
 		bit, _ := io.ReadAll(r.Body)
 		err := json.Unmarshal(bit, cso)
 		assert.NilError(t, err)
 
 		if expStatus.DetailsURL != "" {
-			assert.Equal(t, expStatus.DetailsURL, cso.Url)
+			assert.Equal(t, expStatus.DetailsURL, cso.URL)
 		}
 		if expectedDescSubstr != "" {
 			assert.Assert(t, strings.Contains(cso.Description, expectedDescSubstr),
@@ -224,13 +224,13 @@ func MuxCreateAndTestCommitStatus(t *testing.T, mux *http.ServeMux, event *info.
 	})
 }
 
-func MuxProjectMemberShip(t *testing.T, mux *http.ServeMux, event *info.Event, userperms []*bbv1.UserPermission) {
+func MuxProjectMemberShip(t *testing.T, mux *http.ServeMux, event *info.Event, userperms []*UserPermission) {
 	path := fmt.Sprintf("/projects/%s/permissions/users", event.Organization)
 	mux.HandleFunc(path, func(rw http.ResponseWriter, _ *http.Request) {
 		if userperms == nil {
 			fmt.Fprintf(rw, "{\"values\": []}")
 		}
-		resp := map[string]interface{}{
+		resp := map[string]any{
 			"values": userperms,
 		}
 		b, err := json.Marshal(resp)
@@ -240,13 +240,29 @@ func MuxProjectMemberShip(t *testing.T, mux *http.ServeMux, event *info.Event, u
 	})
 }
 
-func MuxRepoMemberShip(t *testing.T, mux *http.ServeMux, event *info.Event, userperms []*bbv1.UserPermission) {
+func MuxProjectGroupMembership(t *testing.T, mux *http.ServeMux, event *info.Event, groups []*ProjGroup) {
+	path := fmt.Sprintf("/projects/%s/permissions/groups", event.Organization)
+	mux.HandleFunc(path, func(rw http.ResponseWriter, _ *http.Request) {
+		if groups == nil {
+			fmt.Fprintf(rw, "{\"values\": []}")
+		}
+		resp := map[string]any{
+			"values": groups,
+		}
+		b, err := json.Marshal(resp)
+		assert.NilError(t, err)
+
+		fmt.Fprint(rw, string(b))
+	})
+}
+
+func MuxRepoMemberShip(t *testing.T, mux *http.ServeMux, event *info.Event, userperms []*UserPermission) {
 	path := fmt.Sprintf("/projects/%s/repos/%s/permissions/users", event.Organization, event.Repository)
 	mux.HandleFunc(path, func(rw http.ResponseWriter, _ *http.Request) {
 		if userperms == nil {
 			fmt.Fprintf(rw, "{\"values\": []}")
 		}
-		resp := map[string]interface{}{
+		resp := map[string]any{
 			"values": userperms,
 		}
 		b, err := json.Marshal(resp)
@@ -255,10 +271,10 @@ func MuxRepoMemberShip(t *testing.T, mux *http.ServeMux, event *info.Event, user
 	})
 }
 
-func MuxPullRequestActivities(t *testing.T, mux *http.ServeMux, event *info.Event, prNumber int, activities []*bbv1.Activity) {
+func MuxPullRequestActivities(t *testing.T, mux *http.ServeMux, event *info.Event, prNumber int, activities []*Activity) {
 	path := fmt.Sprintf("/projects/%s/repos/%s/pull-requests/%d/activities", event.Organization, event.Repository, prNumber)
 	mux.HandleFunc(path, func(rw http.ResponseWriter, _ *http.Request) {
-		resp := map[string]interface{}{
+		resp := map[string]any{
 			"values": activities,
 		}
 		b, err := json.Marshal(resp)
@@ -272,44 +288,44 @@ func MakePREvent(event *info.Event, comment string) *types.PullRequestEvent {
 	iii, _ := strconv.Atoi(event.AccountID)
 
 	pr := &types.PullRequestEvent{
-		Actor: bbv1.UserWithLinks{ID: iii, Name: event.Sender},
-		PullRequest: bbv1.PullRequest{
+		Actor: types.UserWithLinks{ID: iii, Name: event.Sender},
+		PullRequest: types.PullRequest{
 			ID: 1,
-			ToRef: bbv1.PullRequestRef{
-				Repository: bbv1.Repository{
-					Project: &bbv1.Project{Key: event.Organization},
+			ToRef: types.PullRequestRef{
+				Repository: types.Repository{
+					Project: &types.Project{Key: event.Organization},
 					Name:    event.Repository,
 					Links: &struct {
-						Clone []bbv1.CloneLink `json:"clone,omitempty"`
-						Self  []bbv1.SelfLink  `json:"self,omitempty"`
+						Clone []types.CloneLink `json:"clone,omitempty"`
+						Self  []types.SelfLink  `json:"self,omitempty"`
 					}{
-						Self: []bbv1.SelfLink{
+						Self: []types.SelfLink{
 							{
 								Href: event.URL,
 							},
 						},
-						Clone: []bbv1.CloneLink{{Href: event.URL}},
+						Clone: []types.CloneLink{{Href: event.URL}},
 					},
 				},
 				DisplayID:    "base",
 				LatestCommit: "abcd",
 			},
-			FromRef: bbv1.PullRequestRef{
+			FromRef: types.PullRequestRef{
 				DisplayID:    "head",
 				LatestCommit: event.SHA,
-				Repository: bbv1.Repository{
-					Project: &bbv1.Project{Key: event.Organization},
+				Repository: types.Repository{
+					Project: &types.Project{Key: event.Organization},
 					Name:    event.Repository,
 					Links: &struct {
-						Clone []bbv1.CloneLink `json:"clone,omitempty"`
-						Self  []bbv1.SelfLink  `json:"self,omitempty"`
+						Clone []types.CloneLink `json:"clone,omitempty"`
+						Self  []types.SelfLink  `json:"self,omitempty"`
 					}{
-						Self: []bbv1.SelfLink{
+						Self: []types.SelfLink{
 							{
 								Href: event.HeadURL,
 							},
 						},
-						Clone: []bbv1.CloneLink{
+						Clone: []types.CloneLink{
 							{
 								Name: "http",
 								Href: event.CloneURL,
@@ -321,45 +337,40 @@ func MakePREvent(event *info.Event, comment string) *types.PullRequestEvent {
 		},
 	}
 	if comment != "" {
-		pr.Comment = bbv1.ActivityComment{
+		pr.Comment = types.ActivityComment{
 			Text: comment,
 		}
 	}
 	return pr
 }
 
-func MakePushEvent(event *info.Event) *types.PushRequestEvent {
+func MakePushEvent(event *info.Event, changes []types.PushRequestEventChange) *types.PushRequestEvent {
 	iii, _ := strconv.Atoi(event.AccountID)
 
 	return &types.PushRequestEvent{
-		Actor: bbv1.UserWithLinks{ID: iii, Name: event.Sender},
-		Repository: bbv1.Repository{
-			Project: &bbv1.Project{
+		Actor: types.UserWithLinks{ID: iii, Name: event.Sender},
+		Repository: types.Repository{
+			Project: &types.Project{
 				Key: event.Organization,
 			},
 			Slug: event.Repository,
 			Links: &struct {
-				Clone []bbv1.CloneLink `json:"clone,omitempty"`
-				Self  []bbv1.SelfLink  `json:"self,omitempty"`
+				Clone []types.CloneLink `json:"clone,omitempty"`
+				Self  []types.SelfLink  `json:"self,omitempty"`
 			}{
-				Clone: []bbv1.CloneLink{
+				Clone: []types.CloneLink{
 					{
 						Name: "http",
 						Href: event.CloneURL,
 					},
 				},
-				Self: []bbv1.SelfLink{
+				Self: []types.SelfLink{
 					{
 						Href: event.URL,
 					},
 				},
 			},
 		},
-		Changes: []types.PushRequestEventChange{
-			{
-				ToHash: event.SHA,
-				RefID:  "base",
-			},
-		},
+		Changes: changes,
 	}
 }

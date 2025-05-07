@@ -27,6 +27,7 @@ import (
 	v1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 	"github.com/tektoncd/pipeline/pkg/names"
 	"gotest.tools/v3/assert"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -65,16 +66,36 @@ type TestOpts struct {
 }
 
 func PostCommentOnPullRequest(t *testing.T, topt *TestOpts, body string) {
-	_, _, err := topt.GiteaCNX.Client.CreateIssueComment(topt.Opts.Organization,
+	_, _, err := topt.GiteaCNX.Client().CreateIssueComment(topt.Opts.Organization,
 		topt.Opts.Repo, topt.PullRequest.Index,
 		gitea.CreateIssueCommentOption{Body: body})
 	topt.ParamsRun.Clients.Log.Infof("Posted comment \"%s\" in %s", body, topt.PullRequest.HTMLURL)
 	assert.NilError(t, err)
 }
 
+func checkEvents(t *testing.T, events *corev1.EventList, topts *TestOpts) {
+	t.Helper()
+	newEvents := make([]corev1.Event, 0)
+	// filter out events that are not related to the test like checking for cancelled pipelineruns
+	for i := len(events.Items) - 1; i >= 0; i-- {
+		topts.ParamsRun.Clients.Log.Infof("Reason is %s", events.Items[i].Reason)
+		if events.Items[i].Reason == "CancelInProgress" {
+			continue
+		}
+		newEvents = append(newEvents, events.Items[i])
+	}
+	if len(newEvents) > 0 {
+		topts.ParamsRun.Clients.Log.Infof("0 events expected in case of failure but got %d", len(newEvents))
+		for _, em := range newEvents {
+			topts.ParamsRun.Clients.Log.Infof("Event: Reason: %s Type: %s ReportingInstance: %s Message: %s", em.Reason, em.Type, em.ReportingInstance, em.Message)
+		}
+		t.FailNow()
+	}
+}
+
 func AddLabelToIssue(t *testing.T, topt *TestOpts, label string) {
 	var targetID int64
-	allLabels, _, err := topt.GiteaCNX.Client.ListRepoLabels(topt.Opts.Organization, topt.Opts.Repo, gitea.ListLabelsOptions{})
+	allLabels, _, err := topt.GiteaCNX.Client().ListRepoLabels(topt.Opts.Organization, topt.Opts.Repo, gitea.ListLabelsOptions{})
 	assert.NilError(t, err)
 	for _, l := range allLabels {
 		if l.Name == label {
@@ -83,7 +104,7 @@ func AddLabelToIssue(t *testing.T, topt *TestOpts, label string) {
 	}
 
 	opt := gitea.IssueLabelsOption{Labels: []int64{targetID}}
-	_, _, err = topt.GiteaCNX.Client.AddIssueLabels(topt.Opts.Organization, topt.Opts.Repo, topt.PullRequest.Index, opt)
+	_, _, err = topt.GiteaCNX.Client().AddIssueLabels(topt.Opts.Organization, topt.Opts.Repo, topt.PullRequest.Index, opt)
 	assert.NilError(t, err)
 	topt.ParamsRun.Clients.Log.Infof("Added label \"%s\" to %s", label, topt.PullRequest.HTMLURL)
 }
@@ -132,7 +153,7 @@ func TestPR(t *testing.T, topts *TestOpts) (context.Context, func()) {
 		topts.DefaultBranch = options.MainBranch
 	}
 
-	repoInfo, err := CreateGiteaRepo(topts.GiteaCNX.Client, topts.Opts.Organization, topts.TargetRepoName, topts.DefaultBranch, hookURL, topts.OnOrg, topts.ParamsRun.Clients.Log)
+	repoInfo, err := CreateGiteaRepo(topts.GiteaCNX.Client(), topts.Opts.Organization, topts.TargetRepoName, topts.DefaultBranch, hookURL, topts.OnOrg, topts.ParamsRun.Clients.Log)
 	assert.NilError(t, err)
 	topts.Opts.Repo = repoInfo.Name
 	topts.Opts.Organization = repoInfo.Owner.UserName
@@ -203,7 +224,7 @@ func TestPR(t *testing.T, topts *TestOpts) (context.Context, func()) {
 
 	topts.ParamsRun.Clients.Log.Infof("Creating PullRequest")
 	for i := 0; i < 5; i++ {
-		if topts.PullRequest, _, err = topts.GiteaCNX.Client.CreatePullRequest(topts.Opts.Organization, repoInfo.Name, gitea.CreatePullRequestOption{
+		if topts.PullRequest, _, err = topts.GiteaCNX.Client().CreatePullRequest(topts.Opts.Organization, repoInfo.Name, gitea.CreatePullRequestOption{
 			Title: "Test Pull Request - " + topts.TargetRefName,
 			Head:  topts.TargetRefName,
 			Base:  topts.DefaultBranch,
@@ -249,7 +270,7 @@ func TestPR(t *testing.T, topts *TestOpts) (context.Context, func()) {
 		}
 		assert.Assert(t, len(events.Items) != 0, "events expected in case of failure but got 0")
 	} else if !topts.SkipEventsCheck {
-		assert.Assert(t, len(events.Items) == 0, fmt.Sprintf("no events expected but got %v in %v ns, items: %+v", len(events.Items), topts.TargetNS, events.Items))
+		checkEvents(t, events, topts)
 	}
 	return ctx, cleanup
 }
@@ -287,7 +308,7 @@ func NewPR(t *testing.T, topts *TestOpts) func() {
 		topts.TargetRepoName = topts.TargetRefName
 	}
 
-	repoInfo, err := GetGiteaRepo(topts.GiteaCNX.Client, topts.Opts.Organization, topts.TargetRepoName, topts.ParamsRun.Clients.Log)
+	repoInfo, err := GetGiteaRepo(topts.GiteaCNX.Client(), topts.Opts.Organization, topts.TargetRepoName, topts.ParamsRun.Clients.Log)
 	assert.NilError(t, err)
 	topts.Opts.Repo = repoInfo.Name
 	topts.Opts.Organization = repoInfo.Owner.UserName
@@ -323,7 +344,7 @@ func NewPR(t *testing.T, topts *TestOpts) func() {
 
 	topts.ParamsRun.Clients.Log.Infof("Creating PullRequest")
 	for i := 0; i < 5; i++ {
-		if topts.PullRequest, _, err = topts.GiteaCNX.Client.CreatePullRequest(topts.Opts.Organization, repoInfo.Name, gitea.CreatePullRequestOption{
+		if topts.PullRequest, _, err = topts.GiteaCNX.Client().CreatePullRequest(topts.Opts.Organization, repoInfo.Name, gitea.CreatePullRequestOption{
 			Title: "Test Pull Request - " + topts.TargetRefName,
 			Head:  topts.TargetRefName,
 			Base:  options.MainBranch,
@@ -369,7 +390,7 @@ func NewPR(t *testing.T, topts *TestOpts) func() {
 		}
 		assert.Assert(t, len(events.Items) != 0, "events expected in case of failure but got 0")
 	} else if !topts.SkipEventsCheck {
-		assert.Assert(t, len(events.Items) == 0, fmt.Sprintf("no events expected but got %v in %v ns, items: %+v", len(events.Items), topts.TargetNS, events.Items))
+		checkEvents(t, events, topts)
 	}
 	return cleanup
 }
@@ -377,7 +398,7 @@ func NewPR(t *testing.T, topts *TestOpts) func() {
 func WaitForStatus(t *testing.T, topts *TestOpts, ref, forcontext string, onlylatest bool) {
 	i := 0
 	if strings.HasPrefix(ref, "heads/") {
-		refo, _, err := topts.GiteaCNX.Client.GetRepoRefs(topts.Opts.Organization, topts.Opts.Repo, ref)
+		refo, _, err := topts.GiteaCNX.Client().GetRepoRefs(topts.Opts.Organization, topts.Opts.Repo, ref)
 		assert.NilError(t, err)
 		ref = refo[0].Object.SHA
 	}
@@ -388,7 +409,7 @@ func WaitForStatus(t *testing.T, topts *TestOpts, ref, forcontext string, onlyla
 	for {
 		numstatus := 0
 		// get first sha of tree ref
-		statuses, _, err := topts.GiteaCNX.Client.ListStatuses(topts.Opts.Organization, topts.Opts.Repo, ref, gitea.ListStatusesOption{})
+		statuses, _, err := topts.GiteaCNX.Client().ListStatuses(topts.Opts.Organization, topts.Opts.Repo, ref, gitea.ListStatusesOption{})
 		assert.NilError(t, err)
 		// sort statuses by id
 		sort.Slice(statuses, func(i, j int) bool {
@@ -491,7 +512,7 @@ func WaitForPullRequestCommentMatch(t *testing.T, topts *TestOpts) {
 	i := 0
 	topts.ParamsRun.Clients.Log.Infof("Looking for regexp \"%s\" in PR comments", topts.Regexp.String())
 	for {
-		comments, _, err := topts.GiteaCNX.Client.ListRepoIssueComments(topts.PullRequest.Base.Repository.Owner.UserName, topts.PullRequest.Base.Repository.Name, gitea.ListIssueCommentOptions{})
+		comments, _, err := topts.GiteaCNX.Client().ListRepoIssueComments(topts.PullRequest.Base.Repository.Owner.UserName, topts.PullRequest.Base.Repository.Name, gitea.ListIssueCommentOptions{})
 		assert.NilError(t, err)
 		for _, v := range comments {
 			if topts.Regexp.MatchString(v.Body) {
