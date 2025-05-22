@@ -25,10 +25,8 @@ jobs:
         rm -fR upstream
         git clone https://github.com/openshift-pipelines/pipelines-as-code upstream
         pushd upstream
-        git checkout -B main origin/main
+        git checkout -B release-v0.34.x origin/release-v0.34.x
         popd
-
-
     - name: Commit new changes
       run: |
         git config user.name openshift-pipelines-bot
