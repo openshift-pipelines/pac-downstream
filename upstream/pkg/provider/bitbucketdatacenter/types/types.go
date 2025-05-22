@@ -1,5 +1,9 @@
 package types
 
+import (
+	bbv1 "github.com/gfleury/go-bitbucket-v1"
+)
+
 type UserWithMetadata struct {
 	User               UserWithLinks `json:"user,omitempty"`
 	Role               string        `json:"role,omitempty"`
@@ -68,7 +72,7 @@ type ActivityComment struct {
 }
 
 type Properties struct {
-	RepositoryID int `json:"repositoryId"`
+	Key string `json:"key"`
 }
 
 type PermittedOperations struct {
@@ -194,5 +198,5 @@ type PushRequestEvent struct {
 
 type ToCommit struct {
 	Commit
-	Parents []Commit `json:"parents"` // Commit also has Parents field, but its Parents has only two fields while actual payload has more.
+	Parents []bbv1.Commit `json:"parents"` // bbv1.Commit also has Parents field, but its Parents has only two fields while actual payload has more.
 }
