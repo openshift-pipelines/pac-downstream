@@ -27,8 +27,6 @@ jobs:
         pushd upstream
         git checkout -B release-v0.28.x origin/release-v0.28.x
         popd
-
-
     - name: Commit new changes
       run: |
         git config user.name openshift-pipelines-bot
