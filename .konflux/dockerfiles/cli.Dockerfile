@@ -9,7 +9,8 @@ COPY upstream .
 COPY .konflux/patches patches/
 RUN set -e; for f in patches/*.patch; do echo ${f}; [[ -f ${f} ]] || continue; git apply ${f}; done
 ENV GODEBUG="http2server=0"
-RUN go build -mod=vendor -tags disable_gcp -v  \
+ENV GOEXPERIMENT="strictfipsruntime"
+RUN go build -mod=vendor -tags disable_gcp,strictfipsruntime -v  \
     -ldflags "-X github.com/openshift-pipelines/pipelines-as-code/pkg/params/version.Version=${TKN_PAC_VERSION}" \
     -o /tmp/tkn-pac ./cmd/tkn-pac
 
