@@ -1,26 +1,15 @@
 diff --git a/go.mod b/go.mod
-index 95210aac..651831cf 100644
+index 0e9c75b2..e1de2ef2 100644
 --- a/go.mod
 +++ b/go.mod
-@@ -2,7 +2,7 @@ module github.com/openshift-pipelines/pipelines-as-code
+@@ -1,8 +1,8 @@
+ module github.com/openshift-pipelines/pipelines-as-code
  
- go 1.23.8
+-go 1.23.8
++go 1.23.6
  
 -toolchain go1.24.2
-+toolchain go1.23
++toolchain go1.24.0
  
  require (
- 	code.gitea.io/gitea v1.23.7
-diff --git a/vendor/modules.txt b/vendor/modules.txt
-index cf4331dd..42754839 100644
---- a/vendor/modules.txt
-+++ b/vendor/modules.txt
-@@ -58,7 +58,7 @@ github.com/census-instrumentation/opencensus-proto/gen-go/metrics/v1
- github.com/census-instrumentation/opencensus-proto/gen-go/resource/v1
- github.com/census-instrumentation/opencensus-proto/gen-go/trace/v1
- # github.com/cert-manager/cert-manager v1.17.2
--## explicit; go 1.23.8
-+## explicit; go 1.23.6
- github.com/cert-manager/cert-manager/pkg/apis/acme
- github.com/cert-manager/cert-manager/pkg/apis/acme/v1
- github.com/cert-manager/cert-manager/pkg/apis/certmanager
+        code.gitea.io/gitea v1.23.7
