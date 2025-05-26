@@ -1,10 +1,12 @@
 diff --git a/go.mod b/go.mod
-index 95210aac..651831cf 100644
+index 95210aac..82cbf6ad 100644
 --- a/go.mod
 +++ b/go.mod
-@@ -2,7 +2,7 @@ module github.com/openshift-pipelines/pipelines-as-code
+@@ -1,8 +1,8 @@
+ module github.com/openshift-pipelines/pipelines-as-code
  
- go 1.23.8
+-go 1.23.8
++go 1.23.6
  
 -toolchain go1.24.2
 +toolchain go1.23
