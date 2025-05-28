@@ -1,4 +1,4 @@
-# Generated for Konflux Application openshift-pipelines-core-next by openshift-pipelines/hack. DO NOT EDIT
+# Generated for Konflux Application openshift-pipelines-core by openshift-pipelines/hack. DO NOT EDIT
 apiVersion: tekton.dev/v1
 kind: PipelineRun
 metadata:
@@ -10,16 +10,16 @@ metadata:
     build.appstudio.redhat.com/target_branch: '{{target_branch}}'
     pipelinesascode.tekton.dev/max-keep-runs: "3"
     pipelinesascode.tekton.dev/on-cel-expression: event == "push" && target_branch
-      == "next" &&
+      == "release-v1.19.x]" &&
       ("upstream/***".pathChanged() || ".konflux/patches/***".pathChanged() || ".konflux/rpms/***".pathChanged() ||
-      ".konflux/dockerfiles/cli.Dockerfile".pathChanged() ||
-      ".tekton/pac-downstream-next-cli-push.yaml".pathChanged())
+      ".konflux/dockerfiles/webhook.Dockerfile".pathChanged() ||
+      ".tekton/pac-downstream-1-19-webhook-push.yaml".pathChanged())
   creationTimestamp: null
   labels:
-    appstudio.openshift.io/application: openshift-pipelines-core-next
-    appstudio.openshift.io/component: pac-downstream-next-cli
+    appstudio.openshift.io/application: openshift-pipelines-core-1-19
+    appstudio.openshift.io/component: pac-downstream-1-19-webhook
     pipelines.appstudio.openshift.io/type: build
-  name: pac-downstream-next-cli-on-push
+  name: pac-downstream-1-19-webhook-on-push
   namespace: tekton-ecosystem-tenant
 spec:
   params:
@@ -28,16 +28,16 @@ spec:
   - name: revision
     value: '{{revision}}'
   - name: output-image
-    value: quay.io/redhat-user-workloads/tekton-ecosystem-tenant/next/pipelines-as-code-cli-rhel9:{{revision}}
+    value: quay.io/redhat-user-workloads/tekton-ecosystem-tenant/1-19/pipelines-as-code-webhook-rhel9:{{revision}}
   - name: dockerfile
-    value: .konflux/dockerfiles/cli.Dockerfile
+    value: .konflux/dockerfiles/webhook.Dockerfile
   - name: prefetch-input
     value: |
       {"type": "rpm", "path": ".konflux/rpms"}
   pipelineRef:
     name: docker-build-ta
   taskRunTemplate:
-    serviceAccountName: build-pipeline-pac-downstream-next-cli
+    serviceAccountName: build-pipeline-pac-downstream-1-19-webhook
   workspaces:
   - name: git-auth
     secret:
