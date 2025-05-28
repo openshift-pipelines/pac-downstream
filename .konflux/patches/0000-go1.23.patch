@@ -1,5 +1,5 @@
 diff --git a/go.mod b/go.mod
-index 95210aac..82cbf6ad 100644
+index 0e9c75b2..f5587538 100644
 --- a/go.mod
 +++ b/go.mod
 @@ -1,8 +1,8 @@
@@ -14,7 +14,7 @@ index 95210aac..82cbf6ad 100644
  require (
  	code.gitea.io/gitea v1.23.7
 diff --git a/vendor/modules.txt b/vendor/modules.txt
-index cf4331dd..42754839 100644
+index d46c004a..d3461ba8 100644
 --- a/vendor/modules.txt
 +++ b/vendor/modules.txt
 @@ -58,7 +58,7 @@ github.com/census-instrumentation/opencensus-proto/gen-go/metrics/v1

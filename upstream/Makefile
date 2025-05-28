@@ -83,7 +83,7 @@ lint: lint-go lint-yaml lint-md lint-python lint-shell ## run all linters
 .PHONY: lint-go
 lint-go: ## runs go linter on all go files
 	@echo "Linting go files..."
-	@$(GOLANGCI_LINT) run ./... --modules-download-mode=vendor \
+	@$(GOLANGCI_LINT) run ./pkg/... ./test/... --modules-download-mode=vendor \
 							--max-issues-per-linter=0 \
 							--max-same-issues=0 \
 							--timeout $(TIMEOUT_UNIT)
@@ -180,6 +180,11 @@ check-generated: # check if all files that needs to be generated are generated
 update-golden: ## run unit tests (updating golden files)
 	@echo "Running unit tests to update golden files..."
 	@./hack/update-golden.sh
+
+.PHONY: update-schemas
+update-schemas: ## update openapi schemas
+	@echo "Running update schemas..."
+	@./hack/update-schemas.sh
 
 .PHONY: generated
 generated: update-golden fumpt ## generate all files that needs to be generated
