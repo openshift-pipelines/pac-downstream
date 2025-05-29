@@ -14,7 +14,7 @@ RUN go build -ldflags="-X 'knative.dev/pkg/changeset.rev=$(cat HEAD)'" -mod=vend
     ./cmd/pipelines-as-code-webhook
 
 FROM $RUNTIME
-ARG VERSION=pipelines-as-code-webhook-next
+ARG VERSION=pipelines-as-code-webhook-1.19
 
 ENV KO_APP=/ko-app \
     KO_DATA_PATH=/kodata
