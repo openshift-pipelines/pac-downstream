@@ -33,7 +33,7 @@ require (
 	github.com/xanzy/go-gitlab v0.101.0
 	go.opencensus.io v0.24.0
 	go.uber.org/zap v1.27.0
-	golang.org/x/exp v0.0.0-20240325151524-a685a6edb6d8
+	golang.org/x/exp dcc06ee1d476
 	golang.org/x/oauth2 v0.18.0
 	golang.org/x/sync v0.11.0
 	golang.org/x/text v0.22.0
