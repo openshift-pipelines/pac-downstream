@@ -1,20 +1,21 @@
-ARG GO_BUILDER=brew.registry.redhat.io/rh-osbs/openshift-golang-builder:v1.22
-ARG RUNTIME=registry.access.redhat.com/ubi9/ubi-minimal:latest@sha256:bafd57451de2daa71ed301b277d49bd120b474ed438367f087eac0b885a668dc
+ARG GO_BUILDER=brew.registry.redhat.io/rh-osbs/openshift-golang-builder:v1.23
+ARG RUNTIME=registry.redhat.io/ubi8/ubi:latest@sha256:0c1757c4526cfd7fdfedc54fadf4940e7f453201de65c0fefd454f3dde117273
 
 FROM $GO_BUILDER AS builder
 
-ARG TKN_PAC_VERSION=nightly
+ARG TKN_PAC_VERSION=0.29.1
 WORKDIR /go/src/github.com/openshift-pipelines/pipelines-as-code
 COPY upstream .
 COPY .konflux/patches patches/
 RUN set -e; for f in patches/*.patch; do echo ${f}; [[ -f ${f} ]] || continue; git apply ${f}; done
 ENV GODEBUG="http2server=0"
-RUN go build -mod=vendor -tags disable_gcp -v  \
+ENV GOEXPERIMENT=strictfipsruntime
+RUN go build -mod=vendor -tags disable_gcp -tags strictfipsruntime -v  \
     -ldflags "-X github.com/openshift-pipelines/pipelines-as-code/pkg/params/version.Version=${TKN_PAC_VERSION}" \
     -o /tmp/tkn-pac ./cmd/tkn-pac
 
 FROM $RUNTIME
-ARG VERSION=pipelines-as-code-cli-next
+ARG VERSION=pipelines-as-code-cli-1.17.2
 
 COPY --from=builder /tmp/tkn-pac /usr/bin
 
@@ -29,6 +30,5 @@ LABEL \
       io.k8s.description="Red Hat OpenShift Pipelines tkn pac CLI" \
       io.openshift.tags="pipelines,tekton,openshift"
 
-RUN groupadd -r -g 65532 nonroot && \
-    useradd --no-log-init -r -u 65532 -g nonroot nonroot
+RUN groupadd -r -g 65532 nonroot && useradd --no-log-init -r -u 65532 -g nonroot nonroot
 USER 65532
