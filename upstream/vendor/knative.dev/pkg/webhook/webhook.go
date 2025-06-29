@@ -38,7 +38,6 @@ import (
 	admissionv1 "k8s.io/api/admission/v1"
 	"knative.dev/pkg/logging"
 	"knative.dev/pkg/system"
-	certresources "knative.dev/pkg/webhook/certificates/resources"
 )
 
 // Options contains the configuration for the webhook
@@ -58,10 +57,21 @@ type Options struct {
 	// If no SecretName is provided, then the webhook serves without TLS.
 	SecretName string
 
+	// ServerPrivateKeyName is the name for the webhook secret's data key e.g. `tls.key`.
+	// Default value is `server-key.pem` if no value is passed.
+	ServerPrivateKeyName string
+
+	// ServerCertificateName is the name for the webhook secret's ca data key e.g. `tls.crt`.
+	// Default value is `server-cert.pem` if no value is passed.
+	ServerCertificateName string
+
 	// Port where the webhook is served. Per k8s admission
 	// registration requirements this should be 443 unless there is
 	// only a single port for the service.
 	Port int
+
+	// StatsReporterOptions are the options used to initialize the default StatsReporter
+	StatsReporterOptions []StatsReporterOption
 
 	// StatsReporter reports metrics about the webhook.
 	// This will be automatically initialized by the constructor if left uninitialized.
@@ -70,6 +80,12 @@ type Options struct {
 	// GracePeriod is how long to wait after failing readiness probes
 	// before shutting down.
 	GracePeriod time.Duration
+
+	// DisableNamespaceOwnership configures if the SYSTEM_NAMESPACE is added as an owner reference to the
+	// webhook configuration resources. Overridden by the WEBHOOK_DISABLE_NAMESPACE_OWNERSHIP environment variable.
+	// Disabling can be useful to avoid breaking systems that expect ownership to indicate a true controller
+	// relationship: https://github.com/knative/serving/issues/15483
+	DisableNamespaceOwnership bool
 
 	// ControllerOptions encapsulates options for creating a new controller,
 	// including throttling and stats behavior.
@@ -122,7 +138,6 @@ func New(
 	ctx context.Context,
 	controllers []interface{},
 ) (webhook *Webhook, err error) {
-
 	// ServeMux.Handle panics on duplicate paths
 	defer func() {
 		if r := recover(); r != nil {
@@ -137,7 +152,7 @@ func New(
 	logger := logging.FromContext(ctx)
 
 	if opts.StatsReporter == nil {
-		reporter, err := NewStatsReporter()
+		reporter, err := NewStatsReporter(opts.StatsReporterOptions...)
 		if err != nil {
 			return nil, err
 		}
@@ -167,6 +182,7 @@ func New(
 		// a new secret informer from it.
 		secretInformer := kubeinformerfactory.Get(ctx).Core().V1().Secrets()
 
+		//nolint:gosec // operator configures TLS min version (default is 1.3)
 		webhook.tlsConfig = &tls.Config{
 			MinVersion: opts.TLSMinVersion,
 
@@ -180,13 +196,14 @@ func New(
 					logger.Errorw("failed to fetch secret", zap.Error(err))
 					return nil, nil
 				}
-
-				serverKey, ok := secret.Data[certresources.ServerKey]
+				webOpts := GetOptions(ctx)
+				sKey, sCert := getSecretDataKeyNamesOrDefault(webOpts.ServerPrivateKeyName, webOpts.ServerCertificateName)
+				serverKey, ok := secret.Data[sKey]
 				if !ok {
 					logger.Warn("server key missing")
 					return nil, nil
 				}
-				serverCert, ok := secret.Data[certresources.ServerCert]
+				serverCert, ok := secret.Data[sCert]
 				if !ok {
 					logger.Warn("server cert missing")
 					return nil, nil
@@ -259,11 +276,11 @@ func (wh *Webhook) Run(stop <-chan struct{}) error {
 		Handler:           drainer,
 		Addr:              fmt.Sprint(":", wh.Options.Port),
 		TLSConfig:         wh.tlsConfig,
-		ReadHeaderTimeout: time.Minute, //https://medium.com/a-journey-with-go/go-understand-and-mitigate-slowloris-attack-711c1b1403f6
+		ReadHeaderTimeout: time.Minute, // https://medium.com/a-journey-with-go/go-understand-and-mitigate-slowloris-attack-711c1b1403f6
 		TLSNextProto:      nextProto,
 	}
 
-	var serve = server.ListenAndServe
+	serve := server.ListenAndServe
 
 	if server.TLSConfig != nil && wh.testListener != nil {
 		serve = func() error {

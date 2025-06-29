@@ -17,23 +17,23 @@ limitations under the License.
 package informer
 
 import (
+	"context"
 	"sync"
 
 	"k8s.io/apimachinery/pkg/util/sets"
-	"k8s.io/apimachinery/pkg/util/wait"
 )
 
 // namedWaitGroup is used to increment and decrement a WaitGroup by name
 type namedWaitGroup struct {
 	waitGroup sync.WaitGroup
-	keys      sets.String
+	keys      sets.Set[string]
 	mu        sync.Mutex
 }
 
 // newNamedWaitGroup returns an instantiated namedWaitGroup.
 func newNamedWaitGroup() *namedWaitGroup {
 	return &namedWaitGroup{
-		keys: sets.NewString(),
+		keys: sets.New[string](),
 	}
 }
 
@@ -107,6 +107,6 @@ func (s *syncedCallback) WaitForAllKeys(stopCh <-chan struct{}) error {
 	case <-c:
 		return nil
 	case <-stopCh:
-		return wait.ErrWaitTimeout
+		return context.DeadlineExceeded
 	}
 }
