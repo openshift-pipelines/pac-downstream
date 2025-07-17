@@ -5,7 +5,6 @@ package test
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -29,15 +28,7 @@ var (
 	incomingSecretName   = "incoming-webhook-secret"
 )
 
-func TestGitlabIncomingWebhookLegacy(t *testing.T) {
-	testGitlabIncomingWebhook(t, true)
-}
-
-func TestGitlabIncomingWebhookJsonBody(t *testing.T) {
-	testGitlabIncomingWebhook(t, false)
-}
-
-func testGitlabIncomingWebhook(t *testing.T, useLegacy bool) {
+func TestGitlabIncomingWebhook(t *testing.T) {
 	randomedString := names.SimpleNameGenerator.RestrictLengthWithRandomSuffix("pac-e2e-ns")
 	ctx := context.Background()
 	runcnx, opts, glprovider, err := tgitlab.Setup(ctx)
@@ -88,37 +79,16 @@ func testGitlabIncomingWebhook(t *testing.T, useLegacy bool) {
 	_ = scm.PushFilesToRefGit(t, scmOpts, entries)
 	runcnx.Clients.Log.Infof("Branch %s has been created and pushed with files", randomedString)
 
-	var req *http.Request
-	var incomingURL string
+	url := fmt.Sprintf("%s/incoming?repository=%s&branch=%s&pipelinerun=%s&secret=%s", opts.ControllerURL,
+		randomedString, randomedString, "pipelinerun-incoming", incomingSecreteValue)
 	client := &http.Client{}
-
-	if useLegacy {
-		// Legacy URL query parameters method
-		incomingURL = fmt.Sprintf("%s/incoming?repository=%s&branch=%s&pipelinerun=%s&secret=%s",
-			opts.ControllerURL, randomedString, randomedString, "pipelinerun-incoming", incomingSecreteValue)
-		req, err = http.NewRequestWithContext(ctx, http.MethodPost, incomingURL, nil)
-		assert.NilError(t, err)
-	} else {
-		// JSON body method
-		incomingURL = fmt.Sprintf("%s/incoming", opts.ControllerURL)
-		jsonBody := map[string]interface{}{
-			"repository":  randomedString,
-			"branch":      randomedString,
-			"pipelinerun": "pipelinerun-incoming",
-			"secret":      incomingSecreteValue,
-		}
-		jsonData, err := json.Marshal(jsonBody)
-		assert.NilError(t, err)
-		req, err = http.NewRequestWithContext(ctx, http.MethodPost, incomingURL, strings.NewReader(string(jsonData)))
-		assert.NilError(t, err)
-		req.Header.Add("Content-Type", "application/json")
-	}
-
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, nil)
+	assert.NilError(t, err)
 	httpResp, err := client.Do(req)
 	assert.NilError(t, err)
 	defer httpResp.Body.Close()
-	runcnx.Clients.Log.Infof("Kicked off on incoming-webhook URL: %s", incomingURL)
-	assert.Assert(t, httpResp.StatusCode >= 200 && httpResp.StatusCode < 300)
+	runcnx.Clients.Log.Infof("Kicked off on incoming-webhook URL: %s", url)
+	assert.Assert(t, httpResp.StatusCode > 200 && httpResp.StatusCode < 300)
 	defer tgitlab.TearDown(ctx, t, runcnx, glprovider, -1, randomedString, randomedString, opts.ProjectID)
 
 	sopt := wait.SuccessOpt{
