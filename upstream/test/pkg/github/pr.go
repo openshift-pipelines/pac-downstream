@@ -137,9 +137,6 @@ func (g *PRTest) RunPullRequest(ctx context.Context, t *testing.T) {
 		t.Errorf("Repository %s not found in %s", opts.Organization, opts.Repo)
 	}
 
-	if g.Options.Settings.Github != nil {
-		opts.Settings = g.Options.Settings
-	}
 	err = CreateCRD(ctx, t, repoinfo, runcnx, opts, targetNS)
 	assert.NilError(t, err)
 

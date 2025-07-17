@@ -21,8 +21,7 @@ func CreateCRD(ctx context.Context, t *testing.T, repoinfo *ghlib.Repository, ru
 			Name: targetNS,
 		},
 		Spec: v1alpha1.RepositorySpec{
-			URL:      repoinfo.GetHTMLURL(),
-			Settings: &opts.Settings,
+			URL: repoinfo.GetHTMLURL(),
 		},
 	}
 

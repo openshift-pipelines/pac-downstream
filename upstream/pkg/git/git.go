@@ -3,7 +3,6 @@ package git
 import (
 	"bytes"
 	"fmt"
-	"os"
 	"os/exec"
 	"strings"
 )
@@ -25,12 +24,6 @@ func RunGit(dir string, args ...string) (string, error) {
 	args = append([]string{"-c", "commit.gpgsign=false"}, args...)
 
 	c := exec.Command(gitPath, args...)
-	c.Env = []string{
-		"PATH=" + os.Getenv("PATH"),
-		"HOME=" + os.Getenv("HOME"),
-		"LC_ALL=C",
-		"LANG=C",
-	}
 	var output bytes.Buffer
 	c.Stderr = &output
 	c.Stdout = &output

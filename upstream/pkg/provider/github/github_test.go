@@ -657,11 +657,10 @@ func TestGithubGetCommitInfo(t *testing.T) {
 
 func TestGithubSetClient(t *testing.T) {
 	tests := []struct {
-		name           string
-		event          *info.Event
-		expectedURL    string
-		isGHE          bool
-		installationID int64
+		name        string
+		event       *info.Event
+		expectedURL string
+		isGHE       bool
 	}{
 		{
 			name: "api url set",
@@ -670,30 +669,20 @@ func TestGithubSetClient(t *testing.T) {
 					URL: "foo.com",
 				},
 			},
-			expectedURL:    "https://foo.com",
-			isGHE:          true,
-			installationID: 0,
+			expectedURL: "https://foo.com",
+			isGHE:       true,
 		},
 		{
-			name:           "default to public github",
-			expectedURL:    fmt.Sprintf("%s/", keys.PublicGithubAPIURL),
-			event:          info.NewEvent(),
-			installationID: 12345,
+			name:        "default to public github",
+			expectedURL: fmt.Sprintf("%s/", keys.PublicGithubAPIURL),
+			event:       info.NewEvent(),
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tt.event.InstallationID = tt.installationID
 			ctx, _ := rtesting.SetupFakeContext(t)
-			core, observer := zapobserver.New(zap.InfoLevel)
-			testLog := zap.New(core).Sugar()
-			fakeRun := &params.Run{
-				Clients: clients.Clients{
-					Log: testLog,
-				},
-			}
 			v := Provider{}
-			err := v.SetClient(ctx, fakeRun, tt.event, nil, nil)
+			err := v.SetClient(ctx, nil, tt.event, nil, nil)
 			assert.NilError(t, err)
 			assert.Equal(t, tt.expectedURL, *v.APIURL)
 			assert.Equal(t, "https", v.Client().BaseURL.Scheme)
@@ -702,33 +691,6 @@ func TestGithubSetClient(t *testing.T) {
 			} else {
 				assert.Equal(t, "/", v.Client().BaseURL.Path)
 			}
-
-			logs := observer.TakeAll()
-			assert.Assert(t, len(logs) == 1, "expected exactly one log entry, got %d", len(logs))
-
-			prefix := "github-webhook"
-			if tt.installationID != 0 {
-				prefix = "github-app"
-			}
-			wantStart := fmt.Sprintf("%s: initialized OAuth2 client", prefix)
-			got := logs[0].Message
-			assert.Assert(t, strings.HasPrefix(got, wantStart), "log entry should start with %q, got %q", wantStart, got)
-
-			// Determine expected providerName based on whether it's GHE or public GitHub.
-			expectedProviderName := "github"
-			if tt.isGHE {
-				expectedProviderName = "github-enterprise"
-			}
-
-			// Build the full expected log message.
-			fullExpected := fmt.Sprintf(
-				"%s: initialized OAuth2 client for providerName=%s providerURL=%s",
-				prefix,
-				expectedProviderName,
-				tt.event.Provider.URL,
-			)
-
-			assert.Equal(t, fullExpected, logs[0].Message)
 		})
 	}
 }
@@ -952,6 +914,12 @@ func TestGetFiles(t *testing.T) {
 	}
 }
 
+type roundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripperFunc) RoundTrip(r *http.Request) (*http.Response, error) {
+	return f(r)
+}
+
 func TestProvider_checkWebhookSecretValidity(t *testing.T) {
 	t1 := time.Date(1999, time.February, 3, 4, 5, 6, 7, time.UTC)
 	cw := clockwork.NewFakeClockAt(t1)
@@ -963,7 +931,9 @@ func TestProvider_checkWebhookSecretValidity(t *testing.T) {
 		expHeaderSet   bool
 		apiNotEnabled  bool
 		wantLogSnippet string
-		report500      bool
+		statusCode     int
+		wantNilSCIM    bool
+		wantNilResp    bool
 	}{
 		{
 			name:         "remaining scim calls",
@@ -989,6 +959,22 @@ func TestProvider_checkWebhookSecretValidity(t *testing.T) {
 			remaining: 5,
 		},
 		{
+			name:       "skipping api rate limit is not enabled",
+			remaining:  0,
+			statusCode: http.StatusNotFound,
+		},
+		{
+			name:        "skipping because scim is not available",
+			remaining:   0,
+			wantNilSCIM: true,
+		},
+		{
+			name:        "resp is nil",
+			remaining:   0,
+			wantNilResp: true,
+			wantSubErr:  "error making request to the GitHub API checking rate limit",
+		},
+		{
 			name:       "no header but no remaining scim calls",
 			remaining:  0,
 			wantSubErr: "api rate limit exceeded. Access will be restored at Mon, 01 Jan 0001 00:00:00 UTC",
@@ -996,7 +982,12 @@ func TestProvider_checkWebhookSecretValidity(t *testing.T) {
 		{
 			name:       "api error",
 			wantSubErr: "error making request to the GitHub API checking rate limit",
-			report500:  true,
+			statusCode: http.StatusInternalServerError,
+		},
+		{
+			name:           "not enabled",
+			apiNotEnabled:  true,
+			wantLogSnippet: "skipping checking",
 		},
 		{
 			name:           "not enabled",
@@ -1012,14 +1003,15 @@ func TestProvider_checkWebhookSecretValidity(t *testing.T) {
 
 			if !tt.apiNotEnabled {
 				mux.HandleFunc("/rate_limit", func(rw http.ResponseWriter, _ *http.Request) {
-					if tt.report500 {
-						rw.WriteHeader(http.StatusInternalServerError)
+					if tt.statusCode != 0 {
+						rw.WriteHeader(tt.statusCode)
 						return
 					}
-					s := &github.RateLimits{
-						SCIM: &github.Rate{
+					s := &github.RateLimits{}
+					if !tt.wantNilSCIM {
+						s.SCIM = &github.Rate{
 							Remaining: tt.remaining,
-						},
+						}
 					}
 					st := new(struct {
 						Resources *github.RateLimits `json:"resources"`
@@ -1034,6 +1026,16 @@ func TestProvider_checkWebhookSecretValidity(t *testing.T) {
 				})
 			}
 			defer teardown()
+
+			// create bad round tripper to make response nil and test that it handles that case.
+			if tt.wantNilResp {
+				errRT := roundTripperFunc(func(*http.Request) (*http.Response, error) {
+					return nil, fmt.Errorf("network down")
+				})
+				httpClient := &http.Client{Transport: errRT}
+				fakeclient = github.NewClient(httpClient)
+			}
+
 			v := &Provider{
 				ghClient: fakeclient,
 				Logger:   logger,
@@ -1472,7 +1474,7 @@ func TestSkipPushEventForPRCommits(t *testing.T) {
 			},
 			isPartOfPR:          false,
 			wantErr:             false,
-			skipWarnLogContains: "Error getting pull requests associated with the commit in this push event",
+			skipWarnLogContains: "Error checking if push commit is part of PR",
 		},
 	}
 
