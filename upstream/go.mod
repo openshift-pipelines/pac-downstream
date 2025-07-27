@@ -1,18 +1,20 @@
 module github.com/openshift-pipelines/pipelines-as-code
 
-go 1.20
+go 1.23.0
+
+toolchain go1.24.4
 
 require (
 	code.gitea.io/gitea/modules/structs v0.0.0-20190610152049-835b53fc259c
 	code.gitea.io/sdk/gitea v0.16.0
 	github.com/AlecAivazis/survey/v2 v2.3.7
-	github.com/bradleyfalzon/ghinstallation/v2 v2.8.0
+	github.com/bradleyfalzon/ghinstallation/v2 v2.16.0
 	github.com/cloudevents/sdk-go/v2 v2.14.0
 	github.com/fvbommel/sortorder v1.1.0
 	github.com/gfleury/go-bitbucket-v1 v0.0.0-20230830121038-6e30c5760c87
 	github.com/gobwas/glob v0.2.3
 	github.com/google/cel-go v0.18.2
-	github.com/google/go-cmp v0.6.0
+	github.com/google/go-cmp v0.7.0
 	github.com/google/go-github/scrape v0.0.0-20231113230724-78c6de0b72ac
 	github.com/google/go-github/v56 v56.0.0
 	github.com/hako/durafmt v0.0.0-20210608085754-5c1018a4e16b
@@ -44,6 +46,8 @@ require (
 	knative.dev/pkg v0.0.0-20231115001034-97c7258e3a98
 	sigs.k8s.io/yaml v1.4.0
 )
+
+require github.com/google/go-github/v72 v72.0.0 // indirect
 
 replace (
 	k8s.io/api => k8s.io/api v0.26.7
@@ -80,7 +84,7 @@ require (
 	github.com/go-openapi/jsonreference v0.20.2 // indirect
 	github.com/go-openapi/swag v0.22.4 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
-	github.com/golang-jwt/jwt/v4 v4.5.1
+	github.com/golang-jwt/jwt/v4 v4.5.2
 	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da // indirect
 	github.com/golang/protobuf v1.5.3 // indirect
 	github.com/google/gnostic v0.7.0 // indirect
