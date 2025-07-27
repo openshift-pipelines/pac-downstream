@@ -141,6 +141,6 @@ require (
 	k8s.io/apiextensions-apiserver v0.31.0 // indirect
 	k8s.io/klog/v2 v2.130.1
 	k8s.io/kube-openapi v0.0.0-20240903163716-9e1beecbcb38 // indirect
-	sigs.k8s.io/json v0.0.0-20221116044647-bc3834ca7abd // indirect
+	sigs.k8s.io/json v0.0.0-20241014173422-cfa47c3a1cc8 // indirect
 	sigs.k8s.io/structured-merge-diff/v4 v4.4.1 // indirect
 )
