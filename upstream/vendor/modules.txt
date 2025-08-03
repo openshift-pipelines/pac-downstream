@@ -401,7 +401,7 @@ github.com/tektoncd/pipeline/pkg/substitution
 # github.com/x448/float16 v0.8.4
 ## explicit; go 1.11
 github.com/x448/float16
-# github.com/xanzy/go-gitlab v0.108.0
+# github.com/xanzy/go-gitlab v0.115.0
 ## explicit; go 1.19
 github.com/xanzy/go-gitlab
 # github.com/xlzd/gotp v0.1.0
