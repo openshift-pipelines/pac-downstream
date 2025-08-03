@@ -594,8 +594,8 @@ cloud.google.com/go/workflows v1.9.0/go.mod h1:ZGkj1aFIOd9c8Gerkjjq7OW7I5+l6cSvT
 cloud.google.com/go/workflows v1.10.0/go.mod h1:fZ8LmRmZQWacon9UCX1r/g/DfAXx5VcPALq2CxzdePw=
 code.gitea.io/gitea v1.22.1 h1:hrY7bMQaqP3rI7jkx5Syupxf94+WXI6E6IX7rvpwaBI=
 code.gitea.io/gitea v1.22.1/go.mod h1:4mpqK/vMcipFzmviA5Ez3Rd3tmj2NsymP6NugcCtyZ8=
-code.gitea.io/sdk/gitea v0.19.0 h1:8I6s1s4RHgzxiPHhOQdgim1RWIRcr0LVMbHBjBFXq4Y=
-code.gitea.io/sdk/gitea v0.19.0/go.mod h1:IG9xZJoltDNeDSW0qiF2Vqx5orMWa7OhVWrjvrd5NpI=
+code.gitea.io/sdk/gitea v0.21.0 h1:69n6oz6kEVHRo1+APQQyizkhrZrLsTLXey9142pfkD4=
+code.gitea.io/sdk/gitea v0.21.0/go.mod h1:tnBjVhuKJCn8ibdyyhvUyxrR1Ca2KHEoTWoukNhXQPA=
 contrib.go.opencensus.io/exporter/ocagent v0.7.1-0.20200907061046-05415f1de66d h1:LblfooH1lKOpp1hIhukktmSAxFkqMPFk9KR6iZ0MJNI=
 contrib.go.opencensus.io/exporter/ocagent v0.7.1-0.20200907061046-05415f1de66d/go.mod h1:IshRmMJBhDfFj5Y67nVhMYTTIze91RUeT73ipWKs/GY=
 contrib.go.opencensus.io/exporter/prometheus v0.4.2 h1:sqfsYl5GIY/L570iT+l93ehxaWJs2/OwXtiWwew3oAg=
@@ -605,6 +605,8 @@ contrib.go.opencensus.io/exporter/zipkin v0.1.2/go.mod h1:mP5xM3rrgOjpn79MM8fZbj
 dmitri.shuralyov.com/gpu/mtl v0.0.0-20190408044501-666a987793e9/go.mod h1:H6x//7gZCb22OMCxBHrMx7a5I7Hp++hsVxbQ4BYO7hU=
 gioui.org v0.0.0-20210308172011-57750fc8a0a6/go.mod h1:RSH6KIUZ0p2xy5zHDxgAM4zumjgTw83q2ge/PI+yyw8=
 git.sr.ht/~sbinet/gg v0.3.1/go.mod h1:KGYtlADtqsqANL9ueOFkWymvzUvLMQllU5Ixo+8v3pc=
+github.com/42wim/httpsig v1.2.2 h1:ofAYoHUNs/MJOLqQ8hIxeyz2QxOz8qdSVvp3PX/oPgA=
+github.com/42wim/httpsig v1.2.2/go.mod h1:P/UYo7ytNBFwc+dg35IubuAUIs8zj5zzFIgUCEl55WY=
 github.com/AlecAivazis/survey/v2 v2.3.7 h1:6I/u8FvytdGsgonrYsVn2t8t4QiRnh6QSTqkkhIiSjQ=
 github.com/AlecAivazis/survey/v2 v2.3.7/go.mod h1:xUTIdE4KCOIjsBAE1JYsUPoCqYdZ1reCfTwbto0Fduo=
 github.com/BurntSushi/toml v0.3.1/go.mod h1:xHWCNGjB5oqiDr8zfno3MHue2Ht5sIBksp03qcyfWMU=
@@ -1147,8 +1149,9 @@ github.com/stretchr/testify v1.7.1/go.mod h1:6Fq8oRcR53rry900zMqJjRRixrwX3KX962/
 github.com/stretchr/testify v1.8.0/go.mod h1:yNjHg4UonilssWZ8iaSj1OCr/vHnekPRkoO+kdMU+MU=
 github.com/stretchr/testify v1.8.1/go.mod h1:w2LPCIKwWwSfY2zedu0+kehJoqGctiVI29o6fzry7u4=
 github.com/stretchr/testify v1.8.4/go.mod h1:sz/lmYIOXD/1dqDmKjjqLyZ2RngseejIcXlSw2iwfAo=
-github.com/stretchr/testify v1.9.0 h1:HtqpIVDClZ4nwg75+f6Lvsy/wHu+3BoSGCbBAcpTsTg=
 github.com/stretchr/testify v1.9.0/go.mod h1:r2ic/lqez/lEtzL7wO/rwa5dbSLXVDPFyf8C91i36aY=
+github.com/stretchr/testify v1.10.0 h1:Xv5erBjTwe/5IxqUQTdXv5kgmIvbHo3QQyRwhJsOfJA=
+github.com/stretchr/testify v1.10.0/go.mod h1:r2ic/lqez/lEtzL7wO/rwa5dbSLXVDPFyf8C91i36aY=
 github.com/stvp/go-udp-testing v0.0.0-20201019212854-469649b16807/go.mod h1:7jxmlfBCDBXRzr0eAQJ48XC1hBu1np4CS5+cHEYfwpc=
 github.com/tektoncd/pipeline v0.63.0 h1:QLkhYr970jgs6vmHopXz8pcXbz5c3i0a0FX7ggGtn94=
 github.com/tektoncd/pipeline v0.63.0/go.mod h1:HA7r0XJzhhcajNBcl0GErmcT5Omow1jVfLKwbVGjojY=

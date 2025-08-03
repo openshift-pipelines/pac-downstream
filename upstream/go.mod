@@ -6,7 +6,7 @@ toolchain go1.24.1
 
 require (
 	code.gitea.io/gitea v1.22.1
-	code.gitea.io/sdk/gitea v0.19.0
+	code.gitea.io/sdk/gitea v0.21.0
 	github.com/AlecAivazis/survey/v2 v2.3.7
 	github.com/bradleyfalzon/ghinstallation/v2 v2.11.0
 	github.com/cloudevents/sdk-go/v2 v2.15.2
@@ -28,7 +28,7 @@ require (
 	github.com/mitchellh/mapstructure v1.5.0
 	github.com/pkg/errors v0.9.1
 	github.com/spf13/cobra v1.8.1
-	github.com/stretchr/testify v1.9.0
+	github.com/stretchr/testify v1.10.0
 	github.com/tektoncd/pipeline v0.63.0
 	github.com/xanzy/go-gitlab v0.108.0
 	go.opencensus.io v0.24.0
@@ -49,6 +49,7 @@ require (
 )
 
 require (
+	github.com/42wim/httpsig v1.2.2 // indirect
 	github.com/coreos/go-oidc/v3 v3.9.0 // indirect
 	github.com/fxamacker/cbor/v2 v2.7.0 // indirect
 	github.com/klauspost/compress v1.17.9 // indirect

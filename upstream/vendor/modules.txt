@@ -2,8 +2,8 @@
 ## explicit; go 1.22
 code.gitea.io/gitea/modules/json
 code.gitea.io/gitea/modules/structs
-# code.gitea.io/sdk/gitea v0.19.0
-## explicit; go 1.18
+# code.gitea.io/sdk/gitea v0.21.0
+## explicit; go 1.23
 code.gitea.io/sdk/gitea
 # contrib.go.opencensus.io/exporter/ocagent v0.7.1-0.20200907061046-05415f1de66d
 ## explicit; go 1.13
@@ -14,6 +14,9 @@ contrib.go.opencensus.io/exporter/prometheus
 # contrib.go.opencensus.io/exporter/zipkin v0.1.2
 ## explicit
 contrib.go.opencensus.io/exporter/zipkin
+# github.com/42wim/httpsig v1.2.2
+## explicit; go 1.18
+github.com/42wim/httpsig
 # github.com/AlecAivazis/survey/v2 v2.3.7
 ## explicit; go 1.13
 github.com/AlecAivazis/survey/v2
@@ -347,9 +350,10 @@ github.com/spf13/pflag
 # github.com/stoewer/go-strcase v1.3.0
 ## explicit; go 1.11
 github.com/stoewer/go-strcase
-# github.com/stretchr/testify v1.9.0
+# github.com/stretchr/testify v1.10.0
 ## explicit; go 1.17
 github.com/stretchr/testify/assert
+github.com/stretchr/testify/assert/yaml
 # github.com/tektoncd/pipeline v0.63.0
 ## explicit; go 1.22
 github.com/tektoncd/pipeline/internal/artifactref
