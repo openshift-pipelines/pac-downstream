@@ -26,8 +26,8 @@ You can create the Repository CR using the [tkn pac]({{< relref
 "/docs/guide/cli.md" >}}) CLI and its `tkn pac create repository` command or by
 applying a YAML file with kubectl:
 
-```yaml
-cat <<EOF|kubectl create -n project-repository -f-
+```bash
+cat <<EOF | kubectl create -n project-repository -f-
 apiVersion: "pipelinesascode.tekton.dev/v1alpha1"
 kind: Repository
 metadata:
@@ -121,17 +121,34 @@ right to merge commits to the default branch can change the PipelineRun and have
 access to the infrastructure.
 {{< /hint >}}
 
-## Disabling all comments for Pipelineruns on GitLab MR
+## Disabling all comments for PipelineRuns on GitLab MR
 
 `comment_strategy` allows you to disable the comments on GitLab MR for a Repository
 
 ```yaml
 spec:
-  gitlab:
-    comment_strategy: "disable_all"
+  settings:
+    gitlab:
+      comment_strategy: "disable_all"
 ```
 
-When you set the value of `comment_strategy` to `disable_all` it will not add any comment on the merge request for the start and the end of pipelinerun
+When you set the value of `comment_strategy` to `disable_all` it will not add any comment on the merge request for the start and the end of PipelineRun
+
+## Disabling all comments for PipelineRuns in GitHub Pull Requests on GitHub Webhook Setup
+
+`comment_strategy` allows you to disable the comments on GitHub PR for a Repository
+
+```yaml
+spec:
+  settings:
+    github:
+      comment_strategy: "disable_all"
+```
+
+When `comment_strategy` is set to `disable_all` Pipelines as Code will not create any comment on the pull request for PipelineRun Status
+
+Note: The disable_all strategy applies only to comments about a PipelineRun's status (e.g., "started," "succeeded").
+If your PipelineRun YAML definition fails validation, a comment detailing the error will always be posted to the pull request. [see docs](../running/#errors-when-parsing-pipelinerun-yaml)
 
 ## Concurrency
 
@@ -146,11 +163,19 @@ When multiple PipelineRuns match the event, they will be started in alphabetical
 
 Example:
 
-If you have three pipelineruns in a .tekton directory, and you create a pull
+If you have three PipelineRuns in a .tekton directory, and you create a pull
 request with a `concurrency_limit` of 1 in the repository configuration, then all
-of the pipelineruns will be executed in alphabetical order, one after the
-other. At any given time, only one pipeline run will be in the running state,
+of the PipelineRuns will be executed in alphabetical order, one after the
+other. At any given time, only one PipelineRun will be in the running state,
 while the rest will be queued.
+
+### Kueue - Kubernetes-native Job Queueing
+
+Pipelines-as-Code now accommodates [Kueue](https://kueue.sigs.k8s.io/) as an alternative, Kubernetes-native solution for queuing PipelineRun.
+To get started, you can deploy the experimental integration provided by the [konflux-ci/tekton-kueue](https://github.com/konflux-ci/tekton-kueue) project. This allows you to schedule PipelineRuns through Kueue's queuing mechanism.
+
+Note: The [konflux-ci/tekton-kueue](https://github.com/konflux-ci/tekton-kueue) project and the Pipelines-as-Code integration is only intended for testing.
+It is only meant for experimentation and should not be used in production environments.
 
 ## Scoping GitHub token to a list of private and public repositories within and outside namespaces
 

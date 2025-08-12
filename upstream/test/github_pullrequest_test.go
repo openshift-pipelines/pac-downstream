@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/opscomments"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
@@ -98,7 +99,7 @@ func TestGithubPullRequestOnLabel(t *testing.T) {
 
 	sopt := twait.SuccessOpt{
 		Title:           g.CommitTitle,
-		OnEvent:         triggertype.LabelUpdate.String(),
+		OnEvent:         triggertype.PullRequestLabeled.String(),
 		TargetNS:        g.TargetNamespace,
 		NumberofPRMatch: len(g.YamlFiles),
 		SHA:             g.SHA,
@@ -182,6 +183,39 @@ func TestGithubSecondPullRequestBadYaml(t *testing.T) {
 		if len(comments) > 0 {
 			assert.Assert(t, len(comments) == 1, "Should have only one comment created we got way too many: %+v", comments)
 			golden.Assert(t, comments[0].GetBody(), strings.ReplaceAll(fmt.Sprintf("%s.golden", t.Name()), "/", "-"))
+			return
+		}
+
+		g.Cnx.Clients.Log.Infof("Looping %d/%d waiting for a comment to appear", i, maxLoop)
+		time.Sleep(6 * time.Second)
+	}
+
+	t.Fatal("No comments with the pipelinerun error found on the pull request")
+}
+
+func TestGithubInvalidCELExpressionReportingOnPR(t *testing.T) {
+	ctx := context.Background()
+	g := &tgithub.PRTest{
+		Label:         "Github PullRequest Invalid CEL expression",
+		YamlFiles:     []string{"testdata/failures/pipelinerun-invalid-cel.yaml"},
+		NoStatusCheck: true,
+	}
+	g.RunPullRequest(ctx, t)
+	defer g.TearDown(ctx, t)
+
+	maxLoop := 10
+	for i := 0; i < maxLoop; i++ {
+		comments, _, err := g.Provider.Client().Issues.ListComments(
+			ctx, g.Options.Organization, g.Options.Repo, g.PRNumber,
+			&github.IssueListCommentsOptions{})
+		assert.NilError(t, err)
+
+		if len(comments) > 0 {
+			assert.Assert(t, len(comments) == 1, "Should have only one comment created we got way too many: %+v", comments)
+			commentBody := comments[0].GetBody()
+			commentRegexp := regexp.MustCompile(`CEL expression evaluation error: failed to parse expression "event == \"pull request\" |": ERROR: <input>:1:25: Syntax error: token recognition error at: '|'  | event == "pull request" |  | ........................^`)
+			assert.Check(t, commentRegexp.MatchString(commentBody), commentBody, t)
+			g.Logger.Info("CEL expression validation comment has been matched")
 			return
 		}
 
@@ -580,6 +614,40 @@ func TestGithubPullandPushMatchTriggerOnlyPull(t *testing.T) {
 	maxLines := int64(100)
 	err = twait.RegexpMatchingInControllerLog(ctx, g.Cnx, *reg, 20, "controller", &maxLines)
 	assert.NilError(t, err)
+}
+
+func TestGithubDisableCommentsOnPR(t *testing.T) {
+	if os.Getenv("TEST_GITHUB_REPO_OWNER_WEBHOOK") == "" {
+		t.Skip("TEST_GITHUB_REPO_OWNER_WEBHOOK is not set")
+		return
+	}
+	ctx := context.Background()
+
+	g := &tgithub.PRTest{
+		Label:     "Github PullRequest onWebhook",
+		YamlFiles: []string{"testdata/pipelinerun.yaml"},
+		Webhook:   true,
+	}
+
+	commentStrategy := v1alpha1.Settings{
+		Github: &v1alpha1.GithubSettings{
+			CommentStrategy: "disable_all",
+		},
+	}
+
+	g.Options.Settings = commentStrategy
+	g.RunPullRequest(ctx, t)
+	defer g.TearDown(ctx, t)
+
+	comments, _, _ := g.Provider.Client().Issues.ListComments(ctx, g.Options.Organization, g.Options.Repo, g.PRNumber, nil)
+	commentRegexp := regexp.MustCompile(`.*Pipelines as Code CI/*`)
+	successCommentsPost := 0
+	for _, n := range comments {
+		if commentRegexp.MatchString(*n.Body) {
+			successCommentsPost++
+		}
+	}
+	assert.Equal(t, 0, successCommentsPost)
 }
 
 // Local Variables:

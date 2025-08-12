@@ -137,6 +137,9 @@ func (g *PRTest) RunPullRequest(ctx context.Context, t *testing.T) {
 		t.Errorf("Repository %s not found in %s", opts.Organization, opts.Repo)
 	}
 
+	if g.Options.Settings.Github != nil {
+		opts.Settings = g.Options.Settings
+	}
 	err = CreateCRD(ctx, t, repoinfo, runcnx, opts, targetNS)
 	assert.NilError(t, err)
 
@@ -185,6 +188,10 @@ func (g *PRTest) TearDown(ctx context.Context, t *testing.T) {
 		g.Logger.Infof("Not cleaning up and closing PR since TEST_NOCLEANUP is set")
 		return
 	}
+
+	// Collect GitHub API call information from controller logs
+	g.collectGitHubAPICalls(ctx, t)
+
 	g.Logger.Infof("Closing PR %d", g.PRNumber)
 	if g.PRNumber != -1 {
 		state := "closed"
