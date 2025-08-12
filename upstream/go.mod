@@ -1,6 +1,8 @@
 module github.com/openshift-pipelines/pipelines-as-code
 
-go 1.23.6
+go 1.23.8
+
+toolchain go1.24.2
 
 require (
 	code.gitea.io/gitea v1.23.7
@@ -15,7 +17,7 @@ require (
 	github.com/google/go-github/scrape v0.0.0-20250430122735-c9e1ad0d3b65
 	github.com/google/go-github/v71 v71.0.0
 	github.com/hako/durafmt v0.0.0-20210608085754-5c1018a4e16b
-	github.com/jenkins-x/go-scm v1.14.58
+	github.com/jenkins-x/go-scm v1.15.10
 	github.com/jonboulle/clockwork v0.5.0
 	github.com/juju/ansiterm v1.0.0
 	github.com/ktrysmt/go-bitbucket v0.9.85
@@ -37,7 +39,7 @@ require (
 	gopkg.in/yaml.v2 v2.4.0
 	gotest.tools/v3 v3.5.2
 	k8s.io/api v0.32.4
-	k8s.io/apimachinery v0.33.0
+	k8s.io/apimachinery v0.33.3
 	k8s.io/client-go v0.32.4
 	k8s.io/utils v0.0.0-20250502105355-0f33e8f1c979
 	knative.dev/eventing v0.45.0
@@ -49,7 +51,7 @@ require (
 	cel.dev/expr v0.23.1 // indirect
 	github.com/42wim/httpsig v1.2.3 // indirect
 	github.com/antlr/antlr4/runtime/Go/antlr v1.4.10 // indirect
-	github.com/cert-manager/cert-manager v1.17.1 // indirect
+	github.com/cert-manager/cert-manager v1.17.2 // indirect
 	github.com/cloudevents/sdk-go/sql/v2 v2.0.0-20240712172937-3ce6b2f1f011 // indirect
 	github.com/coreos/go-oidc/v3 v3.14.1 // indirect
 	github.com/fxamacker/cbor/v2 v2.8.0 // indirect

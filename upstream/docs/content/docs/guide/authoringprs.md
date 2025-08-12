@@ -22,8 +22,8 @@ weight: 3
 - Inside your pipeline, you need to be able to check out the commit as
   received from the webhook by checking out the repository from that ref. Most of the time
   you want to reuse the
-  [git-clone](https://github.com/tektoncd/catalog/blob/main/task/git-clone/)
-  task from the [tektoncd/catalog](https://github.com/tektoncd/catalog).
+  [git-clone](https://github.com/tektoncd-catalog/git-clone/tree/main/task/git-clone)
+  task from the [tektoncd/catalog](https://github.com/tektoncd-catalog/git-clone/tree/main/task/git-clone).
 
 - To be able to specify parameters of your commit and URL, Pipelines-as-Code
   gives you some “dynamic” variables that are defined according to the execution
@@ -44,7 +44,7 @@ Here is a list of all the dynamic variables available in Pipelines-as-Code. The
 one that would be the most important to you would probably be the `revision` and `repo_url`
 variables, they will give you the commit SHA and the repository URL that is
 getting tested. You usually use this with the
-[git-clone](https://hub.tekton.dev/tekton/task/git-clone) task to be able to
+[git-clone](https://artifacthub.io/packages/tekton-task/tekton-catalog-tasks/git-clone) task to be able to
 check out the code that is being tested.
 
 | Variable            | Description                                                                                                                                                                     | Example                             | Example Output                                                                                                                                                |
@@ -53,7 +53,7 @@ check out the code that is being tested.
 | event_type          | The event type (eg: `pull_request` or `push`)                                                                                                                                   | `{{event_type}}`                    | pull_request          (see the note for GitOps Comments [here]({{< relref "/docs/guide/gitops_commands.md#event-type-annotation-and-dynamic-variables" >}}) ) |
 | git_auth_secret     | The secret name auto-generated with provider token to check out private repos.                                                                                                  | `{{git_auth_secret}}`               | pac-gitauth-xkxkx                                                                                                                                             |
 | headers             | The request headers (see [below](#using-the-body-and-headers-in-a-pipelines-as-code-parameter))                                                                                 | `{{headers['x-github-event']}}`     | push                                                                                                                                                          |
-| pull_request_number | The pull or merge request number, only defined when we are in a `pull_request` event type.                                                                                      | `{{pull_request_number}}`           | 1                                                                                                                                                             |
+| pull_request_number | The pull or merge request number, only defined when we are in a `pull_request` event or push event occurred when pull request is merged.                                        | `{{pull_request_number}}`           | 1                                                                                                                                                             |
 | repo_name           | The repository name.                                                                                                                                                            | `{{repo_name}}`                     | pipelines-as-code                                                                                                                                             |
 | repo_owner          | The repository owner.                                                                                                                                                           | `{{repo_owner}}`                    | openshift-pipelines                                                                                                                                           |
 | repo_url            | The repository full URL.                                                                                                                                                        | `{{repo_url}}`                      | https:/github.com/repo/owner                                                                                                                                  |
@@ -66,6 +66,11 @@ check out the code that is being tested.
 | target_namespace    | The target namespace where the Repository has matched and the PipelineRun will be created.                                                                                      | `{{target_namespace}}`              | my-namespace                                                                                                                                                  |
 | trigger_comment     | The comment triggering the PipelineRun when using a [GitOps command]({{< relref "/docs/guide/running.md#gitops-command-on-pull-or-merge-request" >}}) (like `/test`, `/retest`) | `{{trigger_comment}}`               | /merge-pr branch                                                                                                                                              |
 | pull_request_labels | The labels of the pull request separated by a newline                                                                                                                           | `{{pull_request_labels}}`           | bugs\nenhancement                                                                                                                                             |
+
+Note: When using the `{{ pull_request_number }}` variable in a push-triggered PipelineRun when a pull request is merged and the commit is associated with multiple pull requests
+the git provider API may return more than one pull request. In such cases, the `{{ pull_request_number }}` variable will contain the number of the first pull request returned by the API.
+
+The `{{ pull_request_number }}` variable is currently supported only for the GitHub provider when used in a push event.
 
 ### Defining Parameters with Object Values in YAML
 
@@ -191,12 +196,16 @@ The token value is stored in the temporary git-auth secret as generated for [pri
 repositories](../privaterepo/) in the key `git-provider-token`.
 
 As an example, if you want to add a comment to your pull request, you can use the
-[github-add-comment](https://hub.tekton.dev/tekton/task/github-add-comment)
-task from the [Tekton Hub](https://hub.tekton.dev)
-using a [pipelines as code annotation](../resolver/#remote-http-url):
+[github-add-comment](https://artifacthub.io/packages/tekton-task/tekton-catalog-tasks/github-add-comment)
+task from [Artifact Hub](https://artifacthub.io) or the same task from
+[Tekton Hub](https://hub.tekton.dev/) using a [pipelines as code annotation](../resolver/#hub-support-for-tasks):
 
 ```yaml
+# Using Artifact Hub (default)
 pipelinesascode.tekton.dev/task: "github-add-comment"
+
+# Or explicitly using Tekton Hub
+pipelinesascode.tekton.dev/task: "tektonhub://github-add-comment"
 ```
 
 you can then add the task to your [tasks section](https://tekton.dev/docs/pipelines/pipelines/#adding-tasks-to-the-pipeline) (or [finally](https://tekton.dev/docs/pipelines/pipelines/#adding-finally-to-the-pipeline) tasks) of your PipelineRun :
