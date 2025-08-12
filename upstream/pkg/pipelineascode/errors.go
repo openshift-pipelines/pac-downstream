@@ -13,15 +13,13 @@ import (
 	"go.uber.org/zap"
 )
 
-const validationErrorTemplate = `> [!CAUTION]
-> There are some errors in your PipelineRun template.
-
-| PipelineRun | Error |
-|------|-------|`
+const (
+	tektonDirMissingError = ".tekton/ directory doesn't exist in repository's root directory"
+)
 
 var regexpIgnoreErrors = regexp.MustCompile(`.*no kind.*is registered for version.*in scheme.*`)
 
-func (p *PacRun) checkAccessOrErrror(ctx context.Context, repo *v1alpha1.Repository, status provider.StatusOpts, viamsg string) (bool, error) {
+func (p *PacRun) checkAccessOrError(ctx context.Context, repo *v1alpha1.Repository, status provider.StatusOpts, viamsg string) (bool, error) {
 	allowed, err := p.vcx.IsAllowed(ctx, p.event)
 	if err != nil {
 		return false, fmt.Errorf("unable to verify event authorization: %w", err)
@@ -61,8 +59,8 @@ func (p *PacRun) reportValidationErrors(ctx context.Context, repo *v1alpha1.Repo
 		return
 	}
 	markdownErrMessage := fmt.Sprintf(`%s
-%s`, validationErrorTemplate, strings.Join(errorRows, "\n"))
-	if err := p.vcx.CreateComment(ctx, p.event, markdownErrMessage, validationErrorTemplate); err != nil {
+%s`, provider.ValidationErrorTemplate, strings.Join(errorRows, "\n"))
+	if err := p.vcx.CreateComment(ctx, p.event, markdownErrMessage, provider.ValidationErrorTemplate); err != nil {
 		p.eventEmitter.EmitMessage(repo, zap.ErrorLevel, "PipelineRunCommentCreationError",
 			fmt.Sprintf("failed to create comment: %s", err.Error()))
 	}
