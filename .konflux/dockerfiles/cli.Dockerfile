@@ -3,7 +3,7 @@ ARG RUNTIME=registry.access.redhat.com/ubi9/ubi-minimal:latest@sha256:6d5a6576c8
 
 FROM $GO_BUILDER AS builder
 
-ARG TKN_PAC_VERSION=nightly
+ARG TKN_PAC_VERSION=0.35.2
 WORKDIR /go/src/github.com/openshift-pipelines/pipelines-as-code
 COPY upstream .
 COPY .konflux/patches patches/
@@ -15,7 +15,7 @@ RUN go build -mod=vendor -tags disable_gcp,strictfipsruntime -v  \
     -o /tmp/tkn-pac ./cmd/tkn-pac
 
 FROM $RUNTIME
-ARG VERSION=pipelines-as-code-cli-next
+ARG VERSION=pipelines-as-code-cli-1.20
 
 COPY --from=builder /tmp/tkn-pac /usr/bin
 

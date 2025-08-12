@@ -14,7 +14,7 @@ RUN go build -ldflags="-X 'knative.dev/pkg/changeset.rev=$(cat HEAD)'" -mod=vend
     ./cmd/pipelines-as-code-watcher
 
 FROM $RUNTIME
-ARG VERSION=pipelines-as-code-watcher-next
+ARG VERSION=pipelines-as-code-watcher-1.20
 
 ENV KO_APP=/ko-app \
     KO_DATA_PATH=/kodata
