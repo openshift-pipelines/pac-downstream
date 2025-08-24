@@ -1,8 +1,8 @@
 module github.com/openshift-pipelines/pipelines-as-code
 
-go 1.23.8
+go 1.24.0
 
-toolchain go1.24.2
+toolchain go1.24.6
 
 require (
 	code.gitea.io/gitea v1.23.7
@@ -63,7 +63,7 @@ require (
 	github.com/x448/float16 v0.8.4 // indirect
 	go.uber.org/atomic v1.11.0 // indirect
 	gopkg.in/evanphx/json-patch.v4 v4.12.0 // indirect
-	sigs.k8s.io/gateway-api v1.1.0 // indirect
+	sigs.k8s.io/gateway-api v1.3.0 // indirect
 	sigs.k8s.io/randfill v1.0.0 // indirect
 )
 
@@ -150,5 +150,5 @@ replace (
 	github.com/go-jose/go-jose/v4 => github.com/go-jose/go-jose/v4 v4.0.5
 	k8s.io/api => k8s.io/api v0.32.4
 	k8s.io/apimachinery => k8s.io/apimachinery v0.32.4
-	sigs.k8s.io/gateway-api => sigs.k8s.io/gateway-api v1.0.0
+	sigs.k8s.io/gateway-api => sigs.k8s.io/gateway-api v1.3.0
 )
