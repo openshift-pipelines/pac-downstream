@@ -12,7 +12,7 @@ require (
 	github.com/cloudevents/sdk-go/v2 v2.16.0
 	github.com/fvbommel/sortorder v1.1.0
 	github.com/gobwas/glob v0.2.3
-	github.com/google/cel-go v0.25.0
+	github.com/google/cel-go v0.26.0
 	github.com/google/go-cmp v0.7.0
 	github.com/google/go-github/scrape v0.0.0-20250430122735-c9e1ad0d3b65
 	github.com/google/go-github/v71 v71.0.0
@@ -48,7 +48,7 @@ require (
 )
 
 require (
-	cel.dev/expr v0.23.1 // indirect
+	cel.dev/expr v0.24.0 // indirect
 	github.com/42wim/httpsig v1.2.3 // indirect
 	github.com/antlr/antlr4/runtime/Go/antlr v1.4.10 // indirect
 	github.com/cert-manager/cert-manager v1.17.2 // indirect
