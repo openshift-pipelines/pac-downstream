@@ -63,7 +63,7 @@ require (
 
 replace (
 	github.com/PuerkitoBio/goquery => github.com/PuerkitoBio/goquery v1.9.2
-	github.com/imdario/mergo => dario.cat/mergo v1.0.1
+	github.com/imdario/mergo => dario.cat/mergo v1.0.2
 	sigs.k8s.io/json => sigs.k8s.io/json v0.0.0-20221116044647-bc3834ca7abd
 	sigs.k8s.io/structured-merge-diff/v4 => sigs.k8s.io/structured-merge-diff/v4 v4.4.1
 )
