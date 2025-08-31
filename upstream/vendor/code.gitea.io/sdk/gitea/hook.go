@@ -14,14 +14,16 @@ import (
 
 // Hook a hook is a web hook when one repository changed
 type Hook struct {
-	ID      int64             `json:"id"`
-	Type    string            `json:"type"`
-	URL     string            `json:"-"`
-	Config  map[string]string `json:"config"`
-	Events  []string          `json:"events"`
-	Active  bool              `json:"active"`
-	Updated time.Time         `json:"updated_at"`
-	Created time.Time         `json:"created_at"`
+	ID                  int64             `json:"id"`
+	Type                string            `json:"type"`
+	URL                 string            `json:"-"`
+	BranchFilter        string            `json:"branch_filter"`
+	Config              map[string]string `json:"config"`
+	Events              []string          `json:"events"`
+	AuthorizationHeader string            `json:"authorization_header"`
+	Active              bool              `json:"active"`
+	Updated             time.Time         `json:"updated_at"`
+	Created             time.Time         `json:"created_at"`
 }
 
 // HookType represent all webhook types gitea currently offer
@@ -62,6 +64,14 @@ func (c *Client) ListOrgHooks(org string, opt ListHooksOptions) ([]*Hook, *Respo
 	return hooks, resp, err
 }
 
+// ListMyHooks list all the hooks of the authenticated user
+func (c *Client) ListMyHooks(opt ListHooksOptions) ([]*Hook, *Response, error) {
+	opt.setDefaults()
+	hooks := make([]*Hook, 0, opt.PageSize)
+	resp, err := c.getParsedResponse("GET", fmt.Sprintf("/user/hooks?%s", opt.getURLQuery().Encode()), nil, nil, &hooks)
+	return hooks, resp, err
+}
+
 // ListRepoHooks list all the hooks of one repository
 func (c *Client) ListRepoHooks(user, repo string, opt ListHooksOptions) ([]*Hook, *Response, error) {
 	if err := escapeValidatePathSegments(&user, &repo); err != nil {
@@ -80,6 +90,13 @@ func (c *Client) GetOrgHook(org string, id int64) (*Hook, *Response, error) {
 	}
 	h := new(Hook)
 	resp, err := c.getParsedResponse("GET", fmt.Sprintf("/orgs/%s/hooks/%d", org, id), nil, nil, h)
+	return h, resp, err
+}
+
+// GetMyHook get a hook of the authenticated user
+func (c *Client) GetMyHook(id int64) (*Hook, *Response, error) {
+	h := new(Hook)
+	resp, err := c.getParsedResponse("GET", fmt.Sprintf("/user/hooks/%d", id), nil, nil, h)
 	return h, resp, err
 }
 
@@ -128,6 +145,20 @@ func (c *Client) CreateOrgHook(org string, opt CreateHookOption) (*Hook, *Respon
 	return h, resp, err
 }
 
+// CreateMyHook create one hook for the authenticated user, with options
+func (c *Client) CreateMyHook(opt CreateHookOption) (*Hook, *Response, error) {
+	if err := opt.Validate(); err != nil {
+		return nil, nil, err
+	}
+	body, err := json.Marshal(&opt)
+	if err != nil {
+		return nil, nil, err
+	}
+	h := new(Hook)
+	resp, err := c.getParsedResponse("POST", "/user/hooks", jsonHeader, bytes.NewReader(body), h)
+	return h, resp, err
+}
+
 // CreateRepoHook create one hook for a repository, with options
 func (c *Client) CreateRepoHook(user, repo string, opt CreateHookOption) (*Hook, *Response, error) {
 	if err := escapeValidatePathSegments(&user, &repo); err != nil {
@@ -160,8 +191,16 @@ func (c *Client) EditOrgHook(org string, id int64, opt EditHookOption) (*Respons
 	if err != nil {
 		return nil, err
 	}
-	_, resp, err := c.getResponse("PATCH", fmt.Sprintf("/orgs/%s/hooks/%d", org, id), jsonHeader, bytes.NewReader(body))
-	return resp, err
+	return c.doRequestWithStatusHandle("PATCH", fmt.Sprintf("/orgs/%s/hooks/%d", org, id), jsonHeader, bytes.NewReader(body))
+}
+
+// EditMyHook modify one hook of the authenticated user, with hook id and options
+func (c *Client) EditMyHook(id int64, opt EditHookOption) (*Response, error) {
+	body, err := json.Marshal(&opt)
+	if err != nil {
+		return nil, err
+	}
+	return c.doRequestWithStatusHandle("PATCH", fmt.Sprintf("/user/hooks/%d", id), jsonHeader, bytes.NewReader(body))
 }
 
 // EditRepoHook modify one hook of a repository, with hook id and options
@@ -173,8 +212,7 @@ func (c *Client) EditRepoHook(user, repo string, id int64, opt EditHookOption) (
 	if err != nil {
 		return nil, err
 	}
-	_, resp, err := c.getResponse("PATCH", fmt.Sprintf("/repos/%s/%s/hooks/%d", user, repo, id), jsonHeader, bytes.NewReader(body))
-	return resp, err
+	return c.doRequestWithStatusHandle("PATCH", fmt.Sprintf("/repos/%s/%s/hooks/%d", user, repo, id), jsonHeader, bytes.NewReader(body))
 }
 
 // DeleteOrgHook delete one hook from an organization, with hook id
@@ -182,8 +220,12 @@ func (c *Client) DeleteOrgHook(org string, id int64) (*Response, error) {
 	if err := escapeValidatePathSegments(&org); err != nil {
 		return nil, err
 	}
-	_, resp, err := c.getResponse("DELETE", fmt.Sprintf("/orgs/%s/hooks/%d", org, id), nil, nil)
-	return resp, err
+	return c.doRequestWithStatusHandle("DELETE", fmt.Sprintf("/orgs/%s/hooks/%d", org, id), nil, nil)
+}
+
+// DeleteMyHook delete one hook from the authenticated user, with hook id
+func (c *Client) DeleteMyHook(id int64) (*Response, error) {
+	return c.doRequestWithStatusHandle("DELETE", fmt.Sprintf("/user/hooks/%d", id), nil, nil)
 }
 
 // DeleteRepoHook delete one hook from a repository, with hook id
@@ -191,6 +233,5 @@ func (c *Client) DeleteRepoHook(user, repo string, id int64) (*Response, error) 
 	if err := escapeValidatePathSegments(&user, &repo); err != nil {
 		return nil, err
 	}
-	_, resp, err := c.getResponse("DELETE", fmt.Sprintf("/repos/%s/%s/hooks/%d", user, repo, id), nil, nil)
-	return resp, err
+	return c.doRequestWithStatusHandle("DELETE", fmt.Sprintf("/repos/%s/%s/hooks/%d", user, repo, id), nil, nil)
 }
