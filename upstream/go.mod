@@ -5,7 +5,7 @@ go 1.23.0
 toolchain go1.23.8
 
 require (
-	code.gitea.io/gitea v1.22.3
+	code.gitea.io/gitea v1.24.5
 	code.gitea.io/sdk/gitea v0.19.0
 	github.com/AlecAivazis/survey/v2 v2.3.7
 	github.com/bradleyfalzon/ghinstallation/v2 v2.13.0
