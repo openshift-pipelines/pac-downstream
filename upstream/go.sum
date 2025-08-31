@@ -425,8 +425,8 @@ github.com/prometheus/statsd_exporter v0.28.0/go.mod h1:Lq41vNkMLfiPANmI+uHb5/rp
 github.com/rcrowley/go-metrics v0.0.0-20181016184325-3113b8401b8a/go.mod h1:bCqnVzQkZxMG4s8nGwiZ5l3QUCyqpo9Y+/ZMZ9VjZe4=
 github.com/rickb777/date v1.20.2 h1:CUpAaa4ksqvcRaidSgwzK7zeO2wUG5/VGy6Zlfcu/d4=
 github.com/rickb777/date v1.20.2/go.mod h1:PVaM/Zn0IOzjm1uj84Eh9NJ/imtQSm1SVKtOvIunaYw=
-github.com/rickb777/plural v1.4.1 h1:5MMLcbIaapLFmvDGRT5iPk8877hpTPt8Y9cdSKRw9sU=
-github.com/rickb777/plural v1.4.1/go.mod h1:kdmXUpmKBJTS0FtG/TFumd//VBWsNTD7zOw7x4umxNw=
+github.com/rickb777/plural v1.4.4 h1:OpZU8uRr9P2NkYAbkLMwlKNVJyJ5HvRcRBFyXGJtKGI=
+github.com/rickb777/plural v1.4.4/go.mod h1:DB19dtrplGS5s6VJVHn7tvmFYPoE83p1xqio3oVnNRM=
 github.com/robfig/cron/v3 v3.0.1 h1:WdRxkvbJztn8LMz/QEvLN5sBU+xKpSqwwUO1Pjr4qDs=
 github.com/robfig/cron/v3 v3.0.1/go.mod h1:eQICP3HwyT7UooqI/z+Ov+PtYAWygg1TEWWzGIFLtro=
 github.com/rogpeppe/fastuuid v1.2.0/go.mod h1:jVj6XXZzXRy/MSR5jhDC/2q6DgLz+nrA6LYCDYWNEvQ=
