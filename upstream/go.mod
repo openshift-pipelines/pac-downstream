@@ -1,8 +1,8 @@
 module github.com/openshift-pipelines/pipelines-as-code
 
-go 1.23.0
+go 1.24.0
 
-toolchain go1.24.1
+toolchain go1.24.6
 
 require (
 	code.gitea.io/gitea v1.22.1
@@ -133,9 +133,9 @@ require (
 	gomodules.xyz/jsonpatch/v2 v2.4.0 // indirect
 	google.golang.org/api v0.195.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20240903143218-8af14fe29dc1 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20240903143218-8af14fe29dc1 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20250826171959-ef028d996bc1 // indirect
 	google.golang.org/grpc v1.66.0 // indirect
-	google.golang.org/protobuf v1.34.2
+	google.golang.org/protobuf v1.36.8
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	k8s.io/apiextensions-apiserver v0.31.0 // indirect
