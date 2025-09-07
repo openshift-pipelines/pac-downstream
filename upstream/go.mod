@@ -45,7 +45,7 @@ require (
 	k8s.io/utils v0.0.0-20241104163129-6fe5fd82f078
 	knative.dev/eventing v0.43.0
 	knative.dev/pkg v0.0.0-20241106013442-0a99635c789e
-	sigs.k8s.io/yaml v1.4.0
+	sigs.k8s.io/yaml v1.6.0
 )
 
 require (
@@ -58,6 +58,7 @@ require (
 	github.com/rickb777/plural v1.4.1 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	go.uber.org/atomic v1.11.0 // indirect
+	go.yaml.in/yaml/v2 v2.4.2 // indirect
 	gopkg.in/evanphx/json-patch.v4 v4.12.0 // indirect
 )
 
