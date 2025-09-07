@@ -22,18 +22,31 @@ import (
 	"time"
 )
 
-// ReleasesService handles communication with the releases methods
-// of the GitLab API.
-//
-// GitLab API docs: https://docs.gitlab.com/ee/api/releases/index.html
-type ReleasesService struct {
-	client *Client
-}
+type (
+	ReleasesServiceInterface interface {
+		ListReleases(pid any, opt *ListReleasesOptions, options ...RequestOptionFunc) ([]*Release, *Response, error)
+		GetRelease(pid any, tagName string, options ...RequestOptionFunc) (*Release, *Response, error)
+		GetLatestRelease(pid any, options ...RequestOptionFunc) (*Release, *Response, error)
+		CreateRelease(pid any, opts *CreateReleaseOptions, options ...RequestOptionFunc) (*Release, *Response, error)
+		UpdateRelease(pid any, tagName string, opts *UpdateReleaseOptions, options ...RequestOptionFunc) (*Release, *Response, error)
+		DeleteRelease(pid any, tagName string, options ...RequestOptionFunc) (*Release, *Response, error)
+	}
+
+	// ReleasesService handles communication with the releases methods
+	// of the GitLab API.
+	//
+	// GitLab API docs: https://docs.gitlab.com/api/releases/
+	ReleasesService struct {
+		client *Client
+	}
+)
+
+var _ ReleasesServiceInterface = (*ReleasesService)(nil)
 
 // Release represents a project release.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/ee/api/releases/index.html#list-releases
+// https://docs.gitlab.com/api/releases/#list-releases
 type Release struct {
 	TagName         string     `json:"tag_name"`
 	Name            string     `json:"name"`
@@ -49,19 +62,22 @@ type Release struct {
 		AvatarURL string `json:"avatar_url"`
 		WebURL    string `json:"web_url"`
 	} `json:"author"`
-	Commit          Commit `json:"commit"`
-	UpcomingRelease bool   `json:"upcoming_release"`
-	CommitPath      string `json:"commit_path"`
-	TagPath         string `json:"tag_path"`
+	Commit          Commit              `json:"commit"`
+	Milestones      []*ReleaseMilestone `json:"milestones"`
+	UpcomingRelease bool                `json:"upcoming_release"`
+	CommitPath      string              `json:"commit_path"`
+	TagPath         string              `json:"tag_path"`
 	Assets          struct {
 		Count   int `json:"count"`
 		Sources []struct {
 			Format string `json:"format"`
 			URL    string `json:"url"`
 		} `json:"sources"`
-		Links []*ReleaseLink `json:"links"`
+		Links            []*ReleaseLink `json:"links"`
+		EvidenceFilePath string         `json:"evidence_file_path"`
 	} `json:"assets"`
-	Links struct {
+	Evidences []*ReleaseEvidence `json:"evidences"`
+	Links     struct {
 		ClosedIssueURL     string `json:"closed_issues_url"`
 		ClosedMergeRequest string `json:"closed_merge_requests_url"`
 		EditURL            string `json:"edit_url"`
@@ -72,10 +88,49 @@ type Release struct {
 	} `json:"_links"`
 }
 
+// ReleaseMilestone represents a project release milestone.
+//
+// GitLab API docs:
+// https://docs.gitlab.com/api/releases/#list-releases
+type ReleaseMilestone struct {
+	ID          int                         `json:"id"`
+	IID         int                         `json:"iid"`
+	ProjectID   int                         `json:"project_id"`
+	Title       string                      `json:"title"`
+	Description string                      `json:"description"`
+	State       string                      `json:"state"`
+	CreatedAt   *time.Time                  `json:"created_at"`
+	UpdatedAt   *time.Time                  `json:"updated_at"`
+	DueDate     *ISOTime                    `json:"due_date"`
+	StartDate   *ISOTime                    `json:"start_date"`
+	WebURL      string                      `json:"web_url"`
+	IssueStats  *ReleaseMilestoneIssueStats `json:"issue_stats"`
+}
+
+// ReleaseMilestoneIssueStats represents a project release milestone's
+// related issues statistics.
+//
+// GitLab API docs:
+// https://docs.gitlab.com/api/releases/#list-releases
+type ReleaseMilestoneIssueStats struct {
+	Total  int `json:"total"`
+	Closed int `json:"closed"`
+}
+
+// ReleaseEvidence represents a project release's evidence.
+//
+// GitLab API docs:
+// https://docs.gitlab.com/api/releases/#list-releases
+type ReleaseEvidence struct {
+	SHA         string     `json:"sha"`
+	Filepath    string     `json:"filepath"`
+	CollectedAt *time.Time `json:"collected_at"`
+}
+
 // ListReleasesOptions represents ListReleases() options.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/ee/api/releases/index.html#list-releases
+// https://docs.gitlab.com/api/releases/#list-releases
 type ListReleasesOptions struct {
 	ListOptions
 	OrderBy                *string `url:"order_by,omitempty" json:"order_by,omitempty"`
@@ -83,11 +138,11 @@ type ListReleasesOptions struct {
 	IncludeHTMLDescription *bool   `url:"include_html_description,omitempty" json:"include_html_description,omitempty"`
 }
 
-// ListReleases gets a pagenated of releases accessible by the authenticated user.
+// ListReleases gets a paginated list of releases accessible by the authenticated user.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/ee/api/releases/index.html#list-releases
-func (s *ReleasesService) ListReleases(pid interface{}, opt *ListReleasesOptions, options ...RequestOptionFunc) ([]*Release, *Response, error) {
+// https://docs.gitlab.com/api/releases/#list-releases
+func (s *ReleasesService) ListReleases(pid any, opt *ListReleasesOptions, options ...RequestOptionFunc) ([]*Release, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err
@@ -111,8 +166,8 @@ func (s *ReleasesService) ListReleases(pid interface{}, opt *ListReleasesOptions
 // GetRelease returns a single release, identified by a tag name.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/ee/api/releases/index.html#get-a-release-by-a-tag-name
-func (s *ReleasesService) GetRelease(pid interface{}, tagName string, options ...RequestOptionFunc) (*Release, *Response, error) {
+// https://docs.gitlab.com/api/releases/#get-a-release-by-a-tag-name
+func (s *ReleasesService) GetRelease(pid any, tagName string, options ...RequestOptionFunc) (*Release, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err
@@ -136,8 +191,8 @@ func (s *ReleasesService) GetRelease(pid interface{}, tagName string, options ..
 // GetLatestRelease returns the latest release for the project.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/ee/api/releases/#get-the-latest-release
-func (s *ReleasesService) GetLatestRelease(pid interface{}, options ...RequestOptionFunc) (*Release, *Response, error) {
+// https://docs.gitlab.com/api/releases/#get-the-latest-release
+func (s *ReleasesService) GetLatestRelease(pid any, options ...RequestOptionFunc) (*Release, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err
@@ -161,7 +216,7 @@ func (s *ReleasesService) GetLatestRelease(pid interface{}, options ...RequestOp
 // CreateReleaseOptions represents CreateRelease() options.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/ee/api/releases/index.html#create-a-release
+// https://docs.gitlab.com/api/releases/#create-a-release
 type CreateReleaseOptions struct {
 	Name        *string               `url:"name,omitempty" json:"name,omitempty"`
 	TagName     *string               `url:"tag_name,omitempty" json:"tag_name,omitempty"`
@@ -176,7 +231,7 @@ type CreateReleaseOptions struct {
 // ReleaseAssetsOptions represents release assets in CreateRelease() options.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/ee/api/releases/index.html#create-a-release
+// https://docs.gitlab.com/api/releases/#create-a-release
 type ReleaseAssetsOptions struct {
 	Links []*ReleaseAssetLinkOptions `url:"links,omitempty" json:"links,omitempty"`
 }
@@ -185,7 +240,7 @@ type ReleaseAssetsOptions struct {
 // options.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/ee/api/releases/index.html#create-a-release
+// https://docs.gitlab.com/api/releases/#create-a-release
 type ReleaseAssetLinkOptions struct {
 	Name            *string        `url:"name,omitempty" json:"name,omitempty"`
 	URL             *string        `url:"url,omitempty" json:"url,omitempty"`
@@ -197,8 +252,8 @@ type ReleaseAssetLinkOptions struct {
 // CreateRelease creates a release.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/ee/api/releases/index.html#create-a-release
-func (s *ReleasesService) CreateRelease(pid interface{}, opts *CreateReleaseOptions, options ...RequestOptionFunc) (*Release, *Response, error) {
+// https://docs.gitlab.com/api/releases/#create-a-release
+func (s *ReleasesService) CreateRelease(pid any, opts *CreateReleaseOptions, options ...RequestOptionFunc) (*Release, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err
@@ -222,7 +277,7 @@ func (s *ReleasesService) CreateRelease(pid interface{}, opts *CreateReleaseOpti
 // UpdateReleaseOptions represents UpdateRelease() options.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/ee/api/releases/index.html#update-a-release
+// https://docs.gitlab.com/api/releases/#update-a-release
 type UpdateReleaseOptions struct {
 	Name        *string    `url:"name" json:"name"`
 	Description *string    `url:"description" json:"description"`
@@ -233,8 +288,8 @@ type UpdateReleaseOptions struct {
 // UpdateRelease updates a release.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/ee/api/releases/index.html#update-a-release
-func (s *ReleasesService) UpdateRelease(pid interface{}, tagName string, opts *UpdateReleaseOptions, options ...RequestOptionFunc) (*Release, *Response, error) {
+// https://docs.gitlab.com/api/releases/#update-a-release
+func (s *ReleasesService) UpdateRelease(pid any, tagName string, opts *UpdateReleaseOptions, options ...RequestOptionFunc) (*Release, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err
@@ -258,8 +313,8 @@ func (s *ReleasesService) UpdateRelease(pid interface{}, tagName string, opts *U
 // DeleteRelease deletes a release.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/ee/api/releases/index.html#delete-a-release
-func (s *ReleasesService) DeleteRelease(pid interface{}, tagName string, options ...RequestOptionFunc) (*Release, *Response, error) {
+// https://docs.gitlab.com/api/releases/#delete-a-release
+func (s *ReleasesService) DeleteRelease(pid any, tagName string, options ...RequestOptionFunc) (*Release, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err

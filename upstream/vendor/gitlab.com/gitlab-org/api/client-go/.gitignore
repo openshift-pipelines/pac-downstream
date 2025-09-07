@@ -31,3 +31,10 @@ _testmain.go
 
 # vendor
 vendor
+.go/
+.golangci-lint/
+
+# reports
+gl-code-quality-report.json
+
+.mise/
