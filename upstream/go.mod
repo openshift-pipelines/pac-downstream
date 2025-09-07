@@ -1,6 +1,8 @@
 module github.com/openshift-pipelines/pipelines-as-code
 
-go 1.20
+go 1.21
+
+toolchain go1.24.6
 
 require (
 	code.gitea.io/gitea/modules/structs v0.0.0-20190610152049-835b53fc259c
@@ -12,7 +14,7 @@ require (
 	github.com/gfleury/go-bitbucket-v1 v0.0.0-20230830121038-6e30c5760c87
 	github.com/gobwas/glob v0.2.3
 	github.com/google/cel-go v0.18.2
-	github.com/google/go-cmp v0.6.0
+	github.com/google/go-cmp v0.7.0
 	github.com/google/go-github/scrape v0.0.0-20231113230724-78c6de0b72ac
 	github.com/google/go-github/v56 v56.0.0
 	github.com/hako/durafmt v0.0.0-20210608085754-5c1018a4e16b
