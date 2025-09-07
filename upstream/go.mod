@@ -28,7 +28,7 @@ require (
 	github.com/mitchellh/mapstructure v1.5.0
 	github.com/pkg/errors v0.9.1
 	github.com/spf13/cobra v1.8.1
-	github.com/stretchr/testify v1.9.0
+	github.com/stretchr/testify v1.11.1
 	github.com/tektoncd/pipeline v0.65.1
 	gitlab.com/gitlab-org/api/client-go v0.116.0
 	go.opencensus.io v0.24.0
