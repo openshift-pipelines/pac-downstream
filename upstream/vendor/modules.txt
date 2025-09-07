@@ -252,8 +252,8 @@ github.com/jenkins-x/go-scm/scm/driver/stash
 github.com/jenkins-x/go-scm/scm/labels
 github.com/jenkins-x/go-scm/scm/transport/internal
 github.com/jenkins-x/go-scm/scm/transport/oauth2
-# github.com/jonboulle/clockwork v0.4.0
-## explicit; go 1.15
+# github.com/jonboulle/clockwork v0.5.0
+## explicit; go 1.21
 github.com/jonboulle/clockwork
 # github.com/josharian/intern v1.0.0
 ## explicit; go 1.5
