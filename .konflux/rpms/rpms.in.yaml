@@ -4,7 +4,7 @@ contentOrigin:
 packages: [openssl-libs-3.2.2-6.el9_5.1]
 arches:
   # The list of architectures
-  - aarch64
+  - aarch64 
   - x86_64
   - ppc64le
   - s390x
