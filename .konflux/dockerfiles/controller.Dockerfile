@@ -28,6 +28,7 @@ LABEL \
       summary="Red Hat OpenShift Pipelines Pipelines as Code Controller" \
       maintainer="pipelines-extcomm@redhat.com" \
       description="Red Hat OpenShift Pipelines Pipelines as Code Controller" \
+      cpe="cpe:/a:redhat:openshift_pipelines:1.15::el8" \
       io.k8s.display-name="Red Hat OpenShift Pipelines Pipelines as Code Controller" \
       io.k8s.description="Red Hat OpenShift Pipelines Pipelines as Code Controller" \
       io.openshift.tags="pipelines,tekton,openshift"
