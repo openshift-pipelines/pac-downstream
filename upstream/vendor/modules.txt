@@ -103,7 +103,7 @@ github.com/go-kit/log/level
 # github.com/go-logfmt/logfmt v0.6.0
 ## explicit; go 1.17
 github.com/go-logfmt/logfmt
-# github.com/go-logr/logr v1.3.0
+# github.com/go-logr/logr v1.4.1
 ## explicit; go 1.18
 github.com/go-logr/logr
 github.com/go-logr/logr/slogr
@@ -203,8 +203,6 @@ github.com/google/go-querystring/query
 ## explicit; go 1.12
 github.com/google/gofuzz
 github.com/google/gofuzz/bytesource
-# github.com/google/pprof v0.0.0-20230111200839-76d1ae5aea2b
-## explicit; go 1.18
 # github.com/google/uuid v1.5.0
 ## explicit
 github.com/google/uuid
@@ -295,6 +293,10 @@ github.com/modern-go/reflect2
 # github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822
 ## explicit
 github.com/munnerz/goautoneg
+# github.com/onsi/ginkgo/v2 v2.17.2
+## explicit; go 1.20
+# github.com/onsi/gomega v1.33.1
+## explicit; go 1.20
 # github.com/opencontainers/go-digest v1.0.0
 ## explicit; go 1.13
 github.com/opencontainers/go-digest
@@ -335,7 +337,7 @@ github.com/prometheus/procfs/internal/util
 github.com/prometheus/statsd_exporter/pkg/level
 github.com/prometheus/statsd_exporter/pkg/mapper
 github.com/prometheus/statsd_exporter/pkg/mapper/fsm
-# github.com/rickb777/date v1.20.2
+# github.com/rickb777/date v1.21.1
 ## explicit; go 1.17
 # github.com/spf13/cobra v1.8.0
 ## explicit; go 1.15
