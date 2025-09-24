@@ -24,7 +24,7 @@ require (
 	github.com/mgutz/ansi v0.0.0-20200706080929-d51e80ef957d
 	github.com/mitchellh/mapstructure v1.5.0
 	github.com/pkg/errors v0.9.1
-	github.com/spf13/cobra v1.8.0
+	github.com/spf13/cobra v1.10.1
 	github.com/stretchr/testify v1.8.4
 	github.com/tektoncd/pipeline v0.56.0
 	github.com/xanzy/go-gitlab v0.94.0
@@ -118,7 +118,7 @@ require (
 	github.com/prometheus/procfs v0.12.0 // indirect
 	github.com/prometheus/statsd_exporter v0.25.0 // indirect
 	github.com/rickb777/date v1.20.2 // indirect
-	github.com/spf13/pflag v1.0.5 // indirect
+	github.com/spf13/pflag v1.0.9 // indirect
 	github.com/stoewer/go-strcase v1.3.0 // indirect
 	github.com/xlzd/gotp v0.1.0 // indirect
 	go.uber.org/atomic v1.11.0 // indirect
