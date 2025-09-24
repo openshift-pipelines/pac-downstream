@@ -26,6 +26,7 @@ LABEL \
       com.redhat.component="openshift-pipelines-pipelines-as-code-controller-container" \
       name="openshift-pipelines/pipelines-pipelines-as-code-controller-rhel9" \
       version=$VERSION \
+      cpe="cpe:/a:redhat:openshift_pipelines:1.19::el9" \
       summary="Red Hat OpenShift Pipelines Pipelines as Code Controller" \
       maintainer="pipelines-extcomm@redhat.com" \
       description="Red Hat OpenShift Pipelines Pipelines as Code Controller" \
