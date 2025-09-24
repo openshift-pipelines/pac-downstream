@@ -17,7 +17,6 @@ limitations under the License.
 package auth
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -28,12 +27,14 @@ import (
 	"sync"
 	"time"
 
-	"go.opencensus.io/plugin/ochttp"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/otel"
 	corev1listers "k8s.io/client-go/listers/core/v1"
 	"knative.dev/eventing/pkg/eventingtls"
+	"knative.dev/eventing/pkg/utils"
 	"knative.dev/pkg/configmap"
 	"knative.dev/pkg/network"
-	"knative.dev/pkg/tracing/propagation/tracecontextb3"
+	"knative.dev/pkg/observability/tracing"
 
 	duckv1 "knative.dev/eventing/pkg/apis/duck/v1"
 	"knative.dev/eventing/pkg/client/listers/eventing/v1alpha1"
@@ -160,7 +161,7 @@ func (v *Verifier) verifyAuthN(ctx context.Context, audience *string, req *http.
 // verifyAuthZ verifies if the given idToken is allowed by the resources eventPolicyStatus
 func (v *Verifier) verifyAuthZ(ctx context.Context, features feature.Flags, idToken *IDToken, resourceNamespace string, policyRefs []duckv1.AppliedEventPolicyRef, req *http.Request, resp http.ResponseWriter) error {
 	if len(policyRefs) > 0 {
-		req, err := copyRequest(req)
+		req, err := utils.CopyRequest(req)
 		if err != nil {
 			resp.WriteHeader(http.StatusInternalServerError)
 			return fmt.Errorf("failed to copy request body: %w", err)
@@ -303,10 +304,12 @@ func (v *Verifier) getHTTPClient(features feature.Flags) (*http.Client, error) {
 
 	client := &http.Client{
 		// Add output tracing.
-		Transport: &ochttp.Transport{
-			Base:        base,
-			Propagation: tracecontextb3.TraceContextEgress,
-		},
+		Transport: otelhttp.NewTransport(
+			base,
+			otelhttp.WithMeterProvider(otel.GetMeterProvider()),
+			otelhttp.WithTracerProvider(otel.GetTracerProvider()),
+			otelhttp.WithPropagators(tracing.DefaultTextMapPropagator()),
+		),
 	}
 
 	return client, nil
@@ -330,35 +333,6 @@ func (v *Verifier) getKubernetesOIDCDiscovery(features feature.Flags, client *ht
 	}
 
 	return openIdConfig, nil
-}
-
-// copyRequest makes a copy of the http request which can be consumed as needed, leaving the original request
-// able to be consumed as well.
-func copyRequest(req *http.Request) (*http.Request, error) {
-	// check if we actually need to copy the body, otherwise we can return the original request
-	if req.Body == nil || req.Body == http.NoBody {
-		return req, nil
-	}
-
-	var buf bytes.Buffer
-	if _, err := buf.ReadFrom(req.Body); err != nil {
-		return nil, fmt.Errorf("failed to read request body while copying it: %w", err)
-	}
-
-	if err := req.Body.Close(); err != nil {
-		return nil, fmt.Errorf("failed to close original request body ready while copying request: %w", err)
-	}
-
-	// set the original request body to be readable again
-	req.Body = io.NopCloser(&buf)
-
-	// return a new request with a readable body and same headers as the original
-	// we don't need to set any other fields as cloudevents only uses the headers
-	// and body to construct the Message/Event.
-	return &http.Request{
-		Header: req.Header,
-		Body:   io.NopCloser(bytes.NewReader(buf.Bytes())),
-	}, nil
 }
 
 type openIDMetadata struct {
