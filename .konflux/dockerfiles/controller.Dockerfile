@@ -30,7 +30,8 @@ LABEL \
       description="Red Hat OpenShift Pipelines Pipelines as Code Controller" \
       io.k8s.display-name="Red Hat OpenShift Pipelines Pipelines as Code Controller" \
       io.k8s.description="Red Hat OpenShift Pipelines Pipelines as Code Controller" \
-      io.openshift.tags="pipelines,tekton,openshift"
+      io.openshift.tags="pipelines,tekton,openshift" \
+      cpe="cpe:/a:redhat:openshift_pipelines:1.14::el8"
 
 RUN groupadd -r -g 65532 nonroot && useradd --no-log-init -r -u 65532 -g nonroot nonroot
 USER 65532
