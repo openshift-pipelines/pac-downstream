@@ -57,7 +57,7 @@ type Repository struct {
 	Private       bool        `json:"private"`
 	Fork          bool        `json:"fork"`
 	Template      bool        `json:"template"`
-	Parent        *Repository `json:"parent"`
+	Parent        *Repository `json:"parent,omitempty"`
 	Mirror        bool        `json:"mirror"`
 	Size          int         `json:"size"`
 	Language      string      `json:"language"`
@@ -112,7 +112,9 @@ type Repository struct {
 	ObjectFormatName string `json:"object_format_name"`
 	// swagger:strfmt date-time
 	MirrorUpdated time.Time     `json:"mirror_updated,omitempty"`
-	RepoTransfer  *RepoTransfer `json:"repo_transfer"`
+	RepoTransfer  *RepoTransfer `json:"repo_transfer,omitempty"`
+	Topics        []string      `json:"topics"`
+	Licenses      []string      `json:"licenses"`
 }
 
 // CreateRepoOption options when creating repository
@@ -276,6 +278,16 @@ type CreateBranchRepoOption struct {
 	OldRefName string `json:"old_ref_name" binding:"GitRefName;MaxSize(100)"`
 }
 
+// UpdateBranchRepoOption options when updating a branch in a repository
+// swagger:model
+type UpdateBranchRepoOption struct {
+	// New branch name
+	//
+	// required: true
+	// unique: true
+	Name string `json:"name" binding:"Required;GitRefName;MaxSize(100)"`
+}
+
 // TransferRepoOption options when transfer a repository's ownership
 // swagger:model
 type TransferRepoOption struct {
@@ -290,15 +302,16 @@ type GitServiceType int
 
 // enumerate all GitServiceType
 const (
-	NotMigrated      GitServiceType = iota // 0 not migrated from external sites
-	PlainGitService                        // 1 plain git service
-	GithubService                          // 2 github.com
-	GiteaService                           // 3 gitea service
-	GitlabService                          // 4 gitlab service
-	GogsService                            // 5 gogs service
-	OneDevService                          // 6 onedev service
-	GitBucketService                       // 7 gitbucket service
-	CodebaseService                        // 8 codebase service
+	NotMigrated       GitServiceType = iota // 0 not migrated from external sites
+	PlainGitService                         // 1 plain git service
+	GithubService                           // 2 github.com
+	GiteaService                            // 3 gitea service
+	GitlabService                           // 4 gitlab service
+	GogsService                             // 5 gogs service
+	OneDevService                           // 6 onedev service
+	GitBucketService                        // 7 gitbucket service
+	CodebaseService                         // 8 codebase service
+	CodeCommitService                       // 9 codecommit service
 )
 
 // Name represents the service type's name
@@ -324,6 +337,8 @@ func (gt GitServiceType) Title() string {
 		return "GitBucket"
 	case CodebaseService:
 		return "Codebase"
+	case CodeCommitService:
+		return "CodeCommit"
 	case PlainGitService:
 		return "Git"
 	}
@@ -342,7 +357,7 @@ type MigrateRepoOptions struct {
 	// required: true
 	RepoName string `json:"repo_name" binding:"Required;AlphaDashDot;MaxSize(100)"`
 
-	// enum: git,github,gitea,gitlab,gogs,onedev,gitbucket,codebase
+	// enum: git,github,gitea,gitlab,gogs,onedev,gitbucket,codebase,codecommit
 	Service      string `json:"service"`
 	AuthUsername string `json:"auth_username"`
 	AuthPassword string `json:"auth_password"`
@@ -360,6 +375,9 @@ type MigrateRepoOptions struct {
 	PullRequests   bool   `json:"pull_requests"`
 	Releases       bool   `json:"releases"`
 	MirrorInterval string `json:"mirror_interval"`
+
+	AWSAccessKeyID     string `json:"aws_access_key_id"`
+	AWSSecretAccessKey string `json:"aws_secret_access_key"`
 }
 
 // TokenAuth represents whether a service type supports token-based auth
@@ -381,6 +399,7 @@ var SupportedFullGitService = []GitServiceType{
 	OneDevService,
 	GitBucketService,
 	CodebaseService,
+	CodeCommitService,
 }
 
 // RepoTransfer represents a pending repo transfer
