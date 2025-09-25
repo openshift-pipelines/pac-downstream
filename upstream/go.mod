@@ -45,12 +45,13 @@ require (
 	k8s.io/utils v0.0.0-20240310230437-4693a0247e57
 	knative.dev/eventing v0.40.3
 	knative.dev/pkg v0.0.0-20240404013351-5d4af76051e4
-	sigs.k8s.io/yaml v1.4.0
+	sigs.k8s.io/yaml v1.6.0
 )
 
 require (
 	github.com/coreos/go-oidc/v3 v3.9.0 // indirect
 	github.com/go-jose/go-jose/v3 v3.0.3 // indirect
+	go.yaml.in/yaml/v2 v2.4.2 // indirect
 )
 
 replace (
