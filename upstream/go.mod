@@ -29,7 +29,7 @@ require (
 	github.com/tektoncd/pipeline v0.56.0
 	github.com/xanzy/go-gitlab v0.94.0
 	go.opencensus.io v0.24.0
-	go.uber.org/zap v1.26.0
+	go.uber.org/zap v1.27.0
 	golang.org/x/exp v0.0.0-20231110203233-9a3e6036ecaa
 	golang.org/x/oauth2 v0.16.0
 	golang.org/x/sync v0.10.0
