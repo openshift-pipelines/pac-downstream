@@ -17,7 +17,7 @@ require (
 	github.com/google/go-cmp v0.6.0
 	github.com/google/go-github/scrape v0.0.0-20240903181346-00caddcf95be
 	github.com/google/go-github/v62 v62.0.0
-	github.com/google/go-github/v64 v64.0.0
+	github.com/google/go-github/v75 v75.0.0
 	github.com/hako/durafmt v0.0.0-20210608085754-5c1018a4e16b
 	github.com/jonboulle/clockwork v0.4.0
 	github.com/juju/ansiterm v1.0.0
