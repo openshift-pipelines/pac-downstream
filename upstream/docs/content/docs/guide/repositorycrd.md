@@ -2,6 +2,7 @@
 title: Repository CR
 weight: 1
 ---
+
 # Repository CR
 
 The Repository CR serves the following purposes:
@@ -14,6 +15,10 @@ The Repository CR serves the following purposes:
 - Providing the last `PipelineRun` statuses for the repository (5 by default).
 - Letting you declare [custom parameters]({{< relref "/docs/guide/customparams" >}})
   within the `PipelineRun` that can be expanded based on certain filters.
+
+{{< hint danger >}}
+The `pipelinerun_status` field in the `Repository` CR is scheduled for deprecation and will be removed in a future release. Please avoid relying on it.
+{{< /hint >}}
 
 To configure Pipelines-as-Code, a Repository CR must be created within the
 user's namespace, for example `project-repository`, where their CI will run.
@@ -123,7 +128,29 @@ access to the infrastructure.
 
 ## Disabling all comments for PipelineRuns on GitLab MR
 
-`comment_strategy` allows you to disable the comments on GitLab MR for a Repository
+By default, Pipelines-as-Code attempts to update the commit status through the
+GitLab API. It first tries the source project (fork), then falls back to the
+target project (upstream repository). The source project update succeeds when
+the configured token has access to the source repository and GitLab creates
+pipeline entries for external CI systems like Pipelines-as-Code. The target
+project fallback may fail if there's no CI pipeline running for that commit
+in the target repository, since GitLab only creates pipeline entries for commits
+that actually trigger CI in that specific project. If either status update
+succeeds, no comment is posted on the Merge Request.
+
+When a status update succeeds, you can see the status in the GitLab UI in the `Pipelines` tab, as
+shown in the following example:
+
+![Gitlab Pipelines from Pipelines-as-Code](/images/gitlab-pipelines-tab.png)
+
+Comments are only posted when:
+
+- Both commit status updates fail (typically due to insufficient token permissions)
+- The event type and repository settings allow commenting
+- The `comment_strategy` is not set to `disable_all`
+
+To explicitly disable all comments on GitLab Merge Requests for a Repository,
+use the `comment_strategy` setting:
 
 ```yaml
 spec:
@@ -131,8 +158,6 @@ spec:
     gitlab:
       comment_strategy: "disable_all"
 ```
-
-When you set the value of `comment_strategy` to `disable_all` it will not add any comment on the merge request for the start and the end of PipelineRun
 
 ## Disabling all comments for PipelineRuns in GitHub Pull Requests on GitHub Webhook Setup
 
