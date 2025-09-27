@@ -76,6 +76,7 @@ require (
 	github.com/x448/float16 v0.8.4 // indirect
 	go.uber.org/atomic v1.11.0 // indirect
 	go.yaml.in/yaml/v2 v2.4.3 // indirect
+	go.yaml.in/yaml/v3 v3.0.4 // indirect
 	gopkg.in/evanphx/json-patch.v4 v4.13.0 // indirect
 	k8s.io/kube-openapi v0.0.0-20250710124328-f3f2b991d03b // indirect
 	sigs.k8s.io/gateway-api v1.3.0 // indirect
@@ -160,7 +161,7 @@ require (
 
 replace (
 	github.com/go-jose/go-jose/v4 => github.com/go-jose/go-jose/v4 v4.0.5
-	github.com/google/gnostic-models => github.com/google/gnostic-models v0.6.9
+	github.com/google/gnostic-models => github.com/google/gnostic-models v0.7.0
 	k8s.io/api => k8s.io/api v0.32.8
 	k8s.io/apimachinery => k8s.io/apimachinery v0.32.8
 	k8s.io/client-go => k8s.io/client-go v0.32.4
