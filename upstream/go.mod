@@ -167,5 +167,5 @@ replace (
 	k8s.io/kube-openapi => k8s.io/kube-openapi v0.0.0-20250318190949-c8a335a9a2ff // indirect
 	knative.dev/eventing => knative.dev/eventing v0.45.0
 	knative.dev/pkg => knative.dev/pkg v0.0.0-20250424013628-d5e74d29daa3
-	sigs.k8s.io/gateway-api => sigs.k8s.io/gateway-api v1.0.0
+	sigs.k8s.io/gateway-api => sigs.k8s.io/gateway-api v1.3.0
 )
