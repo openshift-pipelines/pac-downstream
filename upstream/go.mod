@@ -1,20 +1,20 @@
 module github.com/openshift-pipelines/pipelines-as-code
 
-go 1.23.0
+go 1.24.0
 
-toolchain go1.23.8
+toolchain go1.24.6
 
 require (
 	code.gitea.io/gitea v1.22.3
 	code.gitea.io/sdk/gitea v0.19.0
 	github.com/AlecAivazis/survey/v2 v2.3.7
-	github.com/bradleyfalzon/ghinstallation/v2 v2.13.0
+	github.com/bradleyfalzon/ghinstallation/v2 v2.17.0
 	github.com/cloudevents/sdk-go/v2 v2.15.2
 	github.com/fvbommel/sortorder v1.1.0
 	github.com/gfleury/go-bitbucket-v1 v0.0.0-20240917142304-df385efaac68
 	github.com/gobwas/glob v0.2.3
 	github.com/google/cel-go v0.21.0
-	github.com/google/go-cmp v0.6.0
+	github.com/google/go-cmp v0.7.0
 	github.com/google/go-github/scrape v0.0.0-20250130204427-cbe65f01498a
 	github.com/google/go-github/v68 v68.0.0
 	github.com/hako/durafmt v0.0.0-20210608085754-5c1018a4e16b
@@ -54,6 +54,7 @@ require (
 	github.com/coreos/go-oidc/v3 v3.9.0 // indirect
 	github.com/fxamacker/cbor/v2 v2.7.0 // indirect
 	github.com/go-jose/go-jose/v3 v3.0.3 // indirect
+	github.com/google/go-github/v75 v75.0.0 // indirect
 	github.com/klauspost/compress v1.17.11 // indirect
 	github.com/rickb777/plural v1.4.1 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
