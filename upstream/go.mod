@@ -117,7 +117,7 @@ require (
 	github.com/prometheus/common v0.45.0 // indirect
 	github.com/prometheus/procfs v0.12.0 // indirect
 	github.com/prometheus/statsd_exporter v0.25.0 // indirect
-	github.com/rickb777/date v1.20.2 // indirect
+	github.com/rickb777/date/v2 v2.1.13 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
 	github.com/stoewer/go-strcase v1.3.0 // indirect
 	github.com/xlzd/gotp v0.1.0 // indirect
