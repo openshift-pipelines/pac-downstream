@@ -42,7 +42,7 @@ require (
 	gotest.tools/v3 v3.5.2
 	k8s.io/api v0.34.1
 	k8s.io/apimachinery v0.34.1
-	k8s.io/client-go v1.5.2
+	k8s.io/client-go v11.0.0+incompatible
 	k8s.io/utils v0.0.0-20250820121507-0af2bda4dd1d
 	knative.dev/eventing v0.46.5
 	knative.dev/pkg v0.0.0-20250915135827-db4c336acdbe
