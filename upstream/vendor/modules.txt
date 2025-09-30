@@ -46,8 +46,8 @@ github.com/blang/semver/v4
 # github.com/blendle/zapdriver v1.3.1
 ## explicit; go 1.12
 github.com/blendle/zapdriver
-# github.com/bradleyfalzon/ghinstallation/v2 v2.16.0
-## explicit; go 1.23.0
+# github.com/bradleyfalzon/ghinstallation/v2 v2.17.0
+## explicit; go 1.24.0
 github.com/bradleyfalzon/ghinstallation/v2
 # github.com/census-instrumentation/opencensus-proto v0.4.1
 ## explicit; go 1.18
@@ -256,6 +256,9 @@ github.com/google/go-github/v72/github
 # github.com/google/go-github/v74 v74.0.0
 ## explicit; go 1.23.0
 github.com/google/go-github/v74/github
+# github.com/google/go-github/v75 v75.0.0
+## explicit; go 1.24.0
+github.com/google/go-github/v75/github
 # github.com/google/go-querystring v1.1.0
 ## explicit; go 1.10
 github.com/google/go-querystring/query
