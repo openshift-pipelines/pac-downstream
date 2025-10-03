@@ -15,7 +15,7 @@ require (
 	github.com/gobwas/glob v0.2.3
 	github.com/google/cel-go v0.26.1
 	github.com/google/go-cmp v0.7.0
-	github.com/google/go-github/scrape v0.0.0-20250818135035-f137c94931a7
+	github.com/google/go-github/scrape v0.0.0-20251003120947-233fe03e1797
 	github.com/google/go-github/v72 v72.0.0
 	github.com/google/go-github/v74 v74.0.0
 	github.com/hako/durafmt v0.0.0-20210608085754-5c1018a4e16b
@@ -70,6 +70,7 @@ require (
 	github.com/go-openapi/swag/stringutils v0.24.0 // indirect
 	github.com/go-openapi/swag/typeutils v0.24.0 // indirect
 	github.com/go-openapi/swag/yamlutils v0.24.0 // indirect
+	github.com/google/go-github/v75 v75.0.0 // indirect
 	github.com/google/gofuzz v1.2.0 // indirect
 	github.com/rickb777/plural v1.4.4 // indirect
 	github.com/robfig/cron/v3 v3.0.1 // indirect
