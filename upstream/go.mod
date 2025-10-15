@@ -1,8 +1,8 @@
 module github.com/openshift-pipelines/pipelines-as-code
 
-go 1.23.0
+go 1.24.0
 
-toolchain go1.24.1
+toolchain go1.24.6
 
 require (
 	code.gitea.io/gitea v1.22.1
@@ -14,7 +14,7 @@ require (
 	github.com/gfleury/go-bitbucket-v1 v0.0.0-20240822132758-a3031aa024b4
 	github.com/gobwas/glob v0.2.3
 	github.com/google/cel-go v0.21.0
-	github.com/google/go-cmp v0.6.0
+	github.com/google/go-cmp v0.7.0
 	github.com/google/go-github/scrape v0.0.0-20240903181346-00caddcf95be
 	github.com/google/go-github/v62 v62.0.0
 	github.com/google/go-github/v64 v64.0.0
@@ -34,9 +34,9 @@ require (
 	go.opencensus.io v0.24.0
 	go.uber.org/zap v1.27.0
 	golang.org/x/exp v0.0.0-20240823005443-9b4947da3948
-	golang.org/x/oauth2 v0.22.0
-	golang.org/x/sync v0.11.0
-	golang.org/x/text v0.22.0
+	golang.org/x/oauth2 v0.25.0
+	golang.org/x/sync v0.12.0
+	golang.org/x/text v0.23.0
 	gopkg.in/yaml.v2 v2.4.0
 	gotest.tools/v3 v3.5.1
 	k8s.io/api v0.31.0
@@ -125,17 +125,17 @@ require (
 	github.com/xlzd/gotp v0.1.0 // indirect
 	go.uber.org/automaxprocs v1.5.3 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
-	golang.org/x/crypto v0.35.0 // indirect
-	golang.org/x/net v0.33.0 // indirect
-	golang.org/x/sys v0.30.0 // indirect
-	golang.org/x/term v0.29.0 // indirect
+	golang.org/x/crypto v0.36.0 // indirect
+	golang.org/x/net v0.38.0 // indirect
+	golang.org/x/sys v0.31.0 // indirect
+	golang.org/x/term v0.30.0 // indirect
 	golang.org/x/time v0.6.0 // indirect
 	gomodules.xyz/jsonpatch/v2 v2.4.0 // indirect
 	google.golang.org/api v0.195.0 // indirect
-	google.golang.org/genproto/googleapis/api v0.0.0-20240903143218-8af14fe29dc1 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20240903143218-8af14fe29dc1 // indirect
-	google.golang.org/grpc v1.66.0 // indirect
-	google.golang.org/protobuf v1.34.2
+	google.golang.org/genproto/googleapis/api v0.0.0-20251014184007-4626949a642f // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20251007200510-49b9836ed3ff // indirect
+	google.golang.org/grpc v1.71.0 // indirect
+	google.golang.org/protobuf v1.36.10
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	k8s.io/apiextensions-apiserver v0.31.0 // indirect
