@@ -44,7 +44,7 @@ require (
 	k8s.io/client-go v1.5.2
 	k8s.io/utils v0.0.0-20240310230437-4693a0247e57
 	knative.dev/eventing v0.40.3
-	knative.dev/pkg v0.0.0-20240404013351-5d4af76051e4
+	knative.dev/pkg aadc6f6a1012
 	sigs.k8s.io/yaml v1.4.0
 )
 
@@ -61,7 +61,7 @@ replace (
 	k8s.io/code-generator => k8s.io/code-generator v0.26.7
 	k8s.io/kube-openapi => k8s.io/kube-openapi v0.0.0-20230515203736-54b630e78af5
 	knative.dev/eventing => knative.dev/eventing v0.39.0
-	knative.dev/pkg => knative.dev/pkg v0.0.0-20231023150739-56bfe0dd9626
+	knative.dev/pkg => knative.dev/pkg aadc6f6a1012
 )
 
 require (
