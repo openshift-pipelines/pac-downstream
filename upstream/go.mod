@@ -55,7 +55,7 @@ require (
 	github.com/fxamacker/cbor/v2 v2.7.0 // indirect
 	github.com/go-jose/go-jose/v3 v3.0.3 // indirect
 	github.com/klauspost/compress v1.17.11 // indirect
-	github.com/rickb777/plural v1.4.1 // indirect
+	github.com/rickb777/plural v1.4.2 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	go.uber.org/atomic v1.11.0 // indirect
 	gopkg.in/evanphx/json-patch.v4 v4.12.0 // indirect
@@ -123,7 +123,7 @@ require (
 	github.com/prometheus/common v0.60.1 // indirect
 	github.com/prometheus/procfs v0.15.1 // indirect
 	github.com/prometheus/statsd_exporter v0.28.0 // indirect
-	github.com/rickb777/date v1.20.2 // indirect
+	github.com/rickb777/date v1.21.1 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
 	github.com/stoewer/go-strcase v1.3.0 // indirect
 	github.com/xlzd/gotp v0.1.0 // indirect
