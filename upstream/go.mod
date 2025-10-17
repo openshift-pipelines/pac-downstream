@@ -61,7 +61,7 @@ require (
 	github.com/x448/float16 v0.8.4 // indirect
 	go.uber.org/atomic v1.11.0 // indirect
 	gopkg.in/evanphx/json-patch.v4 v4.12.0 // indirect
-	sigs.k8s.io/gateway-api v1.1.0 // indirect
+	sigs.k8s.io/gateway-api v1.4.0 // indirect
 	sigs.k8s.io/randfill v1.0.0 // indirect
 )
 
@@ -148,5 +148,5 @@ replace (
 	github.com/go-jose/go-jose/v4 => github.com/go-jose/go-jose/v4 v4.0.5
 	k8s.io/api => k8s.io/api v0.32.4
 	k8s.io/apimachinery => k8s.io/apimachinery v0.32.4
-	sigs.k8s.io/gateway-api => sigs.k8s.io/gateway-api v1.0.0
+	sigs.k8s.io/gateway-api => sigs.k8s.io/gateway-api v1.4.0
 )
