@@ -2,7 +2,7 @@ module github.com/openshift-pipelines/pipelines-as-code
 
 go 1.24.0
 
-toolchain go1.24.2
+toolchain go1.25.3
 
 require (
 	code.gitea.io/gitea v1.24.6
