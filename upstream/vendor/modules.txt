@@ -94,7 +94,7 @@ github.com/fvbommel/sortorder
 # github.com/fxamacker/cbor/v2 v2.7.0
 ## explicit; go 1.17
 github.com/fxamacker/cbor/v2
-# github.com/gfleury/go-bitbucket-v1 v0.0.0-20240822132758-a3031aa024b4
+# github.com/gfleury/go-bitbucket-v1 v0.0.0-20240917142304-df385efaac68
 ## explicit; go 1.14
 github.com/gfleury/go-bitbucket-v1
 # github.com/go-fed/httpsig v1.1.1-0.20201223112313-55836744818e
