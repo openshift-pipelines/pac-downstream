@@ -51,6 +51,7 @@ require (
 require (
 	github.com/coreos/go-oidc/v3 v3.9.0 // indirect
 	github.com/go-jose/go-jose/v3 v3.0.3 // indirect
+	go.yaml.in/yaml/v3 v3.0.3 // indirect
 )
 
 replace (
@@ -94,7 +95,7 @@ require (
 	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da // indirect
 	github.com/golang/protobuf v1.5.4 // indirect
 	github.com/google/gnostic v0.7.0 // indirect
-	github.com/google/gnostic-models v0.6.9-0.20230804172637-c7be7c783f49 // indirect
+	github.com/google/gnostic-models v0.7.0 // indirect
 	github.com/google/go-containerregistry v0.19.1 // indirect
 	github.com/google/go-querystring v1.1.0 // indirect
 	github.com/google/gofuzz v1.2.0 // indirect
@@ -144,7 +145,7 @@ require (
 	google.golang.org/genproto/googleapis/api v0.0.0-20240401170217-c3f982113cda // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20240401170217-c3f982113cda // indirect
 	google.golang.org/grpc v1.63.0 // indirect
-	google.golang.org/protobuf v1.33.0
+	google.golang.org/protobuf v1.35.1
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	k8s.io/apiextensions-apiserver v0.29.3 // indirect
