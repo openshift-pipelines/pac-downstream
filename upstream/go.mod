@@ -8,7 +8,7 @@ require (
 	code.gitea.io/gitea v1.24.6
 	code.gitea.io/sdk/gitea v0.22.0
 	github.com/AlecAivazis/survey/v2 v2.3.7
-	github.com/bradleyfalzon/ghinstallation/v2 v2.16.0
+	github.com/bradleyfalzon/ghinstallation/v2 v2.17.0
 	github.com/chzyer/readline v1.5.1
 	github.com/cloudevents/sdk-go/v2 v2.16.1
 	github.com/fvbommel/sortorder v1.1.0
@@ -70,6 +70,7 @@ require (
 	github.com/go-openapi/swag/stringutils v0.24.0 // indirect
 	github.com/go-openapi/swag/typeutils v0.24.0 // indirect
 	github.com/go-openapi/swag/yamlutils v0.24.0 // indirect
+	github.com/google/go-github/v75 v75.0.0 // indirect
 	github.com/google/gofuzz v1.2.0 // indirect
 	github.com/rickb777/plural v1.4.4 // indirect
 	github.com/robfig/cron/v3 v3.0.1 // indirect
