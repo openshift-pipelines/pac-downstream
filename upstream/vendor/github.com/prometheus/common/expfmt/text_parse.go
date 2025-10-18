@@ -75,7 +75,17 @@ type TextParser struct {
 	// count and sum of that summary/histogram.
 	currentIsSummaryCount, currentIsSummarySum     bool
 	currentIsHistogramCount, currentIsHistogramSum bool
-	currentMetricIsInsideBraces                    bool
+	// These indicate if the metric name from the current line being parsed is inside
+	// braces and if that metric name was found respectively.
+	currentMetricIsInsideBraces, currentMetricInsideBracesIsPresent bool
+	// scheme sets the desired ValidationScheme for names. Defaults to the invalid
+	// UnsetValidation.
+	scheme model.ValidationScheme
+}
+
+// NewTextParser returns a new TextParser with the provided nameValidationScheme.
+func NewTextParser(nameValidationScheme model.ValidationScheme) TextParser {
+	return TextParser{scheme: nameValidationScheme}
 }
 
 // TextToMetricFamilies reads 'in' as the simple and flat text-based exchange
@@ -124,6 +134,7 @@ func (p *TextParser) TextToMetricFamilies(in io.Reader) (map[string]*dto.MetricF
 
 func (p *TextParser) reset(in io.Reader) {
 	p.metricFamiliesByName = map[string]*dto.MetricFamily{}
+	p.currentLabelPairs = nil
 	if p.buf == nil {
 		p.buf = bufio.NewReader(in)
 	} else {
@@ -147,6 +158,7 @@ func (p *TextParser) reset(in io.Reader) {
 func (p *TextParser) startOfLine() stateFn {
 	p.lineCount++
 	p.currentMetricIsInsideBraces = false
+	p.currentMetricInsideBracesIsPresent = false
 	if p.skipBlankTab(); p.err != nil {
 		// This is the only place that we expect to see io.EOF,
 		// which is not an error but the signal that we are done.
@@ -213,6 +225,9 @@ func (p *TextParser) startComment() stateFn {
 		return nil
 	}
 	p.setOrCreateCurrentMF()
+	if p.err != nil {
+		return nil
+	}
 	if p.skipBlankTab(); p.err != nil {
 		return nil // Unexpected end of input.
 	}
@@ -241,6 +256,9 @@ func (p *TextParser) readingMetricName() stateFn {
 		return nil
 	}
 	p.setOrCreateCurrentMF()
+	if p.err != nil {
+		return nil
+	}
 	// Now is the time to fix the type if it hasn't happened yet.
 	if p.currentMF.Type == nil {
 		p.currentMF.Type = dto.MetricType_UNTYPED.Enum()
@@ -301,17 +319,31 @@ func (p *TextParser) startLabelName() stateFn {
 	}
 	if p.currentByte != '=' {
 		if p.currentMetricIsInsideBraces {
-			if p.currentMF != nil && p.currentMF.GetName() != p.currentToken.String() {
-				p.parseError(fmt.Sprintf("multiple metric names %s %s", p.currentMF.GetName(), p.currentToken.String()))
+			if p.currentMetricInsideBracesIsPresent {
+				p.parseError(fmt.Sprintf("multiple metric names for metric %q", p.currentMF.GetName()))
 				return nil
 			}
 			switch p.currentByte {
 			case ',':
 				p.setOrCreateCurrentMF()
+				if p.err != nil {
+					return nil
+				}
+				if p.currentMF.Type == nil {
+					p.currentMF.Type = dto.MetricType_UNTYPED.Enum()
+				}
 				p.currentMetric = &dto.Metric{}
+				p.currentMetricInsideBracesIsPresent = true
 				return p.startLabelName
 			case '}':
 				p.setOrCreateCurrentMF()
+				if p.err != nil {
+					p.currentLabelPairs = nil
+					return nil
+				}
+				if p.currentMF.Type == nil {
+					p.currentMF.Type = dto.MetricType_UNTYPED.Enum()
+				}
 				p.currentMetric = &dto.Metric{}
 				p.currentMetric.Label = append(p.currentMetric.Label, p.currentLabelPairs...)
 				p.currentLabelPairs = nil
@@ -331,25 +363,30 @@ func (p *TextParser) startLabelName() stateFn {
 	p.currentLabelPair = &dto.LabelPair{Name: proto.String(p.currentToken.String())}
 	if p.currentLabelPair.GetName() == string(model.MetricNameLabel) {
 		p.parseError(fmt.Sprintf("label name %q is reserved", model.MetricNameLabel))
+		p.currentLabelPairs = nil
+		return nil
+	}
+	if !p.scheme.IsValidLabelName(p.currentLabelPair.GetName()) {
+		p.parseError(fmt.Sprintf("invalid label name %q", p.currentLabelPair.GetName()))
+		p.currentLabelPairs = nil
 		return nil
 	}
 	// Special summary/histogram treatment. Don't add 'quantile' and 'le'
 	// labels to 'real' labels.
-	if !(p.currentMF.GetType() == dto.MetricType_SUMMARY && p.currentLabelPair.GetName() == model.QuantileLabel) &&
-		!(p.currentMF.GetType() == dto.MetricType_HISTOGRAM && p.currentLabelPair.GetName() == model.BucketLabel) {
+	if (p.currentMF.GetType() != dto.MetricType_SUMMARY || p.currentLabelPair.GetName() != model.QuantileLabel) &&
+		(p.currentMF.GetType() != dto.MetricType_HISTOGRAM || p.currentLabelPair.GetName() != model.BucketLabel) {
 		p.currentLabelPairs = append(p.currentLabelPairs, p.currentLabelPair)
 	}
 	// Check for duplicate label names.
 	labels := make(map[string]struct{})
 	for _, l := range p.currentLabelPairs {
 		lName := l.GetName()
-		if _, exists := labels[lName]; !exists {
-			labels[lName] = struct{}{}
-		} else {
+		if _, exists := labels[lName]; exists {
 			p.parseError(fmt.Sprintf("duplicate label names for metric %q", p.currentMF.GetName()))
 			p.currentLabelPairs = nil
 			return nil
 		}
+		labels[lName] = struct{}{}
 	}
 	return p.startLabelValue
 }
@@ -430,7 +467,8 @@ func (p *TextParser) readingValue() stateFn {
 	// When we are here, we have read all the labels, so for the
 	// special case of a summary/histogram, we can finally find out
 	// if the metric already exists.
-	if p.currentMF.GetType() == dto.MetricType_SUMMARY {
+	switch p.currentMF.GetType() {
+	case dto.MetricType_SUMMARY:
 		signature := model.LabelsToSignature(p.currentLabels)
 		if summary := p.summaries[signature]; summary != nil {
 			p.currentMetric = summary
@@ -438,7 +476,7 @@ func (p *TextParser) readingValue() stateFn {
 			p.summaries[signature] = p.currentMetric
 			p.currentMF.Metric = append(p.currentMF.Metric, p.currentMetric)
 		}
-	} else if p.currentMF.GetType() == dto.MetricType_HISTOGRAM {
+	case dto.MetricType_HISTOGRAM:
 		signature := model.LabelsToSignature(p.currentLabels)
 		if histogram := p.histograms[signature]; histogram != nil {
 			p.currentMetric = histogram
@@ -446,7 +484,7 @@ func (p *TextParser) readingValue() stateFn {
 			p.histograms[signature] = p.currentMetric
 			p.currentMF.Metric = append(p.currentMF.Metric, p.currentMetric)
 		}
-	} else {
+	default:
 		p.currentMF.Metric = append(p.currentMF.Metric, p.currentMetric)
 	}
 	if p.readTokenUntilWhitespace(); p.err != nil {
@@ -795,6 +833,10 @@ func (p *TextParser) setOrCreateCurrentMF() {
 	p.currentIsHistogramCount = false
 	p.currentIsHistogramSum = false
 	name := p.currentToken.String()
+	if !p.scheme.IsValidMetricName(name) {
+		p.parseError(fmt.Sprintf("invalid metric name %q", name))
+		return
+	}
 	if p.currentMF = p.metricFamiliesByName[name]; p.currentMF != nil {
 		return
 	}
@@ -885,7 +927,7 @@ func histogramMetricName(name string) string {
 
 func parseFloat(s string) (float64, error) {
 	if strings.ContainsAny(s, "pP_") {
-		return 0, fmt.Errorf("unsupported character in float")
+		return 0, errors.New("unsupported character in float")
 	}
 	return strconv.ParseFloat(s, 64)
 }
