@@ -1193,7 +1193,7 @@ k8s.io/klog/v2/internal/dbg
 k8s.io/klog/v2/internal/serialize
 k8s.io/klog/v2/internal/severity
 k8s.io/klog/v2/internal/sloghandler
-# k8s.io/kube-openapi v0.0.0-20250710124328-f3f2b991d03b => k8s.io/kube-openapi v0.0.0-20250318190949-c8a335a9a2ff
+# k8s.io/kube-openapi v0.0.0-20250814151709-d7b6acb124c3 => k8s.io/kube-openapi v0.0.0-20250318190949-c8a335a9a2ff
 ## explicit; go 1.21
 k8s.io/kube-openapi/pkg/cached
 k8s.io/kube-openapi/pkg/common
@@ -1302,8 +1302,8 @@ knative.dev/pkg/webhook
 knative.dev/pkg/webhook/certificates
 knative.dev/pkg/webhook/certificates/resources
 knative.dev/pkg/webhook/resourcesemantics
-# sigs.k8s.io/gateway-api v1.3.0 => sigs.k8s.io/gateway-api v1.0.0
-## explicit; go 1.21
+# sigs.k8s.io/gateway-api v1.4.0 => sigs.k8s.io/gateway-api v1.4.0
+## explicit; go 1.24.0
 sigs.k8s.io/gateway-api/apis/v1
 # sigs.k8s.io/json v0.0.0-20250730193827-2d320260d730
 ## explicit; go 1.23
@@ -1332,4 +1332,4 @@ sigs.k8s.io/yaml/goyaml.v2
 # k8s.io/kube-openapi => k8s.io/kube-openapi v0.0.0-20250318190949-c8a335a9a2ff
 # knative.dev/eventing => knative.dev/eventing v0.45.0
 # knative.dev/pkg => knative.dev/pkg v0.0.0-20250424013628-d5e74d29daa3
-# sigs.k8s.io/gateway-api => sigs.k8s.io/gateway-api v1.0.0
+# sigs.k8s.io/gateway-api => sigs.k8s.io/gateway-api v1.4.0

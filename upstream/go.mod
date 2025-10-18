@@ -77,8 +77,8 @@ require (
 	go.uber.org/atomic v1.11.0 // indirect
 	go.yaml.in/yaml/v2 v2.4.3 // indirect
 	gopkg.in/evanphx/json-patch.v4 v4.13.0 // indirect
-	k8s.io/kube-openapi v0.0.0-20250710124328-f3f2b991d03b // indirect
-	sigs.k8s.io/gateway-api v1.3.0 // indirect
+	k8s.io/kube-openapi v0.0.0-20250814151709-d7b6acb124c3 // indirect
+	sigs.k8s.io/gateway-api v1.4.0 // indirect
 	sigs.k8s.io/randfill v1.0.0 // indirect
 )
 
@@ -167,5 +167,5 @@ replace (
 	k8s.io/kube-openapi => k8s.io/kube-openapi v0.0.0-20250318190949-c8a335a9a2ff // indirect
 	knative.dev/eventing => knative.dev/eventing v0.45.0
 	knative.dev/pkg => knative.dev/pkg v0.0.0-20250424013628-d5e74d29daa3
-	sigs.k8s.io/gateway-api => sigs.k8s.io/gateway-api v1.0.0
+	sigs.k8s.io/gateway-api => sigs.k8s.io/gateway-api v1.4.0
 )
