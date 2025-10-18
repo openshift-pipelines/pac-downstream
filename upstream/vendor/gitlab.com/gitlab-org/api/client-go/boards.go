@@ -21,17 +21,85 @@ import (
 	"net/http"
 )
 
-// IssueBoardsService handles communication with the issue board related
-// methods of the GitLab API.
-//
-// GitLab API docs: https://docs.gitlab.com/ee/api/boards.html
-type IssueBoardsService struct {
-	client *Client
-}
+type (
+	IssueBoardsServiceInterface interface {
+		// CreateIssueBoard creates a new issue board.
+		//
+		// GitLab API docs:
+		// https://docs.gitlab.com/api/boards/#create-an-issue-board
+		CreateIssueBoard(pid any, opt *CreateIssueBoardOptions, options ...RequestOptionFunc) (*IssueBoard, *Response, error)
+
+		// UpdateIssueBoard update an issue board.
+		//
+		// GitLab API docs:
+		// https://docs.gitlab.com/api/boards/#update-an-issue-board
+		UpdateIssueBoard(pid any, board int, opt *UpdateIssueBoardOptions, options ...RequestOptionFunc) (*IssueBoard, *Response, error)
+
+		// DeleteIssueBoard deletes an issue board.
+		//
+		// GitLab API docs:
+		// https://docs.gitlab.com/api/boards/#delete-an-issue-board
+		DeleteIssueBoard(pid any, board int, options ...RequestOptionFunc) (*Response, error)
+
+		// ListIssueBoards gets a list of all issue boards in a project.
+		//
+		// GitLab API docs:
+		// https://docs.gitlab.com/api/boards/#list-project-issue-boards
+		ListIssueBoards(pid any, opt *ListIssueBoardsOptions, options ...RequestOptionFunc) ([]*IssueBoard, *Response, error)
+
+		// GetIssueBoard gets a single issue board of a project.
+		//
+		// GitLab API docs:
+		// https://docs.gitlab.com/api/boards/#show-a-single-issue-board
+		GetIssueBoard(pid any, board int, options ...RequestOptionFunc) (*IssueBoard, *Response, error)
+
+		// GetIssueBoardLists gets a list of the issue board's lists. Does not include
+		// backlog and closed lists.
+		//
+		// GitLab API docs:
+		// https://docs.gitlab.com/api/boards/#list-board-lists-in-a-project-issue-board
+		GetIssueBoardLists(pid any, board int, opt *GetIssueBoardListsOptions, options ...RequestOptionFunc) ([]*BoardList, *Response, error)
+
+		// GetIssueBoardList gets a single issue board list.
+		//
+		// GitLab API docs:
+		// https://docs.gitlab.com/api/boards/#show-a-single-board-list
+		GetIssueBoardList(pid any, board, list int, options ...RequestOptionFunc) (*BoardList, *Response, error)
+
+		// CreateIssueBoardList creates a new issue board list.
+		//
+		// GitLab API docs:
+		// https://docs.gitlab.com/api/boards/#create-a-board-list
+		CreateIssueBoardList(pid any, board int, opt *CreateIssueBoardListOptions, options ...RequestOptionFunc) (*BoardList, *Response, error)
+
+		// UpdateIssueBoardList updates the position of an existing issue board list.
+		//
+		// GitLab API docs:
+		// https://docs.gitlab.com/api/boards/#reorder-a-list-in-a-board
+		UpdateIssueBoardList(pid any, board, list int, opt *UpdateIssueBoardListOptions, options ...RequestOptionFunc) (*BoardList, *Response, error)
+
+		// DeleteIssueBoardList soft deletes an issue board list. Only for admins and
+		// project owners.
+		//
+		// GitLab API docs:
+		// https://docs.gitlab.com/api/boards/#delete-a-board-list-from-a-board
+		DeleteIssueBoardList(pid any, board, list int, options ...RequestOptionFunc) (*Response, error)
+	}
+
+	// IssueBoardsService handles communication with the issue board related
+	// methods of the GitLab API.
+	//
+	// GitLab API docs: https://docs.gitlab.com/api/boards/
+	IssueBoardsService struct {
+		client *Client
+	}
+)
+
+var _ IssueBoardsServiceInterface = (*IssueBoardsService)(nil)
 
 // IssueBoard represents a GitLab issue board.
 //
-// GitLab API docs: https://docs.gitlab.com/ee/api/boards.html
+// GitLab API docs: https://docs.gitlab.com/api/boards/
 type IssueBoard struct {
 	ID        int        `json:"id"`
 	Name      string     `json:"name"`
@@ -56,7 +124,7 @@ func (b IssueBoard) String() string {
 
 // BoardList represents a GitLab board list.
 //
-// GitLab API docs: https://docs.gitlab.com/ee/api/boards.html
+// GitLab API docs: https://docs.gitlab.com/api/boards/
 type BoardList struct {
 	ID       int `json:"id"`
 	Assignee *struct {
@@ -78,15 +146,12 @@ func (b BoardList) String() string {
 
 // CreateIssueBoardOptions represents the available CreateIssueBoard() options.
 //
-// GitLab API docs: https://docs.gitlab.com/ee/api/boards.html#create-an-issue-board
+// GitLab API docs: https://docs.gitlab.com/api/boards/#create-an-issue-board
 type CreateIssueBoardOptions struct {
 	Name *string `url:"name,omitempty" json:"name,omitempty"`
 }
 
-// CreateIssueBoard creates a new issue board.
-//
-// GitLab API docs: https://docs.gitlab.com/ee/api/boards.html#create-an-issue-board
-func (s *IssueBoardsService) CreateIssueBoard(pid interface{}, opt *CreateIssueBoardOptions, options ...RequestOptionFunc) (*IssueBoard, *Response, error) {
+func (s *IssueBoardsService) CreateIssueBoard(pid any, opt *CreateIssueBoardOptions, options ...RequestOptionFunc) (*IssueBoard, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err
@@ -109,7 +174,7 @@ func (s *IssueBoardsService) CreateIssueBoard(pid interface{}, opt *CreateIssueB
 
 // UpdateIssueBoardOptions represents the available UpdateIssueBoard() options.
 //
-// GitLab API docs: https://docs.gitlab.com/ee/api/boards.html#update-an-issue-board
+// GitLab API docs: https://docs.gitlab.com/api/boards/#update-an-issue-board
 type UpdateIssueBoardOptions struct {
 	Name        *string       `url:"name,omitempty" json:"name,omitempty"`
 	AssigneeID  *int          `url:"assignee_id,omitempty" json:"assignee_id,omitempty"`
@@ -118,10 +183,7 @@ type UpdateIssueBoardOptions struct {
 	Weight      *int          `url:"weight,omitempty" json:"weight,omitempty"`
 }
 
-// UpdateIssueBoard update an issue board.
-//
-// GitLab API docs: https://docs.gitlab.com/ee/api/boards.html#update-an-issue-board
-func (s *IssueBoardsService) UpdateIssueBoard(pid interface{}, board int, opt *UpdateIssueBoardOptions, options ...RequestOptionFunc) (*IssueBoard, *Response, error) {
+func (s *IssueBoardsService) UpdateIssueBoard(pid any, board int, opt *UpdateIssueBoardOptions, options ...RequestOptionFunc) (*IssueBoard, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err
@@ -142,10 +204,7 @@ func (s *IssueBoardsService) UpdateIssueBoard(pid interface{}, board int, opt *U
 	return is, resp, nil
 }
 
-// DeleteIssueBoard deletes an issue board.
-//
-// GitLab API docs: https://docs.gitlab.com/ee/api/boards.html#delete-an-issue-board
-func (s *IssueBoardsService) DeleteIssueBoard(pid interface{}, board int, options ...RequestOptionFunc) (*Response, error) {
+func (s *IssueBoardsService) DeleteIssueBoard(pid any, board int, options ...RequestOptionFunc) (*Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, err
@@ -162,13 +221,10 @@ func (s *IssueBoardsService) DeleteIssueBoard(pid interface{}, board int, option
 
 // ListIssueBoardsOptions represents the available ListIssueBoards() options.
 //
-// GitLab API docs: https://docs.gitlab.com/ee/api/boards.html#list-project-issue-boards
+// GitLab API docs: https://docs.gitlab.com/api/boards/#list-project-issue-boards
 type ListIssueBoardsOptions ListOptions
 
-// ListIssueBoards gets a list of all issue boards in a project.
-//
-// GitLab API docs: https://docs.gitlab.com/ee/api/boards.html#list-project-issue-boards
-func (s *IssueBoardsService) ListIssueBoards(pid interface{}, opt *ListIssueBoardsOptions, options ...RequestOptionFunc) ([]*IssueBoard, *Response, error) {
+func (s *IssueBoardsService) ListIssueBoards(pid any, opt *ListIssueBoardsOptions, options ...RequestOptionFunc) ([]*IssueBoard, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err
@@ -189,10 +245,7 @@ func (s *IssueBoardsService) ListIssueBoards(pid interface{}, opt *ListIssueBoar
 	return is, resp, nil
 }
 
-// GetIssueBoard gets a single issue board of a project.
-//
-// GitLab API docs: https://docs.gitlab.com/ee/api/boards.html#show-a-single-issue-board
-func (s *IssueBoardsService) GetIssueBoard(pid interface{}, board int, options ...RequestOptionFunc) (*IssueBoard, *Response, error) {
+func (s *IssueBoardsService) GetIssueBoard(pid any, board int, options ...RequestOptionFunc) (*IssueBoard, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err
@@ -215,14 +268,10 @@ func (s *IssueBoardsService) GetIssueBoard(pid interface{}, board int, options .
 
 // GetIssueBoardListsOptions represents the available GetIssueBoardLists() options.
 //
-// GitLab API docs: https://docs.gitlab.com/ee/api/boards.html#list-board-lists-in-a-project-issue-board
+// GitLab API docs: https://docs.gitlab.com/api/boards/#list-board-lists-in-a-project-issue-board
 type GetIssueBoardListsOptions ListOptions
 
-// GetIssueBoardLists gets a list of the issue board's lists. Does not include
-// backlog and closed lists.
-//
-// GitLab API docs: https://docs.gitlab.com/ee/api/boards.html#list-board-lists-in-a-project-issue-board
-func (s *IssueBoardsService) GetIssueBoardLists(pid interface{}, board int, opt *GetIssueBoardListsOptions, options ...RequestOptionFunc) ([]*BoardList, *Response, error) {
+func (s *IssueBoardsService) GetIssueBoardLists(pid any, board int, opt *GetIssueBoardListsOptions, options ...RequestOptionFunc) ([]*BoardList, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err
@@ -243,10 +292,7 @@ func (s *IssueBoardsService) GetIssueBoardLists(pid interface{}, board int, opt 
 	return bl, resp, nil
 }
 
-// GetIssueBoardList gets a single issue board list.
-//
-// GitLab API docs: https://docs.gitlab.com/ee/api/boards.html#show-a-single-board-list
-func (s *IssueBoardsService) GetIssueBoardList(pid interface{}, board, list int, options ...RequestOptionFunc) (*BoardList, *Response, error) {
+func (s *IssueBoardsService) GetIssueBoardList(pid any, board, list int, options ...RequestOptionFunc) (*BoardList, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err
@@ -274,7 +320,7 @@ func (s *IssueBoardsService) GetIssueBoardList(pid interface{}, board, list int,
 // CreateIssueBoardListOptions represents the available CreateIssueBoardList()
 // options.
 //
-// GitLab API docs: https://docs.gitlab.com/ee/api/boards.html#create-a-board-list
+// GitLab API docs: https://docs.gitlab.com/api/boards/#create-a-board-list
 type CreateIssueBoardListOptions struct {
 	LabelID     *int `url:"label_id,omitempty" json:"label_id,omitempty"`
 	AssigneeID  *int `url:"assignee_id,omitempty" json:"assignee_id,omitempty"`
@@ -282,10 +328,7 @@ type CreateIssueBoardListOptions struct {
 	IterationID *int `url:"iteration_id,omitempty" json:"iteration_id,omitempty"`
 }
 
-// CreateIssueBoardList creates a new issue board list.
-//
-// GitLab API docs: https://docs.gitlab.com/ee/api/boards.html#create-a-board-list
-func (s *IssueBoardsService) CreateIssueBoardList(pid interface{}, board int, opt *CreateIssueBoardListOptions, options ...RequestOptionFunc) (*BoardList, *Response, error) {
+func (s *IssueBoardsService) CreateIssueBoardList(pid any, board int, opt *CreateIssueBoardListOptions, options ...RequestOptionFunc) (*BoardList, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err
@@ -309,15 +352,12 @@ func (s *IssueBoardsService) CreateIssueBoardList(pid interface{}, board int, op
 // UpdateIssueBoardListOptions represents the available UpdateIssueBoardList()
 // options.
 //
-// GitLab API docs: https://docs.gitlab.com/ee/api/boards.html#reorder-a-list-in-a-board
+// GitLab API docs: https://docs.gitlab.com/api/boards/#reorder-a-list-in-a-board
 type UpdateIssueBoardListOptions struct {
 	Position *int `url:"position" json:"position"`
 }
 
-// UpdateIssueBoardList updates the position of an existing issue board list.
-//
-// GitLab API docs: https://docs.gitlab.com/ee/api/boards.html#reorder-a-list-in-a-board
-func (s *IssueBoardsService) UpdateIssueBoardList(pid interface{}, board, list int, opt *UpdateIssueBoardListOptions, options ...RequestOptionFunc) (*BoardList, *Response, error) {
+func (s *IssueBoardsService) UpdateIssueBoardList(pid any, board, list int, opt *UpdateIssueBoardListOptions, options ...RequestOptionFunc) (*BoardList, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err
@@ -342,12 +382,7 @@ func (s *IssueBoardsService) UpdateIssueBoardList(pid interface{}, board, list i
 	return bl, resp, nil
 }
 
-// DeleteIssueBoardList soft deletes an issue board list. Only for admins and
-// project owners.
-//
-// GitLab API docs:
-// https://docs.gitlab.com/ee/api/boards.html#delete-a-board-list-from-a-board
-func (s *IssueBoardsService) DeleteIssueBoardList(pid interface{}, board, list int, options ...RequestOptionFunc) (*Response, error) {
+func (s *IssueBoardsService) DeleteIssueBoardList(pid any, board, list int, options ...RequestOptionFunc) (*Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, err

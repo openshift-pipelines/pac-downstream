@@ -22,17 +22,53 @@ import (
 	"net/url"
 )
 
-// BranchesService handles communication with the branch related methods
-// of the GitLab API.
-//
-// GitLab API docs: https://docs.gitlab.com/ee/api/branches.html
-type BranchesService struct {
-	client *Client
-}
+type (
+	BranchesServiceInterface interface {
+		// ListBranches gets a list of repository branches from a project, sorted by name alphabetically.
+		//
+		// GitLab API docs:
+		// https://docs.gitlab.com/api/branches/#list-repository-branches
+		ListBranches(pid any, opts *ListBranchesOptions, options ...RequestOptionFunc) ([]*Branch, *Response, error)
+
+		// GetBranch gets a single project repository branch.
+		//
+		// GitLab API docs:
+		// https://docs.gitlab.com/api/branches/#get-single-repository-branch
+		GetBranch(pid any, branch string, options ...RequestOptionFunc) (*Branch, *Response, error)
+
+		// CreateBranch creates branch from commit SHA or existing branch.
+		//
+		// GitLab API docs:
+		// https://docs.gitlab.com/api/branches/#create-repository-branch
+		CreateBranch(pid any, opt *CreateBranchOptions, options ...RequestOptionFunc) (*Branch, *Response, error)
+
+		// DeleteBranch deletes an existing branch.
+		//
+		// GitLab API docs:
+		// https://docs.gitlab.com/api/branches/#delete-repository-branch
+		DeleteBranch(pid any, branch string, options ...RequestOptionFunc) (*Response, error)
+
+		// DeleteMergedBranches deletes all branches that are merged into the project's default branch.
+		//
+		// GitLab API docs:
+		// https://docs.gitlab.com/api/branches/#delete-merged-branches
+		DeleteMergedBranches(pid any, options ...RequestOptionFunc) (*Response, error)
+	}
+
+	// BranchesService handles communication with the branch related methods
+	// of the GitLab API.
+	//
+	// GitLab API docs: https://docs.gitlab.com/api/branches/
+	BranchesService struct {
+		client *Client
+	}
+)
+
+var _ BranchesServiceInterface = (*BranchesService)(nil)
 
 // Branch represents a GitLab branch.
 //
-// GitLab API docs: https://docs.gitlab.com/ee/api/branches.html
+// GitLab API docs: https://docs.gitlab.com/api/branches/
 type Branch struct {
 	Commit             *Commit `json:"commit"`
 	Name               string  `json:"name"`
@@ -52,19 +88,14 @@ func (b Branch) String() string {
 // ListBranchesOptions represents the available ListBranches() options.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/ee/api/branches.html#list-repository-branches
+// https://docs.gitlab.com/api/branches/#list-repository-branches
 type ListBranchesOptions struct {
 	ListOptions
 	Search *string `url:"search,omitempty" json:"search,omitempty"`
 	Regex  *string `url:"regex,omitempty" json:"regex,omitempty"`
 }
 
-// ListBranches gets a list of repository branches from a project, sorted by
-// name alphabetically.
-//
-// GitLab API docs:
-// https://docs.gitlab.com/ee/api/branches.html#list-repository-branches
-func (s *BranchesService) ListBranches(pid interface{}, opts *ListBranchesOptions, options ...RequestOptionFunc) ([]*Branch, *Response, error) {
+func (s *BranchesService) ListBranches(pid any, opts *ListBranchesOptions, options ...RequestOptionFunc) ([]*Branch, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err
@@ -85,11 +116,7 @@ func (s *BranchesService) ListBranches(pid interface{}, opts *ListBranchesOption
 	return b, resp, nil
 }
 
-// GetBranch gets a single project repository branch.
-//
-// GitLab API docs:
-// https://docs.gitlab.com/ee/api/branches.html#get-single-repository-branch
-func (s *BranchesService) GetBranch(pid interface{}, branch string, options ...RequestOptionFunc) (*Branch, *Response, error) {
+func (s *BranchesService) GetBranch(pid any, branch string, options ...RequestOptionFunc) (*Branch, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err
@@ -110,89 +137,16 @@ func (s *BranchesService) GetBranch(pid interface{}, branch string, options ...R
 	return b, resp, nil
 }
 
-// ProtectBranchOptions represents the available ProtectBranch() options.
-//
-// GitLab API docs:
-// https://docs.gitlab.com/ee/api/branches.html#protect-repository-branch
-type ProtectBranchOptions struct {
-	DevelopersCanPush  *bool `url:"developers_can_push,omitempty" json:"developers_can_push,omitempty"`
-	DevelopersCanMerge *bool `url:"developers_can_merge,omitempty" json:"developers_can_merge,omitempty"`
-}
-
-// ProtectBranch protects a single project repository branch. This is an
-// idempotent function, protecting an already protected repository branch
-// still returns a 200 OK status code.
-//
-// Deprecated: This endpoint has been replaced by
-// ProtectedBranchesService.ProtectRepositoryBranches()
-//
-// GitLab API docs:
-// https://docs.gitlab.com/ee/api/branches.html#protect-repository-branch
-func (s *BranchesService) ProtectBranch(pid interface{}, branch string, opts *ProtectBranchOptions, options ...RequestOptionFunc) (*Branch, *Response, error) {
-	project, err := parseID(pid)
-	if err != nil {
-		return nil, nil, err
-	}
-	u := fmt.Sprintf("projects/%s/repository/branches/%s/protect", PathEscape(project), url.PathEscape(branch))
-
-	req, err := s.client.NewRequest(http.MethodPut, u, opts, options)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	b := new(Branch)
-	resp, err := s.client.Do(req, b)
-	if err != nil {
-		return nil, resp, err
-	}
-
-	return b, resp, nil
-}
-
-// UnprotectBranch unprotects a single project repository branch. This is an
-// idempotent function, unprotecting an already unprotected repository branch
-// still returns a 200 OK status code.
-//
-// Deprecated: This endpoint has been replaced by
-// ProtectedBranchesService.UnprotectRepositoryBranches()
-//
-// GitLab API docs:
-// https://docs.gitlab.com/ee/api/branches.html#unprotect-repository-branch
-func (s *BranchesService) UnprotectBranch(pid interface{}, branch string, options ...RequestOptionFunc) (*Branch, *Response, error) {
-	project, err := parseID(pid)
-	if err != nil {
-		return nil, nil, err
-	}
-	u := fmt.Sprintf("projects/%s/repository/branches/%s/unprotect", PathEscape(project), url.PathEscape(branch))
-
-	req, err := s.client.NewRequest(http.MethodPut, u, nil, options)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	b := new(Branch)
-	resp, err := s.client.Do(req, b)
-	if err != nil {
-		return nil, resp, err
-	}
-
-	return b, resp, nil
-}
-
 // CreateBranchOptions represents the available CreateBranch() options.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/ee/api/branches.html#create-repository-branch
+// https://docs.gitlab.com/api/branches/#create-repository-branch
 type CreateBranchOptions struct {
 	Branch *string `url:"branch,omitempty" json:"branch,omitempty"`
 	Ref    *string `url:"ref,omitempty" json:"ref,omitempty"`
 }
 
-// CreateBranch creates branch from commit SHA or existing branch.
-//
-// GitLab API docs:
-// https://docs.gitlab.com/ee/api/branches.html#create-repository-branch
-func (s *BranchesService) CreateBranch(pid interface{}, opt *CreateBranchOptions, options ...RequestOptionFunc) (*Branch, *Response, error) {
+func (s *BranchesService) CreateBranch(pid any, opt *CreateBranchOptions, options ...RequestOptionFunc) (*Branch, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err
@@ -213,11 +167,7 @@ func (s *BranchesService) CreateBranch(pid interface{}, opt *CreateBranchOptions
 	return b, resp, nil
 }
 
-// DeleteBranch deletes an existing branch.
-//
-// GitLab API docs:
-// https://docs.gitlab.com/ee/api/branches.html#delete-repository-branch
-func (s *BranchesService) DeleteBranch(pid interface{}, branch string, options ...RequestOptionFunc) (*Response, error) {
+func (s *BranchesService) DeleteBranch(pid any, branch string, options ...RequestOptionFunc) (*Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, err
@@ -232,11 +182,7 @@ func (s *BranchesService) DeleteBranch(pid interface{}, branch string, options .
 	return s.client.Do(req, nil)
 }
 
-// DeleteMergedBranches deletes all branches that are merged into the project's default branch.
-//
-// GitLab API docs:
-// https://docs.gitlab.com/ee/api/branches.html#delete-merged-branches
-func (s *BranchesService) DeleteMergedBranches(pid interface{}, options ...RequestOptionFunc) (*Response, error) {
+func (s *BranchesService) DeleteMergedBranches(pid any, options ...RequestOptionFunc) (*Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, err

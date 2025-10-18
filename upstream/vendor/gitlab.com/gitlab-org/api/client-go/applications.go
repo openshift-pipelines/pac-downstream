@@ -21,13 +21,37 @@ import (
 	"net/http"
 )
 
-// ApplicationsService handles communication with administrables applications
-// of the Gitlab API.
-//
-// Gitlab API docs : https://docs.gitlab.com/ee/api/applications.html
-type ApplicationsService struct {
-	client *Client
-}
+type (
+	ApplicationsServiceInterface interface {
+		// CreateApplication creates a new application owned by the authenticated user.
+		//
+		// GitLab API docs:
+		// https://docs.gitlab.com/api/applications/#create-an-application
+		CreateApplication(opt *CreateApplicationOptions, options ...RequestOptionFunc) (*Application, *Response, error)
+
+		// ListApplications get a list of administrables applications by the authenticated user
+		//
+		// GitLab API docs:
+		// https://docs.gitlab.com/api/applications/#list-all-applications
+		ListApplications(opt *ListApplicationsOptions, options ...RequestOptionFunc) ([]*Application, *Response, error)
+
+		// DeleteApplication removes a specific application.
+		//
+		// GitLab API docs:
+		// https://docs.gitlab.com/api/applications/#delete-an-application
+		DeleteApplication(application int, options ...RequestOptionFunc) (*Response, error)
+	}
+
+	// ApplicationsService handles communication with administrables applications
+	// of the GitLab API.
+	//
+	// GitLab API docs: https://docs.gitlab.com/api/applications/
+	ApplicationsService struct {
+		client *Client
+	}
+)
+
+var _ ApplicationsServiceInterface = (*ApplicationsService)(nil)
 
 // Application represents a GitLab application
 type Application struct {
@@ -42,7 +66,7 @@ type Application struct {
 // CreateApplicationOptions represents the available CreateApplication() options.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/ee/api/applications.html#create-an-application
+// https://docs.gitlab.com/api/applications/#create-an-application
 type CreateApplicationOptions struct {
 	Name         *string `url:"name,omitempty" json:"name,omitempty"`
 	RedirectURI  *string `url:"redirect_uri,omitempty" json:"redirect_uri,omitempty"`
@@ -50,9 +74,6 @@ type CreateApplicationOptions struct {
 	Confidential *bool   `url:"confidential,omitempty" json:"confidential,omitempty"`
 }
 
-// CreateApplication creates a new application owned by the authenticated user.
-//
-// Gitlab API docs : https://docs.gitlab.com/ee/api/applications.html#create-an-application
 func (s *ApplicationsService) CreateApplication(opt *CreateApplicationOptions, options ...RequestOptionFunc) (*Application, *Response, error) {
 	req, err := s.client.NewRequest(http.MethodPost, "applications", opt, options)
 	if err != nil {
@@ -72,9 +93,6 @@ func (s *ApplicationsService) CreateApplication(opt *CreateApplicationOptions, o
 // ListApplications() options.
 type ListApplicationsOptions ListOptions
 
-// ListApplications get a list of administrables applications by the authenticated user
-//
-// Gitlab API docs : https://docs.gitlab.com/ee/api/applications.html#list-all-applications
 func (s *ApplicationsService) ListApplications(opt *ListApplicationsOptions, options ...RequestOptionFunc) ([]*Application, *Response, error) {
 	req, err := s.client.NewRequest(http.MethodGet, "applications", opt, options)
 	if err != nil {
@@ -90,10 +108,6 @@ func (s *ApplicationsService) ListApplications(opt *ListApplicationsOptions, opt
 	return as, resp, nil
 }
 
-// DeleteApplication removes a specific application.
-//
-// GitLab API docs:
-// https://docs.gitlab.com/ee/api/applications.html#delete-an-application
 func (s *ApplicationsService) DeleteApplication(application int, options ...RequestOptionFunc) (*Response, error) {
 	u := fmt.Sprintf("applications/%d", application)
 
