@@ -14,7 +14,7 @@ require (
 	github.com/gfleury/go-bitbucket-v1 v0.0.0-20240822132758-a3031aa024b4
 	github.com/gobwas/glob v0.2.3
 	github.com/google/cel-go v0.21.0
-	github.com/google/go-cmp v0.6.0
+	github.com/google/go-cmp v0.7.0
 	github.com/google/go-github/scrape v0.0.0-20240903181346-00caddcf95be
 	github.com/google/go-github/v62 v62.0.0
 	github.com/google/go-github/v64 v64.0.0
@@ -80,7 +80,7 @@ require (
 	github.com/evanphx/json-patch/v5 v5.9.0 // indirect
 	github.com/go-fed/httpsig v1.1.1-0.20201223112313-55836744818e // indirect
 	github.com/go-kit/log v0.2.1 // indirect
-	github.com/go-logfmt/logfmt v0.6.0 // indirect
+	github.com/go-logfmt/logfmt v0.6.1 // indirect
 	github.com/go-logr/logr v1.4.2 // indirect
 	github.com/go-openapi/jsonpointer v0.21.0 // indirect
 	github.com/go-openapi/jsonreference v0.21.0 // indirect
