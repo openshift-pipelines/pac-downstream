@@ -13,7 +13,7 @@ require (
 	github.com/fvbommel/sortorder v1.1.0
 	github.com/gfleury/go-bitbucket-v1 v0.0.0-20240917142304-df385efaac68
 	github.com/gobwas/glob v0.2.3
-	github.com/google/cel-go v0.21.0
+	github.com/google/cel-go v0.26.1
 	github.com/google/go-cmp v0.6.0
 	github.com/google/go-github/scrape v0.0.0-20250130204427-cbe65f01498a
 	github.com/google/go-github/v68 v68.0.0
@@ -49,6 +49,7 @@ require (
 )
 
 require (
+	cel.dev/expr v0.24.0 // indirect
 	github.com/antlr/antlr4/runtime/Go/antlr v1.4.10 // indirect
 	github.com/cloudevents/sdk-go/sql/v2 v2.0.0-20240712172937-3ce6b2f1f011 // indirect
 	github.com/coreos/go-oidc/v3 v3.9.0 // indirect
