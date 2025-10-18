@@ -13,7 +13,7 @@ require (
 	github.com/fvbommel/sortorder v1.1.0
 	github.com/gfleury/go-bitbucket-v1 v0.0.0-20240131155556-0b41d7863037
 	github.com/gobwas/glob v0.2.3
-	github.com/google/cel-go v0.20.1
+	github.com/google/cel-go v0.26.1
 	github.com/google/go-cmp v0.6.0
 	github.com/google/go-github/scrape v0.0.0-20240403195118-24209f034709
 	github.com/google/go-github/v60 v60.0.0
@@ -34,7 +34,7 @@ require (
 	go.opencensus.io v0.24.0
 	go.uber.org/zap v1.27.0
 	golang.org/x/exp v0.0.0-20240325151524-a685a6edb6d8
-	golang.org/x/oauth2 v0.18.0
+	golang.org/x/oauth2 v0.20.0
 	golang.org/x/sync v0.11.0
 	golang.org/x/text v0.22.0
 	gopkg.in/yaml.v2 v2.4.0
@@ -49,6 +49,7 @@ require (
 )
 
 require (
+	cel.dev/expr v0.24.0 // indirect
 	github.com/coreos/go-oidc/v3 v3.9.0 // indirect
 	github.com/go-jose/go-jose/v3 v3.0.3 // indirect
 )
@@ -75,7 +76,7 @@ require (
 	github.com/blang/semver/v4 v4.0.0 // indirect
 	github.com/blendle/zapdriver v1.3.1 // indirect
 	github.com/census-instrumentation/opencensus-proto v0.4.1 // indirect
-	github.com/cespare/xxhash/v2 v2.2.0 // indirect
+	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/cloudevents/sdk-go/observability/opencensus/v2 v2.15.2 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/davidmz/go-pageant v1.0.2 // indirect
@@ -140,11 +141,10 @@ require (
 	golang.org/x/time v0.5.0 // indirect
 	gomodules.xyz/jsonpatch/v2 v2.4.0 // indirect
 	google.golang.org/api v0.172.0 // indirect
-	google.golang.org/appengine v1.6.8 // indirect
-	google.golang.org/genproto/googleapis/api v0.0.0-20240401170217-c3f982113cda // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20240401170217-c3f982113cda // indirect
-	google.golang.org/grpc v1.63.0 // indirect
-	google.golang.org/protobuf v1.33.0
+	google.golang.org/genproto/googleapis/api v0.0.0-20240826202546-f6391c0de4c7 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20240826202546-f6391c0de4c7 // indirect
+	google.golang.org/grpc v1.65.0 // indirect
+	google.golang.org/protobuf v1.34.2
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	k8s.io/apiextensions-apiserver v0.29.3 // indirect
