@@ -730,8 +730,8 @@ github.com/fvbommel/sortorder v1.1.0 h1:fUmoe+HLsBTctBDoaBwpQo5N+nrCp8g/BjKb/6ZQ
 github.com/fvbommel/sortorder v1.1.0/go.mod h1:uk88iVf1ovNn1iLfgUVU2F9o5eO30ui720w+kxuqRs0=
 github.com/fxamacker/cbor/v2 v2.7.0 h1:iM5WgngdRBanHcxugY4JySA0nk1wZorNOpTgCMedv5E=
 github.com/fxamacker/cbor/v2 v2.7.0/go.mod h1:pxXPTn3joSm21Gbwsv0w9OSA2y1HFR9qXEeXQVeNoDQ=
-github.com/gfleury/go-bitbucket-v1 v0.0.0-20240822132758-a3031aa024b4 h1:sRZ/hpZOEfU+/05QFOt6nRE+OAFWCP0x+qz+inrcbkw=
-github.com/gfleury/go-bitbucket-v1 v0.0.0-20240822132758-a3031aa024b4/go.mod h1:bB7XwdZF40tLVnu9n5A9TjI2ddNZtLYImtwYwmcmnRo=
+github.com/gfleury/go-bitbucket-v1 v0.0.0-20240917142304-df385efaac68 h1:iJXWkoIPk3e8RVHhQE/gXfP2TP3OLQ9vVPNSJ+oL6mM=
+github.com/gfleury/go-bitbucket-v1 v0.0.0-20240917142304-df385efaac68/go.mod h1:bB7XwdZF40tLVnu9n5A9TjI2ddNZtLYImtwYwmcmnRo=
 github.com/gfleury/go-bitbucket-v1/test/bb-mock-server v0.0.0-20230825095122-9bc1711434ab h1:BeG9dDWckFi/p5Gvqq3wTEDXsUV4G6bdvjEHMOT2B8E=
 github.com/gfleury/go-bitbucket-v1/test/bb-mock-server v0.0.0-20230825095122-9bc1711434ab/go.mod h1:VssB0kb1cETNaFFC/0mHVCj+7i5TS2xraYq+tl9JLwE=
 github.com/ghodss/yaml v1.0.0/go.mod h1:4dBDuWmgqj2HViK6kFavaiC9ZROes6MMH2rRYeMEF04=
