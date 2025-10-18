@@ -45,6 +45,11 @@ require (
 	sigs.k8s.io/yaml v1.4.0
 )
 
+require (
+	github.com/onsi/ginkgo/v2 v2.17.2 // indirect
+	github.com/onsi/gomega v1.33.1 // indirect
+)
+
 replace (
 	k8s.io/api => k8s.io/api v0.26.7
 	k8s.io/apimachinery => k8s.io/apimachinery v0.26.7
@@ -75,7 +80,7 @@ require (
 	github.com/go-fed/httpsig v1.1.0 // indirect
 	github.com/go-kit/log v0.2.1 // indirect
 	github.com/go-logfmt/logfmt v0.6.0 // indirect
-	github.com/go-logr/logr v1.3.0 // indirect
+	github.com/go-logr/logr v1.4.1 // indirect
 	github.com/go-openapi/jsonpointer v0.20.0 // indirect
 	github.com/go-openapi/jsonreference v0.20.2 // indirect
 	github.com/go-openapi/swag v0.22.4 // indirect
@@ -88,7 +93,6 @@ require (
 	github.com/google/go-containerregistry v0.17.0 // indirect
 	github.com/google/go-querystring v1.1.0 // indirect
 	github.com/google/gofuzz v1.2.0 // indirect
-	github.com/google/pprof v0.0.0-20230111200839-76d1ae5aea2b // indirect
 	github.com/google/uuid v1.5.0 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.18.1 // indirect
 	github.com/hashicorp/errwrap v1.1.0 // indirect
@@ -117,7 +121,7 @@ require (
 	github.com/prometheus/common v0.45.0 // indirect
 	github.com/prometheus/procfs v0.12.0 // indirect
 	github.com/prometheus/statsd_exporter v0.25.0 // indirect
-	github.com/rickb777/date v1.20.2 // indirect
+	github.com/rickb777/date v1.21.1 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
 	github.com/stoewer/go-strcase v1.3.0 // indirect
 	github.com/xlzd/gotp v0.1.0 // indirect
