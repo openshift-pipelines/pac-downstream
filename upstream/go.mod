@@ -1,6 +1,8 @@
 module github.com/openshift-pipelines/pipelines-as-code
 
-go 1.20
+go 1.22
+
+toolchain go1.24.6
 
 require (
 	code.gitea.io/gitea/modules/structs v0.0.0-20190610152049-835b53fc259c
@@ -30,7 +32,7 @@ require (
 	github.com/xanzy/go-gitlab v0.94.0
 	go.opencensus.io v0.24.0
 	go.uber.org/zap v1.26.0
-	golang.org/x/exp v0.0.0-20231110203233-9a3e6036ecaa
+	golang.org/x/exp v0.0.0-20240506185415-9bf2ced13842
 	golang.org/x/oauth2 v0.16.0
 	golang.org/x/sync v0.10.0
 	golang.org/x/text v0.21.0
@@ -60,7 +62,7 @@ require (
 	contrib.go.opencensus.io/exporter/zipkin v0.1.2 // indirect
 	github.com/PuerkitoBio/goquery v1.8.1 // indirect
 	github.com/andybalholm/cascadia v1.3.2 // indirect
-	github.com/antlr4-go/antlr/v4 v4.13.0 // indirect
+	github.com/antlr4-go/antlr/v4 v4.13.1 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/blang/semver/v4 v4.0.0 // indirect
 	github.com/blendle/zapdriver v1.3.1 // indirect
