@@ -58,7 +58,7 @@ require (
 	github.com/coreos/go-oidc/v3 v3.15.0 // indirect
 	github.com/fxamacker/cbor/v2 v2.9.0 // indirect
 	github.com/go-jose/go-jose/v3 v3.0.4 // indirect
-	github.com/go-jose/go-jose/v4 v4.1.2 // indirect
+	github.com/go-jose/go-jose/v4 v4.1.3 // indirect
 	github.com/go-openapi/swag/cmdutils v0.24.0 // indirect
 	github.com/go-openapi/swag/conv v0.24.0 // indirect
 	github.com/go-openapi/swag/fileutils v0.24.0 // indirect
@@ -159,7 +159,7 @@ require (
 )
 
 replace (
-	github.com/go-jose/go-jose/v4 => github.com/go-jose/go-jose/v4 v4.0.5
+	github.com/go-jose/go-jose/v4 => github.com/go-jose/go-jose/v4 v4.1.3
 	github.com/google/gnostic-models => github.com/google/gnostic-models v0.6.9
 	k8s.io/api => k8s.io/api v0.32.8
 	k8s.io/apimachinery => k8s.io/apimachinery v0.32.8
