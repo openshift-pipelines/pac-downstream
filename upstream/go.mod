@@ -51,6 +51,8 @@ require (
 require (
 	github.com/coreos/go-oidc/v3 v3.9.0 // indirect
 	github.com/go-jose/go-jose/v3 v3.0.3 // indirect
+	github.com/onsi/ginkgo/v2 v2.17.2 // indirect
+	github.com/onsi/gomega v1.33.1 // indirect
 )
 
 replace (
@@ -98,7 +100,6 @@ require (
 	github.com/google/go-containerregistry v0.19.1 // indirect
 	github.com/google/go-querystring v1.1.0 // indirect
 	github.com/google/gofuzz v1.2.0 // indirect
-	github.com/google/pprof v0.0.0-20230111200839-76d1ae5aea2b // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.19.1 // indirect
 	github.com/hashicorp/errwrap v1.1.0 // indirect
@@ -126,7 +127,7 @@ require (
 	github.com/prometheus/common v0.52.2 // indirect
 	github.com/prometheus/procfs v0.13.0 // indirect
 	github.com/prometheus/statsd_exporter v0.26.1 // indirect
-	github.com/rickb777/date v1.20.2 // indirect
+	github.com/rickb777/date v1.21.1 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
 	github.com/stoewer/go-strcase v1.3.0 // indirect
 	github.com/xlzd/gotp v0.1.0 // indirect
