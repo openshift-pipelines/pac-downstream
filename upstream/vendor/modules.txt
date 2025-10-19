@@ -396,7 +396,7 @@ github.com/tektoncd/pipeline/pkg/reconciler/pipeline/dag
 github.com/tektoncd/pipeline/pkg/result
 github.com/tektoncd/pipeline/pkg/spire/config
 github.com/tektoncd/pipeline/pkg/substitution
-# github.com/xanzy/go-gitlab v0.101.0
+# github.com/xanzy/go-gitlab v0.115.0
 ## explicit; go 1.19
 github.com/xanzy/go-gitlab
 # github.com/xlzd/gotp v0.1.0
