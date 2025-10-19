@@ -5,7 +5,7 @@ Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-    http://www.apache.org/licenses/LICENSE-2.0
+	http://www.apache.org/licenses/LICENSE-2.0
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -20,25 +20,34 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	nethttp "net/http"
 	"net/url"
 	"time"
+
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/trace"
+	"k8s.io/apimachinery/pkg/types"
+	corev1listers "k8s.io/client-go/listers/core/v1"
+	"knative.dev/pkg/network"
+	"knative.dev/pkg/observability/tracing"
+
+	"knative.dev/eventing/pkg/auth"
 
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 	ceclient "github.com/cloudevents/sdk-go/v2/client"
 	"github.com/cloudevents/sdk-go/v2/event"
 	"github.com/cloudevents/sdk-go/v2/protocol"
 	"github.com/cloudevents/sdk-go/v2/protocol/http"
-	"go.opencensus.io/plugin/ochttp"
-	"go.opencensus.io/plugin/ochttp/propagation/tracecontext"
 	duckv1 "knative.dev/pkg/apis/duck/v1"
-	"knative.dev/pkg/tracing/propagation/tracecontextb3"
 
+	obsclient "github.com/cloudevents/sdk-go/observability/opentelemetry/v2/client"
 	"knative.dev/eventing/pkg/adapter/v2/util/crstatusevent"
 	"knative.dev/eventing/pkg/apis"
 	"knative.dev/eventing/pkg/eventingtls"
 	"knative.dev/eventing/pkg/metrics/source"
-	obsclient "knative.dev/eventing/pkg/observability/client"
 )
 
 type closeIdler interface {
@@ -54,13 +63,23 @@ var newClientHTTPObserved = NewClientHTTPObserved
 
 func NewClientHTTPObserved(topt []http.Option, copt []ceclient.Option) (Client, error) {
 	t, err := http.New(append(topt,
-		http.WithMiddleware(tracecontextMiddleware),
+		http.WithMiddleware(
+			otelhttp.NewMiddleware(
+				"receive",
+				otelhttp.WithPropagators(tracing.DefaultTextMapPropagator()),
+			),
+		),
 	)...)
 	if err != nil {
 		return nil, err
 	}
 
-	copt = append(copt, ceclient.WithTimeNow(), ceclient.WithUUIDs(), ceclient.WithObservabilityService(obsclient.New()))
+	copt = append(
+		copt,
+		ceclient.WithTimeNow(),
+		ceclient.WithUUIDs(),
+		ceclient.WithObservabilityService(obsclient.NewOTelObservabilityService()),
+	)
 
 	c, err := ceclient.New(t, copt...)
 	if err != nil {
@@ -110,6 +129,11 @@ type ClientConfig struct {
 	Reporter            source.StatsReporter
 	CrStatusEventClient *crstatusevent.CRStatusEventClient
 	Options             []http.Option
+	TokenProvider       *auth.OIDCTokenProvider
+	MeterProvider       metric.MeterProvider
+	TraceProvider       trace.TracerProvider
+
+	TrustBundleConfigMapLister corev1listers.ConfigMapNamespaceLister
 }
 
 type clientConfigKey struct{}
@@ -127,10 +151,7 @@ func GetClientConfig(ctx context.Context) ClientConfig {
 }
 
 func NewClient(cfg ClientConfig) (Client, error) {
-	transport := &ochttp.Transport{
-		Base:        nethttp.DefaultTransport.(*nethttp.Transport),
-		Propagation: tracecontextb3.TraceContextEgress,
-	}
+	base := nethttp.DefaultTransport.(*nethttp.Transport).Clone()
 
 	pOpts := make([]http.Option, 0)
 
@@ -142,25 +163,21 @@ func NewClient(cfg ClientConfig) (Client, error) {
 		if sinkWait := cfg.Env.GetSinktimeout(); sinkWait > 0 {
 			pOpts = append(pOpts, setTimeOut(time.Duration(sinkWait)*time.Second))
 		}
-		if eventingtls.IsHttpsSink(cfg.Env.GetSink()) {
-			var err error
 
+		if eventingtls.IsHttpsSink(cfg.Env.GetSink()) {
 			clientConfig := eventingtls.NewDefaultClientConfig()
 			clientConfig.CACerts = cfg.Env.GetCACerts()
+			clientConfig.TrustBundleConfigMapLister = cfg.TrustBundleConfigMapLister
 
-			tlsConfig, err := eventingtls.GetTLSClientConfig(clientConfig)
-			if err != nil {
-				return nil, err
-			}
-
-			httpsTransport := transport.Base.(*nethttp.Transport).Clone()
-			httpsTransport.TLSClientConfig = tlsConfig
-
-			transport = &ochttp.Transport{
-				Base:        httpsTransport,
-				Propagation: tracecontextb3.TraceContextEgress,
+			base.DialTLSContext = func(ctx context.Context, net, addr string) (net.Conn, error) {
+				tlsConfig, err := eventingtls.GetTLSClientConfig(clientConfig)
+				if err != nil {
+					return nil, err
+				}
+				return network.DialTLSWithBackOff(ctx, net, addr, tlsConfig)
 			}
 		}
+
 		if ceOverrides == nil {
 			var err error
 			ceOverrides, err = cfg.Env.GetCloudEventOverrides()
@@ -172,7 +189,25 @@ func NewClient(cfg ClientConfig) (Client, error) {
 		pOpts = append(pOpts, http.WithHeader(apis.KnNamespaceHeader, cfg.Env.GetNamespace()))
 	}
 
-	httpClient := nethttp.Client{Transport: roundTripperDecorator(transport)}
+	mp := cfg.MeterProvider
+	if mp == nil {
+		mp = otel.GetMeterProvider()
+	}
+
+	tp := cfg.TraceProvider
+	if tp == nil {
+		tp = otel.GetTracerProvider()
+	}
+
+	transport := otelhttp.NewTransport(
+		base,
+		otelhttp.WithPropagators(tracing.DefaultTextMapPropagator()),
+		otelhttp.WithMeterProvider(mp),
+		otelhttp.WithTracerProvider(tp),
+		otelhttp.WithSpanNameFormatter(formatSpanName),
+	)
+
+	httpClient := nethttp.Client{Transport: transport}
 
 	// Important: prepend HTTP client option to make sure that other options are applied to this
 	// client and not to the default client.
@@ -189,13 +224,30 @@ func NewClient(cfg ClientConfig) (Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &client{
+
+	client := &client{
 		ceClient:            ceClient,
-		closeIdler:          transport.Base.(*nethttp.Transport),
+		closeIdler:          base,
 		ceOverrides:         ceOverrides,
 		reporter:            cfg.Reporter,
 		crStatusEventClient: cfg.CrStatusEventClient,
-	}, nil
+		oidcTokenProvider:   cfg.TokenProvider,
+		scheme:              "http",
+	}
+
+	if cfg.Env != nil {
+		client.audience = cfg.Env.GetAudience()
+		client.oidcServiceAccountName = cfg.Env.GetOIDCServiceAccountName()
+		sinkURI := cfg.Env.GetSink()
+		if sinkURI != "" {
+			parsedUrl, err := url.Parse(sinkURI)
+			if err == nil {
+				client.scheme = parsedUrl.Scheme
+			}
+		}
+	}
+
+	return client, nil
 }
 
 func setTimeOut(duration time.Duration) http.Option {
@@ -212,11 +264,15 @@ func setTimeOut(duration time.Duration) http.Option {
 }
 
 type client struct {
-	ceClient            cloudevents.Client
-	ceOverrides         *duckv1.CloudEventOverrides
-	reporter            source.StatsReporter
-	crStatusEventClient *crstatusevent.CRStatusEventClient
-	closeIdler          closeIdler
+	ceClient               cloudevents.Client
+	ceOverrides            *duckv1.CloudEventOverrides
+	reporter               source.StatsReporter
+	crStatusEventClient    *crstatusevent.CRStatusEventClient
+	closeIdler             closeIdler
+	scheme                 string
+	oidcTokenProvider      *auth.OIDCTokenProvider
+	audience               *string
+	oidcServiceAccountName *types.NamespacedName
 }
 
 func (c *client) CloseIdleConnections() {
@@ -228,6 +284,15 @@ var _ cloudevents.Client = (*client)(nil)
 // Send implements client.Send
 func (c *client) Send(ctx context.Context, out event.Event) protocol.Result {
 	c.applyOverrides(&out)
+	var err error
+
+	if c.audience != nil && c.oidcServiceAccountName != nil {
+		ctx, err = c.withAuthHeader(ctx)
+		if err != nil {
+			return err
+		}
+	}
+
 	res := c.ceClient.Send(ctx, out)
 	c.reportMetrics(ctx, out, res)
 	return res
@@ -236,6 +301,15 @@ func (c *client) Send(ctx context.Context, out event.Event) protocol.Result {
 // Request implements client.Request
 func (c *client) Request(ctx context.Context, out event.Event) (*event.Event, protocol.Result) {
 	c.applyOverrides(&out)
+	var err error
+
+	if c.audience != nil && c.oidcServiceAccountName != nil {
+		ctx, err = c.withAuthHeader(ctx)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	resp, res := c.ceClient.Request(ctx, out)
 	c.reportMetrics(ctx, out, res)
 	return resp, res
@@ -258,6 +332,7 @@ func (c *client) reportMetrics(ctx context.Context, event cloudevents.Event, res
 	if c.reporter == nil {
 		return
 	}
+
 	tags := MetricTagFromContext(ctx)
 	reportArgs := &source.ReportArgs{
 		Namespace:     tags.Namespace,
@@ -265,6 +340,7 @@ func (c *client) reportMetrics(ctx context.Context, event cloudevents.Event, res
 		EventType:     event.Type(),
 		Name:          tags.Name,
 		ResourceGroup: tags.ResourceGroup,
+		EventScheme:   c.scheme,
 	}
 
 	var rres *http.RetriesResult
@@ -342,22 +418,24 @@ func MetricTagFromContext(ctx context.Context) *MetricTag {
 	}
 }
 
-func roundTripperDecorator(roundTripper nethttp.RoundTripper) nethttp.RoundTripper {
-	return &ochttp.Transport{
-		Propagation:    &tracecontext.HTTPFormat{},
-		Base:           roundTripper,
-		FormatSpanName: formatSpanName,
-	}
-}
-
-func formatSpanName(r *nethttp.Request) string {
+func formatSpanName(operation string, r *nethttp.Request) string {
 	return "cloudevents.http." + r.URL.Path
 }
 
-func tracecontextMiddleware(h nethttp.Handler) nethttp.Handler {
-	return &ochttp.Handler{
-		Propagation:    &tracecontext.HTTPFormat{},
-		Handler:        h,
-		FormatSpanName: formatSpanName,
+// When OIDC is enabled, withAuthHeader will request the JWT token from the tokenProvider and append it to every request
+// it has interaction with, if source's OIDC service account (source.Status.Auth.ServiceAccountName) and destination's
+// audience are present.
+func (c *client) withAuthHeader(ctx context.Context) (context.Context, error) {
+	// Request the JWT token for the given service account
+	jwt, err := c.oidcTokenProvider.GetJWT(*c.oidcServiceAccountName, *c.audience)
+	if err != nil {
+		return ctx, protocol.NewResult("Failed when appending the Authorization header to the outgoing request %w", err)
 	}
+
+	// Appending the auth token to the outgoing request
+	headers := http.HeaderFrom(ctx)
+	headers.Set("Authorization", fmt.Sprintf("Bearer %s", jwt))
+	ctx = http.WithCustomHeader(ctx, headers)
+
+	return ctx, nil
 }
