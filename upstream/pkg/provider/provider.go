@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
-	"gopkg.in/yaml.v2"
+	"gopkg.in/yaml.v3"
 )
 
 var (
