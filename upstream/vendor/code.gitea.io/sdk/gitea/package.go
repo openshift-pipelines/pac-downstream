@@ -16,7 +16,7 @@ type Package struct {
 	// the package's owner
 	Owner User `json:"owner"`
 	// the repo this package belongs to (if any)
-	Repository *string `json:"repository"`
+	Repository *Repository `json:"repository"`
 	// the package's creator
 	Creator User `json:"creator"`
 	// the type of package:
@@ -78,8 +78,7 @@ func (c *Client) DeletePackage(owner, packageType, name, version string) (*Respo
 	if err := escapeValidatePathSegments(&owner, &packageType, &name, &version); err != nil {
 		return nil, err
 	}
-	_, resp, err := c.getResponse("DELETE", fmt.Sprintf("/packages/%s/%s/%s/%s", owner, packageType, name, version), nil, nil)
-	return resp, err
+	return c.doRequestWithStatusHandle("DELETE", fmt.Sprintf("/packages/%s/%s/%s/%s", owner, packageType, name, version), nil, nil)
 }
 
 // ListPackageFiles lists the files within a package
