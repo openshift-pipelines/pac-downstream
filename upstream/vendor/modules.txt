@@ -5,7 +5,7 @@ cel.dev/expr
 ## explicit; go 1.24
 code.gitea.io/gitea/modules/json
 code.gitea.io/gitea/modules/structs
-# code.gitea.io/sdk/gitea v0.22.0
+# code.gitea.io/sdk/gitea v0.22.1
 ## explicit; go 1.23.0
 code.gitea.io/sdk/gitea
 # contrib.go.opencensus.io/exporter/ocagent v0.7.1-0.20200907061046-05415f1de66d
