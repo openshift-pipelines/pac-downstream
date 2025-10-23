@@ -1,6 +1,8 @@
 module github.com/openshift-pipelines/pipelines-as-code
 
-go 1.23.6
+go 1.24.0
+
+toolchain go1.24.6
 
 require (
 	code.gitea.io/gitea v1.23.7
@@ -30,9 +32,9 @@ require (
 	gitlab.com/gitlab-org/api/client-go v0.128.0
 	go.opencensus.io v0.24.0
 	go.uber.org/zap v1.27.0
-	golang.org/x/exp v0.0.0-20250408133849-7e4ce0ab07d0
+	golang.org/x/exp v0.0.0-20251023183803-a4bb9ffd2546
 	golang.org/x/oauth2 v0.30.0
-	golang.org/x/sync v0.14.0
+	golang.org/x/sync v0.17.0
 	golang.org/x/text v0.24.0
 	gopkg.in/yaml.v2 v2.4.0
 	gotest.tools/v3 v3.5.2
