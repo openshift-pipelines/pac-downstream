@@ -1,6 +1,8 @@
 module github.com/openshift-pipelines/pipelines-as-code
 
-go 1.20
+go 1.22
+
+toolchain go1.24.6
 
 require (
 	code.gitea.io/gitea/modules/structs v0.0.0-20190610152049-835b53fc259c
@@ -42,8 +44,10 @@ require (
 	k8s.io/utils v0.0.0-20230726121419-3b25d923346b
 	knative.dev/eventing v0.39.0
 	knative.dev/pkg v0.0.0-20231115001034-97c7258e3a98
-	sigs.k8s.io/yaml v1.4.0
+	sigs.k8s.io/yaml v1.6.0
 )
+
+require go.yaml.in/yaml/v2 v2.4.2 // indirect
 
 replace (
 	k8s.io/api => k8s.io/api v0.26.7
