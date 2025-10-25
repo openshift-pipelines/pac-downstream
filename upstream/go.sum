@@ -32,8 +32,8 @@ cloud.google.com/go/storage v1.5.0/go.mod h1:tpKbwo567HUNpVclU5sGELwQWBDZ8gh0Zeo
 cloud.google.com/go/storage v1.6.0/go.mod h1:N7U0C8pVQ/+NIKOBQyamJIeKQKkZ+mxpohlUTyfDhBk=
 cloud.google.com/go/storage v1.8.0/go.mod h1:Wv1Oy7z6Yz3DshWRJFhqM/UCfaWIRTdp0RXyy7KQOVs=
 cloud.google.com/go/storage v1.10.0/go.mod h1:FLPqc6j+Ki4BU591ie1oL6qBQGu2Bl/tZ9ullr3+Kg0=
-code.gitea.io/gitea v1.24.6 h1:BrHATK2cfr/hkJc8cc2W/1lWTVhyCxa1NQMHvEVeLWM=
-code.gitea.io/gitea v1.24.6/go.mod h1:GGvBvwgBWl4tAfzeEkbVyeBW9vRg9MRPgwKwnDVpX6I=
+code.gitea.io/gitea v1.24.7 h1:61pM7fyh5GrKxJaoE79dGk11pbFdIE76Dv+Lzhxflt0=
+code.gitea.io/gitea v1.24.7/go.mod h1:GGvBvwgBWl4tAfzeEkbVyeBW9vRg9MRPgwKwnDVpX6I=
 code.gitea.io/sdk/gitea v0.22.0 h1:HCKq7bX/HQ85Nw7c/HAhWgRye+vBp5nQOE8Md1+9Ef0=
 code.gitea.io/sdk/gitea v0.22.0/go.mod h1:yyF5+GhljqvA30sRDreoyHILruNiy4ASufugzYg0VHM=
 contrib.go.opencensus.io/exporter/ocagent v0.7.1-0.20200907061046-05415f1de66d h1:LblfooH1lKOpp1hIhukktmSAxFkqMPFk9KR6iZ0MJNI=
