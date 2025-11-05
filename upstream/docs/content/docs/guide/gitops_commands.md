@@ -16,7 +16,7 @@ For example, when you are on a Pull Request, you may want to restart failed Pipe
 Example:
 
 ```text
-Thanks for contributing. This is a much-needed bugfix, and we love it ❤️ The
+Thanks for contributing. This is a much-needed bugfix, and we appreciate it ❤️ The
 failure is not with your PR but seems to be an infrastructure issue.
 
 /retest
@@ -42,7 +42,7 @@ Similar to `/retest`, the `/ok-to-test` command will only trigger new PipelineRu
 If you have multiple `PipelineRun` and you want to target a specific `PipelineRun`, you can use the `/test` command followed by the specific PipelineRun name to restart it. Example:
 
 ```text
-Roses are red, violets are blue. Pipelines are bound to flake by design.
+Pipeline execution appears to be unstable due to external factors. Retesting this specific pipeline.
 
 /test <pipelinerun-name>
 ```
@@ -109,6 +109,8 @@ spec:
 
 To issue a `GitOps` comment on a pushed commit, you can follow these steps:
 
+### For GitHub
+
 1. Go to your repository.
 2. Click on the **Commits** section.
 3. Choose one of the individual **Commit**.
@@ -116,7 +118,14 @@ To issue a `GitOps` comment on a pushed commit, you can follow these steps:
 
 ![GitOps Commits For Comments](/images/gitops-comments-on-commit.png)
 
-Please note that this feature is supported for the GitHub provider only.
+### For GitLab
+
+1. Go to your repository.
+2. Click on the **History**.
+3. Choose one of the individual **Commit**.
+4. Click on the line number where you want to add a `GitOps` comment, as shown in the image below:
+
+![GitOps Commits For Comments](/images/gitlab-gitops-comment-on-commit.png)
 
 ## GitOps Commands on Non-Matching PipelineRun
 
@@ -124,7 +133,7 @@ The PipelineRun will be restarted regardless of the annotations if the comment `
 
 ### Triggering PipelineRun on Git tags
 
-{{< support_matrix github_app="true" github_webhook="true" gitea="false" gitlab="false" bitbucket_cloud="false" bitbucket_server="false" >}}
+{{< support_matrix github_app="true" github_webhook="true" gitea="false" gitlab="true" bitbucket_cloud="false" bitbucket_server="false" >}}
 
 You can retrigger a PipelineRun against a specific Git tag by commenting on
 the tagged commit using a GitOps command. Pipelines-as-Code will resolve the
@@ -262,7 +271,7 @@ For example, if you want to cancel all your PipelineRuns, you can add a comment 
 Example:
 
 ```text
-It seems the infrastructure is down, so cancelling the PipelineRuns.
+The infrastructure appears to be experiencing issues. Cancelling the current PipelineRuns.
 
 /cancel
 ```
@@ -272,7 +281,7 @@ If you have multiple `PipelineRun` and you want to target a specific `PipelineRu
 Example:
 
 ```text
-Roses are red, violets are blue. Why run the pipeline when the infrastructure is down.
+The infrastructure appears to be experiencing issues, cancelling this specific pipeline.
 
 /cancel <pipelinerun-name>
 ```
