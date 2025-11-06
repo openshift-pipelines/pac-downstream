@@ -16,7 +16,7 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
 	testclient "github.com/openshift-pipelines/pipelines-as-code/pkg/test/clients"
 
-	"github.com/google/go-github/v71/github"
+	"github.com/google/go-github/v74/github"
 	pipelinev1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 	"go.uber.org/zap"
 	zapobserver "go.uber.org/zap/zaptest/observer"
@@ -1312,6 +1312,34 @@ func TestCancelAllInProgressBelongingToClosedPullRequest(t *testing.T) {
 						},
 					},
 					Spec: pipelinev1.PipelineRunSpec{},
+				},
+			},
+			cancelledPipelineRuns: map[string]bool{},
+		},
+		// this can happen when a pull request is merged and a new push is made to the branch
+		// so PaC assign the merged pull request number to the push PipelineRun
+		{
+			name: "do not cancel push-triggered PipelineRuns on PR close",
+			event: &info.Event{
+				Repository:        "foo",
+				PullRequestNumber: pullReqNumber,
+				TriggerTarget:     "push",
+			},
+			repo: fooRepo,
+			pipelineRuns: []*pipelinev1.PipelineRun{
+				{
+					Spec: pipelinev1.PipelineRunSpec{},
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "pr-foo-1",
+						Namespace: "foo",
+						Labels: map[string]string{
+							keys.OriginalPRName: "pr-foo",
+							keys.URLRepository:  formatting.CleanValueKubernetes("foo"),
+							keys.PullRequest:    strconv.Itoa(pullReqNumber),
+							keys.EventType:      string(triggertype.Push),
+							keys.SHA:            formatting.CleanValueKubernetes("foosha"),
+						},
+					},
 				},
 			},
 			cancelledPipelineRuns: map[string]bool{},
