@@ -14,7 +14,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/google/go-github/v71/github"
+	"github.com/google/go-github/v74/github"
 	apipac "github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
@@ -749,4 +749,42 @@ func TestGetLogURLMergePatch(t *testing.T) {
 	a, ok := m["annotations"].(map[string]string)
 	assert.Assert(t, ok)
 	assert.Equal(t, a[path.Join(apipac.GroupName, "log-url")], con.URL())
+}
+
+func TestGetExecutionOrderPatch(t *testing.T) {
+	tests := []struct {
+		name  string
+		order string
+		want  string
+	}{
+		{
+			name:  "single pr",
+			order: "pull-pr-1",
+			want:  "pull-pr-1",
+		},
+		{
+			name:  "multiple prs",
+			order: "pull-pr-1,pull-pr-2,pull-pr-3",
+			want:  "pull-pr-1,pull-pr-2,pull-pr-3",
+		},
+		{
+			name:  "empty",
+			order: "",
+			want:  "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := getExecutionOrderPatch(tt.order)
+			expected := map[string]any{
+				"metadata": map[string]any{
+					"annotations": map[string]string{
+						keys.ExecutionOrder: tt.want,
+					},
+				},
+			}
+			assert.DeepEqual(t, expected, result)
+		})
+	}
 }
