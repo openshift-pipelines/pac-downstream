@@ -27,6 +27,8 @@ spec:
     value: '{{source_url}}'
   - name: revision
     value: '{{revision}}'
+  - name: upstream-git-url
+    value: 'https://github.com/openshift-pipelines/pipelines-as-code'
   - name: output-image
     value: quay.io/redhat-user-workloads/tekton-ecosystem-tenant/next/pipelines-as-code-cli-rhel9:{{revision}}
   - name: dockerfile
