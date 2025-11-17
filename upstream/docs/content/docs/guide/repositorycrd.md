@@ -10,7 +10,7 @@ The Repository CR serves the following purposes:
 - Informing Pipelines-as-Code that an event from a specific URL needs to be handled.
 - Specifying the namespace where the `PipelineRuns` will be executed.
 - Referencing an API secret, username, or API URL if necessary for Git provider
-  platforms that require it (e.g., when using webhooks instead of the GitHub
+  platforms (e.g., when using webhooks instead of the GitHub
   application).
 - Providing the last `PipelineRun` statuses for the repository (5 by default).
 - Letting you declare [custom parameters]({{< relref "/docs/guide/customparams" >}})
@@ -23,8 +23,8 @@ The `pipelinerun_status` field in the `Repository` CR is scheduled for deprecati
 To configure Pipelines-as-Code, a Repository CR must be created within the
 user's namespace, for example `project-repository`, where their CI will run.
 
-Keep in mind that creating a Repository CR in the namespace where
-Pipelines-as-Code is deployed is not supported (for example
+Note that you cannot create a Repository CR in the same namespace where
+Pipelines-as-Code is deployed (for example
 `openshift-pipelines` or `pipelines-as-code` namespace).
 
 You can create the Repository CR using the [tkn pac]({{< relref
@@ -126,7 +126,27 @@ right to merge commits to the default branch can change the PipelineRun and have
 access to the infrastructure.
 {{< /hint >}}
 
-## Disabling all comments for PipelineRuns on GitLab MR
+## Controlling Pull/Merge Request comment volume
+
+For GitHub (Webhook) and GitLab integrations, you can control the types
+of Pull/Merge request comments that Pipelines as Code emits using
+the `spec.<provider>.comment_strategy` setting. This can
+help reduce notification volume for repositories that use long-lasting
+Pull/Merge requests with many PipelineRuns.
+
+Acceptable values for `spec.<provider>.comment_strategy` are `""`
+(default) and `"disable_all"`.
+
+When you set the value of `comment_strategy` to `disable_all`, Pipelines
+as Code will not add any comment on the Pull/Merge Request related to
+PipelineRun status.
+
+Note: The `disable_all` strategy applies only to comments about a
+PipelineRun's status (e.g., "started," "succeeded"). Comments may still
+appear if there are errors validating PipelineRuns in the `.tekton`
+directory. (See [Running the PipelineRun docs](../running/#errors-when-parsing-pipelinerun-yaml) for details)
+
+### GitLab
 
 By default, Pipelines-as-Code attempts to update the commit status through the
 GitLab API. It first tries the source project (fork), then falls back to the
@@ -149,9 +169,6 @@ Comments are only posted when:
 - The event type and repository settings allow commenting
 - The `comment_strategy` is not set to `disable_all`
 
-To explicitly disable all comments on GitLab Merge Requests for a Repository,
-use the `comment_strategy` setting:
-
 ```yaml
 spec:
   settings:
@@ -159,9 +176,7 @@ spec:
       comment_strategy: "disable_all"
 ```
 
-## Disabling all comments for PipelineRuns in GitHub Pull Requests on GitHub Webhook Setup
-
-`comment_strategy` allows you to disable the comments on GitHub PR for a Repository
+### GitHub Webhook
 
 ```yaml
 spec:
@@ -169,11 +184,6 @@ spec:
     github:
       comment_strategy: "disable_all"
 ```
-
-When `comment_strategy` is set to `disable_all` Pipelines as Code will not create any comment on the pull request for PipelineRun Status
-
-Note: The disable_all strategy applies only to comments about a PipelineRun's status (e.g., "started," "succeeded").
-If your PipelineRun YAML definition fails validation, a comment detailing the error will always be posted to the pull request. [see docs](../running/#errors-when-parsing-pipelinerun-yaml)
 
 ## Concurrency
 
@@ -184,7 +194,7 @@ spec:
   concurrency_limit: <number>
 ```
 
-When multiple PipelineRuns match the event, they will be started in alphabetical order.
+When multiple PipelineRuns match the event, they will be started in alphabetical order by PipelineRun name.
 
 Example:
 
