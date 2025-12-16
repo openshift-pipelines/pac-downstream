@@ -17,7 +17,7 @@ metadata:
   creationTimestamp: null
   labels:
     appstudio.openshift.io/application: openshift-pipelines-core-1-22
-    appstudio.openshift.io/component: pac-downstream-watcher-1-22
+    appstudio.openshift.io/component: pac-downstream-1-22-watcher
     pipelines.appstudio.openshift.io/type: build
   name: pac-downstream-1-22-watcher-on-push
   namespace: tekton-ecosystem-tenant
@@ -25,6 +25,8 @@ spec:
   params:
   - name: git-url
     value: '{{source_url}}'
+  - name: upstream-git-url
+    value: 'https://github.com/openshift-pipelines/pipelines-as-code'
   - name: revision
     value: '{{revision}}'
   - name: output-image
@@ -33,7 +35,6 @@ spec:
     value: .konflux/dockerfiles/watcher.Dockerfile
   - name: additional-tags
     value:
-      - "1.22"
       - "1.22.0"
   - name: prefetch-input
     value: |
@@ -41,7 +42,7 @@ spec:
   pipelineRef:
     name: docker-build-ta
   taskRunTemplate:
-    serviceAccountName: build-pipeline-pac-downstream-watcher-1-22
+    serviceAccountName: build-pipeline-pac-downstream-1-22-watcher
   workspaces:
   - name: git-auth
     secret:
