@@ -69,7 +69,7 @@ jobs:
       TEST_BITBUCKET_SERVER_USER: pipelines
       TEST_BITBUCKET_SERVER_E2E_REPOSITORY: PAC/pac-e2e-tests
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           ref: ${{ inputs.target_ref || github.event.pull_request.head.sha || github.sha }}
 
@@ -342,7 +342,7 @@ jobs:
 
       - name: Upload artifacts
         if: ${{ always() }}
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: logs-e2e-tests-${{ matrix.provider }}
           path: /tmp/logs

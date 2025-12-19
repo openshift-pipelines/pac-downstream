@@ -64,7 +64,12 @@ type Provider struct {
 	triggerEvent      string
 	// memberCache caches membership/permission checks by user ID within the
 	// current provider instance lifecycle to avoid repeated API calls.
-	memberCache map[int]bool
+	memberCache        map[int]bool
+	cachedChangedFiles *changedfiles.ChangedFiles
+}
+
+var defaultGitlabListOptions = gitlab.ListOptions{
+	PerPage: 100,
 }
 
 func (v *Provider) Client() *gitlab.Client {
@@ -98,23 +103,35 @@ func (v *Provider) CreateComment(_ context.Context, event *info.Event, commit, u
 
 	// List comments of the merge request
 	if updateMarker != "" {
-		comments, _, err := v.Client().Notes.ListMergeRequestNotes(event.TargetProjectID, event.PullRequestNumber, &gitlab.ListMergeRequestNotesOptions{
-			ListOptions: gitlab.ListOptions{
-				Page:    1,
-				PerPage: 100,
-			},
-		})
-		if err != nil {
-			return err
-		}
+		commentRe := regexp.MustCompile(updateMarker)
+		options := []gitlab.RequestOptionFunc{}
 
-		re := regexp.MustCompile(updateMarker)
-		for _, comment := range comments {
-			if re.MatchString(comment.Body) {
-				_, _, err := v.Client().Notes.UpdateMergeRequestNote(event.TargetProjectID, event.PullRequestNumber, comment.ID, &gitlab.UpdateMergeRequestNoteOptions{
-					Body: &commit,
-				})
+		for {
+			comments, resp, err := v.Client().Notes.ListMergeRequestNotes(event.TargetProjectID, event.PullRequestNumber, &gitlab.ListMergeRequestNotesOptions{ListOptions: defaultGitlabListOptions}, options...)
+			if err != nil {
 				return err
+			}
+
+			for _, comment := range comments {
+				if commentRe.MatchString(comment.Body) {
+					_, _, err := v.Client().Notes.UpdateMergeRequestNote(event.TargetProjectID, event.PullRequestNumber, comment.ID, &gitlab.UpdateMergeRequestNoteOptions{
+						Body: &commit,
+					})
+					if err != nil {
+						return fmt.Errorf("unable to update merge request note: %w", err)
+					}
+					return nil
+				}
+			}
+
+			// Exit the loop when we've seen all pages.
+			if resp.NextLink == "" {
+				break
+			}
+
+			// Otherwise, set param to query the next page
+			options = []gitlab.RequestOptionFunc{
+				gitlab.WithKeysetPaginationParameters(resp.NextLink),
 			}
 		}
 	}
@@ -122,8 +139,10 @@ func (v *Provider) CreateComment(_ context.Context, event *info.Event, commit, u
 	_, _, err := v.Client().Notes.CreateMergeRequestNote(event.TargetProjectID, event.PullRequestNumber, &gitlab.CreateMergeRequestNoteOptions{
 		Body: &commit,
 	})
-
-	return err
+	if err != nil {
+		return fmt.Errorf("unable to create merge request note: %w", err)
+	}
+	return nil
 }
 
 // CheckPolicyAllowing TODO: Implement ME.
@@ -385,7 +404,7 @@ func (v *Provider) GetTektonDir(_ context.Context, event *info.Event, path, prov
 		ListOptions: gitlab.ListOptions{
 			OrderBy:    "id",
 			Pagination: "keyset",
-			PerPage:    20,
+			PerPage:    defaultGitlabListOptions.PerPage,
 			Sort:       "asc",
 		},
 	}
@@ -491,31 +510,48 @@ func (v *Provider) GetCommitInfo(_ context.Context, runevent *info.Event) error 
 		if branchinfo.CommittedDate != nil {
 			runevent.SHACommitterDate = *branchinfo.CommittedDate
 		}
+		runevent.HasSkipCommand = provider.SkipCI(branchinfo.Message)
 	}
 
 	return nil
 }
 
-func (v *Provider) GetFiles(_ context.Context, runevent *info.Event) (changedfiles.ChangedFiles, error) {
+// GetFiles gets and caches the list of files changed by a given event.
+func (v *Provider) GetFiles(ctx context.Context, runevent *info.Event) (changedfiles.ChangedFiles, error) {
+	if v.cachedChangedFiles == nil {
+		changes, err := v.fetchChangedFiles(ctx, runevent)
+		if err != nil {
+			return changedfiles.ChangedFiles{}, err
+		}
+		v.cachedChangedFiles = &changes
+	}
+	return *v.cachedChangedFiles, nil
+}
+
+func (v *Provider) fetchChangedFiles(_ context.Context, runevent *info.Event) (changedfiles.ChangedFiles, error) {
 	if v.gitlabClient == nil {
 		return changedfiles.ChangedFiles{}, fmt.Errorf("no gitlab client has been initialized, " +
 			"exiting... (hint: did you forget setting a secret on your repo?)")
 	}
-	if runevent.TriggerTarget == triggertype.PullRequest {
+
+	changedFiles := changedfiles.ChangedFiles{}
+
+	switch runevent.TriggerTarget {
+	case triggertype.PullRequest:
 		opt := &gitlab.ListMergeRequestDiffsOptions{
 			ListOptions: gitlab.ListOptions{
 				OrderBy:    "id",
 				Pagination: "keyset",
-				PerPage:    20,
+				PerPage:    defaultGitlabListOptions.PerPage,
 				Sort:       "asc",
 			},
 		}
 		options := []gitlab.RequestOptionFunc{}
-		changedFiles := changedfiles.ChangedFiles{}
 
 		for {
 			mrchanges, resp, err := v.Client().MergeRequests.ListMergeRequestDiffs(v.targetProjectID, runevent.PullRequestNumber, opt, options...)
 			if err != nil {
+				// TODO: Should this return the files found so far?
 				return changedfiles.ChangedFiles{}, err
 			}
 
@@ -545,33 +581,45 @@ func (v *Provider) GetFiles(_ context.Context, runevent *info.Event) (changedfil
 				gitlab.WithKeysetPaginationParameters(resp.NextLink),
 			}
 		}
-		return changedFiles, nil
-	}
+	case triggertype.Push:
+		options := gitlab.GetCommitDiffOptions{ListOptions: defaultGitlabListOptions}
+		pageOpts := []gitlab.RequestOptionFunc{}
 
-	if runevent.TriggerTarget == "push" {
-		pushChanges, _, err := v.Client().Commits.GetCommitDiff(v.sourceProjectID, runevent.SHA, &gitlab.GetCommitDiffOptions{})
-		if err != nil {
-			return changedfiles.ChangedFiles{}, err
+		for {
+			pushChanges, resp, err := v.Client().Commits.GetCommitDiff(v.sourceProjectID, runevent.SHA, &options, pageOpts...)
+			if err != nil {
+				return changedfiles.ChangedFiles{}, err
+			}
+
+			for _, change := range pushChanges {
+				changedFiles.All = append(changedFiles.All, change.NewPath)
+				if change.NewFile {
+					changedFiles.Added = append(changedFiles.Added, change.NewPath)
+				}
+				if change.DeletedFile {
+					changedFiles.Deleted = append(changedFiles.Deleted, change.NewPath)
+				}
+				if !change.RenamedFile && !change.DeletedFile && !change.NewFile {
+					changedFiles.Modified = append(changedFiles.Modified, change.NewPath)
+				}
+				if change.RenamedFile {
+					changedFiles.Renamed = append(changedFiles.Renamed, change.NewPath)
+				}
+			}
+
+			if resp.NextLink == "" {
+				// Exit the loop when we've seen all pages.
+				break
+			}
+			// Otherwise, set param to query the next page
+			pageOpts = []gitlab.RequestOptionFunc{
+				gitlab.WithKeysetPaginationParameters(resp.NextLink),
+			}
 		}
-		changedFiles := changedfiles.ChangedFiles{}
-		for _, change := range pushChanges {
-			changedFiles.All = append(changedFiles.All, change.NewPath)
-			if change.NewFile {
-				changedFiles.Added = append(changedFiles.Added, change.NewPath)
-			}
-			if change.DeletedFile {
-				changedFiles.Deleted = append(changedFiles.Deleted, change.NewPath)
-			}
-			if !change.RenamedFile && !change.DeletedFile && !change.NewFile {
-				changedFiles.Modified = append(changedFiles.Modified, change.NewPath)
-			}
-			if change.RenamedFile {
-				changedFiles.Renamed = append(changedFiles.Renamed, change.NewPath)
-			}
-		}
-		return changedFiles, nil
+	default:
+		// No action necessary
 	}
-	return changedfiles.ChangedFiles{}, nil
+	return changedFiles, nil
 }
 
 func (v *Provider) CreateToken(_ context.Context, _ []string, _ *info.Event) (string, error) {

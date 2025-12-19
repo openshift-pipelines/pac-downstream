@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -35,7 +36,7 @@ func Setup(t *testing.T) (*gitlab.Client, *http.ServeMux, func()) {
 		server.Close()
 	}
 
-	client, err := gitlab.NewClient("token", gitlab.WithBaseURL(server.URL))
+	client, err := gitlab.NewClient("token", gitlab.WithBaseURL(server.URL), gitlab.WithoutRetries())
 	assert.NilError(t, err)
 	return client, mux, tearDown
 }
@@ -114,6 +115,13 @@ func MuxDiscussionsNoteEmpty(mux *http.ServeMux, pid, mrID int) {
 	})
 }
 
+func MuxMergeRequestNote(mux *http.ServeMux, pid, mrID, noteID, userID int, commentContent, username string) {
+	path := fmt.Sprintf("/projects/%d/merge_requests/%d/notes/%d", pid, mrID, noteID)
+	mux.HandleFunc(path, func(rw http.ResponseWriter, _ *http.Request) {
+		fmt.Fprintf(rw, `{"body": "%s", "author": {"username": "%s", "id": %d}}`, commentContent, username, userID)
+	})
+}
+
 func MuxDiscussionsNote(mux *http.ServeMux, pid, mrID int, author string, authorID int, notecontent string) {
 	path := fmt.Sprintf("/projects/%d/merge_requests/%d/discussions", pid, mrID)
 	mux.HandleFunc(path, func(rw http.ResponseWriter, r *http.Request) {
@@ -169,9 +177,36 @@ func MuxGetFile(mux *http.ServeMux, pid int, fname, content string, wantErr bool
 	})
 }
 
+// SetPagingHeader sets the gitlab paging header "link" to the next page. If the requested page
+// is equal to or higher than maxPage, no next page header is set. The requested page number
+// is returned.
+func SetPagingHeader(t *testing.T, rw http.ResponseWriter, req *http.Request, maxPage int) int {
+	t.Helper()
+	url := req.URL
+	query := url.Query()
+	lastPageStr := query.Get("page")
+	if lastPageStr == "" {
+		lastPageStr = "1"
+	}
+	lastPage, err := strconv.Atoi(lastPageStr)
+	if err != nil {
+		t.Errorf("unable to parse page number %s: %v", lastPageStr, err)
+		return 0
+	}
+
+	if lastPage < maxPage {
+		query.Set("page", strconv.Itoa(lastPage+1))
+		url.RawQuery = query.Encode()
+		header := fmt.Sprintf("<%s>; rel=\"next\",", url.String())
+		rw.Header().Add("link", header)
+	}
+
+	return lastPage
+}
+
 type TEvent struct {
 	Username, DefaultBranch, URL, SHA, SHAurl, SHAtitle, Headbranch, Basebranch, HeadURL, BaseURL string
-	UserID, MRID, TargetProjectID, SourceProjectID                                                int
+	UserID, MRID, TargetProjectID, SourceProjectID, NoteID                                        int
 	PathWithNameSpace, Comment                                                                    string
 }
 
@@ -309,4 +344,30 @@ func (t TEvent) CommitNoteEventAsJSON(comment, action, repository string) string
         "title": "test title"
     }
 }`, t.SHA, comment, action, t.UserID, t.Username, t.SourceProjectID, t.DefaultBranch, t.URL, t.PathWithNameSpace, repository)
+}
+
+func (t TEvent) MergeCommentEventAsJSON(comment string) string {
+	return fmt.Sprintf(`{
+	"object_kind": "note",
+	"event_type": "note",
+	"object_attributes": {
+		"id": %d,
+		"note": "%s"
+	},
+	"user": {
+		"id": %d,
+		"username": "%s"
+	},
+	"project": {
+		"id": %d,
+		"web_url": "%s"
+	},
+	"merge_request": {
+		"iid": %d,
+		"target_project_id": %d,
+		"source_project_id": %d,
+		"target_branch": "%s",
+		"source_branch": "%s"
+	}
+}`, t.NoteID, comment, t.UserID, t.Username, t.TargetProjectID, t.URL, t.MRID, t.TargetProjectID, t.SourceProjectID, t.Basebranch, t.Headbranch)
 }
