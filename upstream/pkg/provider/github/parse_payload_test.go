@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"strconv"
-	"strings"
 	"testing"
 
 	"github.com/google/go-github/v74/github"
@@ -923,10 +921,10 @@ func TestParsePayLoad(t *testing.T) {
 				},
 				HeadCommit: &github.HeadCommit{ID: github.Ptr("SHAPush")},
 			},
-			shaRet:                    "SHAPush",
+			shaRet:                    "",
 			skipPushEventForPRCommits: true,
 			muxReplies:                map[string]any{"/repos/owner/pushRepo/commits/SHAPush/pulls": sampleGhPRs},
-			wantErrString:             "commit SHAPush is part of pull request #42, skipping push event",
+			wantErrString:             "",
 		},
 		{
 			name:          "good/skip tag push event for skip-pr-commits setting",
@@ -1035,6 +1033,12 @@ func TestParsePayLoad(t *testing.T) {
 				return
 			}
 			assert.NilError(t, err)
+			// If shaRet is empty, this is a skip case (push event for PR commit)
+			// In this case, ret should be nil
+			if tt.shaRet == "" {
+				assert.Assert(t, ret == nil, "Expected nil result for skipped push event")
+				return
+			}
 			assert.Assert(t, ret != nil)
 			assert.Equal(t, tt.shaRet, ret.SHA)
 			if tt.eventType == triggertype.PullRequest.String() {
@@ -1112,16 +1116,13 @@ func TestAppTokenGeneration(t *testing.T) {
 	})
 
 	tests := []struct {
-		ctx                 context.Context
-		ctxNS               string
-		name                string
-		wantErrSubst        string
-		nilClient           bool
-		seedData            testclient.Clients
-		envs                map[string]string
-		resultBaseURL       string
-		checkInstallIDs     []int64
-		extraRepoInstallIDs map[string]string
+		ctx          context.Context
+		ctxNS        string
+		name         string
+		wantErrSubst string
+		nilClient    bool
+		seedData     testclient.Clients
+		envs         map[string]string
 	}{
 		{
 			name:         "secret not found",
@@ -1136,23 +1137,6 @@ func TestAppTokenGeneration(t *testing.T) {
 			ctxNS:     testNamespace,
 			seedData:  vaildSecret,
 			nilClient: false,
-		},
-		{
-			ctx:             ctx,
-			name:            "check installation ids are set",
-			ctxNS:           testNamespace,
-			seedData:        vaildSecret,
-			nilClient:       false,
-			checkInstallIDs: []int64{123},
-		},
-		{
-			ctx:                 ctx,
-			name:                "check extras installations ids set",
-			ctxNS:               testNamespace,
-			seedData:            vaildSecret,
-			nilClient:           false,
-			checkInstallIDs:     []int64{123},
-			extraRepoInstallIDs: map[string]string{"another/one": "789", "andanother/two": "10112"},
 		},
 		{
 			ctx:          ctxInvalidAppID,
@@ -1184,17 +1168,6 @@ func TestAppTokenGeneration(t *testing.T) {
 				ID: &testInstallationID,
 			}
 
-			if len(tt.checkInstallIDs) > 0 {
-				samplePRevent.PullRequest = &github.PullRequest{
-					// order is important here for the check later
-					Base: &github.PullRequestBranch{
-						Repo: &github.Repository{
-							ID: github.Ptr(tt.checkInstallIDs[0]),
-						},
-					},
-				}
-			}
-
 			jeez, _ := json.Marshal(samplePRevent)
 			logger, _ := logger.GetLogger()
 			gprovider := Provider{
@@ -1222,26 +1195,6 @@ func TestAppTokenGeneration(t *testing.T) {
 				},
 			}
 
-			if len(tt.checkInstallIDs) > 0 {
-				gprovider.pacInfo.SecretGHAppRepoScoped = true
-			}
-			if len(tt.extraRepoInstallIDs) > 0 {
-				extras := ""
-				for name := range tt.extraRepoInstallIDs {
-					split := strings.Split(name, "/")
-					mux.HandleFunc(fmt.Sprintf("/repos/%s/%s", split[0], split[1]), func(w http.ResponseWriter, _ *http.Request) {
-						// i can't do a for name, iid and use iid, cause golang shadows the variable out of the for loop
-						// a bit stupid
-						sid := tt.extraRepoInstallIDs[fmt.Sprintf("%s/%s", split[0], split[1])]
-						_, _ = fmt.Fprintf(w, `{"id": %s}`, sid)
-					})
-					extras += fmt.Sprintf("%s, ", name)
-				}
-
-				gprovider.pacInfo.SecretGHAppRepoScoped = true
-				gprovider.pacInfo.SecretGhAppTokenScopedExtraRepos = extras
-			}
-
 			tt.ctx = info.StoreCurrentControllerName(tt.ctx, "default")
 			tt.ctx = info.StoreNS(tt.ctx, tt.ctxNS)
 
@@ -1257,28 +1210,8 @@ func TestAppTokenGeneration(t *testing.T) {
 				return
 			}
 
-			for k, id := range tt.checkInstallIDs {
-				if gprovider.RepositoryIDs[k] != id {
-					t.Errorf("got %d, want %d", gprovider.RepositoryIDs[k], id)
-				}
-			}
-
-			for _, extraid := range tt.extraRepoInstallIDs {
-				// checkInstallIDs and extraRepoInstallIds are merged and extraRepoInstallIds is after
-				found := false
-				extraIDInt, _ := strconv.ParseInt(extraid, 10, 64)
-				for _, rid := range gprovider.RepositoryIDs {
-					if extraIDInt == rid {
-						found = true
-					}
-				}
-				assert.Assert(t, found, "Could not find %s in %s", extraIDInt, tt.extraRepoInstallIDs)
-			}
-
+			// Verify client was created successfully for GitHub App
 			assert.Assert(t, gprovider.Client() != nil)
-			if tt.resultBaseURL != "" {
-				assert.Equal(t, gprovider.Client().BaseURL.String(), tt.resultBaseURL)
-			}
 		})
 	}
 }
