@@ -4,4 +4,3 @@ I come from the global params
 {{ no_match }}
 {{ filter_on_body }}
 {{ secret_nothere }}
-{{ no_initial_value }}

@@ -27,16 +27,6 @@ func (p *PullRequests) Update(po *PullRequestsOptions) (interface{}, error) {
 	return p.c.execute("PUT", urlStr, data)
 }
 
-func (p *PullRequests) GetByCommit(po *PullRequestsOptions) (interface{}, error) {
-	urlStr := p.c.GetApiBaseURL() + "/repositories/" + po.Owner + "/" + po.RepoSlug + "/commit/" + po.Commit + "/pullrequests/"
-	return p.c.executePaginated("GET", urlStr, "", nil)
-}
-
-func (p *PullRequests) GetCommits(po *PullRequestsOptions) (interface{}, error) {
-	urlStr := p.c.GetApiBaseURL() + "/repositories/" + po.Owner + "/" + po.RepoSlug + "/pullrequests/" + po.ID + "/commits/"
-	return p.c.executePaginated("GET", urlStr, "", nil)
-}
-
 func (p *PullRequests) Gets(po *PullRequestsOptions) (interface{}, error) {
 	urlStr := p.c.GetApiBaseURL() + "/repositories/" + po.Owner + "/" + po.RepoSlug + "/pullrequests/"
 
@@ -252,12 +242,8 @@ func (p *PullRequests) buildPullRequestBody(po *PullRequestsOptions) (string, er
 		body["message"] = po.Message
 	}
 
-	if po.CloseSourceBranch || !po.CloseSourceBranch {
+	if po.CloseSourceBranch == true || po.CloseSourceBranch == false {
 		body["close_source_branch"] = po.CloseSourceBranch
-	}
-
-	if po.Draft {
-		body["draft"] = true
 	}
 
 	data, err := json.Marshal(body)

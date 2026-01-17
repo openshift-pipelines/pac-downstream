@@ -24,13 +24,13 @@ func StartConfigSync(ctx context.Context, run *Run) {
 		}))
 	informer := informerFactory.Core().V1().ConfigMaps().Informer()
 	_, _ = informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc: func(_ any) {
+		AddFunc: func(_ interface{}) {
 			// nothing to do
 		},
-		UpdateFunc: func(_, _ any) {
+		UpdateFunc: func(_, _ interface{}) {
 			_ = run.UpdatePacConfig(ctx)
 		},
-		DeleteFunc: func(_ any) {
+		DeleteFunc: func(_ interface{}) {
 			// nothing to do
 		},
 	})

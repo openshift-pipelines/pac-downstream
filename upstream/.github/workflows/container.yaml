@@ -26,14 +26,14 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
 
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v5
         with:
           go-version-file: "go.mod"
 
-      - uses: ko-build/setup-ko@v0.9
+      - uses: ko-build/setup-ko@v0.8
 
       - name: Build and push images
         shell: bash
@@ -41,13 +41,14 @@ jobs:
           set -x
           releaseBranchFormat='release-v'
           if [[ ${{ github.ref_name }} == ${releaseBranchFormat}* ]]; then
-            tag=v$(echo ${{ github.ref_name }}|sed "s,${releaseBranchFormat},,")
+            tag="${${{ github.ref_name }}#*-}" 
           elif [[ ${{ github.ref }} == refs/pull/* ]]; then
             tag=pr-$(echo ${{ github.ref }} | cut -c11-|sed 's,/merge,,')
           else
-            # Sanitize the tag by replacing invalid characters with hyphens
-            tag=$(echo ${{ github.ref_name }}|sed 's,/merge,,' | sed 's,[/.],-,g')
+            tag=$(echo ${{ github.ref_name }}|sed 's,/merge,,')
           fi
+
+
           for image in ./cmd/*;do
             ko build -B -t "${tag}" --platform="${{ env.PLATFORMS }}" "${image}"
           done

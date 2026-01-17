@@ -29,15 +29,15 @@ type FakeTektonV1alpha1 struct {
 }
 
 func (c *FakeTektonV1alpha1) Runs(namespace string) v1alpha1.RunInterface {
-	return newFakeRuns(c, namespace)
+	return &FakeRuns{c, namespace}
 }
 
 func (c *FakeTektonV1alpha1) StepActions(namespace string) v1alpha1.StepActionInterface {
-	return newFakeStepActions(c, namespace)
+	return &FakeStepActions{c, namespace}
 }
 
 func (c *FakeTektonV1alpha1) VerificationPolicies(namespace string) v1alpha1.VerificationPolicyInterface {
-	return newFakeVerificationPolicies(c, namespace)
+	return &FakeVerificationPolicies{c, namespace}
 }
 
 // RESTClient returns a RESTClient that is used to communicate

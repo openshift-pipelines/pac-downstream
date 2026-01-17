@@ -1,4 +1,5 @@
 //go:build e2e
+// +build e2e
 
 package test
 
@@ -46,7 +47,7 @@ func TestGiteaParamsStandardCheckForPushAndPullEvent(t *testing.T) {
 	}
 	_, f := tgitea.TestPR(t, topts)
 	defer f()
-	merged, resp, err := topts.GiteaCNX.Client().MergePullRequest(topts.Opts.Organization, topts.Opts.Repo, topts.PullRequest.Index,
+	merged, resp, err := topts.GiteaCNX.Client.MergePullRequest(topts.Opts.Organization, topts.Opts.Repo, topts.PullRequest.Index,
 		gitea.MergePullRequestOption{
 			Title: "Merged with Panache",
 			Style: "merge",
@@ -293,9 +294,6 @@ func TestGiteaParamsOnRepoCR(t *testing.T) {
 					Key:  "unknowsecret",
 				},
 			},
-			{
-				Name: "no_initial_value",
-			},
 		},
 	}
 	topts.TargetRefName = names.SimpleNameGenerator.RestrictLengthWithRandomSuffix("pac-e2e-test")
@@ -313,21 +311,13 @@ func TestGiteaParamsOnRepoCR(t *testing.T) {
 	_, f := tgitea.TestPR(t, topts)
 	defer f()
 
-	// Wait for Repository status to be updated
-	waitOpts := twait.Opts{
-		RepoName:        topts.TargetNS,
-		Namespace:       topts.TargetNS,
-		MinNumberStatus: 1,
-		PollTimeout:     twait.DefaultTimeout,
-		TargetSHA:       "",
-	}
-	repo, err := twait.UntilRepositoryUpdated(context.Background(), topts.ParamsRun.Clients, waitOpts)
+	repo, err := topts.ParamsRun.Clients.PipelineAsCode.PipelinesascodeV1alpha1().Repositories(topts.TargetNS).Get(context.Background(), topts.TargetNS, metav1.GetOptions{})
 	assert.NilError(t, err)
 	assert.Assert(t, len(repo.Status) != 0)
 	assert.NilError(t,
 		twait.RegexpMatchingInPodLog(context.Background(), topts.ParamsRun, topts.TargetNS, fmt.Sprintf("tekton.dev/pipelineRun=%s,tekton.dev/pipelineTask=params",
 			repo.Status[0].PipelineRunName), "step-test-params-value", *regexp.MustCompile(
-			"I am the most Kawaī params\nSHHHHHHH\nFollow me on my ig #nofilter\n{{ no_match }}\nHey I show up from a payload match\n{{ secret_nothere }}\n{{ no_initial_value }}"), "", 2))
+			"I am the most Kawaī params\nSHHHHHHH\nFollow me on my ig #nofilter\n{{ no_match }}\nHey I show up from a payload match\n{{ secret_nothere }}"), "", 2))
 }
 
 // TestGiteaParamsBodyHeadersCEL Test that we can access the pull request body and headers in params
@@ -362,7 +352,7 @@ my email is a true beauty and like groot, I AM pac`
 	assert.NilError(t, err)
 
 	// Merge the pull request so we can generate a push event and wait that it is updated
-	merged, resp, err := topts.GiteaCNX.Client().MergePullRequest(topts.Opts.Organization, topts.Opts.Repo, topts.PullRequest.Index,
+	merged, resp, err := topts.GiteaCNX.Client.MergePullRequest(topts.Opts.Organization, topts.Opts.Repo, topts.PullRequest.Index,
 		gitea.MergePullRequestOption{
 			Title: "Merged with Panache",
 			Style: "merge",
@@ -446,7 +436,7 @@ func TestGiteaParamsChangedFilesCEL(t *testing.T) {
 	// ======================================================================================================================
 	// Merge the pull request so we can generate a push event and wait that it is updated
 	// ======================================================================================================================
-	merged, resp, err := topts.GiteaCNX.Client().MergePullRequest(topts.Opts.Organization, topts.Opts.Repo, topts.PullRequest.Index,
+	merged, resp, err := topts.GiteaCNX.Client.MergePullRequest(topts.Opts.Organization, topts.Opts.Repo, topts.PullRequest.Index,
 		gitea.MergePullRequestOption{
 			Title: "Merged with Panache",
 			Style: "merge",
@@ -493,7 +483,7 @@ func TestGiteaParamsChangedFilesCEL(t *testing.T) {
 	// ======================================================================================================================
 	// Merge the pull request so we can generate a second push event and wait that it is updated
 	// ======================================================================================================================
-	merged, resp, err = topts.GiteaCNX.Client().MergePullRequest(topts.Opts.Organization, topts.Opts.Repo, topts.PullRequest.Index,
+	merged, resp, err = topts.GiteaCNX.Client.MergePullRequest(topts.Opts.Organization, topts.Opts.Repo, topts.PullRequest.Index,
 		gitea.MergePullRequestOption{
 			Title: "Merged with Panache",
 			Style: "merge",
