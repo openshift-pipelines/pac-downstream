@@ -2,14 +2,13 @@ package info
 
 import (
 	"net/http"
-	"time"
 
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
 )
 
 type Event struct {
 	State
-	Event any
+	Event interface{}
 
 	// EventType is what coming from the provider header, i.e:
 	// GitHub -> pull_request
@@ -21,7 +20,7 @@ type Event struct {
 	// Full request
 	Request *Request
 
-	// TriggerTarget stable field across providers, ie: on GitLab, Github and
+	// TriggerTarget stable field across providers, ie: on Gitlab, Github and
 	// others it would be always be pull_request we can rely on to know if it's
 	// a push or a pull_request
 	TriggerTarget triggertype.Trigger
@@ -40,26 +39,10 @@ type Event struct {
 	SHAURL        string // pretty URL for web browsing for UIs (cli/web)
 	SHATitle      string // commit title for UIs
 
-	// Full commit information populated by provider.GetCommitInfo()
-	SHAMessage        string    // full commit message (not just title)
-	SHAAuthorName     string    // commit author name
-	SHAAuthorEmail    string    // commit author email
-	SHAAuthorDate     time.Time // when the commit was authored
-	SHACommitterName  string    // committer name (may differ from author)
-	SHACommitterEmail string    // committer email
-	SHACommitterDate  time.Time // when the commit was committed
-
 	PullRequestNumber int      // Pull or Merge Request number
 	PullRequestTitle  string   // Title of the pull Request
 	PullRequestLabel  []string // Labels of the pull Request
 	TriggerComment    string   // The comment triggering the pipelinerun when using on-comment annotation
-
-	// HasSkipCommand indicates whether the commit message contains a skip CI command
-	// (e.g., [skip ci], [ci skip], [skip tkn], [tkn skip]). When true, PipelineRun
-	// execution will be skipped unless overridden by a GitOps command (e.g., /test, /retest).
-	// This allows users to bypass CI for documentation changes or minor fixes while still
-	// maintaining the ability to manually trigger builds when needed.
-	HasSkipCommand bool
 
 	// TODO: move forge specifics to each driver
 	// Github
@@ -73,11 +56,11 @@ type Event struct {
 	AccountID string
 
 	// TODO: move out inside the provider
-	// Bitbucket Data Center
-	CloneURL string // bitbucket data center has a different url for cloning the repo than normal public html url
+	// Bitbucket Server
+	CloneURL string // bitbucket server has a different url for cloning the repo than normal public html url
 	Provider *Provider
 
-	// GitLab
+	// Gitlab
 	SourceProjectID int
 	TargetProjectID int
 }

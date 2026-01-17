@@ -64,13 +64,7 @@ func ForwardResponseStream(ctx context.Context, mux *ServeMux, marshaler Marshal
 		}
 
 		if !wroteHeader {
-			var contentType string
-			if sct, ok := marshaler.(StreamContentType); ok {
-				contentType = sct.StreamContentType(respRw)
-			} else {
-				contentType = marshaler.ContentType(respRw)
-			}
-			w.Header().Set("Content-Type", contentType)
+			w.Header().Set("Content-Type", marshaler.ContentType(respRw))
 		}
 
 		var buf []byte
@@ -153,9 +147,11 @@ type responseBody interface {
 // ForwardResponseMessage forwards the message "resp" from gRPC server to REST client.
 func ForwardResponseMessage(ctx context.Context, mux *ServeMux, marshaler Marshaler, w http.ResponseWriter, req *http.Request, resp proto.Message, opts ...func(context.Context, http.ResponseWriter, proto.Message) error) {
 	md, ok := ServerMetadataFromContext(ctx)
-	if ok {
-		handleForwardResponseServerMetadata(w, mux, md)
+	if !ok {
+		grpclog.Error("Failed to extract ServerMetadata from context")
 	}
+
+	handleForwardResponseServerMetadata(w, mux, md)
 
 	// RFC 7230 https://tools.ietf.org/html/rfc7230#section-4.1.2
 	// Unless the request includes a TE header field indicating "trailers"
@@ -164,7 +160,7 @@ func ForwardResponseMessage(ctx context.Context, mux *ServeMux, marshaler Marsha
 	// agent to receive.
 	doForwardTrailers := requestAcceptsTrailers(req)
 
-	if ok && doForwardTrailers {
+	if doForwardTrailers {
 		handleForwardResponseTrailerHeader(w, mux, md)
 		w.Header().Set("Transfer-Encoding", "chunked")
 	}
@@ -194,15 +190,15 @@ func ForwardResponseMessage(ctx context.Context, mux *ServeMux, marshaler Marsha
 		return
 	}
 
-	if !doForwardTrailers && mux.writeContentLength {
+	if !doForwardTrailers {
 		w.Header().Set("Content-Length", strconv.Itoa(len(buf)))
 	}
 
-	if _, err = w.Write(buf); err != nil && !errors.Is(err, http.ErrBodyNotAllowed) {
+	if _, err = w.Write(buf); err != nil {
 		grpclog.Errorf("Failed to write response: %v", err)
 	}
 
-	if ok && doForwardTrailers {
+	if doForwardTrailers {
 		handleForwardResponseTrailer(w, mux, md)
 	}
 }

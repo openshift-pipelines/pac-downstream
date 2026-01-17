@@ -24,31 +24,19 @@ import (
 	"time"
 )
 
-type (
-	ProjectImportExportServiceInterface interface {
-		ScheduleExport(pid any, opt *ScheduleExportOptions, options ...RequestOptionFunc) (*Response, error)
-		ExportStatus(pid any, options ...RequestOptionFunc) (*ExportStatus, *Response, error)
-		ExportDownload(pid any, options ...RequestOptionFunc) ([]byte, *Response, error)
-		ImportFromFile(archive io.Reader, opt *ImportFileOptions, options ...RequestOptionFunc) (*ImportStatus, *Response, error)
-		ImportStatus(pid any, options ...RequestOptionFunc) (*ImportStatus, *Response, error)
-	}
-
-	// ProjectImportExportService handles communication with the project
-	// import/export related methods of the GitLab API.
-	//
-	// GitLab API docs:
-	// https://docs.gitlab.com/api/project_import_export/
-	ProjectImportExportService struct {
-		client *Client
-	}
-)
-
-var _ ProjectImportExportServiceInterface = (*ProjectImportExportService)(nil)
+// ProjectImportExportService handles communication with the project
+// import/export related methods of the GitLab API.
+//
+// GitLab API docs:
+// https://docs.gitlab.com/ee/api/project_import_export.html
+type ProjectImportExportService struct {
+	client *Client
+}
 
 // ImportStatus represents a project import status.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/api/project_import_export/#import-status
+// https://docs.gitlab.com/ee/api/project_import_export.html#import-status
 type ImportStatus struct {
 	ID                int        `json:"id"`
 	Description       string     `json:"description"`
@@ -70,7 +58,7 @@ func (s ImportStatus) String() string {
 // ExportStatus represents a project export status.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/api/project_import_export/#export-status
+// https://docs.gitlab.com/ee/api/project_import_export.html#export-status
 type ExportStatus struct {
 	ID                int        `json:"id"`
 	Description       string     `json:"description"`
@@ -94,7 +82,7 @@ func (s ExportStatus) String() string {
 // ScheduleExportOptions represents the available ScheduleExport() options.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/api/project_import_export/#schedule-an-export
+// https://docs.gitlab.com/ee/api/project_import_export.html#schedule-an-export
 type ScheduleExportOptions struct {
 	Description *string `url:"description,omitempty" json:"description,omitempty"`
 	Upload      struct {
@@ -106,8 +94,8 @@ type ScheduleExportOptions struct {
 // ScheduleExport schedules a project export.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/api/project_import_export/#schedule-an-export
-func (s *ProjectImportExportService) ScheduleExport(pid any, opt *ScheduleExportOptions, options ...RequestOptionFunc) (*Response, error) {
+// https://docs.gitlab.com/ee/api/project_import_export.html#schedule-an-export
+func (s *ProjectImportExportService) ScheduleExport(pid interface{}, opt *ScheduleExportOptions, options ...RequestOptionFunc) (*Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, err
@@ -125,8 +113,8 @@ func (s *ProjectImportExportService) ScheduleExport(pid any, opt *ScheduleExport
 // ExportStatus get the status of export.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/api/project_import_export/#export-status
-func (s *ProjectImportExportService) ExportStatus(pid any, options ...RequestOptionFunc) (*ExportStatus, *Response, error) {
+// https://docs.gitlab.com/ee/api/project_import_export.html#export-status
+func (s *ProjectImportExportService) ExportStatus(pid interface{}, options ...RequestOptionFunc) (*ExportStatus, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err
@@ -150,8 +138,8 @@ func (s *ProjectImportExportService) ExportStatus(pid any, options ...RequestOpt
 // ExportDownload download the finished export.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/api/project_import_export/#export-download
-func (s *ProjectImportExportService) ExportDownload(pid any, options ...RequestOptionFunc) ([]byte, *Response, error) {
+// https://docs.gitlab.com/ee/api/project_import_export.html#export-download
+func (s *ProjectImportExportService) ExportDownload(pid interface{}, options ...RequestOptionFunc) ([]byte, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err
@@ -175,7 +163,7 @@ func (s *ProjectImportExportService) ExportDownload(pid any, options ...RequestO
 // ImportFileOptions represents the available ImportFile() options.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/api/project_import_export/#import-a-file
+// https://docs.gitlab.com/ee/api/project_import_export.html#import-a-file
 type ImportFileOptions struct {
 	Namespace      *string               `url:"namespace,omitempty" json:"namespace,omitempty"`
 	Name           *string               `url:"name,omitempty" json:"name,omitempty"`
@@ -184,10 +172,10 @@ type ImportFileOptions struct {
 	OverrideParams *CreateProjectOptions `url:"override_params,omitempty" json:"override_params,omitempty"`
 }
 
-// ImportFromFile imports a project from an archive file.
+// Import a project from an archive file.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/api/project_import_export/#import-a-file
+// https://docs.gitlab.com/ee/api/project_import_export.html#import-a-file
 func (s *ProjectImportExportService) ImportFromFile(archive io.Reader, opt *ImportFileOptions, options ...RequestOptionFunc) (*ImportStatus, *Response, error) {
 	req, err := s.client.UploadRequest(
 		http.MethodPost,
@@ -214,8 +202,8 @@ func (s *ProjectImportExportService) ImportFromFile(archive io.Reader, opt *Impo
 // ImportStatus get the status of an import.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/api/project_import_export/#import-status
-func (s *ProjectImportExportService) ImportStatus(pid any, options ...RequestOptionFunc) (*ImportStatus, *Response, error) {
+// https://docs.gitlab.com/ee/api/project_import_export.html#import-status
+func (s *ProjectImportExportService) ImportStatus(pid interface{}, options ...RequestOptionFunc) (*ImportStatus, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err

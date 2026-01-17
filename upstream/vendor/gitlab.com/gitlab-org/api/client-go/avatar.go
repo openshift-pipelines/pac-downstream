@@ -20,25 +20,17 @@ import (
 	"net/http"
 )
 
-type (
-	AvatarRequestsServiceInterface interface {
-		GetAvatar(opt *GetAvatarOptions, options ...RequestOptionFunc) (*Avatar, *Response, error)
-	}
-
-	// AvatarRequestsService handles communication with the avatar related methods
-	// of the GitLab API.
-	//
-	// GitLab API docs: https://docs.gitlab.com/api/avatar/
-	AvatarRequestsService struct {
-		client *Client
-	}
-)
-
-var _ AvatarRequestsServiceInterface = (*AvatarRequestsService)(nil)
+// AvatarRequestsService handles communication with the avatar related methods
+// of the GitLab API.
+//
+// GitLab API docs: https://docs.gitlab.com/ee/api/avatar.html
+type AvatarRequestsService struct {
+	client *Client
+}
 
 // Avatar represents a GitLab avatar.
 //
-// GitLab API docs: https://docs.gitlab.com/api/avatar/
+// GitLab API docs: https://docs.gitlab.com/ee/api/avatar.html
 type Avatar struct {
 	AvatarURL string `json:"avatar_url"`
 }
@@ -46,7 +38,7 @@ type Avatar struct {
 // GetAvatarOptions represents the available GetAvatar() options.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/api/avatar/#get-details-on-an-account-avatar
+// https://docs.gitlab.com/ee/api/avatar.html#get-a-single-avatar-url
 type GetAvatarOptions struct {
 	Email *string `url:"email,omitempty" json:"email,omitempty"`
 	Size  *int    `url:"size,omitempty" json:"size,omitempty"`
@@ -55,7 +47,7 @@ type GetAvatarOptions struct {
 // GetAvatar gets the avatar URL for a user with the given email address.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/api/avatar/#get-details-on-an-account-avatar
+// https://docs.gitlab.com/ee/api/avatar.html#get-a-single-avatar-url
 func (s *AvatarRequestsService) GetAvatar(opt *GetAvatarOptions, options ...RequestOptionFunc) (*Avatar, *Response, error) {
 	req, err := s.client.NewRequest(http.MethodGet, "avatar", opt, options)
 	if err != nil {

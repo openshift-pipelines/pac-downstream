@@ -3,7 +3,6 @@ package info
 import (
 	"testing"
 
-	hubtypes "github.com/openshift-pipelines/pipelines-as-code/pkg/hub/vars"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/settings"
 	"github.com/stretchr/testify/assert"
 )
@@ -13,11 +12,10 @@ func TestNewInfo(t *testing.T) {
 	assert.Equal(t, info.Pac.ApplicationName, "Pipelines as Code CI")
 
 	value, ok := info.Pac.HubCatalogs.Load("default")
-	assert.True(t, ok)
+	assert.Equal(t, true, ok)
 
 	catalog, ok := value.(settings.HubCatalog)
-	assert.True(t, ok)
-	assert.Equal(t, "default", catalog.Index)
-	assert.Equal(t, settings.ArtifactHubURLDefaultValue, catalog.URL)
-	assert.Equal(t, hubtypes.ArtifactHubType, catalog.Type)
+	assert.Equal(t, true, ok)
+	assert.Equal(t, catalog.Index, "default")
+	assert.Equal(t, catalog.Name, settings.HubCatalogNameDefaultValue)
 }

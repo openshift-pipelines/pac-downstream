@@ -13,8 +13,8 @@ import (
 const (
 	openShiftConsoleNS                = "openshift-console"
 	openShiftConsoleRouteName         = "console"
-	openShiftPipelineNamespaceViewURL = "%s/pipelines/ns/%s/pipeline-runs"
-	openShiftPipelineDetailViewURL    = "%s/k8s/ns/%s/tekton.dev~v1~PipelineRun/%s"
+	openShiftPipelineNamespaceViewURL = "https://%s/pipelines/ns/%s/pipeline-runs"
+	openShiftPipelineDetailViewURL    = "https://%s/k8s/ns/%s/tekton.dev~v1~PipelineRun/%s"
 	openShiftPipelineTaskLogURL       = "%s/logs/%s"
 	openShiftRouteGroup               = "route.openshift.io"
 	openShiftRouteVersion             = "v1"
@@ -34,14 +34,11 @@ func (o *OpenshiftConsole) GetName() string {
 }
 
 func (o *OpenshiftConsole) URL() string {
-	if o.host == "" {
-		return "https://openshift.url.is.not.configured"
-	}
 	return "https://" + o.host
 }
 
 func (o *OpenshiftConsole) DetailURL(pr *tektonv1.PipelineRun) string {
-	return fmt.Sprintf(openShiftPipelineDetailViewURL, o.URL(), pr.GetNamespace(), pr.GetName())
+	return fmt.Sprintf(openShiftPipelineDetailViewURL, o.host, pr.GetNamespace(), pr.GetName())
 }
 
 func (o *OpenshiftConsole) TaskLogURL(pr *tektonv1.PipelineRun, taskRunStatus *tektonv1.PipelineRunTaskRunStatus) string {
@@ -49,7 +46,7 @@ func (o *OpenshiftConsole) TaskLogURL(pr *tektonv1.PipelineRun, taskRunStatus *t
 }
 
 func (o *OpenshiftConsole) NamespaceURL(pr *tektonv1.PipelineRun) string {
-	return fmt.Sprintf(openShiftPipelineNamespaceViewURL, o.URL(), pr.GetNamespace())
+	return fmt.Sprintf(openShiftPipelineNamespaceViewURL, o.host, pr.GetNamespace())
 }
 
 // UI use dynamic client to get the route of the openshift
@@ -65,7 +62,7 @@ func (o *OpenshiftConsole) UI(ctx context.Context, kdyn dynamic.Interface) error
 		return err
 	}
 
-	spec, ok := route.Object["spec"].(map[string]any)
+	spec, ok := route.Object["spec"].(map[string]interface{})
 	if !ok {
 		// this condition is satisfied if there's no metadata at all in the provided CR
 		return fmt.Errorf("couldn't find spec in the OpenShift Console route")

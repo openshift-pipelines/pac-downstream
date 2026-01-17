@@ -10,8 +10,6 @@ import "time"
 type Secret struct {
 	// the secret's name
 	Name string `json:"name"`
-	// the secret's description
-	Description string `json:"description"`
 	// swagger:strfmt date-time
 	Created time.Time `json:"created_at"`
 }
@@ -23,9 +21,4 @@ type CreateOrUpdateSecretOption struct {
 	//
 	// required: true
 	Data string `json:"data" binding:"Required"`
-
-	// Description of the secret to update
-	//
-	// required: false
-	Description string `json:"description"`
 }

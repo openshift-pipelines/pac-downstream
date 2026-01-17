@@ -10,11 +10,6 @@ type CreateVariableOption struct {
 	//
 	// required: true
 	Value string `json:"value" binding:"Required"`
-
-	// Description of the variable to create
-	//
-	// required: false
-	Description string `json:"description"`
 }
 
 // UpdateVariableOption the option when updating variable
@@ -26,11 +21,6 @@ type UpdateVariableOption struct {
 	//
 	// required: true
 	Value string `json:"value" binding:"Required"`
-
-	// Description of the variable to update
-	//
-	// required: false
-	Description string `json:"description"`
 }
 
 // ActionVariable return value of the query API
@@ -44,6 +34,4 @@ type ActionVariable struct {
 	Name string `json:"name"`
 	// the value of the variable
 	Data string `json:"data"`
-	// the description of the variable
-	Description string `json:"description"`
 }

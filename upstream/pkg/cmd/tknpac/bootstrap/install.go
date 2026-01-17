@@ -10,7 +10,7 @@ import (
 	"strings"
 
 	"github.com/AlecAivazis/survey/v2"
-	"github.com/google/go-github/v74/github"
+	"github.com/google/go-github/v68/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/cli/prompt"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/random"
@@ -48,12 +48,12 @@ func getLatestRelease(ctx context.Context, k8release string) (string, string, er
 }
 
 // kubectlApply get kubectl binary and apply a yaml file.
-func kubectlApply(ctx context.Context, uri string) error {
+func kubectlApply(uri string) error {
 	path, err := exec.LookPath("kubectl")
 	if err != nil {
 		return err
 	}
-	cmd := exec.CommandContext(ctx, path, "apply", "-f", uri)
+	cmd := exec.Command(path, "apply", "-f", uri)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("%w\n%s", err, out)
@@ -101,9 +101,6 @@ func getDashboardURL(ctx context.Context, opts *bootstrapOpts, run *params.Run) 
 	if err := prompt.SurveyAskOne(qs, &answer); err != nil {
 		return err
 	}
-	if answer == "" {
-		return nil
-	}
 	if _, err := url.ParseRequestURI(answer); err != nil {
 		return fmt.Errorf("invalid url: %w", err)
 	}
@@ -112,7 +109,7 @@ func getDashboardURL(ctx context.Context, opts *bootstrapOpts, run *params.Run) 
 }
 
 // installGosmeeForwarder Install a gosmee forwarded to hook.pipelinesascode.com.
-func installGosmeeForwarder(ctx context.Context, opts *bootstrapOpts) error {
+func installGosmeeForwarder(opts *bootstrapOpts) error {
 	gosmeInstall, err := askYN(true, fmt.Sprintf(gosmeeInstallHelpText, opts.forwarderURL), "Do you want me to install the gosmee forwarder?", opts.ioStreams.Out)
 	if err != nil {
 		return err
@@ -132,7 +129,7 @@ func installGosmeeForwarder(ctx context.Context, opts *bootstrapOpts) error {
 	if _, err = f.WriteString(tmpl); err != nil {
 		return err
 	}
-	if err := kubectlApply(ctx, f.Name()); err != nil {
+	if err := kubectlApply(f.Name()); err != nil {
 		return err
 	}
 	fmt.Fprintf(opts.ioStreams.Out, "💡 Your gosmee forward URL has been generated: %s\n", opts.RouteName)
@@ -175,14 +172,14 @@ func installPac(ctx context.Context, run *params.Run, opts *bootstrapOpts) error
 		}
 	}
 
-	if err := kubectlApply(ctx, latestReleaseYaml); err != nil {
+	if err := kubectlApply(latestReleaseYaml); err != nil {
 		return err
 	}
 
 	fmt.Fprintf(opts.ioStreams.Out, "✓ Pipelines-as-Code %s has been installed\n", latestVersion)
 
-	if opts.forceInstallGosmee {
-		if err := installGosmeeForwarder(ctx, opts); err != nil {
+	if (!isOpenShift && opts.RouteName == "") || opts.forceInstallGosmee {
+		if err := installGosmeeForwarder(opts); err != nil {
 			return err
 		}
 	}

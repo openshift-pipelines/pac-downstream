@@ -1,7 +1,5 @@
 package options
 
-import "github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
-
 type E2E struct {
 	Repo, Organization string
 	DirectWebhook      bool
@@ -10,7 +8,6 @@ type E2E struct {
 	Concurrency        int
 	UserName           string
 	Password           string
-	Settings           v1alpha1.Settings
 }
 
 var (

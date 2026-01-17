@@ -18,25 +18,17 @@ package gitlab
 
 import "net/http"
 
-type (
-	MetadataServiceInterface interface {
-		GetMetadata(options ...RequestOptionFunc) (*Metadata, *Response, error)
-	}
-
-	// MetadataService handles communication with the GitLab server instance to
-	// retrieve its metadata information via the GitLab API.
-	//
-	// GitLab API docs: https://docs.gitlab.com/api/metadata/
-	MetadataService struct {
-		client *Client
-	}
-)
-
-var _ MetadataServiceInterface = (*MetadataService)(nil)
+// MetadataService handles communication with the GitLab server instance to
+// retrieve its metadata information via the GitLab API.
+//
+// GitLab API docs: https://docs.gitlab.com/ee/api/metadata.html
+type MetadataService struct {
+	client *Client
+}
 
 // Metadata represents a GitLab instance version.
 //
-// GitLab API docs: https://docs.gitlab.com/api/metadata/
+// GitLab API docs: https://docs.gitlab.com/ee/api/metadata.html
 type Metadata struct {
 	Version  string `json:"version"`
 	Revision string `json:"revision"`
@@ -55,7 +47,7 @@ func (s Metadata) String() string {
 
 // GetMetadata gets a GitLab server instance meteadata.
 //
-// GitLab API docs: https://docs.gitlab.com/api/metadata/
+// GitLab API docs: https://docs.gitlab.com/ee/api/metadata.html
 func (s *MetadataService) GetMetadata(options ...RequestOptionFunc) (*Metadata, *Response, error) {
 	req, err := s.client.NewRequest(http.MethodGet, "metadata", nil, options)
 	if err != nil {

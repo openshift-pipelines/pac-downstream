@@ -1,7 +1,7 @@
 package action
 
 import (
-	"path"
+	"path/filepath"
 	"testing"
 
 	apipac "github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode"
@@ -40,12 +40,12 @@ func TestPatchPipelineRun(t *testing.T) {
 
 	patchedPR, err := PatchPipelineRun(ctx, logger, "log URL", fakeClients.Tekton, testPR, getLogURLMergePatch(fakeClients, testPR))
 	assert.NilError(t, err)
-	assert.Equal(t, patchedPR.Annotations[path.Join(apipac.GroupName, "log-url")], "https://localhost.console/#/namespaces/namespace/pipelineruns/force-me")
+	assert.Equal(t, patchedPR.Annotations[filepath.Join(apipac.GroupName, "log-url")], "https://localhost.console/#/namespaces/namespace/pipelineruns/force-me")
 }
 
-func getLogURLMergePatch(clients clients.Clients, pr *pipelinev1.PipelineRun) map[string]any {
-	return map[string]any{
-		"metadata": map[string]any{
+func getLogURLMergePatch(clients clients.Clients, pr *pipelinev1.PipelineRun) map[string]interface{} {
+	return map[string]interface{}{
+		"metadata": map[string]interface{}{
 			"annotations": map[string]string{
 				keys.LogURL: clients.ConsoleUI().DetailURL(pr),
 			},
