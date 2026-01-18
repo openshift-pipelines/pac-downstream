@@ -5,7 +5,7 @@ import (
 	"os"
 	"testing"
 
-	ghlib "github.com/google/go-github/v68/github"
+	ghlib "github.com/google/go-github/v74/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/test/pkg/options"
@@ -21,7 +21,8 @@ func CreateCRD(ctx context.Context, t *testing.T, repoinfo *ghlib.Repository, ru
 			Name: targetNS,
 		},
 		Spec: v1alpha1.RepositorySpec{
-			URL: repoinfo.GetHTMLURL(),
+			URL:      repoinfo.GetHTMLURL(),
+			Settings: &opts.Settings,
 		},
 	}
 

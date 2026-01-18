@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/google/go-github/v68/github"
+	"github.com/google/go-github/v74/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/incoming"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/events"
@@ -35,7 +35,7 @@ func TestApplyIncomingParams(t *testing.T) {
 				"key1": "value1",
 			},
 			payload: &incoming.Payload{
-				Params: map[string]interface{}{
+				Params: map[string]any{
 					"key2": "value2",
 				},
 			},
@@ -49,7 +49,7 @@ func TestApplyIncomingParams(t *testing.T) {
 				"key1": "value1",
 			},
 			payload: &incoming.Payload{
-				Params: map[string]interface{}{
+				Params: map[string]any{
 					"key1": "value2",
 				},
 			},
@@ -72,7 +72,7 @@ func TestApplyIncomingParams(t *testing.T) {
 				"key1": "value1",
 			},
 			payload: &incoming.Payload{
-				Params: map[string]interface{}{
+				Params: map[string]any{
 					"key2": 1,
 				},
 			},
@@ -153,6 +153,7 @@ func TestProcessTemplates(t *testing.T) {
 				"sender":                "",
 				"source_branch":         "",
 				"source_url":            "",
+				"git_tag":               "",
 				"target_branch":         "",
 				"target_namespace":      "",
 				"trigger_comment":       "",
@@ -265,6 +266,22 @@ func TestProcessTemplates(t *testing.T) {
 			},
 		},
 		{
+			name: "params/override params with no value via gitops arguments",
+			expected: map[string]string{
+				"event_type":      "push",
+				"hello":           `"yolo"`,
+				"trigger_comment": triggerCommentArgs,
+			},
+			event: &info.Event{EventType: "pull_request", TriggerComment: triggerCommentArgs},
+			repository: &v1alpha1.Repository{
+				Spec: v1alpha1.RepositorySpec{
+					Params: &[]v1alpha1.Params{
+						{Name: "hello"},
+					},
+				},
+			},
+		},
+		{
 			name:               "params/skip with no name",
 			expectedLogSnippet: "no name has been set in params[0] of repo",
 			repository: &v1alpha1.Repository{
@@ -272,6 +289,19 @@ func TestProcessTemplates(t *testing.T) {
 					Params: &[]v1alpha1.Params{
 						{
 							Value: "batman",
+						},
+					},
+				},
+			},
+		},
+		{
+			name:     "params/skip with no value",
+			expected: map[string]string{},
+			repository: &v1alpha1.Repository{
+				Spec: v1alpha1.RepositorySpec{
+					Params: &[]v1alpha1.Params{
+						{
+							Name: "empty-param",
 						},
 					},
 				},

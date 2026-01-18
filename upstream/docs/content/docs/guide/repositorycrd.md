@@ -2,6 +2,7 @@
 title: Repository CR
 weight: 1
 ---
+
 # Repository CR
 
 The Repository CR serves the following purposes:
@@ -9,25 +10,29 @@ The Repository CR serves the following purposes:
 - Informing Pipelines-as-Code that an event from a specific URL needs to be handled.
 - Specifying the namespace where the `PipelineRuns` will be executed.
 - Referencing an API secret, username, or API URL if necessary for Git provider
-  platforms that require it (e.g., when using webhooks instead of the GitHub
+  platforms (e.g., when using webhooks instead of the GitHub
   application).
 - Providing the last `PipelineRun` statuses for the repository (5 by default).
 - Letting you declare [custom parameters]({{< relref "/docs/guide/customparams" >}})
   within the `PipelineRun` that can be expanded based on certain filters.
 
+{{< hint danger >}}
+The `pipelinerun_status` field in the `Repository` CR is scheduled for deprecation and will be removed in a future release. Please avoid relying on it.
+{{< /hint >}}
+
 To configure Pipelines-as-Code, a Repository CR must be created within the
 user's namespace, for example `project-repository`, where their CI will run.
 
-Keep in mind that creating a Repository CR in the namespace where
-Pipelines-as-Code is deployed is not supported (for example
+Note that you cannot create a Repository CR in the same namespace where
+Pipelines-as-Code is deployed (for example
 `openshift-pipelines` or `pipelines-as-code` namespace).
 
 You can create the Repository CR using the [tkn pac]({{< relref
 "/docs/guide/cli.md" >}}) CLI and its `tkn pac create repository` command or by
 applying a YAML file with kubectl:
 
-```yaml
-cat <<EOF|kubectl create -n project-repository -f-
+```bash
+cat <<EOF | kubectl create -n project-repository -f-
 apiVersion: "pipelinesascode.tekton.dev/v1alpha1"
 kind: Repository
 metadata:
@@ -121,6 +126,65 @@ right to merge commits to the default branch can change the PipelineRun and have
 access to the infrastructure.
 {{< /hint >}}
 
+## Controlling Pull/Merge Request comment volume
+
+For GitHub (Webhook) and GitLab integrations, you can control the types
+of Pull/Merge request comments that Pipelines as Code emits using
+the `spec.<provider>.comment_strategy` setting. This can
+help reduce notification volume for repositories that use long-lasting
+Pull/Merge requests with many PipelineRuns.
+
+Acceptable values for `spec.<provider>.comment_strategy` are `""`
+(default) and `"disable_all"`.
+
+When you set the value of `comment_strategy` to `disable_all`, Pipelines
+as Code will not add any comment on the Pull/Merge Request related to
+PipelineRun status.
+
+Note: The `disable_all` strategy applies only to comments about a
+PipelineRun's status (e.g., "started," "succeeded"). Comments may still
+appear if there are errors validating PipelineRuns in the `.tekton`
+directory. (See [Running the PipelineRun docs](../running/#errors-when-parsing-pipelinerun-yaml) for details)
+
+### GitLab
+
+By default, Pipelines-as-Code attempts to update the commit status through the
+GitLab API. It first tries the source project (fork), then falls back to the
+target project (upstream repository). The source project update succeeds when
+the configured token has access to the source repository and GitLab creates
+pipeline entries for external CI systems like Pipelines-as-Code. The target
+project fallback may fail if there's no CI pipeline running for that commit
+in the target repository, since GitLab only creates pipeline entries for commits
+that actually trigger CI in that specific project. If either status update
+succeeds, no comment is posted on the Merge Request.
+
+When a status update succeeds, you can see the status in the GitLab UI in the `Pipelines` tab, as
+shown in the following example:
+
+![Gitlab Pipelines from Pipelines-as-Code](/images/gitlab-pipelines-tab.png)
+
+Comments are only posted when:
+
+- Both commit status updates fail (typically due to insufficient token permissions)
+- The event type and repository settings allow commenting
+- The `comment_strategy` is not set to `disable_all`
+
+```yaml
+spec:
+  settings:
+    gitlab:
+      comment_strategy: "disable_all"
+```
+
+### GitHub Webhook
+
+```yaml
+spec:
+  settings:
+    github:
+      comment_strategy: "disable_all"
+```
+
 ## Concurrency
 
 `concurrency_limit` allows you to define the maximum number of PipelineRuns running at any time for a Repository.
@@ -130,15 +194,23 @@ spec:
   concurrency_limit: <number>
 ```
 
-When multiple PipelineRuns match the event, they will be started in alphabetical order.
+When multiple PipelineRuns match the event, they will be started in alphabetical order by PipelineRun name.
 
 Example:
 
-If you have three pipelineruns in a .tekton directory, and you create a pull
+If you have three PipelineRuns in a .tekton directory, and you create a pull
 request with a `concurrency_limit` of 1 in the repository configuration, then all
-of the pipelineruns will be executed in alphabetical order, one after the
-other. At any given time, only one pipeline run will be in the running state,
+of the PipelineRuns will be executed in alphabetical order, one after the
+other. At any given time, only one PipelineRun will be in the running state,
 while the rest will be queued.
+
+### Kueue - Kubernetes-native Job Queueing
+
+Pipelines-as-Code now accommodates [Kueue](https://kueue.sigs.k8s.io/) as an alternative, Kubernetes-native solution for queuing PipelineRun.
+To get started, you can deploy the experimental integration provided by the [konflux-ci/tekton-kueue](https://github.com/konflux-ci/tekton-kueue) project. This allows you to schedule PipelineRuns through Kueue's queuing mechanism.
+
+Note: The [konflux-ci/tekton-kueue](https://github.com/konflux-ci/tekton-kueue) project and the Pipelines-as-Code integration is only intended for testing.
+It is only meant for experimentation and should not be used in production environments.
 
 ## Scoping GitHub token to a list of private and public repositories within and outside namespaces
 

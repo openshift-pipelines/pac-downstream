@@ -1,5 +1,4 @@
 //go:build e2e
-// +build e2e
 
 package test
 
@@ -9,7 +8,7 @@ import (
 	"regexp"
 	"testing"
 
-	"github.com/google/go-github/v68/github"
+	"github.com/google/go-github/v74/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/test/pkg/cctx"
 	tgithub "github.com/openshift-pipelines/pipelines-as-code/test/pkg/github"
@@ -39,7 +38,7 @@ func TestGithubPushRequestGitOpsCommentOnComment(t *testing.T) {
 	assert.Equal(t, len(pruns.Items), 0)
 
 	g.Cnx.Clients.Log.Infof("Running ops comment %s as Push comment", opsComment)
-	_, _, err = g.Provider.Client.Repositories.CreateComment(ctx,
+	_, _, err = g.Provider.Client().Repositories.CreateComment(ctx,
 		g.Options.Organization,
 		g.Options.Repo, g.SHA,
 		&github.RepositoryComment{Body: github.Ptr(opsComment)})
@@ -95,7 +94,7 @@ func TestGithubPushRequestGitOpsCommentRetest(t *testing.T) {
 	assert.Equal(t, len(pruns.Items), 2)
 
 	g.Cnx.Clients.Log.Infof("%s on Push Request", comment)
-	_, _, err = g.Provider.Client.Repositories.CreateComment(ctx,
+	_, _, err = g.Provider.Client().Repositories.CreateComment(ctx,
 		g.Options.Organization,
 		g.Options.Repo, g.SHA,
 		&github.RepositoryComment{Body: github.Ptr(comment)})
@@ -148,7 +147,7 @@ func TestGithubPushRequestGitOpsCommentCancel(t *testing.T) {
 	assert.Equal(t, len(pruns.Items), 2)
 
 	g.Cnx.Clients.Log.Info("/test pipelinerun-on-push on Push Request before canceling")
-	_, _, err = g.Provider.Client.Repositories.CreateComment(ctx,
+	_, _, err = g.Provider.Client().Repositories.CreateComment(ctx,
 		g.Options.Organization,
 		g.Options.Repo, g.SHA,
 		&github.RepositoryComment{Body: github.Ptr("/test pipelinerun-on-push branch:" + g.TargetNamespace)})
@@ -166,14 +165,14 @@ func TestGithubPushRequestGitOpsCommentCancel(t *testing.T) {
 
 	comment := "/cancel pipelinerun-on-push branch:" + g.TargetNamespace
 	g.Cnx.Clients.Log.Infof("%s on Push Request", comment)
-	_, _, err = g.Provider.Client.Repositories.CreateComment(ctx,
+	_, _, err = g.Provider.Client().Repositories.CreateComment(ctx,
 		g.Options.Organization,
 		g.Options.Repo, g.SHA,
 		&github.RepositoryComment{Body: github.Ptr(comment)})
 	assert.NilError(t, err)
 
-	g.Cnx.Clients.Log.Infof("Waiting for Repository to be updated still to %d since it has been canceled", numberOfStatus)
-	repo, _ := twait.UntilRepositoryUpdated(ctx, g.Cnx.Clients, waitOpts) // don't check for error, because canceled is not success and this will fail
+	g.Cnx.Clients.Log.Infof("Waiting for Repository to be updated still to %d since it has been cancelled", numberOfStatus)
+	repo, _ := twait.UntilRepositoryUpdated(ctx, g.Cnx.Clients, waitOpts) // don't check for error, because cancelled is not success and this will fail
 	cancelled := false
 	for _, c := range repo.Status {
 		if c.Conditions[0].Reason == tektonv1.TaskRunReasonCancelled.String() {

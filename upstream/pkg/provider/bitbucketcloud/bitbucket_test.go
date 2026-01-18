@@ -1,13 +1,16 @@
 package bitbucketcloud
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/ktrysmt/go-bitbucket"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/clients"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/settings"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
 	bbcloudtest "github.com/openshift-pipelines/pipelines-as-code/pkg/provider/bitbucketcloud/test"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/bitbucketcloud/types"
@@ -35,11 +38,18 @@ func TestGetTektonDir(t *testing.T) {
 		filterMessageSnippet string
 	}{
 		{
-			name:                 "Get Tekton Directory",
-			event:                bbcloudtest.MakeEvent(nil),
+			name:                 "Get Tekton Directory on pull request",
+			event:                bbcloudtest.MakeEvent(&info.Event{TriggerTarget: triggertype.PullRequest}),
 			testDirPath:          "../../pipelineascode/testdata/pull_request/.tekton",
 			contentContains:      "kind: PipelineRun",
-			filterMessageSnippet: "Using PipelineRun definition from source pull request SHA",
+			filterMessageSnippet: "Using PipelineRun definition from source pull_request commit SHA",
+		},
+		{
+			name:                 "Get Tekton Directory on push",
+			event:                bbcloudtest.MakeEvent(&info.Event{TriggerTarget: triggertype.Push}),
+			testDirPath:          "../../pipelineascode/testdata/pull_request/.tekton",
+			contentContains:      "kind: PipelineRun",
+			filterMessageSnippet: "Using PipelineRun definition from source push commit SHA",
 		},
 		{
 			name:                 "Get Tekton Directory Mainbranch",
@@ -75,7 +85,7 @@ func TestGetTektonDir(t *testing.T) {
 			ctx, _ := rtesting.SetupFakeContext(t)
 			bbclient, mux, tearDown := bbcloudtest.SetupBBCloudClient(t)
 			defer tearDown()
-			v := &Provider{Logger: fakelogger, Client: bbclient}
+			v := &Provider{Logger: fakelogger, bbClient: bbclient}
 			bbcloudtest.MuxDirContent(t, mux, tt.event, tt.testDirPath, tt.provenance)
 			content, err := v.GetTektonDir(ctx, tt.event, ".tekton", tt.provenance)
 			if tt.wantErr != "" {
@@ -137,14 +147,29 @@ func TestSetClient(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx, _ := rtesting.SetupFakeContext(t)
+			core, observer := zapobserver.New(zap.InfoLevel)
+			testLog := zap.New(core).Sugar()
+
+			fakeRun := &params.Run{
+				Clients: clients.Clients{
+					Log: testLog,
+				},
+			}
+
 			v := Provider{}
-			err := v.SetClient(ctx, nil, tt.event, nil, nil)
+			err := v.SetClient(ctx, fakeRun, tt.event, nil, nil)
+
 			if tt.wantErrSubstr != "" {
 				assert.ErrorContains(t, err, tt.wantErrSubstr)
 				return
 			}
 			assert.Equal(t, tt.event.Provider.Token, *v.Token)
 			assert.Equal(t, tt.event.Provider.User, *v.Username)
+
+			logs := observer.TakeAll()
+			assert.Assert(t, len(logs) > 0, "expected a log entry, got none")
+			expected := fmt.Sprintf("bitbucket-cloud: initialized client with provided token for user=%s", tt.event.Provider.User)
+			assert.Equal(t, expected, logs[0].Message)
 		})
 	}
 }
@@ -158,7 +183,7 @@ func TestGetCommitInfo(t *testing.T) {
 		repoinfo   *bitbucket.Repository
 	}{
 		{
-			name:  "Get commit info",
+			name:  "Get commit info with author",
 			event: bbcloudtest.MakeEvent(nil),
 			commitinfo: types.Commit{
 				Hash: "convertedcommit",
@@ -167,7 +192,26 @@ func TestGetCommitInfo(t *testing.T) {
 						HRef: "https://everywhereigo",
 					},
 				},
-				Message: "Das Commit",
+				Message: "Das Commit\n\nWith full message details",
+				Author: types.Author{
+					User: types.User{DisplayName: "John Doe"},
+				},
+			},
+			repoinfo: &bitbucket.Repository{
+				Mainbranch: bitbucket.RepositoryBranch{Name: "branshe"},
+			},
+		},
+		{
+			name:  "Get commit info without author",
+			event: bbcloudtest.MakeEvent(nil),
+			commitinfo: types.Commit{
+				Hash: "convertedcommit",
+				Links: types.Links{
+					HTML: types.HTMLLink{
+						HRef: "https://everywhereigo",
+					},
+				},
+				Message: "Simple message",
 				Author:  types.Author{},
 			},
 			repoinfo: &bitbucket.Repository{
@@ -202,7 +246,7 @@ func TestGetCommitInfo(t *testing.T) {
 			ctx, _ := rtesting.SetupFakeContext(t)
 			bbclient, mux, tearDown := bbcloudtest.SetupBBCloudClient(t)
 			defer tearDown()
-			v := &Provider{Client: bbclient}
+			v := &Provider{bbClient: bbclient}
 			bbcloudtest.MuxCommits(t, mux, tt.event, []types.Commit{
 				tt.commitinfo,
 			})
@@ -216,38 +260,51 @@ func TestGetCommitInfo(t *testing.T) {
 			assert.Equal(t, tt.commitinfo.Links.HTML.HRef, tt.event.SHAURL)
 			assert.Equal(t, tt.commitinfo.Hash, tt.event.SHA)
 			assert.Equal(t, tt.commitinfo.Message, tt.event.SHATitle)
+
+			// Verify new extended commit fields
+			assert.Equal(t, tt.commitinfo.Message, tt.event.SHAMessage, "SHAMessage should match")
+
+			// Bitbucket Cloud only provides author DisplayName (no email or dates)
+			if tt.commitinfo.Author.User.DisplayName != "" {
+				assert.Equal(t, tt.commitinfo.Author.User.DisplayName, tt.event.SHAAuthorName, "SHAAuthorName should match")
+			}
 		})
 	}
 }
 
 func TestCreateStatus(t *testing.T) {
+	originalPipelineRunName := "hello-af9ch"
 	tests := []struct {
 		name                  string
 		wantErr               bool
 		status                provider.StatusOpts
+		applicationName       string
 		expectedDescSubstr    string
 		expectedCommentSubstr string
 	}{
 		{
 			name: "skipped",
 			status: provider.StatusOpts{
-				Conclusion: "skipped",
+				Conclusion:              "skipped",
+				OriginalPipelineRunName: originalPipelineRunName,
 			},
 			expectedDescSubstr: "Skipping",
 		},
 		{
 			name: "neutral",
 			status: provider.StatusOpts{
-				Conclusion: "neutral",
+				Conclusion:              "neutral",
+				OriginalPipelineRunName: originalPipelineRunName,
 			},
 			expectedDescSubstr: "stopped",
 		},
 		{
 			name: "completed with comment",
 			status: provider.StatusOpts{
-				Conclusion: "success",
-				Status:     "completed",
-				Text:       "Happy as a bunny",
+				Conclusion:              "success",
+				Status:                  "completed",
+				OriginalPipelineRunName: originalPipelineRunName,
+				Text:                    "Happy as a bunny",
 			},
 			expectedDescSubstr:    "validated",
 			expectedCommentSubstr: "Happy as a bunny",
@@ -255,37 +312,51 @@ func TestCreateStatus(t *testing.T) {
 		{
 			name: "failed",
 			status: provider.StatusOpts{
-				Conclusion: "failure",
+				Conclusion:              "failure",
+				OriginalPipelineRunName: originalPipelineRunName,
 			},
 			expectedDescSubstr: "Failed",
 		},
 		{
 			name: "details url",
 			status: provider.StatusOpts{
-				Conclusion: "failure",
-				DetailsURL: "http://fail.com",
+				Conclusion:              "failure",
+				DetailsURL:              "http://fail.com",
+				OriginalPipelineRunName: originalPipelineRunName,
 			},
 			expectedDescSubstr: "Failed",
 		},
 		{
 			name: "pending",
 			status: provider.StatusOpts{
-				Conclusion: "pending",
+				Conclusion:              "pending",
+				OriginalPipelineRunName: originalPipelineRunName,
 			},
 			expectedDescSubstr: "started",
 		},
 		{
 			name: "success",
 			status: provider.StatusOpts{
-				Conclusion: "success",
+				Conclusion:              "success",
+				OriginalPipelineRunName: originalPipelineRunName,
 			},
 			expectedDescSubstr: "validated",
 		},
 		{
 			name: "completed",
 			status: provider.StatusOpts{
-				Conclusion: "completed",
+				Conclusion:              "completed",
+				OriginalPipelineRunName: originalPipelineRunName,
 			},
+			expectedDescSubstr: "Completed",
+		},
+		{
+			name: "application name",
+			status: provider.StatusOpts{
+				Conclusion:              "completed",
+				OriginalPipelineRunName: originalPipelineRunName,
+			},
+			applicationName:    "HELLO APP",
 			expectedDescSubstr: "Completed",
 		},
 	}
@@ -294,12 +365,18 @@ func TestCreateStatus(t *testing.T) {
 			ctx, _ := rtesting.SetupFakeContext(t)
 			bbclient, mux, tearDown := bbcloudtest.SetupBBCloudClient(t)
 			defer tearDown()
+
+			appName := tt.applicationName
+			if appName == "" {
+				appName = settings.PACApplicationNameDefaultValue
+			}
+
 			v := &Provider{
-				Client: bbclient,
-				run:    params.New(),
+				bbClient: bbclient,
+				run:      params.New(),
 				pacInfo: &info.PacOpts{
 					Settings: settings.Settings{
-						ApplicationName: settings.PACApplicationNameDefaultValue,
+						ApplicationName: appName,
 					},
 				},
 			}
@@ -307,7 +384,7 @@ func TestCreateStatus(t *testing.T) {
 			event.EventType = "pull_request"
 			event.Provider.Token = "token"
 
-			bbcloudtest.MuxCreateCommitstatus(t, mux, event, tt.expectedDescSubstr, tt.status)
+			bbcloudtest.MuxCreateCommitstatus(t, mux, event, tt.expectedDescSubstr, appName, tt.status)
 			bbcloudtest.MuxCreateComment(t, mux, event, tt.expectedCommentSubstr)
 
 			err := v.CreateStatus(ctx, event, tt.status)
