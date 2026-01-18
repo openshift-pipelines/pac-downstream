@@ -12,36 +12,30 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/gitlab"
 	"github.com/openshift-pipelines/pipelines-as-code/test/pkg/options"
 	"github.com/openshift-pipelines/pipelines-as-code/test/pkg/repository"
+	"github.com/openshift-pipelines/pipelines-as-code/test/pkg/setup"
 	gitlab2 "gitlab.com/gitlab-org/api/client-go"
 	"gotest.tools/v3/assert"
 )
 
 func Setup(ctx context.Context) (*params.Run, options.E2E, gitlab.Provider, error) {
+	if err := setup.RequireEnvs(
+		"TEST_GITLAB_API_URL",
+		"TEST_GITLAB_TOKEN",
+		"TEST_GITLAB_PROJECT_ID",
+		"TEST_EL_WEBHOOK_SECRET",
+		"TEST_EL_URL",
+	); err != nil {
+		return nil, options.E2E{}, gitlab.Provider{}, err
+	}
 	gitlabURL := os.Getenv("TEST_GITLAB_API_URL")
 	gitlabToken := os.Getenv("TEST_GITLAB_TOKEN")
 	sgitlabPid := os.Getenv("TEST_GITLAB_PROJECT_ID")
 	gitlabPid, err := strconv.Atoi(sgitlabPid)
 	if err != nil {
-		return nil, options.E2E{}, gitlab.Provider{}, err
-	}
-
-	for _, value := range []string{
-		"API_URL", "TOKEN", "PROJECT_ID",
-	} {
-		if env := os.Getenv("TEST_GITLAB_" + value); env == "" {
-			return nil, options.E2E{}, gitlab.Provider{}, fmt.Errorf("\"TEST_%s\" env variable is required, cannot continue", value)
-		}
-	}
-
-	gitlabWebhookSecret := os.Getenv("TEST_EL_WEBHOOK_SECRET")
-	if gitlabWebhookSecret == "" {
-		return nil, options.E2E{}, gitlab.Provider{}, fmt.Errorf("TEST_EL_WEBHOOK_SECRET env variable is required, cannot continue")
+		return nil, options.E2E{}, gitlab.Provider{}, fmt.Errorf("TEST_GITLAB_PROJECT_ID env variable must be an integer, found '%v': %w", gitlabPid, err)
 	}
 
 	controllerURL := os.Getenv("TEST_EL_URL")
-	if controllerURL == "" {
-		return nil, options.E2E{}, gitlab.Provider{}, fmt.Errorf("TEST_EL_URL variable is required, cannot continue")
-	}
 
 	run := params.New()
 	if err := run.Clients.NewClients(ctx, &run.Info); err != nil {
@@ -55,7 +49,7 @@ func Setup(ctx context.Context) (*params.Run, options.E2E, gitlab.Provider, erro
 		Password:      gitlabToken,
 	}
 	glprovider := gitlab.Provider{}
-	err = glprovider.SetClient(ctx, nil, &info.Event{
+	err = glprovider.SetClient(ctx, run, &info.Event{
 		Provider: &info.Provider{
 			Token: gitlabToken,
 			URL:   gitlabURL,
@@ -75,7 +69,7 @@ func TearDown(ctx context.Context, t *testing.T, runcnx *params.Run, glprovider 
 
 	if mrNumber != -1 {
 		runcnx.Clients.Log.Infof("Closing PR %d", mrNumber)
-		_, _, err := glprovider.Client.MergeRequests.UpdateMergeRequest(projectid, mrNumber,
+		_, _, err := glprovider.Client().MergeRequests.UpdateMergeRequest(projectid, mrNumber,
 			&gitlab2.UpdateMergeRequestOptions{StateEvent: gitlab2.Ptr("close")})
 		if err != nil {
 			t.Fatal(err)
@@ -84,7 +78,7 @@ func TearDown(ctx context.Context, t *testing.T, runcnx *params.Run, glprovider 
 	repository.NSTearDown(ctx, t, runcnx, targetNS)
 	if ref != "" {
 		runcnx.Clients.Log.Infof("Deleting Ref %s", ref)
-		_, err := glprovider.Client.Branches.DeleteBranch(projectid, ref)
+		_, err := glprovider.Client().Branches.DeleteBranch(projectid, ref)
 		assert.NilError(t, err)
 	}
 }

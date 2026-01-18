@@ -6,24 +6,32 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/gobwas/glob"
-	"github.com/google/cel-go/common/types"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	apipac "github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
+	pacerrors "github.com/openshift-pipelines/pipelines-as-code/pkg/errors"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/events"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/formatting"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/opscomments"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
+
+	"github.com/gobwas/glob"
+	"github.com/google/cel-go/common/types"
 	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 	"go.uber.org/zap"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"knative.dev/pkg/apis"
 )
 
 const (
 	// regex allows array of string or a single string
 	// eg. ["foo", "bar"], ["foo"] or "foo".
 	reValidateTag = `^\[(.*)\]$|^[^[\]\s]*$`
+	// maximum number of characters to display in logs for gitops comments.
+	maxCommentLogLength = 160
 )
 
 // prunBranch is value from annotations and baseBranch is event.Base value from event.
@@ -147,7 +155,42 @@ func getName(prun *tektonv1.PipelineRun) string {
 	return name
 }
 
-func MatchPipelinerunByAnnotation(ctx context.Context, logger *zap.SugaredLogger, pruns []*tektonv1.PipelineRun, cs *params.Run, event *info.Event, vcx provider.Interface) ([]Match, error) {
+// checkPipelineRunAnnotation checks if the Pipelinerun has
+// `on-event`/`on-target-branch annotations` with `on-cel-expression`
+// and if present then warns the user that `on-cel-expression` will take precedence.
+func checkPipelineRunAnnotation(prun *tektonv1.PipelineRun, eventEmitter *events.EventEmitter, repo *apipac.Repository) {
+	// Define the annotations to check in a slice for easy iteration
+	checks := []struct {
+		key   string
+		value string
+	}{
+		{"on-event", prun.GetObjectMeta().GetAnnotations()[keys.OnEvent]},
+		{"on-target-branch", prun.GetObjectMeta().GetAnnotations()[keys.OnTargetBranch]},
+	}
+
+	// Preallocate the annotations slice with the exact capacity needed
+	annotations := make([]string, 0, len(checks))
+
+	// Iterate through each check and append the key if the value is non-empty
+	for _, check := range checks {
+		if check.value != "" {
+			annotations = append(annotations, check.key)
+		}
+	}
+
+	prName := getName(prun)
+	if len(annotations) > 0 {
+		ignoredAnnotations := strings.Join(annotations, ", ")
+		msg := fmt.Sprintf(
+			"Warning: The PipelineRun '%s' has 'on-cel-expression' defined along with [%s] annotation(s). The 'on-cel-expression' will take precedence and these annotations will be ignored",
+			prName,
+			ignoredAnnotations,
+		)
+		eventEmitter.EmitMessage(repo, zap.WarnLevel, "RepositoryTakesOnCelExpressionPrecedence", msg)
+	}
+}
+
+func MatchPipelinerunByAnnotation(ctx context.Context, logger *zap.SugaredLogger, pruns []*tektonv1.PipelineRun, cs *params.Run, event *info.Event, vcx provider.Interface, eventEmitter *events.EventEmitter, repo *apipac.Repository) ([]Match, error) {
 	matchedPRs := []Match{}
 	infomsg := fmt.Sprintf("matching pipelineruns to event: URL=%s, target-branch=%s, source-branch=%s, target-event=%s",
 		event.URL,
@@ -167,6 +210,7 @@ func MatchPipelinerunByAnnotation(ctx context.Context, logger *zap.SugaredLogger
 	}
 	logger.Info(infomsg)
 
+	celValidationErrors := []*pacerrors.PacYamlValidations{}
 	for _, prun := range pruns {
 		prMatch := Match{
 			PipelineRun: prun,
@@ -209,7 +253,13 @@ func MatchPipelinerunByAnnotation(ctx context.Context, logger *zap.SugaredLogger
 				strings.TrimPrefix(strings.TrimSuffix(event.TriggerComment, "\r\n"), "\r\n"))
 			if re.MatchString(strippedComment) {
 				event.EventType = opscomments.OnCommentEventType.String()
-				logger.Infof("matched pipelinerun with name: %s on gitops comment: %q", prName, event.TriggerComment)
+
+				comment := event.TriggerComment
+				if len(comment) > maxCommentLogLength {
+					comment = comment[:maxCommentLogLength] + "..."
+				}
+				logger.Infof("matched pipelinerun with name: %s on gitops comment: %q", prName, comment)
+
 				matchedPRs = append(matchedPRs, prMatch)
 				continue
 			}
@@ -222,15 +272,23 @@ func MatchPipelinerunByAnnotation(ctx context.Context, logger *zap.SugaredLogger
 		// If the event is a pull_request and the event type is label_update, but the PipelineRun
 		// does not contain an 'on-label' annotation, do not match this PipelineRun, as it is not intended for this event.
 		_, ok := prun.GetObjectMeta().GetAnnotations()[keys.OnLabel]
-		if event.TriggerTarget == triggertype.PullRequest && event.EventType == string(triggertype.LabelUpdate) && !ok {
+		if event.TriggerTarget == triggertype.PullRequest && event.EventType == string(triggertype.PullRequestLabeled) && !ok {
 			logger.Infof("label update event, PipelineRun %s does not have a on-label for any of those labels: %s", prName, strings.Join(event.PullRequestLabel, "|"))
 			continue
 		}
 
 		if celExpr, ok := prun.GetObjectMeta().GetAnnotations()[keys.OnCelExpression]; ok {
+			checkPipelineRunAnnotation(prun, eventEmitter, repo)
+
 			out, err := celEvaluate(ctx, celExpr, event, vcx)
 			if err != nil {
 				logger.Errorf("there was an error evaluating the CEL expression, skipping: %v", err)
+				if checkIfCELEvaluateError(err) {
+					celValidationErrors = append(celValidationErrors, &pacerrors.PacYamlValidations{
+						Name: prName,
+						Err:  fmt.Errorf("CEL expression evaluation error: %s", sanitizeErrorAsMarkdown(err)),
+					})
+				}
 				continue
 			}
 			if out != types.True {
@@ -306,11 +364,80 @@ func MatchPipelinerunByAnnotation(ctx context.Context, logger *zap.SugaredLogger
 		matchedPRs = append(matchedPRs, prMatch)
 	}
 
+	if len(celValidationErrors) > 0 {
+		reportCELValidationErrors(ctx, repo, celValidationErrors, eventEmitter, vcx, event)
+	}
+
 	if len(matchedPRs) > 0 {
+		// Filter out templates that already have successful PipelineRuns for /retest and /ok-to-test
+		if event.EventType == opscomments.RetestAllCommentEventType.String() ||
+			event.EventType == opscomments.OkToTestCommentEventType.String() {
+			return filterSuccessfulTemplates(ctx, logger, cs, event, repo, matchedPRs), nil
+		}
 		return matchedPRs, nil
 	}
 
 	return nil, fmt.Errorf("%s", buildAvailableMatchingAnnotationErr(event, pruns))
+}
+
+// filterSuccessfulTemplates filters out templates that already have successful PipelineRuns
+// when executing /ok-to-test or /retest gitops commands, implementing per-template checking.
+func filterSuccessfulTemplates(ctx context.Context, logger *zap.SugaredLogger, cs *params.Run, event *info.Event, repo *apipac.Repository, matchedPRs []Match) []Match {
+	if event.SHA == "" {
+		return matchedPRs
+	}
+
+	// Get all existing PipelineRuns for this SHA
+	labelSelector := fmt.Sprintf("%s=%s", keys.SHA, formatting.CleanValueKubernetes(event.SHA))
+	existingPRs, err := cs.Clients.Tekton.TektonV1().PipelineRuns(repo.GetNamespace()).List(ctx, metav1.ListOptions{
+		LabelSelector: labelSelector,
+	})
+	if err != nil {
+		logger.Errorf("failed to list existing PipelineRuns for SHA %s: %v", event.SHA, err)
+		return matchedPRs // Return all templates if we can't check
+	}
+
+	// Create a map of template names to their most recent successful run
+	successfulTemplates := make(map[string]*tektonv1.PipelineRun)
+
+	for i := range existingPRs.Items {
+		pr := &existingPRs.Items[i]
+
+		// Get the original template name this PipelineRun came from
+		originalPRName, ok := pr.GetAnnotations()[keys.OriginalPRName]
+		if !ok {
+			originalPRName, ok = pr.GetLabels()[keys.OriginalPRName]
+		}
+		if !ok {
+			continue // Skip PipelineRuns without template identification
+		}
+
+		// Check if this PipelineRun succeeded
+		if pr.Status.GetCondition(apis.ConditionSucceeded).IsTrue() {
+			// Keep the most recent successful run for each template
+			if existing, exists := successfulTemplates[originalPRName]; !exists ||
+				pr.CreationTimestamp.After(existing.CreationTimestamp.Time) {
+				successfulTemplates[originalPRName] = pr
+			}
+		}
+	}
+
+	// Filter out templates that have successful runs
+	var filteredPRs []Match
+
+	for _, match := range matchedPRs {
+		templateName := getName(match.PipelineRun)
+
+		if successfulPR, hasSuccessfulRun := successfulTemplates[templateName]; hasSuccessfulRun {
+			logger.Infof("skipping template '%s' for sha %s as it already has a successful pipelinerun '%s'",
+				templateName, event.SHA, successfulPR.Name)
+		} else {
+			filteredPRs = append(filteredPRs, match)
+		}
+	}
+
+	// Return the filtered list (which may be empty if all templates were skipped)
+	return filteredPRs
 }
 
 func buildAvailableMatchingAnnotationErr(event *info.Event, pruns []*tektonv1.PipelineRun) string {

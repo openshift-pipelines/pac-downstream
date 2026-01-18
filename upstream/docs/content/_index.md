@@ -35,9 +35,9 @@ tracking using a Git workflow.
 
 <--->
 
-- Pull-request "*GitOps*" actions through comments with  `/retest`, `/test <pipeline-name>` and so on.
+- Pull-request "*GitOps*" actions through comments with `/retest` (reruns failed pipelines), `/test <pipeline-name>` (force rerun specific pipeline) and so on.
 
-- Automatic Task resolution in Pipelines (local Tasks, Tekton Hub, and remote URLs)
+- Automatic Task resolution in Pipelines (local Tasks, Artifact Hub, and remote URLs)
 
 - Efficient use of GitHub blobs and objects API for retrieving configurations
 
@@ -45,7 +45,7 @@ tracking using a Git workflow.
 
 - Git events Filtering and support for separate pipelines for each event
 
-- GitLab, Bitbucket Server, Bitbucket Cloud and GitHub Webhook support.
+- GitLab, Bitbucket Data Center, Bitbucket Cloud and GitHub Webhook support.
 
 - `tkn-pac` plug-in for Tekton CLI for managing pipelines-as-code repositories and bootstrapping.
 

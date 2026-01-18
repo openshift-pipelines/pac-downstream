@@ -1,5 +1,4 @@
 //go:build e2e
-// +build e2e
 
 package test
 
@@ -10,7 +9,7 @@ import (
 	"regexp"
 	"testing"
 
-	"github.com/google/go-github/v68/github"
+	"github.com/google/go-github/v74/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/opscomments"
 	tgithub "github.com/openshift-pipelines/pipelines-as-code/test/pkg/github"
 	twait "github.com/openshift-pipelines/pipelines-as-code/test/pkg/wait"
@@ -32,7 +31,7 @@ func TestGithubPullRequestTest(t *testing.T) {
 	defer g.TearDown(ctx, t)
 
 	g.Cnx.Clients.Log.Infof("Creating /test in PullRequest")
-	_, _, err := g.Provider.Client.Issues.CreateComment(ctx,
+	_, _, err := g.Provider.Client().Issues.CreateComment(ctx,
 		g.Options.Organization,
 		g.Options.Repo, g.PRNumber,
 		&github.IssueComment{Body: github.Ptr("/test pipeline")})
@@ -66,7 +65,7 @@ func TestGithubSecondOnCommentAnnotation(t *testing.T) {
 	triggerComment := "/hello-world"
 
 	g.Cnx.Clients.Log.Infof("Creating %s custom comment on PullRequest", triggerComment)
-	_, _, err := g.Provider.Client.Issues.CreateComment(ctx, g.Options.Organization, g.Options.Repo, g.PRNumber,
+	_, _, err := g.Provider.Client().Issues.CreateComment(ctx, g.Options.Organization, g.Options.Repo, g.PRNumber,
 		&github.IssueComment{Body: github.Ptr(triggerComment)})
 	assert.NilError(t, err)
 	sopt := twait.SuccessOpt{
