@@ -1,6 +1,7 @@
 package generate
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -15,6 +16,7 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/settings"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
 	"github.com/spf13/cobra"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 var eventTypes = map[string]string{triggertype.PullRequest.String(): "Pull Request", "push": "Push to a Branch or a Tag"}
@@ -49,19 +51,34 @@ func MakeOpts() *Opts {
 	}
 }
 
-func Command(_ *params.Run, ioStreams *cli.IOStreams) *cobra.Command {
+func Command(run *params.Run, ioStreams *cli.IOStreams) *cobra.Command {
 	gopt := MakeOpts()
 	gopt.IOStreams = ioStreams
 	cmd := &cobra.Command{
 		Use:     "generate",
 		Aliases: []string{"gen"},
-		Short:   "Generate a PipelineRun",
+		Short:   "Generate PipelineRun",
 		RunE: func(_ *cobra.Command, _ []string) error {
+			ctx := context.Background()
 			gopt.CLIOpts = cli.NewCliOptions()
 			gopt.IOStreams.SetColorEnabled(!gopt.CLIOpts.NoColoring)
 
 			if gopt.generateWithClusterTask {
-				return fmt.Errorf("ClusterTasks are deprecated and not available anymore")
+				if err := run.Clients.NewClients(ctx, &run.Info); err != nil {
+					// if we don't have access to the cluster we can't do much about it
+					gopt.generateWithClusterTask = false
+				} else {
+					// NOTE(chmou): This is for v1beta1, we need to figure out how to do this for v1.
+					// Trying to find resolver with that same name?
+					_, err := run.Clients.Tekton.TektonV1beta1().ClusterTasks().Get(ctx,
+						gitCloneClusterTaskName,
+						metav1.GetOptions{})
+					if err == nil {
+						gopt.generateWithClusterTask = true
+					} else {
+						gopt.generateWithClusterTask = false
+					}
+				}
 			}
 			cwd, err := os.Getwd()
 			if err != nil {
@@ -75,20 +92,19 @@ func Command(_ *params.Run, ioStreams *cli.IOStreams) *cobra.Command {
 		},
 	}
 	cmd.PersistentFlags().StringVar(&gopt.Event.BaseBranch, "branch", "",
-		"Target branch for the PipelineRun to handle (e.g., main, nightly)")
+		"The target branch for the PipelineRun to handle (eg: main, nightly)")
 	cmd.PersistentFlags().StringVar(&gopt.Event.EventType, "event-type", "",
-		"Event type of the repository event to handle (e.g., pull_request, push)")
+		"The event type of the repository event to handle (eg: pull_request, push)")
 	cmd.PersistentFlags().StringVar(&gopt.pipelineRunName, "pipeline-name", "",
-		"Pipeline name")
+		"The pipeline name")
 	cmd.PersistentFlags().StringVarP(&gopt.FileName, "file-name", "f", "",
-		"File name location")
+		"The file name location")
 	cmd.PersistentFlags().BoolVar(&gopt.overwrite, "overwrite", false,
-		"Whether to overwrite the file if it exists")
+		"Whether to overwrite the file if it exist")
 	cmd.PersistentFlags().StringVarP(&gopt.language, "language", "l", "",
-		"Generate template for this programming language")
-	cmd.PersistentFlags().BoolVarP(&gopt.generateWithClusterTask, "use-clustertasks", "", false,
-		"Deprecated, not available anymore")
-	_ = cmd.PersistentFlags().MarkDeprecated("use-clustertasks", "This flag will be removed in a future release")
+		"Generate for this programming language")
+	cmd.PersistentFlags().BoolVarP(&gopt.generateWithClusterTask, "use-clustertasks", "", true,
+		"By default we try to use the clustertasks unless not available")
 	return cmd
 }
 
@@ -148,9 +164,9 @@ func (o *Opts) branchOrTag() error {
 	o.Event.BaseBranch = mainBranch
 
 	if o.Event.EventType == triggertype.PullRequest.String() {
-		msg = "Enter the target Git branch for the Pull Request (default: %s): "
+		msg = "Enter the target GIT branch for the Pull Request (default: %s): "
 	} else if o.Event.EventType == "push" {
-		msg = "Enter a target Git branch or tag for the push (default: %s)"
+		msg = "Enter a target GIT branch or a tag for the push (default: %s)"
 	}
 
 	if err := prompt.SurveyAskOne(
@@ -181,42 +197,40 @@ func generatefileName(eventType string) string {
 // directory.
 func (o *Opts) samplePipeline(recreateTemplate bool) error {
 	cs := o.IOStreams.ColorScheme()
-	var relpath, fpath, dirPath string
+	var relpath, fpath string
 
 	if o.FileName != "" {
 		fpath = o.FileName
 		relpath = fpath
-		dirPath = filepath.Dir(fpath)
 	} else {
 		fname := generatefileName(o.Event.EventType)
 		fpath = filepath.Join(o.GitInfo.TopLevelPath, ".tekton", fname)
 		relpath, _ = filepath.Rel(o.GitInfo.TopLevelPath, fpath)
-		dirPath = filepath.Join(o.GitInfo.TopLevelPath, ".tekton")
-	}
-
-	if _, err := os.Stat(dirPath); os.IsNotExist(err) {
-		if err := os.MkdirAll(dirPath, 0o750); err != nil {
-			return err
+		if _, err := os.Stat(filepath.Join(o.GitInfo.TopLevelPath, ".tekton")); os.IsNotExist(err) {
+			if err := os.MkdirAll(filepath.Join(o.GitInfo.TopLevelPath, ".tekton"), 0o755); err != nil {
+				return err
+			}
+			fmt.Fprintf(o.IOStreams.Out, "%s Directory %s has been created.\n",
+				cs.InfoIcon(),
+				cs.Bold(".tekton"),
+			)
 		}
-		fmt.Fprintf(o.IOStreams.Out, "%s Directory %s has been created.\n",
-			cs.InfoIcon(),
-			cs.Bold(dirPath),
-		)
 	}
 
 	if _, err := os.Stat(fpath); !os.IsNotExist(err) && !o.overwrite {
 		if recreateTemplate {
 			var overwrite bool
-			msg := fmt.Sprintf("A file named %s already exists. Would you like to override it?", relpath)
+			msg := fmt.Sprintf("There is already a file named: %s would you like me to override it?", relpath)
 			if err := prompt.SurveyAskOne(&survey.Confirm{Message: msg, Default: false}, &overwrite); err != nil {
 				return err
 			}
 			if !overwrite {
-				fmt.Fprintf(o.IOStreams.ErrOut, "%s File not overwritten, exiting...\n", cs.WarningIcon())
-				fmt.Fprintf(o.IOStreams.ErrOut, "%s Use the -f flag to specify a different file name.\n", cs.InfoIcon())
+				fmt.Fprintf(o.IOStreams.ErrOut, "%s Not overwriting file, exiting...\n", cs.WarningIcon())
+				fmt.Fprintf(o.IOStreams.ErrOut, "%s Feel free to use the -f flag if you want to target another file name\n...", cs.InfoIcon())
 			}
 		} else {
-			fmt.Fprintf(o.IOStreams.Out, "%s File %s already exists, skipping template generation. Use \"%s pac generate\" to generate a sample template.\n", cs.InfoIcon(), relpath, settings.TknBinaryName)
+			fmt.Fprintf(o.IOStreams.Out, "%s There is already a file named: %s, skipping template generation, feel free to use \"%s pac generate\" command to generate sample template.\n", cs.InfoIcon(), relpath,
+				settings.TknBinaryName)
 		}
 		return nil
 	}
@@ -225,7 +239,8 @@ func (o *Opts) samplePipeline(recreateTemplate bool) error {
 		return err
 	}
 
-	err = os.WriteFile(fpath, tmpl.Bytes(), 0o600)
+	//nolint: gosec
+	err = os.WriteFile(fpath, tmpl.Bytes(), 0o644)
 	if err != nil {
 		return fmt.Errorf("cannot write template to %s: %w", fpath, err)
 	}

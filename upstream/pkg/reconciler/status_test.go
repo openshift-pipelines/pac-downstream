@@ -70,7 +70,6 @@ func TestPostFinalStatus(t *testing.T) {
 			ErrorLogSnippet: false,
 		},
 	}
-
 	_, err := r.postFinalStatus(ctx, fakelogger, pacInfo, vcx, info.NewEvent(), pr1)
 	assert.NilError(t, err)
 }

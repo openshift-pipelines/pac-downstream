@@ -22,13 +22,15 @@ filters:
   - "[bB]indable"
   - "[bB]oolean"
   - "[bB]ootable"
-  - "[bB]reakpoint(s)?"
+  - "[bB]reakpoint"
+  - "[bB]reakpoints"
+  - "[cC]he"
   - "[cC]hrony"
   - "[cC]lassloading"
   - "[cC]lasspath"
   - "[cC]olocate"
   - "[cC]olocation"
-  - "[cC]omposable"
+  - "[cC]onfig"
   - "[cC]ontainerd"
   - "[cC]orequisite"
   - "[cC]ustomizer"
@@ -40,8 +42,11 @@ filters:
   - "[dD]ecompiler"
   - "[dD]efragmentation"
   - "[dD]eserialization"
-  - "[dD]eserialize(d)?"
-  - "[dD]esynchronize(d)?"
+  - "[dD]eserialize"
+  - "[dD]eserialized"
+  - "[dD]esynchronize"
+  - "[dD]esynchronized"
+  - "[dD]ev"
   - "[dD]ev[wW]orkspace"
   - "[dD]evfile"
   - "[dD]istro"
@@ -56,6 +61,7 @@ filters:
   - "[fF]indability"
   - "[gG]bps"
   - "[gG]ibibyte"
+  - "[gG]it"
   - "[gG]lock"
   - "[gG]radle"
   - "[gG]rafana"
@@ -63,14 +69,13 @@ filters:
   - "[hH]eatmap"
   - "[hH]ostname"
   - "[hH]yperconverged"
-  - "[iI]nferencing"
-  - "[Ii]nferencing"
   - "[iI]node"
   - "[iI]ntranode"
   - "[iI]ntrapartition"
   - "[iI]ntrarecord"
   - "[iI]ntrasystem"
   - "[iI]nvocable"
+  - "[iI]tem"
   - "[jJ]et[bB]rains"
   - "[jJ]ournald"
   - "[jJ]ournaling"
@@ -138,7 +143,7 @@ filters:
   - "[pP]ostoperation"
   - "[pP]ostrequisite"
   - "[pP]recompile"
-  - "[pP]reconfigure(d)?"
+  - "[pP]reconfigured"
   - "[pP]reenrollment"
   - "[pP]reformatted"
   - "[pP]regenerated"
@@ -192,16 +197,25 @@ filters:
   - "[sS]ervlet"
   - "[sS]etter"
   - "[sS]harding"
-  - "[sS]ubcommand(s)?"
-  - "[sS]ubmenu(s)?"
-  - "[sS]ubnet(s)?"
-  - "[sS]ubnetwork(s)?"
-  - "[sS]ubpackage(s)?"
-  - "[sS]ubpath(s)?"
-  - "[sS]ubstep(s)?"
-  - "[sS]ubtest(s)?"
-  - "[sS]ubuser(s)?"
-  - "[sS]ubvolume(s)?"
+  - "[Ss]u"
+  - "[sS]ubcommand"
+  - "[sS]ubcommands"
+  - "[sS]ubmenu"
+  - "[sS]ubmenus"
+  - "[sS]ubnetwork"
+  - "[sS]ubnetworks"
+  - "[sS]ubpackage"
+  - "[sS]ubpackages"
+  - "[sS]ubpath"
+  - "[sS]ubpaths"
+  - "[sS]ubstep"
+  - "[sS]ubsteps"
+  - "[sS]ubtest"
+  - "[sS]ubtests"
+  - "[sS]ubuser"
+  - "[sS]ubusers"
+  - "[sS]ubvolume"
+  - "[sS]ubvolumes"
   - "[sS]ysctl"
   - "[sS]yslog"
   - "[sS]ystemd"
@@ -228,25 +242,7 @@ filters:
   - "I/O"
   - "Let\\'s Encrypt"
   - '\.NET'
-  - '\b[cC]he\b'
-  - '\b[cC]onfig\b'
-  - '\b[dD]ev\b'
-  - '\b[gG]it\b'
-  - '\b[iI]tem\b'
-  - '\b[Ss]u\b'
   - 'Node\.js'
-  - '[Ff]inetune'
-  - '[Ff]inetuning'
-  - '[Mm]ultimodal'
-  - '[Oo]neshot'
-  - '[Qq]uantizable'
-  - '[Qq]uantizes'
-  - '[Qq]uantizing'
-  - '[Ss]moothquant'
-  - '[Ss]parsification'
-  - '[Ss]parsified'
-  - '[Ss]parsify'
-  - '[Tt]okenizers?'
   - ACLs
   - adoc
   - AGPLv
@@ -256,10 +252,8 @@ filters:
   - Antora
   - API
   - Applixware
-  - Arcee
   - Asciidoctor
   - AssertJ
-  - autoconfigure
   - autolink
   - aws
   - AWS
@@ -269,7 +263,6 @@ filters:
   - Bitbucket
   - BOM
   - Bonjour
-  - bootc
   - Bouncy Castle
   - btn
   - Btrfs
@@ -291,7 +284,6 @@ filters:
   - Containerfile
   - Cookiecutter
   - CPUs
-  - CPUs?
   - CR
   - CRD
   - CRDs
@@ -303,10 +295,7 @@ filters:
   - CVEs
   - Cygmon
   - DaemonSet
-  - dataclass
-  - dataclasses
   - Datadog
-  - dataloaders?
   - Dev
   - DevWorkspace
   - Dex
@@ -329,7 +318,6 @@ filters:
   - Failsafe
   - FDs
   - Fernflower
-  - FFmpeg
   - firewalld
   - Flathub
   - Flatpak
@@ -344,7 +332,6 @@ filters:
   - GitLab
   - Gluster
   - GNUPro
-  - GPUs?
   - GraalVM
   - GraphQL
   - Graylog
@@ -353,7 +340,6 @@ filters:
   - gRPC
   - GTID
   - GUI
-  - hadamard
   - Hashicorp
   - Helgrind
   - Helm
@@ -363,13 +349,9 @@ filters:
   - HTTP
   - https
   - HTTPS
-  - https?
-  - Hunyuan
   - IDE
   - IDEs
   - IKEv
-  - impactful
-  - inferencing
   - Infinispan
   - Intelephense
   - IntelliJ
@@ -401,22 +383,17 @@ filters:
   - Knowledgebase
   - Kogito
   - Kompose
-  - Konflux
   - kubelet
   - Kubernetes
   - Kubespray
   - Kylin
   - Laravel
-  - layernorm
   - LGPLv
   - libOSMesa
   - librados
   - librbd
   - Libreswan
-  - linearization
-  - linearize
   - Liquibase
-  - LLMs?
   - Logstash
   - Lombok
   - Makefile
@@ -424,14 +401,11 @@ filters:
   - Maven
   - MicroProfile
   - Microsoft
-  - Minicpm
   - Minikube
   - Minishift
   - Mirantis
-  - Mixtral
   - Mockito
   - MongoDB
-  - multischema
   - MySQL
   - Nagios
   - Narayana
@@ -444,6 +418,7 @@ filters:
   - npm
   - NuGet
   - Nutanix
+  - NVidia
   - NVMe
   - OAuth
   - objectClass
@@ -460,22 +435,16 @@ filters:
   - OSs
   - OSTree
   - OTel
-  - Ovis
   - PCIe
   - PDF
-  - performant
   - Petitboot
   - PHP
   - PIDs
-  - pixtral
   - Podman
   - PostgreSQL
   - PowerShell
-  - precache
-  - pretrained
   - Prometheus
   - proxied
-  - PVCs
   - Pytorch
   - qdmanage
   - qdstat
@@ -485,30 +454,24 @@ filters:
   - Quarkus
   - Quiltflower
   - Qute
-  - Qwen
   - Realtime
-  - rebase
   - Redis
   - Redistributions
   - relaxngDatatype
-  - Reranker
   - RESTEasy
   - Restic
-  - ROCm
   - Rolfe
   - Rollup
   - ROMs
   - rootful
   - rootless
   - RPMs
-  - safetensors?
   - Sakila
   - sbt
   - SCM
   - SELinux
   - Semeru
   - Shadowman
-  - sharded
   - Skopeo
   - SLAs
   - SmallRye
@@ -516,23 +479,15 @@ filters:
   - startx
   - STMicroelectronics
   - Stratis
-  - strided
-  - subaddress
-  - subcapacity
-  - subtab
   - Suchow
-  - superobject
   - SVG
   - Symfony
   - Tekton
   - Telekom
   - Temurin
-  - Tencent
   - Tensorflow
   - Texinfo
-  - tokenization
   - Toolset
-  - TPUs?
   - Traefik
   - Uber
   - UIDs
@@ -547,10 +502,8 @@ filters:
   - Velero
   - Vert.x
   - vHost
-  - vLLM
   - VMs
   - VMware
-  - Voxtral
   - vsix
   - vSphere
   - WebAuthn

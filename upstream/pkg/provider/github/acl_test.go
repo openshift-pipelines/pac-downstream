@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/google/go-github/v74/github"
+	"github.com/google/go-github/v68/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
@@ -89,7 +89,7 @@ func TestCheckPolicyAllowing(t *testing.T) {
 				Settings: &v1alpha1.Settings{},
 			}}
 			gprovider := Provider{
-				ghClient:      fakeclient,
+				Client:        fakeclient,
 				repo:          repo,
 				Logger:        logger,
 				PaginedNumber: 1,
@@ -326,7 +326,7 @@ func TestOkToTestComment(t *testing.T) {
 				},
 			}
 			gprovider := Provider{
-				ghClient:      fakeclient,
+				Client:        fakeclient,
 				repo:          repo,
 				Logger:        logger,
 				PaginedNumber: 1,
@@ -341,157 +341,6 @@ func TestOkToTestComment(t *testing.T) {
 			}
 			if got != tt.allowed {
 				t.Errorf("aclCheck() = %v, want %v", got, tt.allowed)
-			}
-		})
-	}
-}
-
-func TestOkToTestCommentSHA(t *testing.T) {
-	tests := []struct {
-		name                   string
-		commentsReply          string
-		commentBody            string
-		runevent               info.Event
-		allowed                bool
-		wantErr                bool
-		requireOkToTestSHA     bool
-		pullRequestReply       string
-		pullRequestListComment string
-	}{
-		{
-			name:               "good issue comment event with sha",
-			commentsReply:      `[{"body": "/ok-to-test ABCDEF1", "user": {"login": "owner"}}]`,
-			commentBody:        "/ok-to-test ABCDEF1",
-			pullRequestReply:   `{"head": {"sha": "abcdef1234567890"}}`,
-			requireOkToTestSHA: true,
-			runevent: info.Event{
-				Organization: "owner",
-				Sender:       "nonowner",
-				EventType:    "issue_comment",
-				Event: &github.IssueCommentEvent{
-					Issue: &github.Issue{
-						PullRequestLinks: &github.PullRequestLinks{
-							HTMLURL: github.Ptr("http://url.com/owner/repo/1"),
-						},
-					},
-				},
-			},
-			allowed: true,
-			wantErr: false,
-		},
-		{
-			name:               "bad issue comment event with sha",
-			commentsReply:      `[{"body": "/ok-to-test 1234567", "user": {"login": "owner"}}]`,
-			commentBody:        "/ok-to-test 1234567",
-			pullRequestReply:   `{"head": {"sha": "7654321"}}`,
-			requireOkToTestSHA: true,
-			runevent: info.Event{
-				Organization: "owner",
-				Sender:       "nonowner",
-				EventType:    "issue_comment",
-				Event: &github.IssueCommentEvent{
-					Issue: &github.Issue{
-						PullRequestLinks: &github.PullRequestLinks{
-							HTMLURL: github.Ptr("http://url.com/owner/repo/1"),
-						},
-					},
-				},
-			},
-			allowed: false,
-			wantErr: true,
-		},
-		{
-			name:               "good issue comment event without sha",
-			commentsReply:      `[{"body": "/ok-to-test", "user": {"login": "owner"}}]`,
-			commentBody:        "/ok-to-test",
-			pullRequestReply:   `{"head": {"sha": "1234567890"}}`,
-			requireOkToTestSHA: false,
-			runevent: info.Event{
-				Organization: "owner",
-				Sender:       "nonowner",
-				EventType:    "issue_comment",
-				Event: &github.IssueCommentEvent{
-					Issue: &github.Issue{
-						PullRequestLinks: &github.PullRequestLinks{
-							HTMLURL: github.Ptr("http://url.com/owner/repo/1"),
-						},
-					},
-				},
-			},
-			allowed: true,
-			wantErr: false,
-		},
-		{
-			name:               "bad issue comment event without sha when required",
-			commentsReply:      `[{"body": "/ok-to-test", "user": {"login": "owner"}}]`,
-			commentBody:        "/ok-to-test",
-			pullRequestReply:   `{"head": {"sha": "1234567890"}}`,
-			requireOkToTestSHA: true,
-			runevent: info.Event{
-				Organization: "owner",
-				Sender:       "nonowner",
-				EventType:    "issue_comment",
-				Event: &github.IssueCommentEvent{
-					Issue: &github.Issue{
-						PullRequestLinks: &github.PullRequestLinks{
-							HTMLURL: github.Ptr("http://url.com/owner/repo/1"),
-						},
-					},
-				},
-			},
-			allowed: false,
-			wantErr: true,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			tt.runevent.TriggerTarget = "ok-to-test-comment"
-			fakeclient, mux, _, teardown := ghtesthelper.SetupGH()
-			defer teardown()
-			mux.HandleFunc("/repos/owner/issues/comments/0", func(rw http.ResponseWriter, _ *http.Request) {
-				fmt.Fprint(rw, tt.commentsReply)
-			})
-			mux.HandleFunc("/repos/owner/repo/pulls/1", func(rw http.ResponseWriter, _ *http.Request) {
-				fmt.Fprint(rw, tt.pullRequestReply)
-			})
-			mux.HandleFunc("/repos/owner/repo/issues/1/comments", func(rw http.ResponseWriter, r *http.Request) {
-				// this will test if pagination works okay
-				if r.URL.Query().Get("page") == "" || r.URL.Query().Get("page") == "1" {
-					rw.Header().Add("Link", `<https://api.github.com/owner/repo/issues/1/comments?page=2&per_page=1>; rel="next"`)
-					fmt.Fprint(rw, `[{"body": "Foo Bar", "user": {"login": "notallowed"}}]`, tt.commentsReply)
-				} else {
-					fmt.Fprint(rw, tt.commentsReply)
-				}
-			})
-			mux.HandleFunc("/repos/owner/collaborators", func(rw http.ResponseWriter, _ *http.Request) {
-				fmt.Fprint(rw, "[]")
-			})
-			ctx, _ := rtesting.SetupFakeContext(t)
-			observer, _ := zapobserver.New(zap.InfoLevel)
-			logger := zap.New(observer).Sugar()
-			repo := &v1alpha1.Repository{Spec: v1alpha1.RepositorySpec{
-				Settings: &v1alpha1.Settings{},
-			}}
-			pacopts := &info.PacOpts{
-				Settings: settings.Settings{
-					RequireOkToTestSHA: tt.requireOkToTestSHA,
-				},
-			}
-			gprovider := Provider{
-				ghClient:      fakeclient,
-				repo:          repo,
-				Logger:        logger,
-				PaginedNumber: 1,
-				Run:           &params.Run{},
-				pacInfo:       pacopts,
-			}
-
-			payload := fmt.Sprintf(`{"action": "created", "repository": {"name": "repo", "owner": {"login": "owner"}}, "sender": {"login": %q}, "issue": {"pull_request": {"html_url": "https://github.com/owner/repo/pull/1"}}, "comment": {"body": %q}}`,
-				tt.runevent.Sender, tt.commentBody)
-			_, err := gprovider.ParsePayload(ctx, gprovider.Run, &http.Request{Header: http.Header{"X-Github-Event": []string{"issue_comment"}}}, payload)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("aclCheck() error = %v, wantErr %v", err, tt.wantErr)
-				return
 			}
 		})
 	}
@@ -554,7 +403,7 @@ func TestAclCheckAll(t *testing.T) {
 	logger := zap.New(observer).Sugar()
 	ctx, _ := rtesting.SetupFakeContext(t)
 	gprovider := Provider{
-		ghClient:      fakeclient,
+		Client:        fakeclient,
 		Logger:        logger,
 		PaginedNumber: 1,
 	}
@@ -744,8 +593,8 @@ func TestIfPullRequestIsForSameRepoWithoutFork(t *testing.T) {
 				Settings: &v1alpha1.Settings{},
 			}}
 			gprovider := Provider{
-				ghClient: fakeclient,
-				repo:     repo,
+				Client: fakeclient,
+				repo:   repo,
 			}
 
 			got, err := gprovider.aclCheckAll(ctx, tt.event)

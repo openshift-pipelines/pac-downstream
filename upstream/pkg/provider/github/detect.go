@@ -5,14 +5,14 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/google/go-github/v74/github"
+	"github.com/google/go-github/v68/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
 	"go.uber.org/zap"
 )
 
 var (
-	pullRequestOpenSyncEvent = []string{"opened", "synchronize", "synchronized", "reopened", "ready_for_review"}
+	pullRequestOpenSyncEvent = []string{"opened", "synchronize", "synchronized", "reopened"}
 	pullRequestLabelEvent    = []string{"labeled"}
 )
 

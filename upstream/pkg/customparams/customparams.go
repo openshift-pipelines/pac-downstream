@@ -62,9 +62,9 @@ func (p *CustomParams) applyIncomingParams(ret map[string]string) map[string]str
 // we let the user specify a cel filter. If false then we skip the parameters.
 // if multiple params name has a filter we pick up the first one that has
 // matched true.
-func (p *CustomParams) GetParams(ctx context.Context) (map[string]string, map[string]any, error) {
+func (p *CustomParams) GetParams(ctx context.Context) (map[string]string, map[string]interface{}, error) {
 	stdParams, changedFiles := p.makeStandardParamsFromEvent(ctx)
-	resolvedParams, mapFilters, parsedFromComment := map[string]string{}, map[string]string{}, map[string]string{}
+	ret, mapFilters, parsedFromComment := map[string]string{}, map[string]string{}, map[string]string{}
 	if p.event.TriggerComment != "" {
 		parsedFromComment = opscomments.ParseKeyValueArgs(p.event.TriggerComment)
 		for k, v := range parsedFromComment {
@@ -121,27 +121,18 @@ func (p *CustomParams) GetParams(ctx context.Context) (map[string]string, map[st
 				"ParamsFilterUsedValue",
 				fmt.Sprintf("repo %s, param name %s has a value and secretref, picking value", p.repo.GetName(), value.Name))
 		}
-
-		_, paramIsStd := stdParams[value.Name]
-		_, paramParsedFromContent := parsedFromComment[value.Name]
-
-		switch {
-		case value.Value != "":
-			resolvedParams[value.Name] = value.Value
-		case paramParsedFromContent && !paramIsStd:
-			// If the param is standard, it's initial value will be set later so we don't set it here.
-			// Setting to empty string allows the parsedFromComment overrides to set the overridden value below.
-			resolvedParams[value.Name] = ""
-		case value.SecretRef != nil:
+		if value.Value != "" {
+			ret[value.Name] = value.Value
+		} else if value.SecretRef != nil {
 			secretValue, err := p.k8int.GetSecret(ctx, sectypes.GetSecretOpt{
 				Namespace: p.repo.GetNamespace(),
 				Name:      value.SecretRef.Name,
 				Key:       value.SecretRef.Key,
 			})
 			if err != nil {
-				return resolvedParams, changedFiles, err
+				return ret, changedFiles, err
 			}
-			resolvedParams[value.Name] = secretValue
+			ret[value.Name] = secretValue
 		}
 	}
 
@@ -149,17 +140,17 @@ func (p *CustomParams) GetParams(ctx context.Context) (map[string]string, map[st
 	// we don't let them here
 	for k, v := range stdParams {
 		// check if not already there
-		if _, ok := resolvedParams[k]; !ok && v != "" {
-			resolvedParams[k] = v
+		if _, ok := ret[k]; !ok && v != "" {
+			ret[k] = v
 		}
 	}
 
 	// overwrite stdParams with parsed ones from the trigger comment
 	for k, v := range parsedFromComment {
-		if _, ok := resolvedParams[k]; ok && v != "" {
-			resolvedParams[k] = v
+		if _, ok := ret[k]; ok && v != "" {
+			ret[k] = v
 		}
 	}
 
-	return p.applyIncomingParams(resolvedParams), changedFiles, nil
+	return p.applyIncomingParams(ret), changedFiles, nil
 }

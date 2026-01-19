@@ -7,22 +7,13 @@ import (
 )
 
 //go:embed templates/starting.go.tmpl
-var StartingPipelineRunHTML string
-
-//go:embed templates/starting.markdown.go.tmpl
-var StartingPipelineRunMarkdown string
+var StartingPipelineRunText string
 
 //go:embed templates/queuing.go.tmpl
-var QueuingPipelineRunHTML string
-
-//go:embed templates/queuing.markdown.go.tmpl
-var QueuingPipelineRunMarkdown string
+var QueuingPipelineRunText string
 
 //go:embed templates/pipelinerunstatus.tmpl
-var PipelineRunStatusHTML string
-
-//go:embed templates/pipelinerunstatus_markdown.tmpl
-var PipelineRunStatusMarkDown string
+var PipelineRunStatusText string
 
 type MessageTemplate struct {
 	PipelineRunName string

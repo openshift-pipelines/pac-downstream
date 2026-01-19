@@ -8,13 +8,12 @@ type ChangedFiles struct {
 	Renamed  []string
 }
 
-// removeDuplicates removes duplicates from a slice of strings.
 func removeDuplicates(s []string) []string {
-	holdit := make(map[string]struct{})
-	result := make([]string, 0, len(s))
+	holdit := make(map[string]bool)
+	var result []string
 	for _, str := range s {
 		if _, ok := holdit[str]; !ok {
-			holdit[str] = struct{}{}
+			holdit[str] = true
 			result = append(result, str)
 		}
 	}

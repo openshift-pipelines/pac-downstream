@@ -21,7 +21,7 @@ type MarkupOption struct {
 	//
 	// in: body
 	Text string
-	// Mode to render (markdown, comment, wiki, file)
+	// Mode to render (comment, gfm, markdown, file)
 	//
 	// in: body
 	Mode string
@@ -30,9 +30,8 @@ type MarkupOption struct {
 	//
 	// in: body
 	Context string
-	// Is it a wiki page? (use mode=wiki instead)
+	// Is it a wiki page ?
 	//
-	// Deprecated: true
 	// in: body
 	Wiki bool
 	// File path for detecting extension in file mode
@@ -51,7 +50,7 @@ type MarkdownOption struct {
 	//
 	// in: body
 	Text string
-	// Mode to render (markdown, comment, wiki, file)
+	// Mode to render (comment, gfm, markdown)
 	//
 	// in: body
 	Mode string
@@ -60,9 +59,8 @@ type MarkdownOption struct {
 	//
 	// in: body
 	Context string
-	// Is it a wiki page? (use mode=wiki instead)
+	// Is it a wiki page ?
 	//
-	// Deprecated: true
 	// in: body
 	Wiki bool
 }

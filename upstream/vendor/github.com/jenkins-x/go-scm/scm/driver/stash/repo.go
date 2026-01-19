@@ -451,15 +451,15 @@ func (s *repositoryService) CreateStatus(ctx context.Context, repo, ref string, 
 		State: convertFromState(input.State),
 		Key:   input.Label,
 		Name:  input.Label,
-		URL:   input.Link,
+		URL:   input.Target,
 		Desc:  input.Desc,
 	}
 	res, err := s.client.do(ctx, "POST", path, in, nil)
 	return &scm.Status{
-		State: input.State,
-		Label: input.Label,
-		Desc:  input.Desc,
-		Link:  input.Link,
+		State:  input.State,
+		Label:  input.Label,
+		Desc:   input.Desc,
+		Target: input.Target,
 	}, res, err
 }
 
@@ -580,14 +580,8 @@ func convertFromState(from scm.State) string {
 		return "INPROGRESS"
 	case scm.StateSuccess:
 		return "SUCCESSFUL"
-	case scm.StateFailure:
-		return "FAILED"
-	case scm.StateCanceled:
-		return "CANCELLED"
-	case scm.StateUnknown:
-		return "UNKNOWN"
 	default:
-		return "UNKNOWN"
+		return "FAILED"
 	}
 }
 

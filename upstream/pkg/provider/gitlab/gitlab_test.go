@@ -8,28 +8,20 @@ import (
 	"os"
 	"strings"
 	"testing"
-	"time"
 
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/events"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/opscomments"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/clients"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/settings"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
 	thelp "github.com/openshift-pipelines/pipelines-as-code/pkg/provider/gitlab/test"
 	testclient "github.com/openshift-pipelines/pipelines-as-code/pkg/test/clients"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/test/logger"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/test/metrics"
-
 	gitlab "gitlab.com/gitlab-org/api/client-go"
 	"go.uber.org/zap"
 	zapobserver "go.uber.org/zap/zaptest/observer"
 	"gotest.tools/v3/assert"
-	"knative.dev/pkg/metrics/metricstest"
-	_ "knative.dev/pkg/metrics/testing"
 	rtesting "knative.dev/pkg/reconciler/testing"
 )
 
@@ -148,20 +140,6 @@ func TestCreateStatus(t *testing.T) {
 			},
 		},
 		{
-			name:       "cancelled conclusion",
-			wantClient: true,
-			wantErr:    false,
-			args: args{
-				statusOpts: provider.StatusOpts{
-					Conclusion: "cancelled",
-				},
-				event: &info.Event{
-					TriggerTarget: "pull_request",
-				},
-				postStr: "has cancelled",
-			},
-		},
-		{
 			name:       "gitops comments completed",
 			wantClient: true,
 			wantErr:    false,
@@ -190,96 +168,6 @@ func TestCreateStatus(t *testing.T) {
 				postStr: "https://url.com",
 			},
 		},
-		{
-			name:       "pending conclusion for gitops command on pushed commit",
-			wantClient: true,
-			wantErr:    false,
-			args: args{
-				statusOpts: provider.StatusOpts{
-					Conclusion: "pending",
-				},
-				event: &info.Event{
-					TriggerTarget: "push",
-					EventType:     opscomments.TestAllCommentEventType.String(),
-				},
-				postStr: "",
-			},
-		},
-		{
-			name:       "completed conclusion for gitops command on pushed commit",
-			wantClient: true,
-			wantErr:    false,
-			args: args{
-				statusOpts: provider.StatusOpts{
-					Conclusion: "completed",
-				},
-				event: &info.Event{
-					TriggerTarget: "push",
-					EventType:     opscomments.RetestAllCommentEventType.String(),
-				},
-				postStr: "has completed",
-			},
-		},
-		{
-			name:       "commit status success on source project",
-			wantClient: true,
-			wantErr:    false,
-			fields: fields{
-				targetProjectID: 100,
-			},
-			args: args{
-				statusOpts: provider.StatusOpts{
-					Conclusion: "success",
-				},
-				event: &info.Event{
-					TriggerTarget:   "pull_request",
-					SourceProjectID: 200,
-					TargetProjectID: 100,
-					SHA:             "abc123",
-				},
-				postStr: "has successfully",
-			},
-		},
-		{
-			name:       "commit status falls back to target project",
-			wantClient: true,
-			wantErr:    false,
-			fields: fields{
-				targetProjectID: 100,
-			},
-			args: args{
-				statusOpts: provider.StatusOpts{
-					Conclusion: "success",
-				},
-				event: &info.Event{
-					TriggerTarget:   "pull_request",
-					SourceProjectID: 404, // Will fail to find this project
-					TargetProjectID: 100,
-					SHA:             "abc123",
-				},
-				postStr: "has successfully",
-			},
-		},
-		{
-			name:       "commit status fails on both projects but continues",
-			wantClient: true,
-			wantErr:    false,
-			fields: fields{
-				targetProjectID: 100,
-			},
-			args: args{
-				statusOpts: provider.StatusOpts{
-					Conclusion: "success",
-				},
-				event: &info.Event{
-					TriggerTarget:   "pull_request",
-					SourceProjectID: 404, // Will fail
-					TargetProjectID: 405, // Will fail
-					SHA:             "abc123",
-				},
-				postStr: "has successfully",
-			},
-		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -289,13 +177,11 @@ func TestCreateStatus(t *testing.T) {
 			run := &params.Run{
 				Clients: clients.Clients{
 					Kube: stdata.Kube,
-					Log:  logger,
 				},
 			}
 			v := &Provider{
 				targetProjectID: tt.fields.targetProjectID,
 				run:             params.New(),
-				Logger:          logger,
 				pacInfo: &info.PacOpts{
 					Settings: settings.Settings{
 						ApplicationName: settings.PACApplicationNameDefaultValue,
@@ -310,42 +196,8 @@ func TestCreateStatus(t *testing.T) {
 
 			if tt.wantClient {
 				client, mux, tearDown := thelp.Setup(t)
-				v.SetGitLabClient(client)
+				v.Client = client
 				defer tearDown()
-
-				// Mock commit status endpoints for both source and target projects
-				if tt.args.event.SourceProjectID != 0 {
-					// Mock source project commit status endpoint
-					sourceStatusPath := fmt.Sprintf("/projects/%d/statuses/%s", tt.args.event.SourceProjectID, tt.args.event.SHA)
-					mux.HandleFunc(sourceStatusPath, func(rw http.ResponseWriter, _ *http.Request) {
-						if tt.args.event.SourceProjectID == 404 {
-							// Simulate failure on source project
-							rw.WriteHeader(http.StatusNotFound)
-							fmt.Fprint(rw, `{"message": "404 Project Not Found"}`)
-							return
-						}
-						// Success on source project
-						rw.WriteHeader(http.StatusCreated)
-						fmt.Fprint(rw, `{}`)
-					})
-				}
-
-				if tt.args.event.TargetProjectID != 0 {
-					// Mock target project commit status endpoint
-					targetStatusPath := fmt.Sprintf("/projects/%d/statuses/%s", tt.args.event.TargetProjectID, tt.args.event.SHA)
-					mux.HandleFunc(targetStatusPath, func(rw http.ResponseWriter, _ *http.Request) {
-						if tt.args.event.TargetProjectID == 404 {
-							// Simulate failure on target project
-							rw.WriteHeader(http.StatusNotFound)
-							fmt.Fprint(rw, `{"message": "404 Project Not Found"}`)
-							return
-						}
-						// Success on target project
-						rw.WriteHeader(http.StatusCreated)
-						fmt.Fprint(rw, `{}`)
-					})
-				}
-
 				thelp.MuxNotePost(t, mux, v.targetProjectID, tt.args.event.PullRequestNumber, tt.args.postStr)
 			}
 
@@ -357,145 +209,15 @@ func TestCreateStatus(t *testing.T) {
 }
 
 func TestGetCommitInfo(t *testing.T) {
-	tests := []struct {
-		name                string
-		event               *info.Event
-		sourceProjectID     int
-		mockCommitResponse  string
-		wantErr             bool
-		wantSHATitle        string
-		wantSHAURL          string
-		wantSHAMessage      string
-		wantAuthorName      string
-		wantAuthorEmail     string
-		wantAuthorDate      string
-		wantCommitterName   string
-		wantCommitterEmail  string
-		wantCommitterDate   string
-		checkExtendedFields bool
-		noClient            bool
-	}{
-		{
-			name: "good with full commit info",
-			event: &info.Event{
-				HeadBranch: "feature-branch",
-			},
-			sourceProjectID: 123,
-			mockCommitResponse: `{
-				"id": "abc123",
-				"title": "feat: add new feature",
-				"message": "feat: add new feature\n\nThis is the full commit message with details.",
-				"web_url": "https://gitlab.com/owner/repo/-/commit/abc123",
-				"author_name": "John Doe",
-				"author_email": "john@example.com",
-				"authored_date": "2024-01-15T10:30:00Z",
-				"committer_name": "GitLab",
-				"committer_email": "noreply@gitlab.com",
-				"committed_date": "2024-01-15T10:31:00Z"
-			}`,
-			wantSHATitle:        "feat: add new feature",
-			wantSHAURL:          "https://gitlab.com/owner/repo/-/commit/abc123",
-			wantSHAMessage:      "feat: add new feature\n\nThis is the full commit message with details.",
-			wantAuthorName:      "John Doe",
-			wantAuthorEmail:     "john@example.com",
-			wantAuthorDate:      "2024-01-15T10:30:00Z",
-			wantCommitterName:   "GitLab",
-			wantCommitterEmail:  "noreply@gitlab.com",
-			wantCommitterDate:   "2024-01-15T10:31:00Z",
-			checkExtendedFields: true,
-		},
-		{
-			name: "basic fields only",
-			event: &info.Event{
-				HeadBranch: "main",
-			},
-			sourceProjectID: 123,
-			mockCommitResponse: `{
-				"id": "def456",
-				"title": "fix: simple fix",
-				"message": "fix: simple fix",
-				"web_url": "https://gitlab.com/owner/repo/-/commit/def456"
-			}`,
-			wantSHATitle:   "fix: simple fix",
-			wantSHAURL:     "https://gitlab.com/owner/repo/-/commit/def456",
-			wantSHAMessage: "fix: simple fix",
-		},
-		{
-			name: "no client error",
-			event: &info.Event{
-				HeadBranch: "main",
-			},
-			noClient: true,
-			wantErr:  true,
-		},
-		{
-			name: "no SHA, no HeadBranch - no API call",
-			event: &info.Event{
-				SHA: "already-set",
-			},
-			sourceProjectID: 123,
-		},
-	}
+	ctx, _ := rtesting.SetupFakeContext(t)
+	client, _, tearDown := thelp.Setup(t)
+	v := &Provider{Client: client}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			ctx, _ := rtesting.SetupFakeContext(t)
+	defer tearDown()
+	assert.NilError(t, v.GetCommitInfo(ctx, info.NewEvent()))
 
-			var provider *Provider
-			if !tt.noClient {
-				client, mux, tearDown := thelp.Setup(t)
-				defer tearDown()
-
-				// Mock the GetCommit API endpoint if we expect it to be called
-				if tt.event.SHA == "" && tt.event.HeadBranch != "" {
-					mux.HandleFunc(fmt.Sprintf("/projects/%d/repository/commits/%s", tt.sourceProjectID, tt.event.HeadBranch),
-						func(rw http.ResponseWriter, _ *http.Request) {
-							fmt.Fprint(rw, tt.mockCommitResponse)
-						})
-				}
-
-				provider = &Provider{
-					gitlabClient:    client,
-					sourceProjectID: tt.sourceProjectID,
-				}
-			} else {
-				provider = &Provider{}
-			}
-
-			err := provider.GetCommitInfo(ctx, tt.event)
-
-			if tt.wantErr {
-				assert.Assert(t, err != nil, "expected error but got nil")
-				return
-			}
-
-			assert.NilError(t, err)
-
-			// Only check fields if API was supposed to be called
-			if tt.event.SHA == "" && tt.event.HeadBranch != "" {
-				assert.Equal(t, tt.wantSHATitle, tt.event.SHATitle, "SHATitle should match")
-				assert.Equal(t, tt.wantSHAURL, tt.event.SHAURL, "SHAURL should match")
-				assert.Equal(t, tt.wantSHAMessage, tt.event.SHAMessage, "SHAMessage should match")
-
-				if tt.checkExtendedFields {
-					assert.Equal(t, tt.wantAuthorName, tt.event.SHAAuthorName, "SHAAuthorName should match")
-					assert.Equal(t, tt.wantAuthorEmail, tt.event.SHAAuthorEmail, "SHAAuthorEmail should match")
-					assert.Equal(t, tt.wantCommitterName, tt.event.SHACommitterName, "SHACommitterName should match")
-					assert.Equal(t, tt.wantCommitterEmail, tt.event.SHACommitterEmail, "SHACommitterEmail should match")
-
-					// Verify dates are parsed correctly
-					if tt.wantAuthorDate != "" {
-						expectedAuthorDate, _ := time.Parse(time.RFC3339, tt.wantAuthorDate)
-						assert.DeepEqual(t, expectedAuthorDate, tt.event.SHAAuthorDate)
-					}
-					if tt.wantCommitterDate != "" {
-						expectedCommitterDate, _ := time.Parse(time.RFC3339, tt.wantCommitterDate)
-						assert.DeepEqual(t, expectedCommitterDate, tt.event.SHACommitterDate)
-					}
-				}
-			}
-		})
-	}
+	ncv := &Provider{}
+	assert.Assert(t, ncv.GetCommitInfo(ctx, info.NewEvent()) != nil)
 }
 
 func TestGetConfig(t *testing.T) {
@@ -506,239 +228,23 @@ func TestGetConfig(t *testing.T) {
 
 func TestSetClient(t *testing.T) {
 	ctx, _ := rtesting.SetupFakeContext(t)
-	core, observer := zapobserver.New(zap.InfoLevel)
-	fakelogger := zap.New(core).Sugar()
-
-	run := &params.Run{
-		Clients: clients.Clients{
-			Log: fakelogger,
-		},
-	}
-
 	v := &Provider{}
-	assert.Assert(t, v.SetClient(ctx, run, info.NewEvent(), nil, nil) != nil)
+	assert.Assert(t, v.SetClient(ctx, nil, info.NewEvent(), nil, nil) != nil)
 
 	client, _, tearDown := thelp.Setup(t)
 	defer tearDown()
-
-	vv := &Provider{gitlabClient: client}
-	err := vv.SetClient(ctx, run, &info.Event{
+	vv := &Provider{Client: client}
+	err := vv.SetClient(ctx, nil, &info.Event{
 		Provider: &info.Provider{
 			Token: "hello",
 		},
-		Organization:    "my-org",
-		Repository:      "my-repo",
-		SourceProjectID: 1234,
-		TargetProjectID: 1234,
 	}, nil, nil)
-
 	assert.NilError(t, err)
 	assert.Assert(t, *vv.Token != "")
-
-	logs := observer.TakeAll()
-	assert.Assert(t, len(logs) > 0, "expected a log entry, got none")
-
-	expected := fmt.Sprintf(
-		"gitlab: initialized for client with token for apiURL=%s, org=%s, repo=%s",
-		vv.apiURL, "my-org", "my-repo")
-
-	assert.Equal(t, expected, logs[0].Message)
-}
-
-func TestSetClientFieldsInitializedOnError(t *testing.T) {
-	ctx, _ := rtesting.SetupFakeContext(t)
-	observer, _ := zapobserver.New(zap.InfoLevel)
-	fakelogger := zap.New(observer).Sugar()
-	stdata, _ := testclient.SeedTestData(t, ctx, testclient.Data{})
-	run := &params.Run{
-		Clients: clients.Clients{
-			Kube: stdata.Kube,
-			Log:  fakelogger,
-		},
-	}
-
-	tests := []struct {
-		name              string
-		triggerTarget     triggertype.Trigger
-		sourceProjectID   int
-		setupMockResponse func(*http.ServeMux, int)
-		expectedError     string
-		providerToken     string
-	}{
-		{
-			name:            "Fields initialized even when project access fails",
-			triggerTarget:   triggertype.PullRequest,
-			sourceProjectID: 456,
-			providerToken:   "test-token",
-			setupMockResponse: func(mux *http.ServeMux, projectID int) {
-				path := fmt.Sprintf("/projects/%d", projectID)
-				mux.HandleFunc(path, func(rw http.ResponseWriter, r *http.Request) {
-					if r.Method == http.MethodGet {
-						rw.WriteHeader(http.StatusNotFound)
-						fmt.Fprint(rw, `{"message": "404 Project Not Found"}`)
-					}
-				})
-			},
-			expectedError: "failed to access GitLab source repository ID 456",
-		},
-		{
-			name:            "Fields initialized when invalid URL causes error",
-			triggerTarget:   triggertype.Push,
-			sourceProjectID: 123,
-			providerToken:   "test-token",
-			setupMockResponse: func(_ *http.ServeMux, _ int) {
-				// No mock needed
-			},
-			expectedError: "", // This test will use an invalid URL which gets caught during parsing
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			mockClient, mux, tearDown := thelp.Setup(t)
-			defer tearDown()
-
-			if tt.setupMockResponse != nil {
-				tt.setupMockResponse(mux, tt.sourceProjectID)
-			}
-
-			v := &Provider{gitlabClient: mockClient}
-			repo := &v1alpha1.Repository{}
-			repo.SetName("test-repo")
-			eventsEmitter := events.NewEventEmitter(run.Clients.Kube, fakelogger)
-
-			event := &info.Event{
-				Provider: &info.Provider{
-					Token: tt.providerToken,
-				},
-				Organization:    "test-org",
-				Repository:      "test-repo",
-				TriggerTarget:   tt.triggerTarget,
-				SourceProjectID: tt.sourceProjectID,
-				TargetProjectID: 123,
-				EventType:       "pull_request",
-			}
-
-			err := v.SetClient(ctx, run, event, repo, eventsEmitter)
-
-			// The test should verify that even when an error occurs,
-			// the critical fields are initialized to prevent nil pointer crashes
-			if tt.expectedError != "" {
-				assert.Assert(t, err != nil, "expected error but got none")
-				assert.ErrorContains(t, err, tt.expectedError)
-			}
-
-			// This is the key assertion: verify fields are initialized even on error
-			assert.Assert(t, v.run != nil, "v.run should be initialized even on error")
-			assert.Assert(t, v.eventEmitter != nil, "v.eventEmitter should be initialized even on error")
-			assert.Assert(t, v.repo != nil, "v.repo should be initialized even on error")
-			assert.Assert(t, v.triggerEvent != "", "v.triggerEvent should be initialized even on error")
-		})
-	}
-}
-
-func TestSetClientRepositoryAccessCheck(t *testing.T) {
-	ctx, _ := rtesting.SetupFakeContext(t)
-	observer, _ := zapobserver.New(zap.InfoLevel)
-	fakelogger := zap.New(observer).Sugar()
-	run := &params.Run{
-		Clients: clients.Clients{
-			Log: fakelogger,
-		},
-	}
-
-	tests := []struct {
-		name              string
-		triggerTarget     triggertype.Trigger
-		sourceProjectID   int
-		setupMockResponse func(*http.ServeMux, int)
-		expectedError     string
-	}{
-		{
-			name:            "Non-pull request trigger should skip access check",
-			triggerTarget:   triggertype.Push,
-			sourceProjectID: 123,
-			setupMockResponse: func(_ *http.ServeMux, _ int) {
-				// No mock needed - should not make the call
-			},
-			expectedError: "",
-		},
-		{
-			name:            "Pull request with successful access",
-			triggerTarget:   triggertype.PullRequest,
-			sourceProjectID: 123,
-			setupMockResponse: func(mux *http.ServeMux, projectID int) {
-				path := fmt.Sprintf("/projects/%d", projectID)
-				mux.HandleFunc(path, func(rw http.ResponseWriter, r *http.Request) {
-					if r.Method == http.MethodGet {
-						rw.WriteHeader(http.StatusOK)
-						fmt.Fprint(rw, `{"id": 123, "name": "test-repo"}`)
-					}
-				})
-			},
-			expectedError: "",
-		},
-		{
-			name:            "Pull request with not found should return specific error",
-			triggerTarget:   triggertype.PullRequest,
-			sourceProjectID: 456,
-			setupMockResponse: func(mux *http.ServeMux, projectID int) {
-				path := fmt.Sprintf("/projects/%d", projectID)
-				mux.HandleFunc(path, func(rw http.ResponseWriter, r *http.Request) {
-					if r.Method == http.MethodGet {
-						// Return 404 without error to test the status code check
-						rw.WriteHeader(http.StatusNotFound)
-						fmt.Fprint(rw, `{"message": "404 Project Not Found"}`)
-					}
-				})
-			},
-			expectedError: "failed to access GitLab source repository ID 456: please ensure token has 'read_repository' scope on that repository",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			mockClient, mux, tearDown := thelp.Setup(t)
-			defer tearDown()
-
-			// Setup the mock for the repository access check API call
-			if tt.setupMockResponse != nil {
-				tt.setupMockResponse(mux, tt.sourceProjectID)
-			}
-
-			v := &Provider{gitlabClient: mockClient}
-			event := &info.Event{
-				Provider: &info.Provider{
-					Token: "test-token",
-				},
-				Organization:    "test-org",
-				Repository:      "test-repo",
-				TriggerTarget:   tt.triggerTarget,
-				SourceProjectID: tt.sourceProjectID,
-				TargetProjectID: 123,
-			}
-
-			err := v.SetClient(ctx, run, event, nil, nil)
-
-			if tt.expectedError != "" {
-				assert.Assert(t, err != nil, "expected error but got none")
-				assert.ErrorContains(t, err, tt.expectedError)
-			} else {
-				assert.NilError(t, err, "unexpected error: %v", err)
-			}
-		})
-	}
 }
 
 func TestSetClientDetectAPIURL(t *testing.T) {
 	ctx, _ := rtesting.SetupFakeContext(t)
-	observer, _ := zapobserver.New(zap.InfoLevel)
-	fakelogger := zap.New(observer).Sugar()
-	run := &params.Run{
-		Clients: clients.Clients{
-			Log: fakelogger,
-		},
-	}
 	mockClient, _, tearDown := thelp.Setup(t)
 	defer tearDown()
 
@@ -798,7 +304,7 @@ func TestSetClientDetectAPIURL(t *testing.T) {
 			expectedError:  "",
 		},
 		{
-			name:              "Success: Default URL when repoURL is public GitLab",
+			name:              "Success: Default URL when repoURL is public Gitlab",
 			providerToken:     "token",
 			providerURL:       "",
 			repoURL:           apiPublicURL + "/public/repo", // Starts with public URL, so skipped
@@ -840,7 +346,7 @@ func TestSetClientDetectAPIURL(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// Setup specific to this test case
 			v := &Provider{
-				gitlabClient:      mockClient, // Use the shared mock client
+				Client:            mockClient, // Use the shared mock client
 				repoURL:           tc.repoURL,
 				pathWithNamespace: tc.pathWithNamespace,
 			}
@@ -855,7 +361,7 @@ func TestSetClientDetectAPIURL(t *testing.T) {
 
 			// Execute the function under test
 			// Using placeholder nil values for arguments not directly related to URL detection
-			err := v.SetClient(ctx, run, event, nil, nil)
+			err := v.SetClient(ctx, nil, event, nil, nil)
 
 			// Assertions
 			if tc.expectedError != "" {
@@ -867,7 +373,7 @@ func TestSetClientDetectAPIURL(t *testing.T) {
 				// Only check the resulting apiURL if no error was expected
 				assert.Equal(t, tc.expectedAPIURL, v.apiURL)
 				// Optionally, check if the client was actually set (if no error)
-				assert.Assert(t, v.Client() != nil)
+				assert.Assert(t, v.Client != nil)
 				assert.Assert(t, v.Token != nil && *v.Token == tc.providerToken)
 			}
 		})
@@ -922,13 +428,12 @@ func TestGetTektonDir(t *testing.T) {
 			wantErr:   "error unmarshalling yaml file pr.yaml: yaml: line 4: could not find expected ':'",
 		},
 		{
-			name:      "list tekton dir on pull request",
+			name:      "list tekton dir",
 			prcontent: string(samplePR),
 			args: args{
 				path: ".tekton",
 				event: &info.Event{
-					HeadBranch:    "main",
-					TriggerTarget: triggertype.PullRequest,
+					HeadBranch: "main",
 				},
 			},
 			fields: fields{
@@ -936,24 +441,7 @@ func TestGetTektonDir(t *testing.T) {
 			},
 			wantClient:           true,
 			wantStr:              "kind: PipelineRun",
-			filterMessageSnippet: `Using PipelineRun definition from source merge request on commit SHA`,
-		},
-		{
-			name:      "list tekton dir on push",
-			prcontent: string(samplePR),
-			args: args{
-				path: ".tekton",
-				event: &info.Event{
-					HeadBranch:    "main",
-					TriggerTarget: triggertype.Push,
-				},
-			},
-			fields: fields{
-				sourceProjectID: 100,
-			},
-			wantClient:           true,
-			wantStr:              "kind: PipelineRun",
-			filterMessageSnippet: `Using PipelineRun definition from source push on commit SHA`,
+			filterMessageSnippet: `Using PipelineRun definition from source merge request SHA`,
 		},
 		{
 			name:      "list tekton dir on default_branch",
@@ -1033,7 +521,7 @@ func TestGetTektonDir(t *testing.T) {
 			}
 			if tt.wantClient {
 				client, mux, tearDown := thelp.Setup(t)
-				v.SetGitLabClient(client)
+				v.Client = client
 				muxbranch := tt.args.event.HeadBranch
 				if tt.args.provenance == "default_branch" {
 					muxbranch = tt.args.event.DefaultBranch
@@ -1072,7 +560,7 @@ func TestGetFileInsideRepo(t *testing.T) {
 	}
 	v := Provider{
 		sourceProjectID: 10,
-		gitlabClient:    client,
+		Client:          client,
 	}
 	thelp.MuxListTektonDir(t, mux, v.sourceProjectID, event.HeadBranch, content, false, false)
 	got, err := v.GetFileInsideRepo(ctx, event, "pr.yaml", "")
@@ -1248,30 +736,60 @@ func TestGetFiles(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx, _ := rtesting.SetupFakeContext(t)
-			metrics.ResetMetrics()
 			fakeclient, mux, teardown := thelp.Setup(t)
 			defer teardown()
+			mergeFileChanges := []*gitlab.MergeRequestDiff{
+				{
+					NewPath: "modified.yaml",
+				},
+				{
+					NewPath: "added.doc",
+					NewFile: true,
+				},
+				{
+					NewPath:     "removed.yaml",
+					DeletedFile: true,
+				},
+				{
+					NewPath:     "renamed.doc",
+					RenamedFile: true,
+				},
+			}
 			if tt.event.TriggerTarget == "pull_request" {
 				mux.HandleFunc(fmt.Sprintf("/projects/10/merge_requests/%d/diffs",
 					tt.event.PullRequestNumber), func(rw http.ResponseWriter, _ *http.Request) {
-					jeez, err := json.Marshal(tt.mrchanges)
+					jeez, err := json.Marshal(mergeFileChanges)
 					assert.NilError(t, err)
 					_, _ = rw.Write(jeez)
 				})
 			}
+			pushFileChanges := []*gitlab.Diff{
+				{
+					NewPath: "modified.yaml",
+				},
+				{
+					NewPath: "added.doc",
+					NewFile: true,
+				},
+				{
+					NewPath:     "removed.yaml",
+					DeletedFile: true,
+				},
+				{
+					NewPath:     "renamed.doc",
+					RenamedFile: true,
+				},
+			}
 			if tt.event.TriggerTarget == "push" {
 				mux.HandleFunc(fmt.Sprintf("/projects/0/repository/commits/%s/diff", tt.event.SHA),
 					func(rw http.ResponseWriter, _ *http.Request) {
-						jeez, err := json.Marshal(tt.pushChanges)
+						jeez, err := json.Marshal(pushFileChanges)
 						assert.NilError(t, err)
 						_, _ = rw.Write(jeez)
 					})
 			}
 
-			metricsTags := map[string]string{"provider": "api.gitlab.com", "event-type": string(tt.event.TriggerTarget)}
-			metricstest.CheckStatsNotReported(t, "pipelines_as_code_git_provider_api_request_count")
-
-			providerInfo := &Provider{gitlabClient: fakeclient, sourceProjectID: tt.sourceProjectID, targetProjectID: tt.targetProjectID, triggerEvent: string(tt.event.TriggerTarget), apiURL: "api.gitlab.com"}
+			providerInfo := &Provider{Client: fakeclient, sourceProjectID: tt.sourceProjectID, targetProjectID: tt.targetProjectID}
 			changedFiles, err := providerInfo.GetFiles(ctx, tt.event)
 			if tt.wantError != true {
 				assert.NilError(t, err, nil)
@@ -1291,309 +809,6 @@ func TestGetFiles(t *testing.T) {
 					assert.Equal(t, tt.pushChanges[i].NewPath, changedFiles.All[i])
 				}
 			}
-
-			// Check caching
-			metricstest.CheckCountData(t, "pipelines_as_code_git_provider_api_request_count", metricsTags, 1)
-			_, _ = providerInfo.GetFiles(ctx, tt.event)
-			if tt.wantError {
-				// No caching on error
-				metricstest.CheckCountData(t, "pipelines_as_code_git_provider_api_request_count", metricsTags, 2)
-			} else {
-				// Cache API results on success
-				metricstest.CheckCountData(t, "pipelines_as_code_git_provider_api_request_count", metricsTags, 1)
-			}
 		})
 	}
-}
-
-func TestGetFilesPaging(t *testing.T) {
-	tests := []struct {
-		name  string
-		event *info.Event
-	}{
-		{
-			name: "pull-request",
-			event: &info.Event{
-				TriggerTarget: "pull_request",
-				Organization:  "owner",
-				Repository:    "repository",
-			},
-		},
-		{
-			name: "push",
-			event: &info.Event{
-				TriggerTarget: "push",
-				Organization:  "owner",
-				Repository:    "repository",
-				SHA:           "shacommitinfo",
-			},
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			ctx, _ := rtesting.SetupFakeContext(t)
-			metrics.ResetMetrics()
-			fakeclient, mux, teardown := thelp.Setup(t)
-			defer teardown()
-
-			if tt.event.TriggerTarget == "pull_request" {
-				mux.HandleFunc(fmt.Sprintf("/projects/0/merge_requests/%d/diffs",
-					tt.event.PullRequestNumber), func(rw http.ResponseWriter, req *http.Request) {
-					pageCount := thelp.SetPagingHeader(t, rw, req, 5)
-					jeez, err := json.Marshal([]*gitlab.MergeRequestDiff{{NewPath: fmt.Sprintf("change-%d.txt", pageCount)}})
-					assert.NilError(t, err)
-					_, _ = rw.Write(jeez)
-				})
-			}
-			if tt.event.TriggerTarget == "push" {
-				mux.HandleFunc(fmt.Sprintf("/projects/0/repository/commits/%s/diff",
-					tt.event.SHA), func(rw http.ResponseWriter, req *http.Request) {
-					pageCount := thelp.SetPagingHeader(t, rw, req, 5)
-					jeez, err := json.Marshal([]*gitlab.Diff{{NewPath: fmt.Sprintf("change-%d.txt", pageCount)}})
-					assert.NilError(t, err)
-					_, _ = rw.Write(jeez)
-				})
-			}
-
-			metricsTags := map[string]string{"provider": "api.gitlab.com", "event-type": string(tt.event.TriggerTarget)}
-			metricstest.CheckStatsNotReported(t, "pipelines_as_code_git_provider_api_request_count")
-
-			providerInfo := &Provider{gitlabClient: fakeclient, sourceProjectID: 0, targetProjectID: 0, triggerEvent: string(tt.event.TriggerTarget), apiURL: "api.gitlab.com"}
-			changedFiles, err := providerInfo.GetFiles(ctx, tt.event)
-			assert.NilError(t, err, nil)
-			assert.DeepEqual(t, changedFiles.All, []string{"change-1.txt", "change-2.txt", "change-3.txt", "change-4.txt", "change-5.txt"})
-			assert.Equal(t, len(changedFiles.Modified), 5)
-
-			// Check caching
-			metricstest.CheckCountData(t, "pipelines_as_code_git_provider_api_request_count", metricsTags, 5)
-			_, _ = providerInfo.GetFiles(ctx, tt.event)
-			metricstest.CheckCountData(t, "pipelines_as_code_git_provider_api_request_count", metricsTags, 5)
-		})
-	}
-}
-
-func TestIsHeadCommitOfBranch(t *testing.T) {
-	tests := []struct {
-		name          string
-		event         *info.Event
-		branchName    string
-		wantClient    bool
-		errStatusCode int
-		ErrMsg        string
-	}{
-		{
-			name:       "bad/client is not initialized",
-			wantClient: false,
-			ErrMsg:     "no gitlab client has been initialized",
-		},
-		{
-			name:          "bad/user is not authorized",
-			wantClient:    true,
-			branchName:    "cool-branch",
-			errStatusCode: http.StatusUnauthorized,
-			ErrMsg:        "401",
-		},
-		{
-			name:          "bad/branch doesn't exist",
-			wantClient:    true,
-			branchName:    "wrong-branch",
-			errStatusCode: http.StatusNotFound,
-			ErrMsg:        "404",
-		},
-		{
-			name:       "bad/SHA is not HEAD of the branch",
-			wantClient: true,
-			event:      &info.Event{SHA: "IAmNotHEAD"},
-			branchName: "cool-branch",
-			ErrMsg:     "provided SHA IAmNotHEAD is not the HEAD commit of the branch cool-branch",
-		},
-		{
-			name:       "good/SHA is HEAD commit",
-			wantClient: true,
-			event:      &info.Event{SHA: "IAmHEAD321"},
-			branchName: "cool-branch",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			_, _ = rtesting.SetupFakeContext(t)
-			fakeclient, mux, teardown := thelp.Setup(t)
-			defer teardown()
-			glProvider := &Provider{sourceProjectID: 1}
-			if tt.wantClient {
-				glProvider.SetGitLabClient(fakeclient)
-				mux.HandleFunc("/projects/1/repository/branches/cool-branch",
-					func(rw http.ResponseWriter, _ *http.Request) {
-						if tt.errStatusCode != 0 {
-							rw.WriteHeader(tt.errStatusCode)
-							return
-						}
-						branch := &gitlab.Branch{Name: "cool-branch", Commit: &gitlab.Commit{ID: "IAmHEAD321"}}
-						bytes, _ := json.Marshal(branch)
-						_, _ = rw.Write(bytes)
-					})
-			}
-			err := glProvider.isHeadCommitOfBranch(tt.event, tt.branchName)
-			if tt.ErrMsg != "" {
-				assert.ErrorContains(t, err, tt.ErrMsg)
-				return
-			}
-			assert.NilError(t, err)
-		})
-	}
-}
-
-func TestGitLabCreateComment(t *testing.T) {
-	tests := []struct {
-		name          string
-		event         *info.Event
-		commit        string
-		updateMarker  string
-		mockResponses map[string]func(rw http.ResponseWriter, _ *http.Request)
-		wantErr       string
-		clientNil     bool
-	}{
-		{
-			name:      "nil client error",
-			clientNil: true,
-			event:     &info.Event{PullRequestNumber: 123},
-			wantErr:   "no gitlab client has been initialized",
-		},
-		{
-			name:    "not a merge request error",
-			event:   &info.Event{PullRequestNumber: 0},
-			wantErr: "create comment only works on merge requests",
-		},
-		{
-			name:         "create new comment",
-			event:        &info.Event{PullRequestNumber: 123, TargetProjectID: 666},
-			commit:       "New Comment",
-			updateMarker: "",
-			mockResponses: map[string]func(rw http.ResponseWriter, _ *http.Request){
-				"/projects/666/merge_requests/123/notes": func(rw http.ResponseWriter, r *http.Request) {
-					assert.Equal(t, r.Method, http.MethodPost)
-					rw.WriteHeader(http.StatusCreated)
-					fmt.Fprint(rw, `{}`)
-				},
-			},
-		},
-		{
-			name:         "update existing comment",
-			event:        &info.Event{PullRequestNumber: 123, TargetProjectID: 666},
-			commit:       "Updated Comment",
-			updateMarker: "MARKER",
-			mockResponses: map[string]func(rw http.ResponseWriter, _ *http.Request){
-				"/projects/666/merge_requests/123/notes": func(rw http.ResponseWriter, r *http.Request) {
-					if r.Method == http.MethodGet {
-						fmt.Fprint(rw, `[{"id": 555, "body": "MARKER"}]`)
-						return
-					}
-				},
-				"/projects/666/merge_requests/123/notes/555": func(rw http.ResponseWriter, r *http.Request) {
-					assert.Equal(t, r.Method, "PUT")
-					rw.WriteHeader(http.StatusOK)
-					fmt.Fprint(rw, `{}`)
-				},
-			},
-		},
-		{
-			name:         "no matching comment creates new",
-			event:        &info.Event{PullRequestNumber: 123, TargetProjectID: 666},
-			commit:       "New Comment",
-			updateMarker: "MARKER",
-			mockResponses: map[string]func(rw http.ResponseWriter, _ *http.Request){
-				"/projects/666/merge_requests/123/notes": func(rw http.ResponseWriter, r *http.Request) {
-					if r.Method == http.MethodGet {
-						fmt.Fprint(rw, `[{"id": 555, "body": "NO_MATCH"}]`)
-						return
-					}
-					assert.Equal(t, r.Method, http.MethodPost)
-					rw.WriteHeader(http.StatusCreated)
-					fmt.Fprint(rw, `{}`)
-				},
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			fakeclient, mux, teardown := thelp.Setup(t)
-			defer teardown()
-			observer, _ := zapobserver.New(zap.InfoLevel)
-			logger := zap.New(observer).Sugar()
-
-			if tt.clientNil {
-				p := &Provider{
-					Logger:          logger,
-					sourceProjectID: 666,
-				}
-				err := p.CreateComment(context.Background(), tt.event, tt.commit, tt.updateMarker)
-				assert.ErrorContains(t, err, tt.wantErr)
-				return
-			}
-
-			for endpoint, handler := range tt.mockResponses {
-				mux.HandleFunc(endpoint, handler)
-			}
-
-			p := &Provider{
-				sourceProjectID: 666,
-				gitlabClient:    fakeclient,
-			}
-			err := p.CreateComment(context.Background(), tt.event, tt.commit, tt.updateMarker)
-			if tt.wantErr != "" {
-				assert.ErrorContains(t, err, tt.wantErr)
-			} else {
-				assert.NilError(t, err)
-			}
-		})
-	}
-}
-
-func TestGitLabCreateCommentPaging(t *testing.T) {
-	updated := false
-	event := &info.Event{PullRequestNumber: 123, TargetProjectID: 666}
-	commit := "Updated Comment"
-	updateMarker := "MARKER"
-	mockResponses := map[string]func(rw http.ResponseWriter, _ *http.Request){
-		"/projects/666/merge_requests/123/notes": func(rw http.ResponseWriter, r *http.Request) {
-			if r.Method == http.MethodGet {
-				page := thelp.SetPagingHeader(t, rw, r, 100)
-				note := "unrelated"
-				if page == 10 {
-					note = "MARKER"
-				} else if page > 10 {
-					t.Error("notes shouldn't be queries past the expected ID")
-				}
-				fmt.Fprintf(rw, `[{"id": %d, "body": "%s"}]`, page, note)
-			}
-		},
-		"/projects/666/merge_requests/123/notes/{id}": func(rw http.ResponseWriter, r *http.Request) {
-			assert.Equal(t, r.Method, "PUT")
-			if r.PathValue("id") == "10" {
-				rw.WriteHeader(http.StatusOK)
-				updated = true
-			} else {
-				rw.WriteHeader(http.StatusNotFound)
-				t.Errorf("note %s is not intended to be updated", r.PathValue("id"))
-			}
-			fmt.Fprint(rw, `{}`)
-		},
-	}
-
-	fakeclient, mux, teardown := thelp.Setup(t)
-	defer teardown()
-
-	for endpoint, handler := range mockResponses {
-		mux.HandleFunc(endpoint, handler)
-	}
-
-	p := &Provider{
-		sourceProjectID: 666,
-		gitlabClient:    fakeclient,
-	}
-	err := p.CreateComment(context.Background(), event, commit, updateMarker)
-	assert.NilError(t, err)
-	assert.Assert(t, updated == true, "comment update handler has not been called")
 }

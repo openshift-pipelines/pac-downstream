@@ -1,4 +1,5 @@
 //go:build e2e
+// +build e2e
 
 package test
 
@@ -10,7 +11,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/google/go-github/v74/github"
+	"github.com/google/go-github/v68/github"
 	"gotest.tools/v3/assert"
 )
 
