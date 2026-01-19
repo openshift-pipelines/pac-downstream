@@ -166,8 +166,7 @@ func (s *prioritySemaphore) tryAcquire(key string) (bool, string) {
 		}
 	}
 
-	if s.semaphore.TryAcquire(1) {
-		s.running[key] = true
+	if s.acquire(nextKey) {
 		s.pending.pop()
 		return true, ""
 	}
@@ -176,9 +175,6 @@ func (s *prioritySemaphore) tryAcquire(key string) (bool, string) {
 }
 
 func (s *prioritySemaphore) acquire(key string) bool {
-	s.lock.Lock()
-	defer s.lock.Unlock()
-
 	if s.semaphore.TryAcquire(1) {
 		s.running[key] = true
 		return true

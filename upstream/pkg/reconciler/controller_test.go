@@ -2,7 +2,6 @@ package reconciler
 
 import (
 	"context"
-	"path"
 	"testing"
 
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode"
@@ -64,7 +63,7 @@ func TestCtrlOpts(t *testing.T) {
 	opts := ctrlOpts()(impl)
 
 	// Assert that the finalizer name is set correctly.
-	assert.Equal(t, path.Join(pipelinesascode.GroupName, pipelinesascode.FinalizerName), opts.FinalizerName)
+	assert.Equal(t, pipelinesascode.GroupName, opts.FinalizerName)
 
 	// Create a new PipelineRun object with the "started" state label.
 	pr := &pipelinev1.PipelineRun{

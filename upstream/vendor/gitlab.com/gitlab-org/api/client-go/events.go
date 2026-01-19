@@ -22,28 +22,18 @@ import (
 	"time"
 )
 
-type (
-	// EventsServiceInterface defines all the API methods for the EventsService
-	EventsServiceInterface interface {
-		ListCurrentUserContributionEvents(opt *ListContributionEventsOptions, options ...RequestOptionFunc) ([]*ContributionEvent, *Response, error)
-		ListProjectVisibleEvents(pid any, opt *ListProjectVisibleEventsOptions, options ...RequestOptionFunc) ([]*ProjectEvent, *Response, error)
-	}
-
-	// EventsService handles communication with the event related methods of
-	// the GitLab API.
-	//
-	// GitLab API docs: https://docs.gitlab.com/api/events/
-	EventsService struct {
-		client *Client
-	}
-)
-
-var _ EventsServiceInterface = (*EventsService)(nil)
+// EventsService handles communication with the event related methods of
+// the GitLab API.
+//
+// GitLab API docs: https://docs.gitlab.com/ee/api/events.html
+type EventsService struct {
+	client *Client
+}
 
 // ContributionEvent represents a user's contribution
 //
 // GitLab API docs:
-// https://docs.gitlab.com/api/events/#get-user-contribution-events
+// https://docs.gitlab.com/ee/api/events.html#get-user-contribution-events
 type ContributionEvent struct {
 	ID          int        `json:"id"`
 	Title       string     `json:"title"`
@@ -78,8 +68,8 @@ type ContributionEvent struct {
 
 // ListContributionEventsOptions represents the options for GetUserContributionEvents
 //
-// GitLab API docs:
-// https://docs.gitlab.com/api/events/#get-user-contribution-events
+// GitLap API docs:
+// https://docs.gitlab.com/ee/api/events.html#get-user-contribution-events
 type ListContributionEventsOptions struct {
 	ListOptions
 	Action     *EventTypeValue       `url:"action,omitempty" json:"action,omitempty"`
@@ -93,8 +83,8 @@ type ListContributionEventsOptions struct {
 // for the specified user, sorted from newest to oldest.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/api/events/#get-user-contribution-events
-func (s *UsersService) ListUserContributionEvents(uid any, opt *ListContributionEventsOptions, options ...RequestOptionFunc) ([]*ContributionEvent, *Response, error) {
+// https://docs.gitlab.com/ee/api/events.html#get-user-contribution-events
+func (s *UsersService) ListUserContributionEvents(uid interface{}, opt *ListContributionEventsOptions, options ...RequestOptionFunc) ([]*ContributionEvent, *Response, error) {
 	user, err := parseID(uid)
 	if err != nil {
 		return nil, nil, err
@@ -117,7 +107,7 @@ func (s *UsersService) ListUserContributionEvents(uid any, opt *ListContribution
 
 // ListCurrentUserContributionEvents gets a list currently authenticated user's events
 //
-// GitLab API docs: https://docs.gitlab.com/api/events/#list-currently-authenticated-users-events
+// GitLab API docs: https://docs.gitlab.com/ee/api/events.html#list-currently-authenticated-users-events
 func (s *EventsService) ListCurrentUserContributionEvents(opt *ListContributionEventsOptions, options ...RequestOptionFunc) ([]*ContributionEvent, *Response, error) {
 	req, err := s.client.NewRequest(http.MethodGet, "events", opt, options)
 	if err != nil {
@@ -136,7 +126,7 @@ func (s *EventsService) ListCurrentUserContributionEvents(opt *ListContributionE
 // ProjectEvent represents a GitLab project event.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/api/events/#list-a-projects-visible-events
+// https://docs.gitlab.com/ee/api/events.html#list-a-projects-visible-events
 type ProjectEvent struct {
 	ID          int    `json:"id"`
 	Title       string `json:"title"`
@@ -205,7 +195,7 @@ func (s ProjectEvent) String() string {
 // ListProjectVisibleEvents() options.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/api/events/#list-a-projects-visible-events
+// https://docs.gitlab.com/ee/api/events.html#list-a-projects-visible-events
 type ListProjectVisibleEventsOptions struct {
 	ListOptions
 	Action     *EventTypeValue       `url:"action,omitempty" json:"action,omitempty"`
@@ -218,8 +208,8 @@ type ListProjectVisibleEventsOptions struct {
 // ListProjectVisibleEvents gets the events for the specified project.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/api/events/#list-a-projects-visible-events
-func (s *EventsService) ListProjectVisibleEvents(pid any, opt *ListProjectVisibleEventsOptions, options ...RequestOptionFunc) ([]*ProjectEvent, *Response, error) {
+// https://docs.gitlab.com/ee/api/events.html#list-a-projects-visible-events
+func (s *EventsService) ListProjectVisibleEvents(pid interface{}, opt *ListProjectVisibleEventsOptions, options ...RequestOptionFunc) ([]*ProjectEvent, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err

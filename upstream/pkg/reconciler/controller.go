@@ -2,7 +2,6 @@ package reconciler
 
 import (
 	"context"
-	"path"
 
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
@@ -74,8 +73,8 @@ func NewController() func(context.Context, configmap.Watcher) *controller.Impl {
 
 // enqueue only the pipelineruns which are in `started` state
 // pipelinerun will have a label `pipelinesascode.tekton.dev/state` to describe the state.
-func checkStateAndEnqueue(impl *controller.Impl) func(obj any) {
-	return func(obj any) {
+func checkStateAndEnqueue(impl *controller.Impl) func(obj interface{}) {
+	return func(obj interface{}) {
 		object, err := kmeta.DeletionHandlingAccessor(obj)
 		if err == nil {
 			_, exist := object.GetAnnotations()[keys.State]
@@ -89,8 +88,8 @@ func checkStateAndEnqueue(impl *controller.Impl) func(obj any) {
 func ctrlOpts() func(impl *controller.Impl) controller.Options {
 	return func(_ *controller.Impl) controller.Options {
 		return controller.Options{
-			FinalizerName: path.Join(pipelinesascode.GroupName, pipelinesascode.FinalizerName),
-			PromoteFilterFunc: func(obj any) bool {
+			FinalizerName: pipelinesascode.GroupName,
+			PromoteFilterFunc: func(obj interface{}) bool {
 				_, exist := obj.(*tektonv1.PipelineRun).GetAnnotations()[keys.State]
 				return exist
 			},

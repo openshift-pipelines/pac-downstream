@@ -22,39 +22,15 @@ import (
 	"time"
 )
 
-type (
-	// EpicsServiceInterface defines all the API methods for the EpicsService
-	// Will be removed in v5 of the API, use Work Items API instead
-	EpicsServiceInterface interface {
-		// Will be removed in v5 of the API, use Work Items API instead
-		ListGroupEpics(gid any, opt *ListGroupEpicsOptions, options ...RequestOptionFunc) ([]*Epic, *Response, error)
-		// Will be removed in v5 of the API, use Work Items API instead
-		GetEpic(gid any, epic int, options ...RequestOptionFunc) (*Epic, *Response, error)
-		// Will be removed in v5 of the API, use Work Items API instead
-		GetEpicLinks(gid any, epic int, options ...RequestOptionFunc) ([]*Epic, *Response, error)
-		// Will be removed in v5 of the API, use Work Items API instead
-		CreateEpic(gid any, opt *CreateEpicOptions, options ...RequestOptionFunc) (*Epic, *Response, error)
-		// Will be removed in v5 of the API, use Work Items API instead
-		UpdateEpic(gid any, epic int, opt *UpdateEpicOptions, options ...RequestOptionFunc) (*Epic, *Response, error)
-		// Will be removed in v5 of the API, use Work Items API instead
-		DeleteEpic(gid any, epic int, options ...RequestOptionFunc) (*Response, error)
-	}
-
-	// EpicsService handles communication with the epic related methods
-	// of the GitLab API.
-	// Will be removed in v5 of the API, use Work Items API instead
-	//
-	// GitLab API docs: https://docs.gitlab.com/api/epics/
-	EpicsService struct {
-		client *Client
-	}
-)
-
-// Will be removed in v5 of the API, use Work Items API instead
-var _ EpicsServiceInterface = (*EpicsService)(nil)
+// EpicsService handles communication with the epic related methods
+// of the GitLab API.
+//
+// GitLab API docs: https://docs.gitlab.com/ee/api/epics.html
+type EpicsService struct {
+	client *Client
+}
 
 // EpicAuthor represents a author of the epic.
-// Will be removed in v5 of the API, use Work Items API instead
 type EpicAuthor struct {
 	ID        int    `json:"id"`
 	State     string `json:"state"`
@@ -65,9 +41,8 @@ type EpicAuthor struct {
 }
 
 // Epic represents a GitLab epic.
-// Will be removed in v5 of the API, use Work Items API instead
 //
-// GitLab API docs: https://docs.gitlab.com/api/epics/
+// GitLab API docs: https://docs.gitlab.com/ee/api/epics.html
 type Epic struct {
 	ID                      int         `json:"id"`
 	IID                     int         `json:"iid"`
@@ -97,17 +72,13 @@ type Epic struct {
 	URL                     string      `json:"url"`
 }
 
-// String gets a string representation of an Epic.
-//
-// Will be removed in v5 of the API, use Work Items API instead
 func (e Epic) String() string {
 	return Stringify(e)
 }
 
 // ListGroupEpicsOptions represents the available ListGroupEpics() options.
-// Will be removed in v5 of the API, use Work Items API instead
 //
-// GitLab API docs: https://docs.gitlab.com/api/epics/#list-epics-for-a-group
+// GitLab API docs: https://docs.gitlab.com/ee/api/epics.html#list-epics-for-a-group
 type ListGroupEpicsOptions struct {
 	ListOptions
 	AuthorID                *int          `url:"author_id,omitempty" json:"author_id,omitempty"`
@@ -128,10 +99,9 @@ type ListGroupEpicsOptions struct {
 
 // ListGroupEpics gets a list of group epics. This function accepts pagination
 // parameters page and per_page to return the list of group epics.
-// Will be removed in v5 of the API, use Work Items API instead
 //
-// GitLab API docs: https://docs.gitlab.com/api/epics/#list-epics-for-a-group
-func (s *EpicsService) ListGroupEpics(gid any, opt *ListGroupEpicsOptions, options ...RequestOptionFunc) ([]*Epic, *Response, error) {
+// GitLab API docs: https://docs.gitlab.com/ee/api/epics.html#list-epics-for-a-group
+func (s *EpicsService) ListGroupEpics(gid interface{}, opt *ListGroupEpicsOptions, options ...RequestOptionFunc) ([]*Epic, *Response, error) {
 	group, err := parseID(gid)
 	if err != nil {
 		return nil, nil, err
@@ -153,10 +123,9 @@ func (s *EpicsService) ListGroupEpics(gid any, opt *ListGroupEpicsOptions, optio
 }
 
 // GetEpic gets a single group epic.
-// Will be removed in v5 of the API, use Work Items API instead
 //
-// GitLab API docs: https://docs.gitlab.com/api/epics/#single-epic
-func (s *EpicsService) GetEpic(gid any, epic int, options ...RequestOptionFunc) (*Epic, *Response, error) {
+// GitLab API docs: https://docs.gitlab.com/ee/api/epics.html#single-epic
+func (s *EpicsService) GetEpic(gid interface{}, epic int, options ...RequestOptionFunc) (*Epic, *Response, error) {
 	group, err := parseID(gid)
 	if err != nil {
 		return nil, nil, err
@@ -178,10 +147,9 @@ func (s *EpicsService) GetEpic(gid any, epic int, options ...RequestOptionFunc) 
 }
 
 // GetEpicLinks gets all child epics of an epic.
-// Will be removed in v5 of the API, use Work Items API instead
 //
-// GitLab API docs: https://docs.gitlab.com/api/epic_links/
-func (s *EpicsService) GetEpicLinks(gid any, epic int, options ...RequestOptionFunc) ([]*Epic, *Response, error) {
+// GitLab API docs: https://docs.gitlab.com/ee/api/epic_links.html
+func (s *EpicsService) GetEpicLinks(gid interface{}, epic int, options ...RequestOptionFunc) ([]*Epic, *Response, error) {
 	group, err := parseID(gid)
 	if err != nil {
 		return nil, nil, err
@@ -203,9 +171,8 @@ func (s *EpicsService) GetEpicLinks(gid any, epic int, options ...RequestOptionF
 }
 
 // CreateEpicOptions represents the available CreateEpic() options.
-// Will be removed in v5 of the API, use Work Items API instead
 //
-// GitLab API docs: https://docs.gitlab.com/api/epics/#new-epic
+// GitLab API docs: https://docs.gitlab.com/ee/api/epics.html#new-epic
 type CreateEpicOptions struct {
 	Title            *string       `url:"title,omitempty" json:"title,omitempty"`
 	Labels           *LabelOptions `url:"labels,comma,omitempty" json:"labels,omitempty"`
@@ -221,10 +188,9 @@ type CreateEpicOptions struct {
 }
 
 // CreateEpic creates a new group epic.
-// Will be removed in v5 of the API, use Work Items API instead
 //
-// GitLab API docs: https://docs.gitlab.com/api/epics/#new-epic
-func (s *EpicsService) CreateEpic(gid any, opt *CreateEpicOptions, options ...RequestOptionFunc) (*Epic, *Response, error) {
+// GitLab API docs: https://docs.gitlab.com/ee/api/epics.html#new-epic
+func (s *EpicsService) CreateEpic(gid interface{}, opt *CreateEpicOptions, options ...RequestOptionFunc) (*Epic, *Response, error) {
 	group, err := parseID(gid)
 	if err != nil {
 		return nil, nil, err
@@ -246,9 +212,8 @@ func (s *EpicsService) CreateEpic(gid any, opt *CreateEpicOptions, options ...Re
 }
 
 // UpdateEpicOptions represents the available UpdateEpic() options.
-// Will be removed in v5 of the API, use Work Items API instead
 //
-// GitLab API docs: https://docs.gitlab.com/api/epics/#update-epic
+// GitLab API docs: https://docs.gitlab.com/ee/api/epics.html#update-epic
 type UpdateEpicOptions struct {
 	AddLabels        *LabelOptions `url:"add_labels,omitempty" json:"add_labels,omitempty"`
 	Confidential     *bool         `url:"confidential,omitempty" json:"confidential,omitempty"`
@@ -268,10 +233,9 @@ type UpdateEpicOptions struct {
 
 // UpdateEpic updates an existing group epic. This function is also used
 // to mark an epic as closed.
-// Will be removed in v5 of the API, use Work Items API instead
 //
-// GitLab API docs: https://docs.gitlab.com/api/epics/#update-epic
-func (s *EpicsService) UpdateEpic(gid any, epic int, opt *UpdateEpicOptions, options ...RequestOptionFunc) (*Epic, *Response, error) {
+// GitLab API docs: https://docs.gitlab.com/ee/api/epics.html#update-epic
+func (s *EpicsService) UpdateEpic(gid interface{}, epic int, opt *UpdateEpicOptions, options ...RequestOptionFunc) (*Epic, *Response, error) {
 	group, err := parseID(gid)
 	if err != nil {
 		return nil, nil, err
@@ -293,10 +257,9 @@ func (s *EpicsService) UpdateEpic(gid any, epic int, opt *UpdateEpicOptions, opt
 }
 
 // DeleteEpic deletes a single group epic.
-// Will be removed in v5 of the API, use Work Items API instead
 //
-// GitLab API docs: https://docs.gitlab.com/api/epics/#delete-epic
-func (s *EpicsService) DeleteEpic(gid any, epic int, options ...RequestOptionFunc) (*Response, error) {
+// GitLab API docs: https://docs.gitlab.com/ee/api/epics.html#delete-epic
+func (s *EpicsService) DeleteEpic(gid interface{}, epic int, options ...RequestOptionFunc) (*Response, error) {
 	group, err := parseID(gid)
 	if err != nil {
 		return nil, err

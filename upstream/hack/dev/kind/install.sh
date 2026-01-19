@@ -24,10 +24,9 @@ export KUBECONFIG=${HOME}/.kube/config.${KIND_CLUSTER_NAME}
 export TARGET=kubernetes
 export DOMAIN_NAME=paac-127-0-0-1.nip.io
 
-if [ -z "${TEST_GITEA_SMEEURL:-}" ]; then
+if [ -z "${TEST_GITEA_SMEEURL}" ]; then
   echo "You should forward the URL via smee, create a URL in there by going to https://hook.pipelinesascode.com"
-  echo "set it up as environement variable in the \`TEST_GITEA_SMEEURL=https://hook.pipelinesascode.com/XXXXXXXX\` variable"
-  echo "Alternatively, use command: \`TEST_GITEA_SMEEURL=\$(curl https://hook.pipelinesascode.com -o=/dev/null -sw '%{redirect_url}')\`"
+  echo "set it up as environement variable in the 'TEST_GITEA_SMEEURL=https://hook.pipelinesascode.com/XXXXXXXX' variable"
   exit 1
 fi
 if ! builtin type -p kind &>/dev/null; then
@@ -46,7 +45,7 @@ if ! builtin type -p gosmee &>/dev/null; then
 fi
 
 TMPD=$(mktemp -d /tmp/.GITXXXX)
-REG_PORT=${REG_PORT:-'5000'}
+REG_PORT='5000'
 REG_NAME='kind-registry'
 INSTALL_FROM_RELEASE=
 PAC_PASS_SECRET_FOLDER=${PAC_PASS_SECRET_FOLDER:-""}
@@ -173,9 +172,7 @@ function install_pac() {
     if [[ -n ${PAC_DEPLOY_SCRIPT:-""} ]]; then
       ${PAC_DEPLOY_SCRIPT}
     else
-      env KO_DOCKER_REPO=localhost:${REG_PORT} $ko apply -f config --sbom=none -B >/dev/null
-      # Install nonoai for e2e test integration for LLM
-      env KO_DOCKER_REPO=localhost:${REG_PORT} $ko apply -f pkg/test/nonoai/deployment.yaml --sbom=none -B >/dev/null
+      env KO_DOCKER_REPO=localhost:5000 $ko apply -f config --sbom=none -B >/dev/null
     fi
     cd ${oldPwd}
   fi
@@ -194,22 +191,12 @@ function configure_pac() {
 
   sed -e "s,%DOMAIN_NAME%,${DOMAIN_NAME}," -e "s,%SERVICE_NAME%,${service_name}," ingress-pac.yaml | kubectl apply -f-
 
-  patch_data=$(
-    cat <<EOF
-{
-  "data": {
-    "bitbucket-cloud-check-source-ip": "false",
-    "tekton-dashboard-url": "http://dashboard.${DOMAIN_NAME}",
-    "catalog-1-type": "artifacthub",
-    "catalog-1-id": "pacpipelines",
-    "catalog-1-name": "pac-pipelines",
-    "catalog-1-url": "https://artifacthub.io"
-  }
-}
-EOF
-  )
-  kubectl patch configmap -n pipelines-as-code pipelines-as-code --type merge --patch "${patch_data}"
-  kubectl patch configmap pac-config-logging -n pipelines-as-code --type json -p '[{"op": "replace", "path": "/data/loglevel.pipelinesascode", "value":"debug"}]'
+  kubectl patch configmap -n pipelines-as-code -p "{\"data\":{\"bitbucket-cloud-check-source-ip\": \"false\"}}" pipelines-as-code &&
+    kubectl patch configmap -n pipelines-as-code -p "{\"data\":{\"tekton-dashboard-url\": \"http://dashboard.${DOMAIN_NAME}\"}}" --type merge pipelines-as-code
+  # add custom catalog so we can use it in e2e, this will points to the normal upstream hub so we can easily use it
+  kubectl patch configmap -n pipelines-as-code -p '{"data":{"catalog-1-id": "custom", "catalog-1-name": "tekton", "catalog-1-url": "https://api.hub.tekton.dev/v1"}}' --type merge pipelines-as-code
+  # add one more custom catalog so we can use it in e2e for multiple catalog support, this will points to the normal upstream hub so we can easily use it
+  kubectl patch configmap -n pipelines-as-code -p '{"data":{"catalog-2-id": "custom2", "catalog-2-name": "tekton", "catalog-2-url": "https://api.hub.tekton.dev/v1"}}' --type merge pipelines-as-code
   set +x
   if [[ -n ${PAC_PASS_SECRET_FOLDER} ]]; then
     echo "Installing PAC secrets"
@@ -255,7 +242,6 @@ main() {
   install_pac
   [[ -z ${DISABLE_GITEA} ]] && install_gitea
   echo "And we are done :): "
-  echo "Using registry on localhost:${REG_PORT}"
 }
 
 function usage() {

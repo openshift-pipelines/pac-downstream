@@ -9,7 +9,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	knativeapi "knative.dev/pkg/apis"
 	knativeduckv1 "knative.dev/pkg/apis/duck/v1"
-	"sigs.k8s.io/yaml"
 )
 
 func MakePrTrStatus(ptaskname, displayName string, completionmn int) *tektonv1.PipelineRunTaskRunStatus {
@@ -81,7 +80,7 @@ func MakePR(name string, annotations map[string]string, spec tektonv1.PipelineRu
 	}
 }
 
-func MakePRCompletion(clock *clockwork.FakeClock, name, namespace, runstatus string, annotations, labels map[string]string, timeshift int) *tektonv1.PipelineRun {
+func MakePRCompletion(clock clockwork.FakeClock, name, namespace, runstatus string, annotations, labels map[string]string, timeshift int) *tektonv1.PipelineRun {
 	// fakeing time logic give me headache
 	// this will make the pr finish 5mn ago, starting 5-5mn ago
 	starttime := time.Duration((timeshift - 5*-1) * int(time.Minute))
@@ -150,15 +149,7 @@ func MakeTask(name string, taskSpec tektonv1.TaskSpec) *tektonv1.Task {
 	}
 }
 
-func MakeTaskB(name string, taskSpec tektonv1.TaskSpec) ([]byte, error) {
-	objB, err := yaml.Marshal(MakeTask(name, taskSpec))
-	if err != nil {
-		return nil, err
-	}
-	return objB, nil
-}
-
-func MakeTaskRunCompletion(clock *clockwork.FakeClock, name, namespace, runstatus string, annotation map[string]string, taskStatus tektonv1.TaskRunStatusFields, conditions knativeduckv1.Conditions, timeshift int) *tektonv1.TaskRun {
+func MakeTaskRunCompletion(clock clockwork.FakeClock, name, namespace, runstatus string, annotation map[string]string, taskStatus tektonv1.TaskRunStatusFields, conditions knativeduckv1.Conditions, timeshift int) *tektonv1.TaskRun {
 	starttime := time.Duration((timeshift - 5*-1) * int(time.Minute))
 	endtime := time.Duration((timeshift * -1) * int(time.Minute))
 

@@ -1,4 +1,5 @@
 //go:build e2e
+// +build e2e
 
 package test
 
@@ -7,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	ghlib "github.com/google/go-github/v74/github"
+	ghlib "github.com/google/go-github/v68/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	tgithub "github.com/openshift-pipelines/pipelines-as-code/test/pkg/github"
 	twait "github.com/openshift-pipelines/pipelines-as-code/test/pkg/wait"
@@ -25,9 +26,9 @@ func TestGithubMaxKeepRuns(t *testing.T) {
 	g.RunPullRequest(ctx, t)
 	defer g.TearDown(ctx, t)
 
-	g.Cnx.Clients.Log.Infof("Creating /test in PullRequest to create a second run")
-	_, _, err := g.Provider.Client().Issues.CreateComment(ctx, g.Options.Organization, g.Options.Repo, g.PRNumber,
-		&ghlib.IssueComment{Body: ghlib.Ptr("/test")})
+	g.Cnx.Clients.Log.Infof("Creating /retest in PullRequest")
+	_, _, err := g.Provider.Client.Issues.CreateComment(ctx, g.Options.Organization, g.Options.Repo, g.PRNumber,
+		&ghlib.IssueComment{Body: ghlib.Ptr("/retest")})
 	assert.NilError(t, err)
 
 	g.Cnx.Clients.Log.Infof("Wait for the second repository update to be updated")

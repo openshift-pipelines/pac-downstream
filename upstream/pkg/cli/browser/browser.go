@@ -1,13 +1,12 @@
 package browser
 
 import (
-	"context"
 	"os/exec"
 	"runtime"
 )
 
 // OpenWebBrowser opens the specified URL in the default browser of the user.
-func OpenWebBrowser(ctx context.Context, url string) error {
+func OpenWebBrowser(url string) error {
 	var cmd string
 
 	args := []string{}
@@ -22,5 +21,5 @@ func OpenWebBrowser(ctx context.Context, url string) error {
 	}
 
 	args = append(args, url)
-	return exec.CommandContext(ctx, cmd, args...).Start()
+	return exec.Command(cmd, args...).Start()
 }

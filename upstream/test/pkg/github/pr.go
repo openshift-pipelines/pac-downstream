@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	ghlib "github.com/google/go-github/v74/github"
+	ghlib "github.com/google/go-github/v68/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
 	ghprovider "github.com/openshift-pipelines/pipelines-as-code/pkg/provider/github"
@@ -90,7 +90,7 @@ func PushFilesToRef(ctx context.Context, client *ghlib.Client, commitMessage, ba
 }
 
 func PRCreate(ctx context.Context, cs *params.Run, ghcnx *ghprovider.Provider, owner, repo, targetRef, defaultBranch, title string) (int, error) {
-	pr, _, err := ghcnx.Client().PullRequests.Create(ctx, owner, repo, &ghlib.NewPullRequest{
+	pr, _, err := ghcnx.Client.PullRequests.Create(ctx, owner, repo, &ghlib.NewPullRequest{
 		Title: &title,
 		Head:  &targetRef,
 		Base:  &defaultBranch,
@@ -131,15 +131,12 @@ func (g *PRTest) RunPullRequest(ctx context.Context, t *testing.T) {
 	g.CommitTitle = fmt.Sprintf("Testing %s with Github APPS integration on %s", g.Label, targetNS)
 	g.Logger.Info(g.CommitTitle)
 
-	repoinfo, resp, err := ghcnx.Client().Repositories.Get(ctx, opts.Organization, opts.Repo)
+	repoinfo, resp, err := ghcnx.Client.Repositories.Get(ctx, opts.Organization, opts.Repo)
 	assert.NilError(t, err)
 	if resp != nil && resp.StatusCode == http.StatusNotFound {
 		t.Errorf("Repository %s not found in %s", opts.Organization, opts.Repo)
 	}
 
-	if g.Options.Settings.Github != nil {
-		opts.Settings = g.Options.Settings
-	}
 	err = CreateCRD(ctx, t, repoinfo, runcnx, opts, targetNS)
 	assert.NilError(t, err)
 
@@ -155,7 +152,7 @@ func (g *PRTest) RunPullRequest(ctx context.Context, t *testing.T) {
 	targetRefName := fmt.Sprintf("refs/heads/%s",
 		names.SimpleNameGenerator.RestrictLengthWithRandomSuffix("pac-e2e-test"))
 
-	sha, vref, err := PushFilesToRef(ctx, ghcnx.Client(), g.CommitTitle, repoinfo.GetDefaultBranch(), targetRefName,
+	sha, vref, err := PushFilesToRef(ctx, ghcnx.Client, g.CommitTitle, repoinfo.GetDefaultBranch(), targetRefName,
 		opts.Organization, opts.Repo, entries)
 	assert.NilError(t, err)
 
@@ -188,14 +185,10 @@ func (g *PRTest) TearDown(ctx context.Context, t *testing.T) {
 		g.Logger.Infof("Not cleaning up and closing PR since TEST_NOCLEANUP is set")
 		return
 	}
-
-	// Collect GitHub API call information from controller logs
-	g.collectGitHubAPICalls(ctx, t)
-
+	g.Logger.Infof("Closing PR %d", g.PRNumber)
 	if g.PRNumber != -1 {
-		g.Logger.Infof("Closing PR %d", g.PRNumber)
 		state := "closed"
-		_, _, err := g.Provider.Client().PullRequests.Edit(ctx,
+		_, _, err := g.Provider.Client.PullRequests.Edit(ctx,
 			g.Options.Organization, g.Options.Repo, g.PRNumber,
 			&ghlib.PullRequest{State: &state})
 		if err != nil {
@@ -205,10 +198,10 @@ func (g *PRTest) TearDown(ctx context.Context, t *testing.T) {
 	if g.TargetNamespace != "" {
 		repository.NSTearDown(ctx, t, g.Cnx, g.TargetNamespace)
 	}
-	if g.TargetRefName != "" && g.TargetRefName != options.MainBranch {
+	if g.TargetRefName != options.MainBranch {
 		branch := fmt.Sprintf("heads/%s", filepath.Base(g.TargetRefName))
 		g.Logger.Infof("Deleting Ref %s", branch)
-		_, err := g.Provider.Client().Git.DeleteRef(ctx, g.Options.Organization, g.Options.Repo, branch)
+		_, err := g.Provider.Client.Git.DeleteRef(ctx, g.Options.Organization, g.Options.Repo, branch)
 		assert.NilError(t, err)
 	}
 }
@@ -233,7 +226,7 @@ func (g *PRTest) RunPushRequest(ctx context.Context, t *testing.T) {
 		logmsg = fmt.Sprintf("Testing %s with Github APPS integration on %s", g.Label, targetNS)
 		g.Logger.Info(logmsg)
 	}
-	repoinfo, resp, err := ghcnx.Client().Repositories.Get(ctx, opts.Organization, opts.Repo)
+	repoinfo, resp, err := ghcnx.Client.Repositories.Get(ctx, opts.Organization, opts.Repo)
 	assert.NilError(t, err)
 	if resp != nil && resp.StatusCode == http.StatusNotFound {
 		t.Errorf("Repository %s not found in %s", opts.Organization, opts.Repo)
@@ -262,7 +255,7 @@ func (g *PRTest) RunPushRequest(ctx context.Context, t *testing.T) {
 		CommitTitle:   logmsg,
 	}
 	scm.PushFilesToRefGit(t, &scmOpts, entries)
-	branch, _, err := ghcnx.Client().Repositories.GetBranch(ctx, opts.Organization, opts.Repo, targetBranch, 1)
+	branch, _, err := ghcnx.Client.Repositories.GetBranch(ctx, opts.Organization, opts.Repo, targetBranch, 1)
 	assert.NilError(t, err)
 	sha := branch.GetCommit().GetSHA()
 	g.Logger.Infof("Commit %s has been created and pushed to %s in branch %s", sha, branch.GetCommit().GetHTMLURL(), branch.GetName())

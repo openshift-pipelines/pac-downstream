@@ -90,7 +90,6 @@ type ContentsResponse struct {
 	// `submodule_git_url` is populated when `type` is `submodule`, otherwise null
 	SubmoduleGitURL *string            `json:"submodule_git_url"`
 	Links           *FileLinksResponse `json:"_links"`
-	LastCommitSha   string             `json:"last_commit_sha"`
 }
 
 // FileCommitResponse contains information generated from a Git commit for a repo's file.
@@ -126,11 +125,7 @@ func (c *Client) GetFile(owner, repo, ref, filepath string, resolveLFS ...bool) 
 	if reader == nil {
 		return nil, resp, err
 	}
-	defer func() {
-		if closeErr := reader.Close(); closeErr != nil && err == nil {
-			err = closeErr
-		}
-	}()
+	defer reader.Close()
 
 	data, err2 := io.ReadAll(reader)
 	if err2 != nil {
