@@ -1,6 +1,7 @@
 package matcher
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -9,13 +10,13 @@ import (
 
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
+	hubtype "github.com/openshift-pipelines/pipelines-as-code/pkg/hub/vars"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/clients"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/settings"
 	httptesthelper "github.com/openshift-pipelines/pipelines-as-code/pkg/test/http"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/test/provider"
-	testifyassert "github.com/stretchr/testify/assert"
 	tektonv1beta1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1beta1"
 	"go.uber.org/zap"
 	zapobserver "go.uber.org/zap/zaptest/observer"
@@ -30,6 +31,18 @@ const (
 	testHubURL         = "https://mybelovedhub"
 	testCatalogHubName = "tekton"
 )
+
+func createArtifactHubResponse(t *testing.T, manifestContent string) string {
+	t.Helper()
+	response := map[string]interface{}{
+		"data": map[string]interface{}{
+			"manifestRaw": manifestContent,
+		},
+	}
+	jsonBytes, err := json.Marshal(response)
+	assert.NilError(t, err)
+	return string(jsonBytes)
+}
 
 func TestMain(m *testing.M) {
 	s := k8scheme.Scheme
@@ -105,14 +118,26 @@ func TestGrabTasksFromAnnotation(t *testing.T) {
 			annotations: map[string]string{
 				keys.Task: "[http://remote.task",
 			},
-			expected: []string{},
+			expected: nil,
 			wantErr:  "annotations in pipeline are in wrong format: [http://remote.task",
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			output, err := GrabTasksFromAnnotations(tt.annotations)
-			testifyassert.ElementsMatch(t, tt.expected, output)
+
+			for _, task := range output {
+				// check if we have the task inside the expected list
+				found := false
+				for _, expectedTask := range tt.expected {
+					if task == expectedTask {
+						found = true
+					}
+				}
+				assert.Assert(t, found, "We should have found the task %v in the expected list", task)
+			}
+			assert.Equal(t, len(tt.expected), len(output), "We should have the same number of tasks")
+
 			if tt.wantErr != "" {
 				assert.ErrorContains(t, err, tt.wantErr, "We should have get an error with %v but we didn't", tt.wantErr)
 			}
@@ -185,12 +210,28 @@ func TestGetTaskFromAnnotationName(t *testing.T) {
 			Index: "default",
 			URL:   testHubURL,
 			Name:  testCatalogHubName,
+			Type:  hubtype.TektonHubType,
 		})
 	hubCatalogs.Store(
 		"anotherHub", settings.HubCatalog{
 			Index: "1",
 			URL:   testHubURL,
 			Name:  testCatalogHubName,
+			Type:  hubtype.TektonHubType,
+		})
+	hubCatalogs.Store(
+		"artifactHub", settings.HubCatalog{
+			Index: "2",
+			URL:   testHubURL,
+			Name:  testCatalogHubName,
+			Type:  hubtype.ArtifactHubType,
+		})
+	hubCatalogs.Store(
+		"artifactHubDefault", settings.HubCatalog{
+			Index: "3",
+			URL:   testHubURL,
+			Name:  "default",
+			Type:  hubtype.ArtifactHubType,
 		})
 	tests := []struct {
 		task                   string
@@ -212,13 +253,13 @@ func TestGetTaskFromAnnotationName(t *testing.T) {
 					"code": "200",
 				},
 			},
-			wantErr: "returning empty",
+			wantErr: "not found",
 		},
 		{
 			name:                   "test-good-coming-from-provider",
 			task:                   "http://provider/remote.task",
 			wantProviderRemoteTask: true,
-			wantErr:                "returning empty",
+			wantErr:                "not found",
 		},
 		{
 			name:                   "test-bad-coming-from-provider",
@@ -271,7 +312,7 @@ func TestGetTaskFromAnnotationName(t *testing.T) {
 					"code": "200",
 				},
 			},
-			wantErr: "remote task from uri: http://remote.task has not been recognized as a tekton task",
+			wantErr: "remote task from URI http://remote.task has not been recognized as a Tekton task",
 		},
 		{
 			name:        "test-annotations-inside-repo",
@@ -296,19 +337,19 @@ func TestGetTaskFromAnnotationName(t *testing.T) {
 			name:    "test-annotations-remote-no-event-not-found-no-error",
 			task:    "not/here",
 			wantLog: "could not find remote file not/here",
-			wantErr: "returning empty",
+			wantErr: "not found",
 		},
 		{
 			name:    "test-annotations-unknown-hub",
 			task:    "foo://bar",
 			wantLog: "custom catalog foo is not found",
-			wantErr: "could not get remote task \"foo://bar\": returning empty",
+			wantErr: "remote task \"foo://bar\" not found",
 		},
 		{
 			name:        "test-get-from-custom-hub",
 			gotTaskName: "task",
 			task:        "anotherHub://chmouzie",
-			wantLog:     "successfully fetched task chmouzie from custom catalog HUB anotherHub on URL https://mybelovedhub",
+			wantLog:     "successfully fetched task chmouzie from custom catalog Hub anotherHub on URL https://mybelovedhub",
 			remoteURLS: map[string]map[string]string{
 				testHubURL + "/resource/" + testCatalogHubName + "/task/chmouzie": {
 					"body": `{"data": {"LatestVersion": {"version": "0.1"}}}`,
@@ -346,6 +387,39 @@ func TestGetTaskFromAnnotationName(t *testing.T) {
 				},
 				fmt.Sprintf("%s/resource/%s/task/chmouzie/0.2/raw", testHubURL, testCatalogHubName): {
 					"body": readTDfile(t, "task-good"),
+					"code": "200",
+				},
+			},
+		},
+		{
+			name:        "test-get-from-artifacthub-custom-hub",
+			gotTaskName: "task",
+			task:        "artifactHub://chmouzie",
+			remoteURLS: map[string]map[string]string{
+				fmt.Sprintf("%s/api/v1/packages/tekton-task/%s/chmouzie", testHubURL, testCatalogHubName): {
+					"body": createArtifactHubResponse(t, readTDfile(t, "task-good")),
+					"code": "200",
+				},
+			},
+		},
+		{
+			name:        "test-get-from-artifacthub-latest",
+			gotTaskName: "task",
+			task:        "artifactHubDefault://chmouzie",
+			remoteURLS: map[string]map[string]string{
+				fmt.Sprintf("%s/api/v1/packages/tekton-task/tekton-catalog-tasks/chmouzie", testHubURL): {
+					"body": createArtifactHubResponse(t, readTDfile(t, "task-good")),
+					"code": "200",
+				},
+			},
+		},
+		{
+			name:        "test-get-from-artifacthub-specific-version",
+			gotTaskName: "task",
+			task:        "artifactHubDefault://chmouzie:0.2",
+			remoteURLS: map[string]map[string]string{
+				fmt.Sprintf("%s/api/v1/packages/tekton-task/tekton-catalog-tasks/chmouzie/0.2", testHubURL): {
+					"body": createArtifactHubResponse(t, readTDfile(t, "task-good")),
 					"code": "200",
 				},
 			},
@@ -405,12 +479,28 @@ func TestGetPipelineFromAnnotationName(t *testing.T) {
 			Index: "default",
 			URL:   testHubURL,
 			Name:  testCatalogHubName,
+			Type:  hubtype.TektonHubType,
 		})
 	hubCatalogs.Store(
 		"anotherHub", settings.HubCatalog{
 			Index: "1",
 			URL:   testHubURL,
 			Name:  testCatalogHubName,
+			Type:  hubtype.TektonHubType,
+		})
+	hubCatalogs.Store(
+		"artifactHub", settings.HubCatalog{
+			Index: "2",
+			URL:   testHubURL,
+			Name:  testCatalogHubName,
+			Type:  hubtype.ArtifactHubType,
+		})
+	hubCatalogs.Store(
+		"artifactHubDefault", settings.HubCatalog{
+			Index: "3",
+			URL:   testHubURL,
+			Name:  "default",
+			Type:  hubtype.ArtifactHubType,
 		})
 	tests := []struct {
 		pipeline        string
@@ -456,7 +546,7 @@ func TestGetPipelineFromAnnotationName(t *testing.T) {
 		// 			"code": "200",
 		// 		},
 		// 	},
-		// 	wantErr: "remote pipeline from uri: http://remote.pipeline with name pipeline-test1 cannot be validated:",
+		// 	wantErr: "remote pipeline from URI http://remote.pipeline with name pipeline-test1 cannot be validated:",
 		// },
 		// {
 		// 	name: "invalid-remote-pipeline",
@@ -490,7 +580,7 @@ func TestGetPipelineFromAnnotationName(t *testing.T) {
 					"code": "200",
 				},
 			},
-			wantErr: "remote pipeline from uri: http://remote.pipeline has not been recognized as a tekton pipeline",
+			wantErr: "remote pipeline from URI http://remote.pipeline has not been recognized as a Tekton pipeline",
 		},
 		{
 			name:     "bad/could not get remote",
@@ -498,7 +588,7 @@ func TestGetPipelineFromAnnotationName(t *testing.T) {
 			wantErr:  "error getting remote pipeline",
 		},
 		{
-			name:     "bad/returning empty",
+			name:     "bad/not found",
 			pipeline: "http://remote.pipeline",
 			remoteURLS: map[string]map[string]string{
 				"http://remote.pipeline": {
@@ -506,19 +596,19 @@ func TestGetPipelineFromAnnotationName(t *testing.T) {
 					"code": "200",
 				},
 			},
-			wantErr: "returning empty",
+			wantErr: "not found",
 		},
 		{
 			name:     "test-annotations-unknown-hub",
 			pipeline: "foo://bar",
 			wantLog:  "custom catalog foo is not found",
-			wantErr:  "could not get remote pipeline \"foo://bar\": returning empty",
+			wantErr:  "remote pipeline \"foo://bar\" not found",
 		},
 		{
 			name:            "test-get-from-custom-hub",
 			gotPipelineName: "pipeline",
 			pipeline:        "anotherHub://chmouzie",
-			wantLog:         "successfully fetched pipeline chmouzie from custom catalog HUB anotherHub on URL https://mybelovedhub",
+			wantLog:         "successfully fetched pipeline chmouzie from custom catalog Hub anotherHub on URL https://mybelovedhub",
 			remoteURLS: map[string]map[string]string{
 				testHubURL + "/resource/" + testCatalogHubName + "/pipeline/chmouzie": {
 					"body": `{"data": {"LatestVersion": {"version": "0.1"}}}`,
@@ -556,6 +646,39 @@ func TestGetPipelineFromAnnotationName(t *testing.T) {
 				},
 				fmt.Sprintf("%s/resource/%s/pipeline/chmouzie/0.2/raw", testHubURL, testCatalogHubName): {
 					"body": readTDfile(t, "pipeline-good"),
+					"code": "200",
+				},
+			},
+		},
+		{
+			name:            "test-get-from-artifacthub-custom-hub",
+			gotPipelineName: "pipeline",
+			pipeline:        "artifactHub://chmouzie",
+			remoteURLS: map[string]map[string]string{
+				fmt.Sprintf("%s/api/v1/packages/tekton-pipeline/%s/chmouzie", testHubURL, testCatalogHubName): {
+					"body": createArtifactHubResponse(t, readTDfile(t, "pipeline-good")),
+					"code": "200",
+				},
+			},
+		},
+		{
+			name:            "test-get-from-artifacthub-latest",
+			gotPipelineName: "pipeline",
+			pipeline:        "artifactHubDefault://chmouzie",
+			remoteURLS: map[string]map[string]string{
+				fmt.Sprintf("%s/api/v1/packages/tekton-pipeline/tekton-catalog-pipelines/chmouzie", testHubURL): {
+					"body": createArtifactHubResponse(t, readTDfile(t, "pipeline-good")),
+					"code": "200",
+				},
+			},
+		},
+		{
+			name:            "test-get-from-artifacthub-specific-version",
+			gotPipelineName: "pipeline",
+			pipeline:        "artifactHubDefault://chmouzie:0.2",
+			remoteURLS: map[string]map[string]string{
+				fmt.Sprintf("%s/api/v1/packages/tekton-pipeline/tekton-catalog-pipelines/chmouzie/0.2", testHubURL): {
+					"body": createArtifactHubResponse(t, readTDfile(t, "pipeline-good")),
 					"code": "200",
 				},
 			},
