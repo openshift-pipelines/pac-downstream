@@ -26,6 +26,16 @@ When it finishes, you will have the following installed in your kind cluster:
 - Pipelines as code deployed from your repo with ko.
 - Gitea service running locally so you can run the E2E tests against it (Gitea has the most comprehensive set of tests).
 
+### Configuring the Kind Registry Port
+
+By default, the Kind registry runs on port 5000. To use a different port, set the `REG_PORT` environment variable:
+
+```shell
+# Set a custom registry port
+export REG_PORT=5001
+make dev
+```
+
 By default, it will try to install from
 $GOPATH/src/github.com/openshift-pipelines/pipelines-as-code. To override it,
 set the `PAC_DIRS` environment variable.
@@ -179,11 +189,31 @@ For example, to test and lint the go files:
 make test lint-go
 ```
 
-If you add a CLI command with help, you will need to regenerate the golden files:
+We use [golden](https://pkg.go.dev/gotest.tools/v3/golden) files in our tests, for instance, to compare the output of CLI commands or other detailed tests. Occasionally, you may need to regenerate the golden files if you modify the output of a command. For unit tests, you can use this Makefile target:
 
 ```shell
 make update-golden
 ```
+
+Head over to the
+[./test/README.md](https://github.com/openshift-pipelines/pipelines-as-code/blob/main/test/README.md)
+for more information on how to update the golden files on the E2E tests.
+
+## Update OpenAPI Schemas
+
+The CRD schemas are automatically generated from the Go code (generally
+`pkg/apis/pipelinesascode/v1alpha1/types.go`). After modifying
+any type definitions, you'll need to regenerate these schemas to update the CRD
+in `config/300-repositories.yaml`.
+
+When modifying types, ensure the validation logic is appropriate, then run:
+
+```shell
+make update-schemas
+```
+
+There is a PAC CI check that will ensure that the CRD is up to date with the go
+code.
 
 ## Configuring the Pre Push Git checks
 
@@ -251,6 +281,39 @@ need to go to this URL:
 
 There is a drop-down at the bottom of the page to let you change the older
 major version.
+
+### Documentation shortcode
+
+The hugo-book theme has several shortcodes that are used to do different things
+for the documentation.
+
+See the demo site of hugo-book on how to use them here <https://github.com/alex-shpak/hugo-book#shortcodes>
+
+And the demo on how to use them here:
+
+<https://hugo-book-demo.netlify.app/>
+
+We have as well some custom ones, you can see them in this directory:
+
+<https://github.com/openshift-pipelines/pipelines-as-code/tree/main/docs/layouts/shortcodes>
+
+See below on how to use them, feel free to grep around the documentation to see how they are actually used.
+
+#### tech_preview
+
+```markdown
+{ {< tech_preview "Feature Name" >}}
+```
+
+This shortcode creates a red warning blockquote indicating that a feature is in Technology Preview status. It takes one parameter - the name of the feature. The output shows a warning message that the specified feature is not supported for production use and is provided for early testing and feedback.
+
+#### support_matrix
+
+```markdown
+  { {< support_matrix github_app="true" github_webhook="true|false" gitea="true|false" gitlab="true|false" bitbucket_cloud="true|false" bitbucket_datacenter="true|false" >}}
+```
+
+This shortcode generates a compatibility table showing which Git providers support a particular feature. Each parameter accepts "true" or "false" values, displaying checkmarks (✅) or cross marks (❌) accordingly. The table lists all major Git providers (GitHub App, GitHub Webhook, Gitea, GitLab, Bitbucket Cloud, and Bitbucket Data Center) with their support status for the feature.
 
 ## Documentation when we are doing the Release Process
 
@@ -369,9 +432,101 @@ for arm64.
 - A GitHub action is using [ko](https://ko.build/) to build the amd64 and arm64 images whenever there is
 a push to a branch or for a release.
 
+## LLM Assistance Disclosure
+
+When submitting a pull request to Pipelines-as-Code, contributors must disclose
+any AI/LLM assistance used during development. This promotes transparency and
+proper attribution in our collaborative development environment.
+
+### Required Disclosure
+
+All contributors must:
+
+1. **Check the appropriate boxes** in the PR template's "🤖 AI Assistance"
+   section
+2. **Specify which LLM was used** (GitHub Copilot, ChatGPT, Claude, Cursor,
+   Gemini, etc.)
+3. **Indicate the extent of assistance** (documentation, code generation, PR
+   description, etc.)
+4. **Add Co-authored-by trailers** to commit messages when AI significantly
+   contributed to the code
+
+### Adding Co-authored-by Trailers
+
+For commits where AI contributed significantly to the code, add appropriate
+`Co-authored-by` trailers to your commit messages. You can use our helper
+script to automate this process:
+
+```shell
+./hack/add-llm-coauthor.sh
+```
+
+This interactive script will:
+
+- Help you select commits that used AI assistance
+- Choose which AI assistants to credit
+- Automatically add proper `Co-authored-by` trailers to your commit messages
+
+**Examples of Co-authored-by trailers:**
+
+```text
+Co-authored-by: Claude <noreply@anthropic.com>
+Co-authored-by: ChatGPT <noreply@chatgpt.com>
+Co-authored-by: Cursor <cursor@users.noreply.github.com>
+Co-authored-by: Copilot <Copilot@users.noreply.github.com>
+Co-authored-by: Gemini <gemini@google.com>
+```
+
+### Why We Require This
+
+- **Transparency**: Helps reviewers understand the development process
+- **Attribution**: Properly credits AI tools that significantly contributed
+- **Learning**: Helps the team understand effective AI-assisted development patterns
+- **Compliance**: Meets organizational requirements for AI tool usage tracking
+
+See the [PR template](.github/pull_request_template.md) for complete details on
+the AI assistance disclosure requirements.
+
+## Testing External contributor Pull Requests for E2E Testing
+
+When an external contributor submits a pull request (PR), E2E tests may not run
+automatically due to security restrictions. To work around this, maintainers
+can use a script to mirror the external PR to their own fork, allowing E2E
+tests to run safely.
+
+### Usage
+
+1. Ensure you have the [GitHub CLI (`gh`)](https://cli.github.com/) installed and authenticated and fzf installed.
+2. Fork the repository and configure your fork as a git remote.
+3. Run the script:
+
+   ```bash
+   ./hack/mirror-pr.sh <PR_NUMBER> <YOUR_FORK_REMOTE>
+   ```
+
+   If you omit the PR number, you'll be prompted to select one interactively.
+   Same for the fork remote, if you omit it, it will get asked with fzf.
+
+### What the Script Does
+
+- Checks out the external PR locally.
+- Pushes the branch to your fork with a unique name.
+- Creates a draft pull request on the upstream repository with a `[MIRRORED] DO NOT MERGE` title and a `do-not-merge` label.
+- Comments on the original PR with a link to the mirrored PR.
+
+This process allows E2E tests to run on the mirrored PR, while preventing accidental merges. Once the original PR is merged, the mirrored PR can be closed.
+
+See the script (`./hack/mirror-pr.sh`) in the repository for details.
+
+### When all is green in the mirrored PR pull request
+
+- You can merge the external contributor original PR.
+- Close the mirrored PR.
+- Cleanup the branches on your fork or on your local repo
+
 # Links
 
 - [Jira Backlog](https://issues.redhat.com/browse/SRVKP-2144?jql=component%20%3D%20%22Pipeline%20as%20Code%22%20%20AND%20status%20!%3D%20Done)
-- [Bitbucket Server Rest API](https://docs.atlassian.com/bitbucket-server/rest/7.17.0/bitbucket-rest.html)
+- [Bitbucket Data Center Rest API](https://docs.atlassian.com/bitbucket-server/rest/7.17.0/bitbucket-rest.html)
 - [GitHub API](https://docs.github.com/en/rest/reference)
 - [GitLab API](https://docs.gitlab.com/ee/api/api_resources.html)

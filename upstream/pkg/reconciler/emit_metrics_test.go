@@ -6,6 +6,7 @@ import (
 
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/metrics"
+	metricsutils "github.com/openshift-pipelines/pipelines-as-code/pkg/test/metrics"
 	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
@@ -86,7 +87,7 @@ func TestCountPipelineRun(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			unregisterMetrics()
+			metricsutils.ResetMetrics()
 			m, err := metrics.NewRecorder()
 			assert.NilError(t, err)
 			r := &Reconciler{
@@ -102,7 +103,7 @@ func TestCountPipelineRun(t *testing.T) {
 			metricstest.AssertNoMetric(t, "pipelines_as_code_pipelinerun_count")
 
 			if err = r.countPipelineRun(pr); (err != nil) != tt.wantErr {
-				t.Errorf("countPipelineRun() error = %v, wantErr %v", err != nil, tt.wantErr)
+				t.Errorf("countPipelineRun() error = %v, wantErr %v. error: %v", err != nil, tt.wantErr, err)
 			}
 
 			if !tt.wantErr {
@@ -224,7 +225,7 @@ func TestCalculatePipelineRunDuration(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			unregisterMetrics()
+			metricsutils.ResetMetrics()
 			m, err := metrics.NewRecorder()
 			assert.NilError(t, err)
 			r := &Reconciler{
@@ -291,7 +292,7 @@ func TestCountRunningPRs(t *testing.T) {
 		prl = append(prl, pr)
 	}
 
-	unregisterMetrics()
+	metricsutils.ResetMetrics()
 	m, err := metrics.NewRecorder()
 	assert.NilError(t, err)
 	r := &Reconciler{
@@ -305,13 +306,4 @@ func TestCountRunningPRs(t *testing.T) {
 		"repository": "pac-repo",
 	}
 	metricstest.CheckLastValueData(t, "pipelines_as_code_running_pipelineruns_count", tags, float64(numberOfRunningPRs))
-}
-
-func unregisterMetrics() {
-	metricstest.Unregister("pipelines_as_code_pipelinerun_count",
-		"pipelines_as_code_pipelinerun_duration_seconds_sum",
-		"pipelines_as_code_running_pipelineruns_count")
-
-	// have to reset sync.Once to allow recreation of Recorder.
-	metrics.ResetRecorder()
 }
