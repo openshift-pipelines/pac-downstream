@@ -26,6 +26,7 @@ LABEL \
       com.redhat.component="openshift-pipelines-pipelines-as-code-watcher-container" \
       name="openshift-pipelines/pipelines-as-code-watcher-rhel8" \
       version=$VERSION \
+      cpe="cpe:/a:redhat:openshift_pipelines:1.15::el8" \
       summary="Red Hat OpenShift Pipelines Pipelines as Code Watcher" \
       maintainer="pipelines-extcomm@redhat.com" \
       description="Red Hat OpenShift Pipelines Pipelines as Code Watcher" \

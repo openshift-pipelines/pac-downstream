@@ -23,6 +23,7 @@ LABEL \
       com.redhat.component="openshift-pipelines-cli-tkn-pac-container" \
       name="openshift-pipelines/pipelines-cli-tkn-pac-rhel8" \
       version=$VERSION \
+      cpe="cpe:/a:redhat:openshift_pipelines:1.15::el8" \
       summary="Red Hat OpenShift pipelines tkn pac CLI" \
       maintainer="pipelines-extcomm@redhat.com" \
       description="CLI client 'tkn-pac' for managing openshift pipelines" \
