@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/google/go-github/v74/github"
+	"github.com/google/go-github/v81/github"
 	apipac "github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/consoleui"
@@ -335,9 +335,9 @@ func TestGetPipelineRunsFromRepo(t *testing.T) {
 			p.eventEmitter = events.NewEventEmitter(stdata.Kube, logger)
 			matchedPRs, err := p.getPipelineRunsFromRepo(ctx, tt.repositories)
 			assert.NilError(t, err)
-			matchedPRNames := []string{}
+			matchedPRNames := make([]string, len(matchedPRs))
 			for i := range matchedPRs {
-				matchedPRNames = append(matchedPRNames, matchedPRs[i].PipelineRun.GetGenerateName())
+				matchedPRNames[i] = matchedPRs[i].PipelineRun.GetGenerateName()
 			}
 			if tt.logSnippet != "" {
 				assert.Assert(t, logCatcher.FilterMessageSnippet(tt.logSnippet).Len() > 0, logCatcher.All())
