@@ -20,7 +20,7 @@ jobs:
         rm -fR upstream
         git clone https://github.com/openshift-pipelines/pipelines-as-code upstream
         pushd upstream
-        git checkout -B release-v0.39.x origin/release-v0.39.x
+        git checkout -B release-v0.41.x origin/release-v0.41.x
         popd
     - name: Commit new changes
       run: |
