@@ -22,41 +22,33 @@ import (
 	"time"
 )
 
-type (
-	ResourceWeightEventsServiceInterface interface {
-		ListIssueWeightEvents(pid any, issue int64, opt *ListWeightEventsOptions, options ...RequestOptionFunc) ([]*WeightEvent, *Response, error)
-	}
-
-	// ResourceWeightEventsService handles communication with the event related
-	// methods of the GitLab API.
-	//
-	// GitLab API docs: https://docs.gitlab.com/api/resource_weight_events/
-	ResourceWeightEventsService struct {
-		client *Client
-	}
-)
-
-var _ ResourceWeightEventsServiceInterface = (*ResourceWeightEventsService)(nil)
+// ResourceWeightEventsService handles communication with the event related
+// methods of the GitLab API.
+//
+// GitLab API docs: https://docs.gitlab.com/ee/api/resource_weight_events.html
+type ResourceWeightEventsService struct {
+	client *Client
+}
 
 // WeightEvent represents a resource weight event.
 //
-// GitLab API docs: https://docs.gitlab.com/api/resource_weight_events/
+// GitLab API docs: https://docs.gitlab.com/ee/api/resource_weight_events.html
 type WeightEvent struct {
-	ID           int64          `json:"id"`
+	ID           int            `json:"id"`
 	User         *BasicUser     `json:"user"`
 	CreatedAt    *time.Time     `json:"created_at"`
 	ResourceType string         `json:"resource_type"`
-	ResourceID   int64          `json:"resource_id"`
+	ResourceID   int            `json:"resource_id"`
 	State        EventTypeValue `json:"state"`
-	IssueID      int64          `json:"issue_id"`
-	Weight       int64          `json:"weight"`
+	IssueID      int            `json:"issue_id"`
+	Weight       int            `json:"weight"`
 }
 
 // ListWeightEventsOptions represents the options for all resource weight events
 // list methods.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/api/resource_weight_events/#list-project-issue-weight-events
+// https://docs.gitlab.com/ee/api/resource_weight_events.html#list-project-issue-weight-events
 type ListWeightEventsOptions struct {
 	ListOptions
 }
@@ -65,8 +57,8 @@ type ListWeightEventsOptions struct {
 // project and issue.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/api/resource_weight_events/#list-project-issue-weight-events
-func (s *ResourceWeightEventsService) ListIssueWeightEvents(pid any, issue int64, opt *ListWeightEventsOptions, options ...RequestOptionFunc) ([]*WeightEvent, *Response, error) {
+// https://docs.gitlab.com/ee/api/resource_weight_events.html#list-project-issue-weight-events
+func (s *ResourceWeightEventsService) ListIssueWeightEvents(pid interface{}, issue int, opt *ListWeightEventsOptions, options ...RequestOptionFunc) ([]*WeightEvent, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err

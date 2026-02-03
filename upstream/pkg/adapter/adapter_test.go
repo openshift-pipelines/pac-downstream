@@ -8,7 +8,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/google/go-github/v81/github"
+	"github.com/google/go-github/v68/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/clients"
@@ -48,10 +48,10 @@ func TestHandleEvent(t *testing.T) {
 	ctx = info.StoreNS(ctx, "default")
 
 	emptys := &unstructured.Unstructured{}
-	emptys.SetUnstructuredContent(map[string]any{
+	emptys.SetUnstructuredContent(map[string]interface{}{
 		"apiVersion": "route.openshift.io/v1",
 		"kind":       "Route",
-		"metadata": map[string]any{
+		"metadata": map[string]interface{}{
 			"name":      "not",
 			"namespace": "console",
 		},
@@ -218,7 +218,7 @@ func TestWhichProvider(t *testing.T) {
 	}
 	tests := []struct {
 		name          string
-		event         any
+		event         interface{}
 		header        http.Header
 		wantErrString string
 	}{

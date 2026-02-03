@@ -9,36 +9,68 @@ weight: 15
 
 It's important: <https://github.com/openshift-pipelines/pipelines-as-code/blob/main/code-of-conduct.md>
 
-## Local Development Setup with startpaac
+## Use the all in one install on kind to develop
 
-For local development, we recommend using [startpaac](https://github.com/openshift-pipelines/startpaac).
+It uses kind under docker. You start it with:
 
-startpaac provides an interactive, modular setup that includes:
+```shell
+make dev
+```
+
+When it finishes, you will have the following installed in your kind cluster:
 
 - Kind Cluster deployment
-- Internal registry for `ko`
-- Nginx ingress controller
-- Tekton and Dashboard
-- Pipelines as Code deployment
-- Forgejo for local E2E testing
+- Internal registry to push to from `ko`
+- An ingress controller with nginx for routing.
+- Tekton and Dashboard installed with an ingress route.
+- Pipelines as code deployed from your repo with ko.
+- Gitea service running locally so you can run the E2E tests against it (Gitea has the most comprehensive set of tests).
 
-### Quick Start
+By default, it will try to install from
+$GOPATH/src/github.com/openshift-pipelines/pipelines-as-code. To override it,
+set the `PAC_DIRS` environment variable.
 
-```shell
-git clone https://github.com/openshift-pipelines/startpaac
-cd startpaac
-./startpaac -a
-```
+- It will deploy under the nip.io domain reflector, the URL will be:
 
-See the [startpaac README](https://github.com/openshift-pipelines/startpaac) for configuration options and environment variables.
+  - <http://controller.paac-127-0-0-1.nip.io>
+  - <http://dashboard.paac-127-0-0-1.nip.io>
 
-### Redeploying PAC
+- You will need to create the secret yourself. If you have the [pass cli](https://www.passwordstore.org/)
+  installed, you can point to a folder that contains: github-application-id, github-private-key, webhook.secret
+  as configured from your GitHub application. Set the `PAC_PASS_SECRET_FOLDER`
+  environment variable to point to it.
+  For example:
 
-If you need to redeploy just Pipelines as Code, you can use ko directly:
+  ```shell
+  pass insert github-app/github-application-id
+  pass insert github-app/webhook.secret
+  pass insert -m github-app/github-private-key
+  ```
 
-```shell
-env KO_DOCKER_REPO=localhost:5000 ko apply -f config -B
-```
+- If you need to redeploy your pac install (and only pac), you can do:
+
+  ```shell
+  ./hack/dev/kind/install.sh -p
+  ```
+
+  or
+
+  ```shell
+  make rdev
+  ```
+
+  or you can do this directly with ko:
+
+  ```shell
+  env KO_DOCKER_REPO=localhost:5000 ko apply -f ${1:-"config"} -B
+  ```
+
+- more flags: `-b` to only do the kind creation+nginx+docker image, `-r` to
+  install from the latest stable release (override with the env variable `PAC_RELEASE`)
+  instead of ko. `-c` will only do the pac configuration (i.e., creation of
+  secrets/ingress, etc..)
+
+- see the [install.sh](https://github.com/openshift-pipelines/pipelines-as-code/blob/main/hack/dev/kind/install.sh) -h for all flags
 
 ## Gitea
 
@@ -87,7 +119,7 @@ There are some gotchas with the webhook validation secret. Pipelines-as-Code
 detects a Gitea install and lets the user set an empty webhook secret (by default
 it's enforced).
 
-startpaac will by default spin up a new instance of Forgejo (a Gitea fork) to play
+The `install.sh` script will by default spin up a new instance of GITEA to play
 with and run the Gitea E2E tests.
 
 You will need to create a Hook URL generated from <https://hook.pipelinesascode.com/new>
@@ -147,31 +179,11 @@ For example, to test and lint the go files:
 make test lint-go
 ```
 
-We use [golden](https://pkg.go.dev/gotest.tools/v3/golden) files in our tests, for instance, to compare the output of CLI commands or other detailed tests. Occasionally, you may need to regenerate the golden files if you modify the output of a command. For unit tests, you can use this Makefile target:
+If you add a CLI command with help, you will need to regenerate the golden files:
 
 ```shell
 make update-golden
 ```
-
-Head over to the
-[./test/README.md](https://github.com/openshift-pipelines/pipelines-as-code/blob/main/test/README.md)
-for more information on how to update the golden files on the E2E tests.
-
-## Update OpenAPI Schemas
-
-The CRD schemas are automatically generated from the Go code (generally
-`pkg/apis/pipelinesascode/v1alpha1/types.go`). After modifying
-any type definitions, you'll need to regenerate these schemas to update the CRD
-in `config/300-repositories.yaml`.
-
-When modifying types, ensure the validation logic is appropriate, then run:
-
-```shell
-make update-schemas
-```
-
-There is a PAC CI check that will ensure that the CRD is up to date with the go
-code.
 
 ## Configuring the Pre Push Git checks
 
@@ -239,39 +251,6 @@ need to go to this URL:
 
 There is a drop-down at the bottom of the page to let you change the older
 major version.
-
-### Documentation shortcode
-
-The hugo-book theme has several shortcodes that are used to do different things
-for the documentation.
-
-See the demo site of hugo-book on how to use them here <https://github.com/alex-shpak/hugo-book#shortcodes>
-
-And the demo on how to use them here:
-
-<https://hugo-book-demo.netlify.app/>
-
-We have as well some custom ones, you can see them in this directory:
-
-<https://github.com/openshift-pipelines/pipelines-as-code/tree/main/docs/layouts/shortcodes>
-
-See below on how to use them, feel free to grep around the documentation to see how they are actually used.
-
-#### tech_preview
-
-```markdown
-{ {< tech_preview "Feature Name" >}}
-```
-
-This shortcode creates a red warning blockquote indicating that a feature is in Technology Preview status. It takes one parameter - the name of the feature. The output shows a warning message that the specified feature is not supported for production use and is provided for early testing and feedback.
-
-#### support_matrix
-
-```markdown
-  { {< support_matrix github_app="true" github_webhook="true|false" gitea="true|false" gitlab="true|false" bitbucket_cloud="true|false" bitbucket_datacenter="true|false" >}}
-```
-
-This shortcode generates a compatibility table showing which Git providers support a particular feature. Each parameter accepts "true" or "false" values, displaying checkmarks (✅) or cross marks (❌) accordingly. The table lists all major Git providers (GitHub App, GitHub Webhook, Gitea, GitLab, Bitbucket Cloud, and Bitbucket Data Center) with their support status for the feature.
 
 ## Documentation when we are doing the Release Process
 
@@ -390,64 +369,9 @@ for arm64.
 - A GitHub action is using [ko](https://ko.build/) to build the amd64 and arm64 images whenever there is
 a push to a branch or for a release.
 
-## LLM Assistance Disclosure
+# Links
 
-When submitting a pull request to Pipelines-as-Code, contributors must disclose
-any AI/LLM assistance used during development. This promotes transparency and
-proper attribution in our collaborative development environment.
-
-### Python dependencies
-
-```shell
-cd ./hack/pr-ci
-uv lock -U
-```
-
-### Required Disclosure
-
-All contributors must:
-
-1. **Check the appropriate boxes** in the PR template's "🤖 AI Assistance"
-   section
-2. **Specify which LLM was used** (GitHub Copilot, ChatGPT, Claude, Cursor,
-   Gemini, etc.)
-3. **Indicate the extent of assistance** (documentation, code generation, PR
-   description, etc.)
-4. **Add Co-authored-by trailers** to commit messages when AI significantly
-   contributed to the code
-
-### Adding Co-authored-by Trailers
-
-For commits where AI contributed significantly to the code, add appropriate
-`Co-authored-by` trailers to your commit messages. You can use our helper
-script to automate this process:
-
-```shell
-./hack/add-llm-coauthor.sh
-```
-
-This interactive script will:
-
-- Help you select commits that used AI assistance
-- Choose which AI assistants to credit
-- Automatically add proper `Co-authored-by` trailers to your commit messages
-
-**Examples of Co-authored-by trailers:**
-
-```text
-Co-authored-by: Claude <noreply@anthropic.com>
-Co-authored-by: ChatGPT <noreply@chatgpt.com>
-Co-authored-by: Cursor <cursor@users.noreply.github.com>
-Co-authored-by: Copilot <Copilot@users.noreply.github.com>
-Co-authored-by: Gemini <gemini@google.com>
-```
-
-### Why We Require This
-
-- **Transparency**: Helps reviewers understand the development process
-- **Attribution**: Properly credits AI tools that significantly contributed
-- **Learning**: Helps the team understand effective AI-assisted development patterns
-- **Compliance**: Meets organizational requirements for AI tool usage tracking
-
-See the [PR template](.github/pull_request_template.md) for complete details on
-the AI assistance disclosure requirements.
+- [Jira Backlog](https://issues.redhat.com/browse/SRVKP-2144?jql=component%20%3D%20%22Pipeline%20as%20Code%22%20%20AND%20status%20!%3D%20Done)
+- [Bitbucket Server Rest API](https://docs.atlassian.com/bitbucket-server/rest/7.17.0/bitbucket-rest.html)
+- [GitHub API](https://docs.github.com/en/rest/reference)
+- [GitLab API](https://docs.gitlab.com/ee/api/api_resources.html)

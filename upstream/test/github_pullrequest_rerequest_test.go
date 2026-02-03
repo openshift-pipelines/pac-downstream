@@ -1,4 +1,5 @@
 //go:build e2e
+// +build e2e
 
 package test
 
@@ -9,7 +10,7 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/google/go-github/v81/github"
+	"github.com/google/go-github/v68/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	tgithub "github.com/openshift-pipelines/pipelines-as-code/test/pkg/github"
 	"github.com/openshift-pipelines/pipelines-as-code/test/pkg/payload"
@@ -33,7 +34,7 @@ func TestGithubPullRerequest(t *testing.T) {
 	g.RunPullRequest(ctx, t)
 	defer g.TearDown(ctx, t)
 
-	repoinfo, resp, err := g.Provider.Client().Repositories.Get(ctx, g.Options.Organization, g.Options.Repo)
+	repoinfo, resp, err := g.Provider.Client.Repositories.Get(ctx, g.Options.Organization, g.Options.Repo)
 	assert.NilError(t, err)
 	if resp != nil && resp.StatusCode == http.StatusNotFound {
 		t.Errorf("Repository %s not found in %s", g.Options.Organization, g.Options.Repo)

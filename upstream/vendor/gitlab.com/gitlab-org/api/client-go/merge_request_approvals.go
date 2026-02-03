@@ -22,40 +22,23 @@ import (
 	"time"
 )
 
-type (
-	MergeRequestApprovalsServiceInterface interface {
-		ApproveMergeRequest(pid any, mr int64, opt *ApproveMergeRequestOptions, options ...RequestOptionFunc) (*MergeRequestApprovals, *Response, error)
-		UnapproveMergeRequest(pid any, mr int64, options ...RequestOptionFunc) (*Response, error)
-		ResetApprovalsOfMergeRequest(pid any, mr int64, options ...RequestOptionFunc) (*Response, error)
-		GetConfiguration(pid any, mr int64, options ...RequestOptionFunc) (*MergeRequestApprovals, *Response, error)
-		ChangeApprovalConfiguration(pid any, mergeRequest int64, opt *ChangeMergeRequestApprovalConfigurationOptions, options ...RequestOptionFunc) (*MergeRequest, *Response, error)
-		GetApprovalRules(pid any, mergeRequest int64, options ...RequestOptionFunc) ([]*MergeRequestApprovalRule, *Response, error)
-		GetApprovalState(pid any, mergeRequest int64, options ...RequestOptionFunc) (*MergeRequestApprovalState, *Response, error)
-		CreateApprovalRule(pid any, mergeRequest int64, opt *CreateMergeRequestApprovalRuleOptions, options ...RequestOptionFunc) (*MergeRequestApprovalRule, *Response, error)
-		UpdateApprovalRule(pid any, mergeRequest int64, approvalRule int64, opt *UpdateMergeRequestApprovalRuleOptions, options ...RequestOptionFunc) (*MergeRequestApprovalRule, *Response, error)
-		DeleteApprovalRule(pid any, mergeRequest int64, approvalRule int64, options ...RequestOptionFunc) (*Response, error)
-	}
-
-	// MergeRequestApprovalsService handles communication with the merge request
-	// approvals related methods of the GitLab API. This includes reading/updating
-	// approval settings and approve/unapproving merge requests
-	//
-	// GitLab API docs: https://docs.gitlab.com/api/merge_request_approvals/
-	MergeRequestApprovalsService struct {
-		client *Client
-	}
-)
-
-var _ MergeRequestApprovalsServiceInterface = (*MergeRequestApprovalsService)(nil)
+// MergeRequestApprovalsService handles communication with the merge request
+// approvals related methods of the GitLab API. This includes reading/updating
+// approval settings and approve/unapproving merge requests
+//
+// GitLab API docs: https://docs.gitlab.com/ee/api/merge_request_approvals.html
+type MergeRequestApprovalsService struct {
+	client *Client
+}
 
 // MergeRequestApprovals represents GitLab merge request approvals.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/api/merge_request_approvals/#single-merge-request-approval
+// https://docs.gitlab.com/ee/api/merge_request_approvals.html#merge-request-level-mr-approvals
 type MergeRequestApprovals struct {
-	ID                             int64                        `json:"id"`
-	IID                            int64                        `json:"iid"`
-	ProjectID                      int64                        `json:"project_id"`
+	ID                             int                          `json:"id"`
+	IID                            int                          `json:"iid"`
+	ProjectID                      int                          `json:"project_id"`
 	Title                          string                       `json:"title"`
 	Description                    string                       `json:"description"`
 	State                          string                       `json:"state"`
@@ -63,9 +46,9 @@ type MergeRequestApprovals struct {
 	UpdatedAt                      *time.Time                   `json:"updated_at"`
 	MergeStatus                    string                       `json:"merge_status"`
 	Approved                       bool                         `json:"approved"`
-	ApprovalsBeforeMerge           int64                        `json:"approvals_before_merge"`
-	ApprovalsRequired              int64                        `json:"approvals_required"`
-	ApprovalsLeft                  int64                        `json:"approvals_left"`
+	ApprovalsBeforeMerge           int                          `json:"approvals_before_merge"`
+	ApprovalsRequired              int                          `json:"approvals_required"`
+	ApprovalsLeft                  int                          `json:"approvals_left"`
 	RequirePasswordToApprove       bool                         `json:"require_password_to_approve"`
 	ApprovedBy                     []*MergeRequestApproverUser  `json:"approved_by"`
 	SuggestedApprovers             []*BasicUser                 `json:"suggested_approvers"`
@@ -83,39 +66,37 @@ func (m MergeRequestApprovals) String() string {
 	return Stringify(m)
 }
 
-// MergeRequestApproverGroup represents GitLab project level merge request approver group.
+// MergeRequestApproverGroup  represents GitLab project level merge request approver group.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/api/merge_request_approvals/#project-approval-rules
+// https://docs.gitlab.com/ee/api/merge_request_approvals.html#project-level-mr-approvals
 type MergeRequestApproverGroup struct {
-	Group MergeRequestApproverNestedGroup `json:"group"`
-}
-
-type MergeRequestApproverNestedGroup struct {
-	ID                   int64  `json:"id"`
-	Name                 string `json:"name"`
-	Path                 string `json:"path"`
-	Description          string `json:"description"`
-	Visibility           string `json:"visibility"`
-	AvatarURL            string `json:"avatar_url"`
-	WebURL               string `json:"web_url"`
-	FullName             string `json:"full_name"`
-	FullPath             string `json:"full_path"`
-	LFSEnabled           bool   `json:"lfs_enabled"`
-	RequestAccessEnabled bool   `json:"request_access_enabled"`
+	Group struct {
+		ID                   int    `json:"id"`
+		Name                 string `json:"name"`
+		Path                 string `json:"path"`
+		Description          string `json:"description"`
+		Visibility           string `json:"visibility"`
+		AvatarURL            string `json:"avatar_url"`
+		WebURL               string `json:"web_url"`
+		FullName             string `json:"full_name"`
+		FullPath             string `json:"full_path"`
+		LFSEnabled           bool   `json:"lfs_enabled"`
+		RequestAccessEnabled bool   `json:"request_access_enabled"`
+	}
 }
 
 // MergeRequestApprovalRule represents a GitLab merge request approval rule.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/api/merge_request_approvals/#get-merge-request-approval-rules
+// https://docs.gitlab.com/ee/api/merge_request_approvals.html#get-merge-request-level-rules
 type MergeRequestApprovalRule struct {
-	ID                   int64                `json:"id"`
+	ID                   int                  `json:"id"`
 	Name                 string               `json:"name"`
 	RuleType             string               `json:"rule_type"`
 	ReportType           string               `json:"report_type"`
 	EligibleApprovers    []*BasicUser         `json:"eligible_approvers"`
-	ApprovalsRequired    int64                `json:"approvals_required"`
+	ApprovalsRequired    int                  `json:"approvals_required"`
 	SourceRule           *ProjectApprovalRule `json:"source_rule"`
 	Users                []*BasicUser         `json:"users"`
 	Groups               []*Group             `json:"groups"`
@@ -128,7 +109,7 @@ type MergeRequestApprovalRule struct {
 // MergeRequestApprovalState represents a GitLab merge request approval state.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/api/merge_request_approvals/#get-the-approval-state-of-merge-requests
+// https://docs.gitlab.com/ee/api/merge_request_approvals.html#get-the-approval-state-of-merge-requests
 type MergeRequestApprovalState struct {
 	ApprovalRulesOverwritten bool                        `json:"approval_rules_overwritten"`
 	Rules                    []*MergeRequestApprovalRule `json:"rules"`
@@ -142,7 +123,7 @@ func (s MergeRequestApprovalRule) String() string {
 // MergeRequestApproverUser  represents GitLab project level merge request approver user.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/api/merge_request_approvals/#project-approval-rules
+// https://docs.gitlab.com/ee/api/merge_request_approvals.html#project-level-mr-approvals
 type MergeRequestApproverUser struct {
 	User *BasicUser
 }
@@ -150,7 +131,7 @@ type MergeRequestApproverUser struct {
 // ApproveMergeRequestOptions represents the available ApproveMergeRequest() options.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/api/merge_request_approvals/#approve-merge-request
+// https://docs.gitlab.com/ee/api/merge_request_approvals.html#approve-merge-request
 type ApproveMergeRequestOptions struct {
 	SHA *string `url:"sha,omitempty" json:"sha,omitempty"`
 }
@@ -159,8 +140,8 @@ type ApproveMergeRequestOptions struct {
 // is provided then it must match the sha at the HEAD of the MR.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/api/merge_request_approvals/#approve-merge-request
-func (s *MergeRequestApprovalsService) ApproveMergeRequest(pid any, mr int64, opt *ApproveMergeRequestOptions, options ...RequestOptionFunc) (*MergeRequestApprovals, *Response, error) {
+// https://docs.gitlab.com/ee/api/merge_request_approvals.html#approve-merge-request
+func (s *MergeRequestApprovalsService) ApproveMergeRequest(pid interface{}, mr int, opt *ApproveMergeRequestOptions, options ...RequestOptionFunc) (*MergeRequestApprovals, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err
@@ -184,8 +165,8 @@ func (s *MergeRequestApprovalsService) ApproveMergeRequest(pid any, mr int64, op
 // UnapproveMergeRequest unapproves a previously approved merge request on GitLab.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/api/merge_request_approvals/#unapprove-merge-request
-func (s *MergeRequestApprovalsService) UnapproveMergeRequest(pid any, mr int64, options ...RequestOptionFunc) (*Response, error) {
+// https://docs.gitlab.com/ee/api/merge_request_approvals.html#unapprove-merge-request
+func (s *MergeRequestApprovalsService) UnapproveMergeRequest(pid interface{}, mr int, options ...RequestOptionFunc) (*Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, err
@@ -204,8 +185,8 @@ func (s *MergeRequestApprovalsService) UnapproveMergeRequest(pid any, mr int64, 
 // Available only for bot users based on project or group tokens.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/api/merge_request_approvals/#reset-approvals-of-a-merge-request
-func (s *MergeRequestApprovalsService) ResetApprovalsOfMergeRequest(pid any, mr int64, options ...RequestOptionFunc) (*Response, error) {
+// https://docs.gitlab.com/ee/api/merge_request_approvals.html#reset-approvals-of-a-merge-request
+func (s *MergeRequestApprovalsService) ResetApprovalsOfMergeRequest(pid interface{}, mr int, options ...RequestOptionFunc) (*Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, err
@@ -220,11 +201,20 @@ func (s *MergeRequestApprovalsService) ResetApprovalsOfMergeRequest(pid any, mr 
 	return s.client.Do(req, nil)
 }
 
+// ChangeMergeRequestApprovalConfigurationOptions represents the available
+// ChangeMergeRequestApprovalConfiguration() options.
+//
+// GitLab API docs:
+// https://docs.gitlab.com/ee/api/merge_request_approvals.html#change-approval-configuration-deprecated
+type ChangeMergeRequestApprovalConfigurationOptions struct {
+	ApprovalsRequired *int `url:"approvals_required,omitempty" json:"approvals_required,omitempty"`
+}
+
 // GetConfiguration shows information about single merge request approvals
 //
 // GitLab API docs:
-// https://docs.gitlab.com/api/merge_request_approvals/#single-merge-request-approval
-func (s *MergeRequestApprovalsService) GetConfiguration(pid any, mr int64, options ...RequestOptionFunc) (*MergeRequestApprovals, *Response, error) {
+// https://docs.gitlab.com/ee/api/merge_request_approvals.html#get-configuration-1
+func (s *MergeRequestApprovalsService) GetConfiguration(pid interface{}, mr int, options ...RequestOptionFunc) (*MergeRequestApprovals, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err
@@ -245,18 +235,11 @@ func (s *MergeRequestApprovalsService) GetConfiguration(pid any, mr int64, optio
 	return m, resp, nil
 }
 
-// ChangeMergeRequestApprovalConfigurationOptions represents the available
-// ChangeMergeRequestApprovalConfiguration() options.
-//
-// Deprecated: in GitLab 16.0
-type ChangeMergeRequestApprovalConfigurationOptions struct {
-	ApprovalsRequired *int64 `url:"approvals_required,omitempty" json:"approvals_required,omitempty"`
-}
-
 // ChangeApprovalConfiguration updates the approval configuration of a merge request.
 //
-// Deprecated: in GitLab 16.0
-func (s *MergeRequestApprovalsService) ChangeApprovalConfiguration(pid any, mergeRequest int64, opt *ChangeMergeRequestApprovalConfigurationOptions, options ...RequestOptionFunc) (*MergeRequest, *Response, error) {
+// GitLab API docs:
+// https://docs.gitlab.com/ee/api/merge_request_approvals.html#change-approval-configuration-deprecated
+func (s *MergeRequestApprovalsService) ChangeApprovalConfiguration(pid interface{}, mergeRequest int, opt *ChangeMergeRequestApprovalConfigurationOptions, options ...RequestOptionFunc) (*MergeRequest, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err
@@ -277,11 +260,46 @@ func (s *MergeRequestApprovalsService) ChangeApprovalConfiguration(pid any, merg
 	return m, resp, nil
 }
 
+// ChangeMergeRequestAllowedApproversOptions represents the available
+// ChangeMergeRequestAllowedApprovers() options.
+//
+// GitLab API docs:
+// https://docs.gitlab.com/ee/api/merge_request_approvals.html#change-allowed-approvers-for-merge-request
+type ChangeMergeRequestAllowedApproversOptions struct {
+	ApproverIDs      []int `url:"approver_ids" json:"approver_ids"`
+	ApproverGroupIDs []int `url:"approver_group_ids" json:"approver_group_ids"`
+}
+
+// ChangeAllowedApprovers updates the approvers for a merge request.
+//
+// GitLab API docs:
+// https://docs.gitlab.com/ee/api/merge_request_approvals.html#change-allowed-approvers-for-merge-request
+func (s *MergeRequestApprovalsService) ChangeAllowedApprovers(pid interface{}, mergeRequest int, opt *ChangeMergeRequestAllowedApproversOptions, options ...RequestOptionFunc) (*MergeRequest, *Response, error) {
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, nil, err
+	}
+	u := fmt.Sprintf("projects/%s/merge_requests/%d/approvers", PathEscape(project), mergeRequest)
+
+	req, err := s.client.NewRequest(http.MethodPut, u, opt, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	m := new(MergeRequest)
+	resp, err := s.client.Do(req, m)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return m, resp, nil
+}
+
 // GetApprovalRules requests information about a merge request’s approval rules
 //
 // GitLab API docs:
-// https://docs.gitlab.com/api/merge_request_approvals/#get-merge-request-approval-rules
-func (s *MergeRequestApprovalsService) GetApprovalRules(pid any, mergeRequest int64, options ...RequestOptionFunc) ([]*MergeRequestApprovalRule, *Response, error) {
+// https://docs.gitlab.com/ee/api/merge_request_approvals.html#get-merge-request-level-rules
+func (s *MergeRequestApprovalsService) GetApprovalRules(pid interface{}, mergeRequest int, options ...RequestOptionFunc) ([]*MergeRequestApprovalRule, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err
@@ -305,8 +323,8 @@ func (s *MergeRequestApprovalsService) GetApprovalRules(pid any, mergeRequest in
 // GetApprovalState requests information about a merge request’s approval state
 //
 // GitLab API docs:
-// https://docs.gitlab.com/api/merge_request_approvals/#get-the-approval-state-of-merge-requests
-func (s *MergeRequestApprovalsService) GetApprovalState(pid any, mergeRequest int64, options ...RequestOptionFunc) (*MergeRequestApprovalState, *Response, error) {
+// https://docs.gitlab.com/ee/api/merge_request_approvals.html#get-the-approval-state-of-merge-requests
+func (s *MergeRequestApprovalsService) GetApprovalState(pid interface{}, mergeRequest int, options ...RequestOptionFunc) (*MergeRequestApprovalState, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err
@@ -331,20 +349,20 @@ func (s *MergeRequestApprovalsService) GetApprovalState(pid any, mergeRequest in
 // options.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/api/merge_request_approvals/#create-merge-request-rule
+// https://docs.gitlab.com/ee/api/merge_request_approvals.html#create-merge-request-level-rule
 type CreateMergeRequestApprovalRuleOptions struct {
-	Name                  *string  `url:"name,omitempty" json:"name,omitempty"`
-	ApprovalsRequired     *int64   `url:"approvals_required,omitempty" json:"approvals_required,omitempty"`
-	ApprovalProjectRuleID *int64   `url:"approval_project_rule_id,omitempty" json:"approval_project_rule_id,omitempty"`
-	UserIDs               *[]int64 `url:"user_ids,omitempty" json:"user_ids,omitempty"`
-	GroupIDs              *[]int64 `url:"group_ids,omitempty" json:"group_ids,omitempty"`
+	Name                  *string `url:"name,omitempty" json:"name,omitempty"`
+	ApprovalsRequired     *int    `url:"approvals_required,omitempty" json:"approvals_required,omitempty"`
+	ApprovalProjectRuleID *int    `url:"approval_project_rule_id,omitempty" json:"approval_project_rule_id,omitempty"`
+	UserIDs               *[]int  `url:"user_ids,omitempty" json:"user_ids,omitempty"`
+	GroupIDs              *[]int  `url:"group_ids,omitempty" json:"group_ids,omitempty"`
 }
 
 // CreateApprovalRule creates a new MR level approval rule.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/api/merge_request_approvals/#create-merge-request-rule
-func (s *MergeRequestApprovalsService) CreateApprovalRule(pid any, mergeRequest int64, opt *CreateMergeRequestApprovalRuleOptions, options ...RequestOptionFunc) (*MergeRequestApprovalRule, *Response, error) {
+// https://docs.gitlab.com/ee/api/merge_request_approvals.html#create-merge-request-level-rule
+func (s *MergeRequestApprovalsService) CreateApprovalRule(pid interface{}, mergeRequest int, opt *CreateMergeRequestApprovalRuleOptions, options ...RequestOptionFunc) (*MergeRequestApprovalRule, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err
@@ -369,19 +387,19 @@ func (s *MergeRequestApprovalsService) CreateApprovalRule(pid any, mergeRequest 
 // options.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/api/merge_request_approvals/#update-merge-request-rule
+// https://docs.gitlab.com/ee/api/merge_request_approvals.html#update-merge-request-level-rule
 type UpdateMergeRequestApprovalRuleOptions struct {
-	Name              *string  `url:"name,omitempty" json:"name,omitempty"`
-	ApprovalsRequired *int64   `url:"approvals_required,omitempty" json:"approvals_required,omitempty"`
-	UserIDs           *[]int64 `url:"user_ids,omitempty" json:"user_ids,omitempty"`
-	GroupIDs          *[]int64 `url:"group_ids,omitempty" json:"group_ids,omitempty"`
+	Name              *string `url:"name,omitempty" json:"name,omitempty"`
+	ApprovalsRequired *int    `url:"approvals_required,omitempty" json:"approvals_required,omitempty"`
+	UserIDs           *[]int  `url:"user_ids,omitempty" json:"user_ids,omitempty"`
+	GroupIDs          *[]int  `url:"group_ids,omitempty" json:"group_ids,omitempty"`
 }
 
 // UpdateApprovalRule updates an existing approval rule with new options.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/api/merge_request_approvals/#update-merge-request-rule
-func (s *MergeRequestApprovalsService) UpdateApprovalRule(pid any, mergeRequest int64, approvalRule int64, opt *UpdateMergeRequestApprovalRuleOptions, options ...RequestOptionFunc) (*MergeRequestApprovalRule, *Response, error) {
+// https://docs.gitlab.com/ee/api/merge_request_approvals.html#update-merge-request-level-rule
+func (s *MergeRequestApprovalsService) UpdateApprovalRule(pid interface{}, mergeRequest int, approvalRule int, opt *UpdateMergeRequestApprovalRuleOptions, options ...RequestOptionFunc) (*MergeRequestApprovalRule, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err
@@ -405,8 +423,8 @@ func (s *MergeRequestApprovalsService) UpdateApprovalRule(pid any, mergeRequest 
 // DeleteApprovalRule deletes a mr level approval rule.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/api/merge_request_approvals/#delete-merge-request-rule
-func (s *MergeRequestApprovalsService) DeleteApprovalRule(pid any, mergeRequest int64, approvalRule int64, options ...RequestOptionFunc) (*Response, error) {
+// https://docs.gitlab.com/ee/api/merge_request_approvals.html#delete-merge-request-level-rule
+func (s *MergeRequestApprovalsService) DeleteApprovalRule(pid interface{}, mergeRequest int, approvalRule int, options ...RequestOptionFunc) (*Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, err

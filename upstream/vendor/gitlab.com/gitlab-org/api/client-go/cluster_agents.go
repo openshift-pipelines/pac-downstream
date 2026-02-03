@@ -17,89 +17,32 @@
 package gitlab
 
 import (
+	"fmt"
 	"net/http"
 	"time"
 )
 
-type (
-	ClusterAgentsServiceInterface interface {
-		// ListAgents returns a list of agents registered for the project.
-		//
-		// GitLab API docs:
-		// https://docs.gitlab.com/api/cluster_agents/#list-the-agents-for-a-project
-		// ListAgents returns a list of agents registered for the project.
-		//
-		// GitLab API docs:
-		// https://docs.gitlab.com/api/cluster_agents/#list-the-agents-for-a-project
-		ListAgents(pid any, opt *ListAgentsOptions, options ...RequestOptionFunc) ([]*Agent, *Response, error)
-
-		// GetAgent gets a single agent details.
-		//
-		// GitLab API docs:
-		// https://docs.gitlab.com/api/cluster_agents/#get-details-about-an-agent
-		GetAgent(pid any, id int64, options ...RequestOptionFunc) (*Agent, *Response, error)
-
-		// RegisterAgent registers an agent to the project.
-		//
-		// GitLab API docs:
-		// https://docs.gitlab.com/api/cluster_agents/#register-an-agent-with-a-project
-		RegisterAgent(pid any, opt *RegisterAgentOptions, options ...RequestOptionFunc) (*Agent, *Response, error)
-
-		// DeleteAgent deletes an existing agent registration.
-		//
-		// GitLab API docs:
-		// https://docs.gitlab.com/api/cluster_agents/#delete-a-registered-agent
-		DeleteAgent(pid any, id int64, options ...RequestOptionFunc) (*Response, error)
-
-		// ListAgentTokens returns a list of tokens for an agent.
-		//
-		// GitLab API docs:
-		// https://docs.gitlab.com/api/cluster_agents/#list-tokens-for-an-agent
-		ListAgentTokens(pid any, aid int64, opt *ListAgentTokensOptions, options ...RequestOptionFunc) ([]*AgentToken, *Response, error)
-
-		// GetAgentToken gets a single agent token.
-		//
-		// GitLab API docs:
-		// https://docs.gitlab.com/api/cluster_agents/#get-a-single-agent-token
-		GetAgentToken(pid any, aid int64, id int64, options ...RequestOptionFunc) (*AgentToken, *Response, error)
-
-		// CreateAgentToken creates a new token for an agent.
-		//
-		// GitLab API docs:
-		// https://docs.gitlab.com/api/cluster_agents/#create-an-agent-token
-		CreateAgentToken(pid any, aid int64, opt *CreateAgentTokenOptions, options ...RequestOptionFunc) (*AgentToken, *Response, error)
-
-		// RevokeAgentToken revokes an agent token.
-		//
-		// GitLab API docs:
-		// https://docs.gitlab.com/api/cluster_agents/#revoke-an-agent-token
-		RevokeAgentToken(pid any, aid int64, id int64, options ...RequestOptionFunc) (*Response, error)
-	}
-
-	// ClusterAgentsService handles communication with the cluster agents related
-	// methods of the GitLab API.
-	//
-	// GitLab API docs: https://docs.gitlab.com/api/cluster_agents/
-	ClusterAgentsService struct {
-		client *Client
-	}
-)
-
-var _ ClusterAgentsServiceInterface = (*ClusterAgentsService)(nil)
+// ClusterAgentsService handles communication with the cluster agents related
+// methods of the GitLab API.
+//
+// GitLab API docs: https://docs.gitlab.com/ee/api/cluster_agents.html
+type ClusterAgentsService struct {
+	client *Client
+}
 
 // Agent represents a GitLab agent for Kubernetes.
 //
-// GitLab API docs: https://docs.gitlab.com/api/cluster_agents/
+// GitLab API docs: https://docs.gitlab.com/ee/api/cluster_agents.html
 type Agent struct {
-	ID              int64         `json:"id"`
+	ID              int           `json:"id"`
 	Name            string        `json:"name"`
 	CreatedAt       *time.Time    `json:"created_at"`
-	CreatedByUserID int64         `json:"created_by_user_id"`
+	CreatedByUserID int           `json:"created_by_user_id"`
 	ConfigProject   ConfigProject `json:"config_project"`
 }
 
 type ConfigProject struct {
-	ID                int64      `json:"id"`
+	ID                int        `json:"id"`
 	Description       string     `json:"description"`
 	Name              string     `json:"name"`
 	NameWithNamespace string     `json:"name_with_namespace"`
@@ -115,15 +58,15 @@ func (a Agent) String() string {
 // AgentToken represents a GitLab agent token.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/api/cluster_agents/#list-tokens-for-an-agent
+// https://docs.gitlab.com/ee/api/cluster_agents.html#list-tokens-for-an-agent
 type AgentToken struct {
-	ID              int64      `json:"id"`
+	ID              int        `json:"id"`
 	Name            string     `json:"name"`
 	Description     string     `json:"description"`
-	AgentID         int64      `json:"agent_id"`
+	AgentID         int        `json:"agent_id"`
 	Status          string     `json:"status"`
 	CreatedAt       *time.Time `json:"created_at"`
-	CreatedByUserID int64      `json:"created_by_user_id"`
+	CreatedByUserID int        `json:"created_by_user_id"`
 	LastUsedAt      *time.Time `json:"last_used_at"`
 	Token           string     `json:"token"`
 }
@@ -135,101 +78,217 @@ func (a AgentToken) String() string {
 // ListAgentsOptions represents the available ListAgents() options.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/api/cluster_agents/#list-the-agents-for-a-project
-type ListAgentsOptions struct {
-	ListOptions
+// https://docs.gitlab.com/ee/api/cluster_agents.html#list-the-agents-for-a-project
+type ListAgentsOptions ListOptions
+
+// ListAgents returns a list of agents registered for the project.
+//
+// GitLab API docs:
+// https://docs.gitlab.com/ee/api/cluster_agents.html#list-the-agents-for-a-project
+func (s *ClusterAgentsService) ListAgents(pid interface{}, opt *ListAgentsOptions, options ...RequestOptionFunc) ([]*Agent, *Response, error) {
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, nil, err
+	}
+	uri := fmt.Sprintf("projects/%s/cluster_agents", PathEscape(project))
+
+	req, err := s.client.NewRequest(http.MethodGet, uri, opt, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var as []*Agent
+	resp, err := s.client.Do(req, &as)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return as, resp, nil
 }
 
-func (s *ClusterAgentsService) ListAgents(pid any, opt *ListAgentsOptions, options ...RequestOptionFunc) ([]*Agent, *Response, error) {
-	return do[[]*Agent](s.client,
-		withPath("projects/%s/cluster_agents", ProjectID{pid}),
-		withAPIOpts(opt),
-		withRequestOpts(options...),
-	)
-}
+// GetAgent gets a single agent details.
+//
+// GitLab API docs:
+// https://docs.gitlab.com/ee/api/cluster_agents.html#get-details-about-an-agent
+func (s *ClusterAgentsService) GetAgent(pid interface{}, id int, options ...RequestOptionFunc) (*Agent, *Response, error) {
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, nil, err
+	}
+	uri := fmt.Sprintf("projects/%s/cluster_agents/%d", PathEscape(project), id)
 
-func (s *ClusterAgentsService) GetAgent(pid any, id int64, options ...RequestOptionFunc) (*Agent, *Response, error) {
-	return do[*Agent](s.client,
-		withPath("projects/%s/cluster_agents/%d", ProjectID{pid}, id),
-		withRequestOpts(options...),
-	)
+	req, err := s.client.NewRequest(http.MethodGet, uri, nil, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	a := new(Agent)
+	resp, err := s.client.Do(req, a)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return a, resp, nil
 }
 
 // RegisterAgentOptions represents the available RegisterAgent()
 // options.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/api/cluster_agents/#register-an-agent-with-a-project
+// https://docs.gitlab.com/ee/api/cluster_agents.html#register-an-agent-with-a-project
 type RegisterAgentOptions struct {
 	Name *string `url:"name,omitempty" json:"name,omitempty"`
 }
 
-func (s *ClusterAgentsService) RegisterAgent(pid any, opt *RegisterAgentOptions, options ...RequestOptionFunc) (*Agent, *Response, error) {
-	return do[*Agent](s.client,
-		withMethod(http.MethodPost),
-		withPath("projects/%s/cluster_agents", ProjectID{pid}),
-		withAPIOpts(opt),
-		withRequestOpts(options...),
-	)
+// RegisterAgent registers an agent to the project.
+//
+// GitLab API docs:
+// https://docs.gitlab.com/ee/api/cluster_agents.html#register-an-agent-with-a-project
+func (s *ClusterAgentsService) RegisterAgent(pid interface{}, opt *RegisterAgentOptions, options ...RequestOptionFunc) (*Agent, *Response, error) {
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, nil, err
+	}
+	uri := fmt.Sprintf("projects/%s/cluster_agents", PathEscape(project))
+
+	req, err := s.client.NewRequest(http.MethodPost, uri, opt, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	a := new(Agent)
+	resp, err := s.client.Do(req, a)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return a, resp, nil
 }
 
-func (s *ClusterAgentsService) DeleteAgent(pid any, id int64, options ...RequestOptionFunc) (*Response, error) {
-	_, resp, err := do[none](s.client,
-		withMethod(http.MethodDelete),
-		withPath("projects/%s/cluster_agents/%d", ProjectID{pid}, id),
-		withRequestOpts(options...),
-	)
-	return resp, err
+// DeleteAgent deletes an existing agent registration.
+//
+// GitLab API docs:
+// https://docs.gitlab.com/ee/api/cluster_agents.html#delete-a-registered-agent
+func (s *ClusterAgentsService) DeleteAgent(pid interface{}, id int, options ...RequestOptionFunc) (*Response, error) {
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, err
+	}
+	uri := fmt.Sprintf("projects/%s/cluster_agents/%d", PathEscape(project), id)
+
+	req, err := s.client.NewRequest(http.MethodDelete, uri, nil, options)
+	if err != nil {
+		return nil, err
+	}
+
+	return s.client.Do(req, nil)
 }
 
 // ListAgentTokensOptions represents the available ListAgentTokens() options.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/api/cluster_agents/#list-tokens-for-an-agent
-type ListAgentTokensOptions struct {
-	ListOptions
+// https://docs.gitlab.com/ee/api/cluster_agents.html#list-tokens-for-an-agent
+type ListAgentTokensOptions ListOptions
+
+// ListAgentTokens returns a list of tokens for an agent.
+//
+// GitLab API docs:
+// https://docs.gitlab.com/ee/api/cluster_agents.html#list-tokens-for-an-agent
+func (s *ClusterAgentsService) ListAgentTokens(pid interface{}, aid int, opt *ListAgentTokensOptions, options ...RequestOptionFunc) ([]*AgentToken, *Response, error) {
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, nil, err
+	}
+	uri := fmt.Sprintf("projects/%s/cluster_agents/%d/tokens", PathEscape(project), aid)
+
+	req, err := s.client.NewRequest(http.MethodGet, uri, opt, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var ats []*AgentToken
+	resp, err := s.client.Do(req, &ats)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return ats, resp, nil
 }
 
-func (s *ClusterAgentsService) ListAgentTokens(pid any, aid int64, opt *ListAgentTokensOptions, options ...RequestOptionFunc) ([]*AgentToken, *Response, error) {
-	return do[[]*AgentToken](s.client,
-		withMethod(http.MethodGet),
-		withPath("projects/%s/cluster_agents/%d/tokens", ProjectID{pid}, aid),
-		withAPIOpts(opt),
-		withRequestOpts(options...),
-	)
-}
+// GetAgentToken gets a single agent token.
+//
+// GitLab API docs:
+// https://docs.gitlab.com/ee/api/cluster_agents.html#get-a-single-agent-token
+func (s *ClusterAgentsService) GetAgentToken(pid interface{}, aid int, id int, options ...RequestOptionFunc) (*AgentToken, *Response, error) {
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, nil, err
+	}
+	uri := fmt.Sprintf("projects/%s/cluster_agents/%d/tokens/%d", PathEscape(project), aid, id)
 
-func (s *ClusterAgentsService) GetAgentToken(pid any, aid int64, id int64, options ...RequestOptionFunc) (*AgentToken, *Response, error) {
-	return do[*AgentToken](s.client,
-		withMethod(http.MethodGet),
-		withPath("projects/%s/cluster_agents/%d/tokens/%d", ProjectID{pid}, aid, id),
-		withRequestOpts(options...),
-	)
+	req, err := s.client.NewRequest(http.MethodGet, uri, nil, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	at := new(AgentToken)
+	resp, err := s.client.Do(req, at)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return at, resp, nil
 }
 
 // CreateAgentTokenOptions represents the available CreateAgentToken() options.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/api/cluster_agents/#create-an-agent-token
+// https://docs.gitlab.com/ee/api/cluster_agents.html#create-an-agent-token
 type CreateAgentTokenOptions struct {
 	Name        *string `url:"name,omitempty" json:"name,omitempty"`
 	Description *string `url:"description,omitempty" json:"description,omitempty"`
 }
 
-func (s *ClusterAgentsService) CreateAgentToken(pid any, aid int64, opt *CreateAgentTokenOptions, options ...RequestOptionFunc) (*AgentToken, *Response, error) {
-	return do[*AgentToken](s.client,
-		withMethod(http.MethodPost),
-		withPath("projects/%s/cluster_agents/%d/tokens", ProjectID{pid}, aid),
-		withAPIOpts(opt),
-		withRequestOpts(options...),
-	)
+// CreateAgentToken creates a new token for an agent.
+//
+// GitLab API docs:
+// https://docs.gitlab.com/ee/api/cluster_agents.html#create-an-agent-token
+func (s *ClusterAgentsService) CreateAgentToken(pid interface{}, aid int, opt *CreateAgentTokenOptions, options ...RequestOptionFunc) (*AgentToken, *Response, error) {
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, nil, err
+	}
+	uri := fmt.Sprintf("projects/%s/cluster_agents/%d/tokens", PathEscape(project), aid)
+
+	req, err := s.client.NewRequest(http.MethodPost, uri, opt, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	at := new(AgentToken)
+	resp, err := s.client.Do(req, at)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return at, resp, nil
 }
 
-func (s *ClusterAgentsService) RevokeAgentToken(pid any, aid int64, id int64, options ...RequestOptionFunc) (*Response, error) {
-	_, resp, err := do[none](s.client,
-		withMethod(http.MethodDelete),
-		withPath("projects/%s/cluster_agents/%d/tokens/%d", ProjectID{pid}, aid, id),
-		withRequestOpts(options...),
-	)
-	return resp, err
+// RevokeAgentToken revokes an agent token.
+//
+// GitLab API docs:
+// https://docs.gitlab.com/ee/api/cluster_agents.html#revoke-an-agent-token
+func (s *ClusterAgentsService) RevokeAgentToken(pid interface{}, aid int, id int, options ...RequestOptionFunc) (*Response, error) {
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, err
+	}
+	uri := fmt.Sprintf("projects/%s/cluster_agents/%d/tokens/%d", PathEscape(project), aid, id)
+
+	req, err := s.client.NewRequest(http.MethodDelete, uri, nil, options)
+	if err != nil {
+		return nil, err
+	}
+
+	return s.client.Do(req, nil)
 }

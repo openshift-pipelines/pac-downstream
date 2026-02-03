@@ -19,10 +19,10 @@ limitations under the License.
 package v1beta1
 
 import (
-	pipelinev1beta1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1beta1"
-	labels "k8s.io/apimachinery/pkg/labels"
-	listers "k8s.io/client-go/listers"
-	cache "k8s.io/client-go/tools/cache"
+	v1beta1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1beta1"
+	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/client-go/tools/cache"
 )
 
 // CustomRunLister helps list CustomRuns.
@@ -30,7 +30,7 @@ import (
 type CustomRunLister interface {
 	// List lists all CustomRuns in the indexer.
 	// Objects returned here must be treated as read-only.
-	List(selector labels.Selector) (ret []*pipelinev1beta1.CustomRun, err error)
+	List(selector labels.Selector) (ret []*v1beta1.CustomRun, err error)
 	// CustomRuns returns an object that can list and get CustomRuns.
 	CustomRuns(namespace string) CustomRunNamespaceLister
 	CustomRunListerExpansion
@@ -38,17 +38,25 @@ type CustomRunLister interface {
 
 // customRunLister implements the CustomRunLister interface.
 type customRunLister struct {
-	listers.ResourceIndexer[*pipelinev1beta1.CustomRun]
+	indexer cache.Indexer
 }
 
 // NewCustomRunLister returns a new CustomRunLister.
 func NewCustomRunLister(indexer cache.Indexer) CustomRunLister {
-	return &customRunLister{listers.New[*pipelinev1beta1.CustomRun](indexer, pipelinev1beta1.Resource("customrun"))}
+	return &customRunLister{indexer: indexer}
+}
+
+// List lists all CustomRuns in the indexer.
+func (s *customRunLister) List(selector labels.Selector) (ret []*v1beta1.CustomRun, err error) {
+	err = cache.ListAll(s.indexer, selector, func(m interface{}) {
+		ret = append(ret, m.(*v1beta1.CustomRun))
+	})
+	return ret, err
 }
 
 // CustomRuns returns an object that can list and get CustomRuns.
 func (s *customRunLister) CustomRuns(namespace string) CustomRunNamespaceLister {
-	return customRunNamespaceLister{listers.NewNamespaced[*pipelinev1beta1.CustomRun](s.ResourceIndexer, namespace)}
+	return customRunNamespaceLister{indexer: s.indexer, namespace: namespace}
 }
 
 // CustomRunNamespaceLister helps list and get CustomRuns.
@@ -56,15 +64,36 @@ func (s *customRunLister) CustomRuns(namespace string) CustomRunNamespaceLister 
 type CustomRunNamespaceLister interface {
 	// List lists all CustomRuns in the indexer for a given namespace.
 	// Objects returned here must be treated as read-only.
-	List(selector labels.Selector) (ret []*pipelinev1beta1.CustomRun, err error)
+	List(selector labels.Selector) (ret []*v1beta1.CustomRun, err error)
 	// Get retrieves the CustomRun from the indexer for a given namespace and name.
 	// Objects returned here must be treated as read-only.
-	Get(name string) (*pipelinev1beta1.CustomRun, error)
+	Get(name string) (*v1beta1.CustomRun, error)
 	CustomRunNamespaceListerExpansion
 }
 
 // customRunNamespaceLister implements the CustomRunNamespaceLister
 // interface.
 type customRunNamespaceLister struct {
-	listers.ResourceIndexer[*pipelinev1beta1.CustomRun]
+	indexer   cache.Indexer
+	namespace string
+}
+
+// List lists all CustomRuns in the indexer for a given namespace.
+func (s customRunNamespaceLister) List(selector labels.Selector) (ret []*v1beta1.CustomRun, err error) {
+	err = cache.ListAllByNamespace(s.indexer, s.namespace, selector, func(m interface{}) {
+		ret = append(ret, m.(*v1beta1.CustomRun))
+	})
+	return ret, err
+}
+
+// Get retrieves the CustomRun from the indexer for a given namespace and name.
+func (s customRunNamespaceLister) Get(name string) (*v1beta1.CustomRun, error) {
+	obj, exists, err := s.indexer.GetByKey(s.namespace + "/" + name)
+	if err != nil {
+		return nil, err
+	}
+	if !exists {
+		return nil, errors.NewNotFound(v1beta1.Resource("customrun"), name)
+	}
+	return obj.(*v1beta1.CustomRun), nil
 }

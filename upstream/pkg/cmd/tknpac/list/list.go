@@ -36,8 +36,8 @@ func Root(run *params.Run, ioStreams *cli.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:          "list",
 		Aliases:      []string{"ls"},
-		Short:        "List Pipelines-as-Code repositories",
-		Long:         `List Pipelines-as-Code repositories`,
+		Short:        "List Pipelines as Code Repository",
+		Long:         `List Pipelines as Code Repository`,
 		SilenceUsage: true,
 		Annotations: map[string]string{
 			"commandType": "main",
@@ -163,10 +163,6 @@ func list(ctx context.Context, cs *params.Run, opts *cli.PacCliOpts, ioStreams *
 		repoStatuses = append(repoStatuses, rs)
 	}
 
-	if len(repoStatuses) == 0 {
-		return fmt.Errorf("no repo found")
-	}
-
 	w := ansiterm.NewTabWriter(ioStreams.Out, 0, 5, 3, ' ', tabwriter.TabIndent)
 	colorScheme := ioStreams.ColorScheme()
 	data := struct {
@@ -188,5 +184,6 @@ func list(ctx context.Context, cs *params.Run, opts *cli.PacCliOpts, ioStreams *
 	if err := t.Execute(w, data); err != nil {
 		return err
 	}
-	return w.Flush()
+	w.Flush()
+	return nil
 }

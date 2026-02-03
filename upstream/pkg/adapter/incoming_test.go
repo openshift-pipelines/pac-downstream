@@ -25,7 +25,7 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/clients"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/bitbucketcloud"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/bitbucketdatacenter"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/bitbucketserver"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/gitea"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/gitlab"
@@ -104,7 +104,6 @@ func Test_listener_detectIncoming(t *testing.T) {
 		querySecret      string
 		queryBranch      string
 		queryHeaders     http.Header
-		queryNamespace   string
 		incomingBody     string
 		secretResult     map[string]string
 	}
@@ -152,64 +151,6 @@ func Test_listener_detectIncoming(t *testing.T) {
 			},
 		},
 		{
-			name: "good/incoming with namespace",
-			want: true,
-			args: args{
-				secretResult: map[string]string{"good-secret": "verysecrete"},
-				data: testclient.Data{
-					Repositories: []*v1alpha1.Repository{
-						{
-							ObjectMeta: metav1.ObjectMeta{
-								Name:      "test-good",
-								Namespace: "bad-namespace",
-							},
-							Spec: v1alpha1.RepositorySpec{
-								URL: goodURL,
-								Incomings: &[]v1alpha1.Incoming{
-									{
-										Targets: []string{"main"},
-										Secret: v1alpha1.Secret{
-											Name: "good-secret",
-										},
-									},
-								},
-								GitProvider: &v1alpha1.GitProvider{
-									Type: "github",
-								},
-							},
-						},
-						{
-							ObjectMeta: metav1.ObjectMeta{
-								Name:      "test-good",
-								Namespace: "good-namespace",
-							},
-							Spec: v1alpha1.RepositorySpec{
-								URL: goodURL,
-								Incomings: &[]v1alpha1.Incoming{
-									{
-										Targets: []string{"main"},
-										Secret: v1alpha1.Secret{
-											Name: "good-secret",
-										},
-									},
-								},
-								GitProvider: &v1alpha1.GitProvider{
-									Type: "github",
-								},
-							},
-						},
-					},
-				},
-				method:           "GET",
-				queryURL:         "/incoming",
-				queryRepository:  "test-good",
-				querySecret:      "verysecrete",
-				queryPipelineRun: "pipelinerun1",
-				queryBranch:      "main",
-				queryNamespace:   "good-namespace",
-			},
-		},
-		{
 			name: "good/incoming with body",
 			want: true,
 			args: args{
@@ -241,7 +182,7 @@ func Test_listener_detectIncoming(t *testing.T) {
 						},
 					},
 				},
-				method:           http.MethodPost,
+				method:           "POST",
 				queryURL:         "/incoming",
 				queryRepository:  "test-good",
 				querySecret:      "verysecrete",
@@ -282,7 +223,7 @@ func Test_listener_detectIncoming(t *testing.T) {
 						},
 					},
 				},
-				method:           http.MethodPost,
+				method:           "POST",
 				queryURL:         "/incoming",
 				queryRepository:  "test-good",
 				querySecret:      "verysecrete",
@@ -292,46 +233,9 @@ func Test_listener_detectIncoming(t *testing.T) {
 			},
 		},
 		{
-			name: "good/incoming with default secret key",
-			want: true,
-			args: args{
-				secretResult: map[string]string{"incoming-secret": "verysecrete"},
-				data: testclient.Data{
-					Repositories: []*v1alpha1.Repository{
-						{
-							ObjectMeta: metav1.ObjectMeta{
-								Name: "test-default-key",
-							},
-							Spec: v1alpha1.RepositorySpec{
-								URL: goodURL,
-								Incomings: &[]v1alpha1.Incoming{
-									{
-										Targets: []string{"main"},
-										Secret: v1alpha1.Secret{
-											Name: "incoming-secret",
-											// Key is not specified, should default to "secret"
-										},
-									},
-								},
-								GitProvider: &v1alpha1.GitProvider{
-									Type: "github",
-								},
-							},
-						},
-					},
-				},
-				method:           http.MethodPost,
-				queryURL:         "/incoming",
-				queryRepository:  "test-default-key",
-				querySecret:      "verysecrete",
-				queryPipelineRun: "pipelinerun1",
-				queryBranch:      "main",
-			},
-		},
-		{
 			name: "invalid incoming body",
 			args: args{
-				method:           http.MethodPost,
+				method:           "POST",
 				queryURL:         "/incoming",
 				queryRepository:  "test-good",
 				querySecret:      "verysecrete",
@@ -411,61 +315,6 @@ func Test_listener_detectIncoming(t *testing.T) {
 				queryPipelineRun: "pr",
 				querySecret:      "secret",
 				queryBranch:      "branch",
-			},
-			wantErr: true,
-		},
-		{
-			name: "bad/multiple repos with name",
-			args: args{
-				queryURL:         "/incoming",
-				queryRepository:  "repo",
-				queryPipelineRun: "pr",
-				querySecret:      "secret",
-				queryBranch:      "main",
-				data: testclient.Data{
-					Repositories: []*v1alpha1.Repository{
-						{
-							ObjectMeta: metav1.ObjectMeta{
-								Name:      "repo",
-								Namespace: "bad-namespace",
-							},
-							Spec: v1alpha1.RepositorySpec{
-								URL: goodURL,
-								Incomings: &[]v1alpha1.Incoming{
-									{
-										Targets: []string{"main"},
-										Secret: v1alpha1.Secret{
-											Name: "good-secret",
-										},
-									},
-								},
-								GitProvider: &v1alpha1.GitProvider{
-									Type: "github",
-								},
-							},
-						},
-						{
-							ObjectMeta: metav1.ObjectMeta{
-								Name:      "repo",
-								Namespace: "good-namespace",
-							},
-							Spec: v1alpha1.RepositorySpec{
-								URL: goodURL,
-								Incomings: &[]v1alpha1.Incoming{
-									{
-										Targets: []string{"main"},
-										Secret: v1alpha1.Secret{
-											Name: "good-secret",
-										},
-									},
-								},
-								GitProvider: &v1alpha1.GitProvider{
-									Type: "github",
-								},
-							},
-						},
-					},
-				},
 			},
 			wantErr: true,
 		},
@@ -714,7 +563,7 @@ func Test_listener_detectIncoming(t *testing.T) {
 						},
 					},
 				},
-				method:           http.MethodPost,
+				method:           "POST",
 				queryURL:         "/incoming",
 				queryRepository:  "test-good",
 				querySecret:      "verysecrete",
@@ -751,7 +600,7 @@ func Test_listener_detectIncoming(t *testing.T) {
 						},
 					},
 				},
-				method:           http.MethodPost,
+				method:           "POST",
 				queryURL:         "/incoming",
 				queryRepository:  "test-good",
 				querySecret:      "verysecrete",
@@ -792,7 +641,7 @@ func Test_listener_detectIncoming(t *testing.T) {
 						},
 					},
 				},
-				method:           http.MethodPost,
+				method:           "POST",
 				queryURL:         "/incoming",
 				queryRepository:  "test-good",
 				querySecret:      "verysecrete",
@@ -834,8 +683,8 @@ func Test_listener_detectIncoming(t *testing.T) {
 
 			// make a new request
 			req := httptest.NewRequest(tt.args.method,
-				fmt.Sprintf("http://localhost%s?repository=%s&secret=%s&pipelinerun=%s&branch=%s&namespace=%s", tt.args.queryURL,
-					tt.args.queryRepository, tt.args.querySecret, tt.args.queryPipelineRun, tt.args.queryBranch, tt.args.queryNamespace),
+				fmt.Sprintf("http://localhost%s?repository=%s&secret=%s&pipelinerun=%s&branch=%s", tt.args.queryURL,
+					tt.args.queryRepository, tt.args.querySecret, tt.args.queryPipelineRun, tt.args.queryBranch),
 				strings.NewReader(tt.args.incomingBody))
 			req.Header = tt.args.queryHeaders
 			got, _, err := l.detectIncoming(ctx, req, []byte(tt.args.incomingBody))
@@ -906,15 +755,15 @@ func Test_listener_processIncoming(t *testing.T) {
 			},
 		},
 		{
-			name:     "process/bitbucketdatacenter",
-			want:     &bitbucketdatacenter.Provider{},
+			name:     "process/bitbucketserver",
+			want:     &bitbucketserver.Provider{},
 			wantOrg:  "owner",
 			wantRepo: "repo",
 			targetRepo: &v1alpha1.Repository{
 				Spec: v1alpha1.RepositorySpec{
 					URL: "https://forge/owner/repo",
 					GitProvider: &v1alpha1.GitProvider{
-						Type: "bitbucket-datacenter",
+						Type: "bitbucket-server",
 					},
 				},
 			},
@@ -1049,7 +898,7 @@ func TestApplyIncomingParams(t *testing.T) {
 			contentType: "application/json",
 			payloadBody: []byte(`{"params": {"key": "value", "other": "value"}}`),
 			params:      []string{"key", "other"},
-			expected:    apincoming.Payload{Params: map[string]any{"key": "value", "other": "value"}},
+			expected:    apincoming.Payload{Params: map[string]interface{}{"key": "value", "other": "value"}},
 		},
 	}
 
@@ -1060,280 +909,6 @@ func TestApplyIncomingParams(t *testing.T) {
 			assert.DeepEqual(t, tt.expected, actual)
 			if tt.expectedErrStr != "" {
 				assert.ErrorContains(t, err, tt.expectedErrStr)
-			}
-		})
-	}
-}
-
-func Test_detectIncoming_legacy_warning(t *testing.T) {
-	ctx, _ := rtesting.SetupFakeContext(t)
-	testNamespace := &corev1.Namespace{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "pipelinesascode",
-		},
-	}
-	ctx = info.StoreCurrentControllerName(ctx, "default")
-	ctx = info.StoreNS(ctx, testNamespace.GetName())
-	cs, _ := testclient.SeedTestData(t, ctx, testclient.Data{
-		Repositories: []*v1alpha1.Repository{
-			{
-				ObjectMeta: metav1.ObjectMeta{Name: "test-good"},
-				Spec: v1alpha1.RepositorySpec{
-					URL: "https://matched/by/incoming",
-					Incomings: &[]v1alpha1.Incoming{{
-						Targets: []string{"main"},
-						Secret:  v1alpha1.Secret{Name: "good-secret"},
-						Params:  []string{"foo", "bar"},
-					}},
-					GitProvider: &v1alpha1.GitProvider{Type: "github"},
-				},
-			},
-		},
-	})
-	client := &params.Run{
-		Clients: clients.Clients{
-			PipelineAsCode: cs.PipelineAsCode,
-			Kube:           cs.Kube,
-		},
-		Info: info.Info{
-			Controller: &info.ControllerInfo{Secret: info.DefaultPipelinesAscodeSecretName},
-		},
-	}
-	tests := []struct {
-		name          string
-		req           *http.Request
-		body          []byte
-		expectWarning bool
-	}{
-		{
-			name: "legacy mode - params in URL",
-			req: httptest.NewRequest(http.MethodPost,
-				"http://localhost/incoming?repository=test-good&secret=verysecrete&pipelinerun=pipelinerun1&branch=main",
-				strings.NewReader("")),
-			body:          nil,
-			expectWarning: true,
-		},
-		{
-			name: "new mode - params in JSON body",
-			req: func() *http.Request {
-				payload := `{
-					"repository": "test-good",
-					"branch": "main",
-					"pipelinerun": "pipelinerun2",
-					"secret": "verysecrete",
-					"params": {"foo": "bar"}
-				}`
-				r := httptest.NewRequest(http.MethodPost,
-					"http://localhost/incoming",
-					strings.NewReader(payload))
-				r.Header.Set("Content-Type", "application/json")
-				return r
-			}(),
-			body:          []byte(`{"repository":"test-good","branch":"main","pipelinerun":"pipelinerun2","secret":"verysecrete","params":{"foo":"bar"}}`),
-			expectWarning: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			observer, observedLogs := zapobserver.New(zap.InfoLevel)
-			logger := zap.New(observer).Sugar()
-			kint := &kubernetestint.KinterfaceTest{GetSecretResult: map[string]string{"good-secret": "verysecrete"}}
-			l := &listener{
-				run:    client,
-				logger: logger,
-				kint:   kint,
-				event:  info.NewEvent(),
-			}
-			got, _, err := l.detectIncoming(ctx, tt.req, tt.body)
-			assert.NilError(t, err)
-			assert.Assert(t, got)
-			found := false
-			for _, entry := range observedLogs.All() {
-				if strings.Contains(entry.Message, "[SECURITY] Incoming webhook used legacy URL-based secret passing") {
-					found = true
-					break
-				}
-			}
-			if tt.expectWarning {
-				assert.Assert(t, found, "expected security warning log for legacy URL-based secret passing")
-			} else {
-				assert.Assert(t, !found, "did not expect security warning log for new mode")
-			}
-		})
-	}
-}
-
-func Test_detectIncoming_body_params_are_parsed(t *testing.T) {
-	ctx, _ := rtesting.SetupFakeContext(t)
-	testNamespace := &corev1.Namespace{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "pipelinesascode",
-		},
-	}
-	ctx = info.StoreCurrentControllerName(ctx, "default")
-	ctx = info.StoreNS(ctx, testNamespace.GetName())
-	cs, _ := testclient.SeedTestData(t, ctx, testclient.Data{
-		Repositories: []*v1alpha1.Repository{
-			{
-				ObjectMeta: metav1.ObjectMeta{Name: "test-good"},
-				Spec: v1alpha1.RepositorySpec{
-					URL: "https://matched/by/incoming",
-					Incomings: &[]v1alpha1.Incoming{{
-						Targets: []string{"main"},
-						Secret:  v1alpha1.Secret{Name: "good-secret"},
-						Params:  []string{"foo", "bar"},
-					}},
-					GitProvider: &v1alpha1.GitProvider{Type: "github"},
-				},
-			},
-		},
-	})
-	client := &params.Run{
-		Clients: clients.Clients{
-			PipelineAsCode: cs.PipelineAsCode,
-			Kube:           cs.Kube,
-		},
-		Info: info.Info{
-			Controller: &info.ControllerInfo{Secret: info.DefaultPipelinesAscodeSecretName},
-		},
-	}
-	payload := `{
-		"repository": "test-good",
-		"branch": "main",
-		"pipelinerun": "pipelinerun2",
-		"secret": "verysecrete",
-		"params": {"foo": "bar", "bar": "baz"}
-	}`
-	req := httptest.NewRequest(http.MethodPost,
-		"http://localhost/incoming",
-		strings.NewReader(payload))
-	req.Header.Set("Content-Type", "application/json")
-	kint := &kubernetestint.KinterfaceTest{GetSecretResult: map[string]string{"good-secret": "verysecrete"}}
-	l := &listener{
-		run:    client,
-		logger: zap.NewNop().Sugar(),
-		kint:   kint,
-		event:  info.NewEvent(),
-	}
-	got, _, err := l.detectIncoming(ctx, req, []byte(payload))
-	assert.NilError(t, err)
-	assert.Assert(t, got)
-}
-
-func Test_parseIncomingPayload(t *testing.T) {
-	tests := []struct {
-		name          string
-		method        string
-		url           string
-		headers       http.Header
-		body          string
-		wantPayload   incomingPayload
-		wantErr       bool
-		wantErrSubstr string
-	}{
-		{
-			name:   "legacy mode with valid query params",
-			method: http.MethodGet,
-			url:    "http://localhost/incoming?repository=test-repo&branch=main&pipelinerun=my-pr&secret=mysecret&namespace=ns1",
-			body:   "",
-			wantPayload: incomingPayload{
-				legacyMode:  true,
-				RepoName:    "test-repo",
-				Branch:      "main",
-				PipelineRun: "my-pr",
-				Secret:      "mysecret",
-				Namespace:   "ns1",
-			},
-			wantErr: false,
-		},
-		{
-			name:   "new mode with valid JSON body",
-			method: http.MethodPost,
-			url:    "http://localhost/incoming",
-			headers: http.Header{
-				"Content-Type": []string{"application/json"},
-			},
-			body: `{"repository":"test-repo","branch":"feature","pipelinerun":"pr-123","secret":"topsecret","namespace":"team-a","params":{"foo":"bar"}}`,
-			wantPayload: incomingPayload{
-				legacyMode:  false,
-				RepoName:    "test-repo",
-				Branch:      "feature",
-				PipelineRun: "pr-123",
-				Secret:      "topsecret",
-				Namespace:   "team-a",
-				Params:      map[string]any{"foo": "bar"},
-			},
-			wantErr: false,
-		},
-		{
-			name:   "malformed JSON error",
-			method: http.MethodPost,
-			url:    "http://localhost/incoming",
-			headers: http.Header{
-				"Content-Type": []string{"application/json"},
-			},
-			body:          `{invalid json syntax`,
-			wantErr:       true,
-			wantErrSubstr: "invalid JSON body for incoming webhook",
-		},
-		{
-			name:   "missing required fields in JSON",
-			method: http.MethodPost,
-			url:    "http://localhost/incoming",
-			headers: http.Header{
-				"Content-Type": []string{"application/json"},
-			},
-			body:          `{"repository":"test-repo","branch":"main"}`,
-			wantErr:       true,
-			wantErrSubstr: "missing required fields",
-		},
-		{
-			name:   "fallback from invalid query params to JSON body",
-			method: http.MethodPost,
-			url:    "http://localhost/incoming?repository=incomplete",
-			headers: http.Header{
-				"Content-Type": []string{"application/json"},
-			},
-			body: `{"repository":"test-repo","branch":"develop","pipelinerun":"pr-456","secret":"secret123"}`,
-			wantPayload: incomingPayload{
-				legacyMode:  false,
-				RepoName:    "test-repo",
-				Branch:      "develop",
-				PipelineRun: "pr-456",
-				Secret:      "secret123",
-			},
-			wantErr: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			req := httptest.NewRequest(tt.method, tt.url, strings.NewReader(tt.body))
-			if tt.headers != nil {
-				req.Header = tt.headers
-			}
-
-			got, err := parseIncomingPayload(req, []byte(tt.body))
-
-			if tt.wantErr {
-				assert.Assert(t, err != nil, "expected error but got nil")
-				if tt.wantErrSubstr != "" {
-					assert.ErrorContains(t, err, tt.wantErrSubstr)
-				}
-				return
-			}
-
-			assert.NilError(t, err)
-			assert.Equal(t, tt.wantPayload.legacyMode, got.legacyMode)
-			assert.Equal(t, tt.wantPayload.RepoName, got.RepoName)
-			assert.Equal(t, tt.wantPayload.Branch, got.Branch)
-			assert.Equal(t, tt.wantPayload.PipelineRun, got.PipelineRun)
-			assert.Equal(t, tt.wantPayload.Secret, got.Secret)
-			assert.Equal(t, tt.wantPayload.Namespace, got.Namespace)
-
-			if tt.wantPayload.Params != nil {
-				assert.DeepEqual(t, tt.wantPayload.Params, got.Params)
 			}
 		})
 	}

@@ -15,14 +15,11 @@ func (s taskInfoSorter) Swap(i, j int) {
 }
 
 func (s taskInfoSorter) Less(i, j int) bool {
-	if s[i].CompletionTime.Equal(s[j].CompletionTime) {
-		return s[i].Name < s[j].Name
-	}
 	return s[i].CompletionTime.Before(s[j].CompletionTime)
 }
 
 func TaskInfos(taskinfos map[string]pacv1alpha1.TaskInfos) []pacv1alpha1.TaskInfos {
-	tis := make(taskInfoSorter, 0, len(taskinfos))
+	tis := taskInfoSorter{}
 	for _, ti := range taskinfos {
 		tis = append(tis, ti)
 	}

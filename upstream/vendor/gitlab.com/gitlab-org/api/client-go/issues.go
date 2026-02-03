@@ -18,52 +18,24 @@ package gitlab
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"reflect"
-	"strings"
 	"time"
 )
 
-type (
-	IssuesServiceInterface interface {
-		ListIssues(opt *ListIssuesOptions, options ...RequestOptionFunc) ([]*Issue, *Response, error)
-		ListGroupIssues(pid any, opt *ListGroupIssuesOptions, options ...RequestOptionFunc) ([]*Issue, *Response, error)
-		ListProjectIssues(pid any, opt *ListProjectIssuesOptions, options ...RequestOptionFunc) ([]*Issue, *Response, error)
-		GetIssueByID(issue int64, options ...RequestOptionFunc) (*Issue, *Response, error)
-		GetIssue(pid any, issue int64, options ...RequestOptionFunc) (*Issue, *Response, error)
-		CreateIssue(pid any, opt *CreateIssueOptions, options ...RequestOptionFunc) (*Issue, *Response, error)
-		UpdateIssue(pid any, issue int64, opt *UpdateIssueOptions, options ...RequestOptionFunc) (*Issue, *Response, error)
-		DeleteIssue(pid any, issue int64, options ...RequestOptionFunc) (*Response, error)
-		ReorderIssue(pid any, issue int64, opt *ReorderIssueOptions, options ...RequestOptionFunc) (*Issue, *Response, error)
-		MoveIssue(pid any, issue int64, opt *MoveIssueOptions, options ...RequestOptionFunc) (*Issue, *Response, error)
-		SubscribeToIssue(pid any, issue int64, options ...RequestOptionFunc) (*Issue, *Response, error)
-		UnsubscribeFromIssue(pid any, issue int64, options ...RequestOptionFunc) (*Issue, *Response, error)
-		CreateTodo(pid any, issue int64, options ...RequestOptionFunc) (*Todo, *Response, error)
-		ListMergeRequestsClosingIssue(pid any, issue int64, opt *ListMergeRequestsClosingIssueOptions, options ...RequestOptionFunc) ([]*BasicMergeRequest, *Response, error)
-		ListMergeRequestsRelatedToIssue(pid any, issue int64, opt *ListMergeRequestsRelatedToIssueOptions, options ...RequestOptionFunc) ([]*BasicMergeRequest, *Response, error)
-		SetTimeEstimate(pid any, issue int64, opt *SetTimeEstimateOptions, options ...RequestOptionFunc) (*TimeStats, *Response, error)
-		ResetTimeEstimate(pid any, issue int64, options ...RequestOptionFunc) (*TimeStats, *Response, error)
-		AddSpentTime(pid any, issue int64, opt *AddSpentTimeOptions, options ...RequestOptionFunc) (*TimeStats, *Response, error)
-		ResetSpentTime(pid any, issue int64, options ...RequestOptionFunc) (*TimeStats, *Response, error)
-		GetTimeSpent(pid any, issue int64, options ...RequestOptionFunc) (*TimeStats, *Response, error)
-		GetParticipants(pid any, issue int64, options ...RequestOptionFunc) ([]*BasicUser, *Response, error)
-	}
-
-	// IssuesService handles communication with the issue related methods
-	// of the GitLab API.
-	//
-	// GitLab API docs: https://docs.gitlab.com/api/issues/
-	IssuesService struct {
-		client    *Client
-		timeStats *timeStatsService
-	}
-)
-
-var _ IssuesServiceInterface = (*IssuesService)(nil)
+// IssuesService handles communication with the issue related methods
+// of the GitLab API.
+//
+// GitLab API docs: https://docs.gitlab.com/ee/api/issues.html
+type IssuesService struct {
+	client    *Client
+	timeStats *timeStatsService
+}
 
 // IssueAuthor represents a author of the issue.
 type IssueAuthor struct {
-	ID        int64  `json:"id"`
+	ID        int    `json:"id"`
 	State     string `json:"state"`
 	WebURL    string `json:"web_url"`
 	Name      string `json:"name"`
@@ -73,7 +45,7 @@ type IssueAuthor struct {
 
 // IssueAssignee represents a assignee of the issue.
 type IssueAssignee struct {
-	ID        int64  `json:"id"`
+	ID        int    `json:"id"`
 	State     string `json:"state"`
 	WebURL    string `json:"web_url"`
 	Name      string `json:"name"`
@@ -90,7 +62,7 @@ type IssueReferences struct {
 
 // IssueCloser represents a closer of the issue.
 type IssueCloser struct {
-	ID        int64  `json:"id"`
+	ID        int    `json:"id"`
 	State     string `json:"state"`
 	WebURL    string `json:"web_url"`
 	Name      string `json:"name"`
@@ -108,49 +80,46 @@ type IssueLinks struct {
 
 // Issue represents a GitLab issue.
 //
-// GitLab API docs: https://docs.gitlab.com/api/issues/
+// GitLab API docs: https://docs.gitlab.com/ee/api/issues.html
 type Issue struct {
-	ID                   int64                  `json:"id"`
-	IID                  int64                  `json:"iid"`
+	ID                   int                    `json:"id"`
+	IID                  int                    `json:"iid"`
 	ExternalID           string                 `json:"external_id"`
 	State                string                 `json:"state"`
 	Description          string                 `json:"description"`
 	HealthStatus         string                 `json:"health_status"`
 	Author               *IssueAuthor           `json:"author"`
 	Milestone            *Milestone             `json:"milestone"`
-	ProjectID            int64                  `json:"project_id"`
+	ProjectID            int                    `json:"project_id"`
 	Assignees            []*IssueAssignee       `json:"assignees"`
+	Assignee             *IssueAssignee         `json:"assignee"`
 	UpdatedAt            *time.Time             `json:"updated_at"`
 	ClosedAt             *time.Time             `json:"closed_at"`
 	ClosedBy             *IssueCloser           `json:"closed_by"`
 	Title                string                 `json:"title"`
 	CreatedAt            *time.Time             `json:"created_at"`
-	MovedToID            int64                  `json:"moved_to_id"`
+	MovedToID            int                    `json:"moved_to_id"`
 	Labels               Labels                 `json:"labels"`
 	LabelDetails         []*LabelDetails        `json:"label_details"`
-	Upvotes              int64                  `json:"upvotes"`
-	Downvotes            int64                  `json:"downvotes"`
+	Upvotes              int                    `json:"upvotes"`
+	Downvotes            int                    `json:"downvotes"`
 	DueDate              *ISOTime               `json:"due_date"`
 	WebURL               string                 `json:"web_url"`
 	References           *IssueReferences       `json:"references"`
 	TimeStats            *TimeStats             `json:"time_stats"`
 	Confidential         bool                   `json:"confidential"`
-	Weight               int64                  `json:"weight"`
+	Weight               int                    `json:"weight"`
 	DiscussionLocked     bool                   `json:"discussion_locked"`
 	IssueType            *string                `json:"issue_type,omitempty"`
 	Subscribed           bool                   `json:"subscribed"`
-	UserNotesCount       int64                  `json:"user_notes_count"`
+	UserNotesCount       int                    `json:"user_notes_count"`
 	Links                *IssueLinks            `json:"_links"`
-	IssueLinkID          int64                  `json:"issue_link_id"`
-	MergeRequestCount    int64                  `json:"merge_requests_count"`
-	EpicIssueID          int64                  `json:"epic_issue_id"`
+	IssueLinkID          int                    `json:"issue_link_id"`
+	MergeRequestCount    int                    `json:"merge_requests_count"`
+	EpicIssueID          int                    `json:"epic_issue_id"`
 	Epic                 *Epic                  `json:"epic"`
 	Iteration            *GroupIteration        `json:"iteration"`
 	TaskCompletionStatus *TasksCompletionStatus `json:"task_completion_status"`
-	ServiceDeskReplyTo   string                 `json:"service_desk_reply_to"`
-
-	// Deprecated: use Assignees instead
-	Assignee *IssueAssignee `json:"assignee"`
 }
 
 func (i Issue) String() string {
@@ -161,7 +130,7 @@ func (i Issue) String() string {
 func (i *Issue) UnmarshalJSON(data []byte) error {
 	type alias Issue
 
-	raw := make(map[string]any)
+	raw := make(map[string]interface{})
 	err := json.Unmarshal(data, &raw)
 	if err != nil {
 		return err
@@ -172,13 +141,13 @@ func (i *Issue) UnmarshalJSON(data []byte) error {
 		delete(raw, "id")
 	}
 
-	labelDetails, ok := raw["labels"].([]any)
+	labelDetails, ok := raw["labels"].([]interface{})
 	if ok && len(labelDetails) > 0 {
 		// We only want to change anything if we got label details.
-		if _, ok := labelDetails[0].(map[string]any); ok {
-			labels := make([]any, len(labelDetails))
+		if _, ok := labelDetails[0].(map[string]interface{}); ok {
+			labels := make([]interface{}, len(labelDetails))
 			for i, details := range labelDetails {
-				labels[i] = details.(map[string]any)["name"]
+				labels[i] = details.(map[string]interface{})["name"]
 			}
 
 			// Set the correct values
@@ -197,7 +166,7 @@ func (i *Issue) UnmarshalJSON(data []byte) error {
 
 // LabelDetails represents detailed label information.
 type LabelDetails struct {
-	ID              int64  `json:"id"`
+	ID              int    `json:"id"`
 	Name            string `json:"name"`
 	Color           string `json:"color"`
 	Description     string `json:"description"`
@@ -207,7 +176,7 @@ type LabelDetails struct {
 
 // ListIssuesOptions represents the available ListIssues() options.
 //
-// GitLab API docs: https://docs.gitlab.com/api/issues/#list-issues
+// GitLab API docs: https://docs.gitlab.com/ee/api/issues.html#list-issues
 type ListIssuesOptions struct {
 	ListOptions
 	State               *string          `url:"state,omitempty" json:"state,omitempty"`
@@ -217,17 +186,17 @@ type ListIssuesOptions struct {
 	Milestone           *string          `url:"milestone,omitempty" json:"milestone,omitempty"`
 	NotMilestone        *string          `url:"not[milestone],omitempty" json:"not[milestone],omitempty"`
 	Scope               *string          `url:"scope,omitempty" json:"scope,omitempty"`
-	AuthorID            *int64           `url:"author_id,omitempty" json:"author_id,omitempty"`
+	AuthorID            *int             `url:"author_id,omitempty" json:"author_id,omitempty"`
 	AuthorUsername      *string          `url:"author_username,omitempty" json:"author_username,omitempty"`
 	NotAuthorUsername   *string          `url:"not[author_username],omitempty" json:"not[author_username],omitempty"`
-	NotAuthorID         *[]int64         `url:"not[author_id],omitempty" json:"not[author_id],omitempty"`
+	NotAuthorID         *[]int           `url:"not[author_id],omitempty" json:"not[author_id],omitempty"`
 	AssigneeID          *AssigneeIDValue `url:"assignee_id,omitempty" json:"assignee_id,omitempty"`
-	NotAssigneeID       *[]int64         `url:"not[assignee_id],omitempty" json:"not[assignee_id],omitempty"`
+	NotAssigneeID       *[]int           `url:"not[assignee_id],omitempty" json:"not[assignee_id],omitempty"`
 	AssigneeUsername    *string          `url:"assignee_username,omitempty" json:"assignee_username,omitempty"`
 	NotAssigneeUsername *string          `url:"not[assignee_username],omitempty" json:"not[assignee_username],omitempty"`
 	MyReactionEmoji     *string          `url:"my_reaction_emoji,omitempty" json:"my_reaction_emoji,omitempty"`
 	NotMyReactionEmoji  *[]string        `url:"not[my_reaction_emoji],omitempty" json:"not[my_reaction_emoji],omitempty"`
-	IIDs                *[]int64         `url:"iids[],omitempty" json:"iids,omitempty"`
+	IIDs                *[]int           `url:"iids[],omitempty" json:"iids,omitempty"`
 	In                  *string          `url:"in,omitempty" json:"in,omitempty"`
 	NotIn               *string          `url:"not[in],omitempty" json:"not[in],omitempty"`
 	OrderBy             *string          `url:"order_by,omitempty" json:"order_by,omitempty"`
@@ -241,48 +210,52 @@ type ListIssuesOptions struct {
 	UpdatedBefore       *time.Time       `url:"updated_before,omitempty" json:"updated_before,omitempty"`
 	Confidential        *bool            `url:"confidential,omitempty" json:"confidential,omitempty"`
 	IssueType           *string          `url:"issue_type,omitempty" json:"issue_type,omitempty"`
-	IterationID         *int64           `url:"iteration_id,omitempty" json:"iteration_id,omitempty"`
+	IterationID         *int             `url:"iteration_id,omitempty" json:"iteration_id,omitempty"`
 }
 
 // ListIssues gets all issues created by authenticated user. This function
 // takes pagination parameters page and per_page to restrict the list of issues.
 //
-// GitLab API docs: https://docs.gitlab.com/api/issues/#list-issues
+// GitLab API docs: https://docs.gitlab.com/ee/api/issues.html#list-issues
 func (s *IssuesService) ListIssues(opt *ListIssuesOptions, options ...RequestOptionFunc) ([]*Issue, *Response, error) {
-	return do[[]*Issue](s.client,
-		withPath("issues"),
-		withAPIOpts(opt),
-		withRequestOpts(options...),
-	)
+	req, err := s.client.NewRequest(http.MethodGet, "issues", opt, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var i []*Issue
+	resp, err := s.client.Do(req, &i)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return i, resp, nil
 }
 
 // ListGroupIssuesOptions represents the available ListGroupIssues() options.
 //
-// GitLab API docs: https://docs.gitlab.com/api/issues/#list-group-issues
+// GitLab API docs: https://docs.gitlab.com/ee/api/issues.html#list-group-issues
 type ListGroupIssuesOptions struct {
 	ListOptions
 	State             *string       `url:"state,omitempty" json:"state,omitempty"`
 	Labels            *LabelOptions `url:"labels,comma,omitempty" json:"labels,omitempty"`
 	NotLabels         *LabelOptions `url:"not[labels],comma,omitempty" json:"not[labels],omitempty"`
 	WithLabelDetails  *bool         `url:"with_labels_details,omitempty" json:"with_labels_details,omitempty"`
-	IIDs              *[]int64      `url:"iids[],omitempty" json:"iids,omitempty"`
+	IIDs              *[]int        `url:"iids[],omitempty" json:"iids,omitempty"`
 	Milestone         *string       `url:"milestone,omitempty" json:"milestone,omitempty"`
 	NotMilestone      *string       `url:"not[milestone],omitempty" json:"not[milestone],omitempty"`
 	Scope             *string       `url:"scope,omitempty" json:"scope,omitempty"`
-	AuthorID          *int64        `url:"author_id,omitempty" json:"author_id,omitempty"`
-	NotAuthorID       *int64        `url:"not[author_id],omitempty" json:"not[author_id],omitempty"`
+	AuthorID          *int          `url:"author_id,omitempty" json:"author_id,omitempty"`
+	NotAuthorID       *[]int        `url:"not[author_id],omitempty" json:"not[author_id],omitempty"`
 	AuthorUsername    *string       `url:"author_username,omitempty" json:"author_username,omitempty"`
 	NotAuthorUsername *string       `url:"not[author_username],omitempty" json:"not[author_username],omitempty"`
 
-	// AssigneeID is defined as an int64 in the documentation, however, the field
-	// must be able to accept Assignee IDs and the words 'None' and 'Any'.  Use
-	// *AssigneeIDValue instead of *int64.
 	AssigneeID          *AssigneeIDValue `url:"assignee_id,omitempty" json:"assignee_id,omitempty"`
-	NotAssigneeID       *int64           `url:"not[assignee_id],omitempty" json:"not[assignee_id],omitempty"`
+	NotAssigneeID       *[]int           `url:"not[assignee_id],omitempty" json:"not[assignee_id],omitempty"`
 	AssigneeUsername    *string          `url:"assignee_username,omitempty" json:"assignee_username,omitempty"`
 	NotAssigneeUsername *string          `url:"not[assignee_username],omitempty" json:"not[assignee_username],omitempty"`
 	MyReactionEmoji     *string          `url:"my_reaction_emoji,omitempty" json:"my_reaction_emoji,omitempty"`
-	NotMyReactionEmoji  *string          `url:"not[my_reaction_emoji],omitempty" json:"not[my_reaction_emoji],omitempty"`
+	NotMyReactionEmoji  *[]string        `url:"not[my_reaction_emoji],omitempty" json:"not[my_reaction_emoji],omitempty"`
 	OrderBy             *string          `url:"order_by,omitempty" json:"order_by,omitempty"`
 	Sort                *string          `url:"sort,omitempty" json:"sort,omitempty"`
 	Search              *string          `url:"search,omitempty" json:"search,omitempty"`
@@ -294,50 +267,58 @@ type ListGroupIssuesOptions struct {
 	DueDate             *string          `url:"due_date,omitempty" json:"due_date,omitempty"`
 	UpdatedAfter        *time.Time       `url:"updated_after,omitempty" json:"updated_after,omitempty"`
 	UpdatedBefore       *time.Time       `url:"updated_before,omitempty" json:"updated_before,omitempty"`
-	Confidential        *bool            `url:"confidential,omitempty" json:"confidential,omitempty"`
 	IssueType           *string          `url:"issue_type,omitempty" json:"issue_type,omitempty"`
-	IterationID         *int64           `url:"iteration_id,omitempty" json:"iteration_id,omitempty"`
+	IterationID         *int             `url:"iteration_id,omitempty" json:"iteration_id,omitempty"`
 }
 
 // ListGroupIssues gets a list of group issues. This function accepts
 // pagination parameters page and per_page to return the list of group issues.
 //
-// GitLab API docs: https://docs.gitlab.com/api/issues/#list-group-issues
-func (s *IssuesService) ListGroupIssues(pid any, opt *ListGroupIssuesOptions, options ...RequestOptionFunc) ([]*Issue, *Response, error) {
-	return do[[]*Issue](s.client,
-		withPath("groups/%s/issues", GroupID{pid}),
-		withAPIOpts(opt),
-		withRequestOpts(options...),
-	)
+// GitLab API docs: https://docs.gitlab.com/ee/api/issues.html#list-group-issues
+func (s *IssuesService) ListGroupIssues(pid interface{}, opt *ListGroupIssuesOptions, options ...RequestOptionFunc) ([]*Issue, *Response, error) {
+	group, err := parseID(pid)
+	if err != nil {
+		return nil, nil, err
+	}
+	u := fmt.Sprintf("groups/%s/issues", PathEscape(group))
+
+	req, err := s.client.NewRequest(http.MethodGet, u, opt, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var i []*Issue
+	resp, err := s.client.Do(req, &i)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return i, resp, nil
 }
 
 // ListProjectIssuesOptions represents the available ListProjectIssues() options.
 //
-// GitLab API docs: https://docs.gitlab.com/api/issues/#list-project-issues
+// GitLab API docs: https://docs.gitlab.com/ee/api/issues.html#list-project-issues
 type ListProjectIssuesOptions struct {
 	ListOptions
-	IIDs              *[]int64      `url:"iids[],omitempty" json:"iids,omitempty"`
-	State             *string       `url:"state,omitempty" json:"state,omitempty"`
-	Labels            *LabelOptions `url:"labels,comma,omitempty" json:"labels,omitempty"`
-	NotLabels         *LabelOptions `url:"not[labels],comma,omitempty" json:"not[labels],omitempty"`
-	WithLabelDetails  *bool         `url:"with_labels_details,omitempty" json:"with_labels_details,omitempty"`
-	Milestone         *string       `url:"milestone,omitempty" json:"milestone,omitempty"`
-	NotMilestone      *string       `url:"not[milestone],omitempty" json:"not[milestone],omitempty"`
-	Scope             *string       `url:"scope,omitempty" json:"scope,omitempty"`
-	AuthorID          *int64        `url:"author_id,omitempty" json:"author_id,omitempty"`
-	AuthorUsername    *string       `url:"author_username,omitempty" json:"author_username,omitempty"`
-	NotAuthorUsername *string       `url:"not[author_username],omitempty" json:"not[author_username],omitempty"`
-	NotAuthorID       *int64        `url:"not[author_id],omitempty" json:"not[author_id],omitempty"`
-
-	// AssigneeID is defined as an int in the documentation, however, the field
-	// must be able to accept Assignee IDs and the words 'None' and 'Any'.  Use
-	// *AssigneeIDValue instead of *int.
+	IIDs                *[]int           `url:"iids[],omitempty" json:"iids,omitempty"`
+	State               *string          `url:"state,omitempty" json:"state,omitempty"`
+	Labels              *LabelOptions    `url:"labels,comma,omitempty" json:"labels,omitempty"`
+	NotLabels           *LabelOptions    `url:"not[labels],comma,omitempty" json:"not[labels],omitempty"`
+	WithLabelDetails    *bool            `url:"with_labels_details,omitempty" json:"with_labels_details,omitempty"`
+	Milestone           *string          `url:"milestone,omitempty" json:"milestone,omitempty"`
+	NotMilestone        *string          `url:"not[milestone],omitempty" json:"not[milestone],omitempty"`
+	Scope               *string          `url:"scope,omitempty" json:"scope,omitempty"`
+	AuthorID            *int             `url:"author_id,omitempty" json:"author_id,omitempty"`
+	AuthorUsername      *string          `url:"author_username,omitempty" json:"author_username,omitempty"`
+	NotAuthorUsername   *string          `url:"not[author_username],omitempty" json:"not[author_username],omitempty"`
+	NotAuthorID         *[]int           `url:"not[author_id],omitempty" json:"not[author_id],omitempty"`
 	AssigneeID          *AssigneeIDValue `url:"assignee_id,omitempty" json:"assignee_id,omitempty"`
-	NotAssigneeID       *int64           `url:"not[assignee_id],omitempty" json:"not[assignee_id],omitempty"`
+	NotAssigneeID       *[]int           `url:"not[assignee_id],omitempty" json:"not[assignee_id],omitempty"`
 	AssigneeUsername    *string          `url:"assignee_username,omitempty" json:"assignee_username,omitempty"`
 	NotAssigneeUsername *string          `url:"not[assignee_username],omitempty" json:"not[assignee_username],omitempty"`
 	MyReactionEmoji     *string          `url:"my_reaction_emoji,omitempty" json:"my_reaction_emoji,omitempty"`
-	NotMyReactionEmoji  *string          `url:"not[my_reaction_emoji],omitempty" json:"not[my_reaction_emoji],omitempty"`
+	NotMyReactionEmoji  *[]string        `url:"not[my_reaction_emoji],omitempty" json:"not[my_reaction_emoji],omitempty"`
 	OrderBy             *string          `url:"order_by,omitempty" json:"order_by,omitempty"`
 	Sort                *string          `url:"sort,omitempty" json:"sort,omitempty"`
 	Search              *string          `url:"search,omitempty" json:"search,omitempty"`
@@ -350,217 +331,248 @@ type ListProjectIssuesOptions struct {
 	UpdatedBefore       *time.Time       `url:"updated_before,omitempty" json:"updated_before,omitempty"`
 	Confidential        *bool            `url:"confidential,omitempty" json:"confidential,omitempty"`
 	IssueType           *string          `url:"issue_type,omitempty" json:"issue_type,omitempty"`
-	IterationID         *int64           `url:"iteration_id,omitempty" json:"iteration_id,omitempty"`
+	IterationID         *int             `url:"iteration_id,omitempty" json:"iteration_id,omitempty"`
 }
 
 // ListProjectIssues gets a list of project issues. This function accepts
 // pagination parameters page and per_page to return the list of project issues.
 //
-// GitLab API docs: https://docs.gitlab.com/api/issues/#list-project-issues
-func (s *IssuesService) ListProjectIssues(pid any, opt *ListProjectIssuesOptions, options ...RequestOptionFunc) ([]*Issue, *Response, error) {
-	return do[[]*Issue](s.client,
-		withPath("projects/%s/issues", ProjectID{pid}),
-		withAPIOpts(opt),
-		withRequestOpts(options...),
-	)
+// GitLab API docs: https://docs.gitlab.com/ee/api/issues.html#list-project-issues
+func (s *IssuesService) ListProjectIssues(pid interface{}, opt *ListProjectIssuesOptions, options ...RequestOptionFunc) ([]*Issue, *Response, error) {
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, nil, err
+	}
+	u := fmt.Sprintf("projects/%s/issues", PathEscape(project))
+
+	req, err := s.client.NewRequest(http.MethodGet, u, opt, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var i []*Issue
+	resp, err := s.client.Do(req, &i)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return i, resp, nil
 }
 
 // GetIssueByID gets a single issue.
 //
-// GitLab API docs: https://docs.gitlab.com/api/issues/#single-issue
-func (s *IssuesService) GetIssueByID(issue int64, options ...RequestOptionFunc) (*Issue, *Response, error) {
-	return do[*Issue](s.client,
-		withPath("issues/%d", issue),
-		withRequestOpts(options...),
-	)
+// GitLab API docs: https://docs.gitlab.com/ee/api/issues.html#single-issue
+func (s *IssuesService) GetIssueByID(issue int, options ...RequestOptionFunc) (*Issue, *Response, error) {
+	u := fmt.Sprintf("issues/%d", issue)
+
+	req, err := s.client.NewRequest(http.MethodGet, u, nil, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	i := new(Issue)
+	resp, err := s.client.Do(req, i)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return i, resp, nil
 }
 
 // GetIssue gets a single project issue.
 //
-// GitLab API docs: https://docs.gitlab.com/api/issues/#single-project-issue
-func (s *IssuesService) GetIssue(pid any, issue int64, options ...RequestOptionFunc) (*Issue, *Response, error) {
-	return do[*Issue](s.client,
-		withPath("projects/%s/issues/%d", ProjectID{pid}, issue),
-		withRequestOpts(options...),
-	)
+// GitLab API docs: https://docs.gitlab.com/ee/api/issues.html#single-project-issue
+func (s *IssuesService) GetIssue(pid interface{}, issue int, options ...RequestOptionFunc) (*Issue, *Response, error) {
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, nil, err
+	}
+	u := fmt.Sprintf("projects/%s/issues/%d", PathEscape(project), issue)
+
+	req, err := s.client.NewRequest(http.MethodGet, u, nil, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	i := new(Issue)
+	resp, err := s.client.Do(req, i)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return i, resp, nil
 }
 
 // CreateIssueOptions represents the available CreateIssue() options.
 //
-// GitLab API docs: https://docs.gitlab.com/api/issues/#new-issue
+// GitLab API docs: https://docs.gitlab.com/ee/api/issues.html#new-issue
 type CreateIssueOptions struct {
-	IID                                *int64        `url:"iid,omitempty" json:"iid,omitempty"`
+	IID                                *int          `url:"iid,omitempty" json:"iid,omitempty"`
 	Title                              *string       `url:"title,omitempty" json:"title,omitempty"`
 	Description                        *string       `url:"description,omitempty" json:"description,omitempty"`
 	Confidential                       *bool         `url:"confidential,omitempty" json:"confidential,omitempty"`
-	AssigneeIDs                        *[]int64      `url:"assignee_ids,omitempty" json:"assignee_ids,omitempty"`
-	MilestoneID                        *int64        `url:"milestone_id,omitempty" json:"milestone_id,omitempty"`
+	AssigneeIDs                        *[]int        `url:"assignee_ids,omitempty" json:"assignee_ids,omitempty"`
+	MilestoneID                        *int          `url:"milestone_id,omitempty" json:"milestone_id,omitempty"`
 	Labels                             *LabelOptions `url:"labels,comma,omitempty" json:"labels,omitempty"`
 	CreatedAt                          *time.Time    `url:"created_at,omitempty" json:"created_at,omitempty"`
 	DueDate                            *ISOTime      `url:"due_date,omitempty" json:"due_date,omitempty"`
-	EpicID                             *int64        `url:"epic_id,omitempty" json:"epic_id,omitempty"`
-	MergeRequestToResolveDiscussionsOf *int64        `url:"merge_request_to_resolve_discussions_of,omitempty" json:"merge_request_to_resolve_discussions_of,omitempty"`
+	EpicID                             *int          `url:"epic_id,omitempty" json:"epic_id,omitempty"`
+	MergeRequestToResolveDiscussionsOf *int          `url:"merge_request_to_resolve_discussions_of,omitempty" json:"merge_request_to_resolve_discussions_of,omitempty"`
 	DiscussionToResolve                *string       `url:"discussion_to_resolve,omitempty" json:"discussion_to_resolve,omitempty"`
-	Weight                             *int64        `url:"weight,omitempty" json:"weight,omitempty"`
+	Weight                             *int          `url:"weight,omitempty" json:"weight,omitempty"`
 	IssueType                          *string       `url:"issue_type,omitempty" json:"issue_type,omitempty"`
 }
 
 // CreateIssue creates a new project issue.
 //
-// GitLab API docs: https://docs.gitlab.com/api/issues/#new-issue
-func (s *IssuesService) CreateIssue(pid any, opt *CreateIssueOptions, options ...RequestOptionFunc) (*Issue, *Response, error) {
-	return do[*Issue](s.client,
-		withMethod(http.MethodPost),
-		withPath("projects/%s/issues", ProjectID{pid}),
-		withAPIOpts(opt),
-		withRequestOpts(options...),
-	)
+// GitLab API docs: https://docs.gitlab.com/ee/api/issues.html#new-issue
+func (s *IssuesService) CreateIssue(pid interface{}, opt *CreateIssueOptions, options ...RequestOptionFunc) (*Issue, *Response, error) {
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, nil, err
+	}
+	u := fmt.Sprintf("projects/%s/issues", PathEscape(project))
+
+	req, err := s.client.NewRequest(http.MethodPost, u, opt, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	i := new(Issue)
+	resp, err := s.client.Do(req, i)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return i, resp, nil
 }
 
 // UpdateIssueOptions represents the available UpdateIssue() options.
 //
-// To reset the due date, epic, milestone, or weight of the issue, set the
-// ResetDueDate, ResetEpic, ResetMilestone, or ResetWeight field to true.
-//
-// GitLab API docs: https://docs.gitlab.com/api/issues/#edit-an-issue
+// GitLab API docs: https://docs.gitlab.com/ee/api/issues.html#edit-issue
 type UpdateIssueOptions struct {
 	Title            *string       `url:"title,omitempty" json:"title,omitempty"`
 	Description      *string       `url:"description,omitempty" json:"description,omitempty"`
 	Confidential     *bool         `url:"confidential,omitempty" json:"confidential,omitempty"`
-	AssigneeIDs      *[]int64      `url:"assignee_ids,omitempty" json:"assignee_ids,omitempty"`
-	MilestoneID      *int64        `url:"milestone_id,omitempty" json:"milestone_id,omitempty"`
+	AssigneeIDs      *[]int        `url:"assignee_ids,omitempty" json:"assignee_ids,omitempty"`
+	MilestoneID      *int          `url:"milestone_id,omitempty" json:"milestone_id,omitempty"`
 	Labels           *LabelOptions `url:"labels,comma,omitempty" json:"labels,omitempty"`
 	AddLabels        *LabelOptions `url:"add_labels,comma,omitempty" json:"add_labels,omitempty"`
 	RemoveLabels     *LabelOptions `url:"remove_labels,comma,omitempty" json:"remove_labels,omitempty"`
 	StateEvent       *string       `url:"state_event,omitempty" json:"state_event,omitempty"`
 	UpdatedAt        *time.Time    `url:"updated_at,omitempty" json:"updated_at,omitempty"`
 	DueDate          *ISOTime      `url:"due_date,omitempty" json:"due_date,omitempty"`
-	EpicID           *int64        `url:"epic_id,omitempty" json:"epic_id,omitempty"`
-	Weight           *int64        `url:"weight,omitempty" json:"weight,omitempty"`
+	EpicID           *int          `url:"epic_id,omitempty" json:"epic_id,omitempty"`
+	Weight           *int          `url:"weight,omitempty" json:"weight,omitempty"`
 	DiscussionLocked *bool         `url:"discussion_locked,omitempty" json:"discussion_locked,omitempty"`
 	IssueType        *string       `url:"issue_type,omitempty" json:"issue_type,omitempty"`
-
-	ResetDueDate     bool `url:"-" json:"-"`
-	ResetEpicID      bool `url:"-" json:"-"`
-	ResetMilestoneID bool `url:"-" json:"-"`
-	ResetWeight      bool `url:"-" json:"-"`
-}
-
-// MarshalJSON implements custom JSON marshaling for UpdateIssueOptions.
-// This is needed to support emitting a literal `null` when the field needs to be removed.
-func (o UpdateIssueOptions) MarshalJSON() ([]byte, error) {
-	data := map[string]any{}
-
-	// Use reflection to copy all fields from o to data
-	val := reflect.ValueOf(o)
-	typ := val.Type()
-
-	for i := range val.NumField() {
-		field := val.Field(i)
-		fieldName := typ.Field(i).Name
-
-		if field.IsZero() {
-			continue
-		}
-
-		name := fieldName
-
-		if tag := typ.Field(i).Tag.Get("json"); tag != "" {
-			tagFields := strings.Split(tag, ",")
-			name = tagFields[0]
-		}
-
-		// Skip unexported fields.
-		if name == "-" {
-			continue
-		}
-
-		data[name] = field.Interface()
-	}
-
-	// Emit a literal `null` when the field needs to be removed
-	if o.ResetDueDate {
-		data["due_date"] = nil
-	}
-
-	if o.ResetEpicID {
-		data["epic_id"] = nil
-	}
-
-	if o.ResetMilestoneID {
-		data["milestone_id"] = nil
-	}
-
-	if o.ResetWeight {
-		data["weight"] = nil
-	}
-
-	return json.Marshal(data)
 }
 
 // UpdateIssue updates an existing project issue. This function is also used
 // to mark an issue as closed.
 //
-// GitLab API docs: https://docs.gitlab.com/api/issues/#edit-an-issue
-func (s *IssuesService) UpdateIssue(pid any, issue int64, opt *UpdateIssueOptions, options ...RequestOptionFunc) (*Issue, *Response, error) {
-	return do[*Issue](s.client,
-		withMethod(http.MethodPut),
-		withPath("projects/%s/issues/%d", ProjectID{pid}, issue),
-		withAPIOpts(opt),
-		withRequestOpts(options...),
-	)
+// GitLab API docs: https://docs.gitlab.com/ee/api/issues.html#edit-issues
+func (s *IssuesService) UpdateIssue(pid interface{}, issue int, opt *UpdateIssueOptions, options ...RequestOptionFunc) (*Issue, *Response, error) {
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, nil, err
+	}
+	u := fmt.Sprintf("projects/%s/issues/%d", PathEscape(project), issue)
+
+	req, err := s.client.NewRequest(http.MethodPut, u, opt, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	i := new(Issue)
+	resp, err := s.client.Do(req, i)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return i, resp, nil
 }
 
 // DeleteIssue deletes a single project issue.
 //
-// GitLab API docs: https://docs.gitlab.com/api/issues/#delete-an-issue
-func (s *IssuesService) DeleteIssue(pid any, issue int64, options ...RequestOptionFunc) (*Response, error) {
-	_, resp, err := do[none](s.client,
-		withMethod(http.MethodDelete),
-		withPath("projects/%s/issues/%d", ProjectID{pid}, issue),
-		withRequestOpts(options...),
-	)
-	return resp, err
+// GitLab API docs: https://docs.gitlab.com/ee/api/issues.html#delete-an-issue
+func (s *IssuesService) DeleteIssue(pid interface{}, issue int, options ...RequestOptionFunc) (*Response, error) {
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, err
+	}
+	u := fmt.Sprintf("projects/%s/issues/%d", PathEscape(project), issue)
+
+	req, err := s.client.NewRequest(http.MethodDelete, u, nil, options)
+	if err != nil {
+		return nil, err
+	}
+
+	return s.client.Do(req, nil)
 }
 
 // ReorderIssueOptions represents the available ReorderIssue() options.
 //
-// GitLab API docs: https://docs.gitlab.com/api/issues/#reorder-an-issue
+// GitLab API docs: https://docs.gitlab.com/ee/api/issues.html#reorder-an-issue
 type ReorderIssueOptions struct {
-	MoveAfterID  *int64 `url:"move_after_id,omitempty" json:"move_after_id,omitempty"`
-	MoveBeforeID *int64 `url:"move_before_id,omitempty" json:"move_before_id,omitempty"`
+	MoveAfterID  *int `url:"move_after_id,omitempty" json:"move_after_id,omitempty"`
+	MoveBeforeID *int `url:"move_before_id,omitempty" json:"move_before_id,omitempty"`
 }
 
 // ReorderIssue reorders an issue.
 //
-// GitLab API docs: https://docs.gitlab.com/api/issues/#reorder-an-issue
-func (s *IssuesService) ReorderIssue(pid any, issue int64, opt *ReorderIssueOptions, options ...RequestOptionFunc) (*Issue, *Response, error) {
-	return do[*Issue](s.client,
-		withMethod(http.MethodPut),
-		withPath("projects/%s/issues/%d/reorder", ProjectID{pid}, issue),
-		withAPIOpts(opt),
-		withRequestOpts(options...),
-	)
+// GitLab API docs: https://docs.gitlab.com/ee/api/issues.html#reorder-an-issue
+func (s *IssuesService) ReorderIssue(pid interface{}, issue int, opt *ReorderIssueOptions, options ...RequestOptionFunc) (*Issue, *Response, error) {
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, nil, err
+	}
+	u := fmt.Sprintf("projects/%s/issues/%d/reorder", PathEscape(project), issue)
+
+	req, err := s.client.NewRequest(http.MethodPut, u, opt, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	i := new(Issue)
+	resp, err := s.client.Do(req, i)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return i, resp, nil
 }
 
 // MoveIssueOptions represents the available MoveIssue() options.
 //
-// GitLab API docs: https://docs.gitlab.com/api/issues/#move-an-issue
+// GitLab API docs: https://docs.gitlab.com/ee/api/issues.html#move-an-issue
 type MoveIssueOptions struct {
-	ToProjectID *int64 `url:"to_project_id,omitempty" json:"to_project_id,omitempty"`
+	ToProjectID *int `url:"to_project_id,omitempty" json:"to_project_id,omitempty"`
 }
 
 // MoveIssue updates an existing project issue. This function is also used
 // to mark an issue as closed.
 //
-// GitLab API docs: https://docs.gitlab.com/api/issues/#move-an-issue
-func (s *IssuesService) MoveIssue(pid any, issue int64, opt *MoveIssueOptions, options ...RequestOptionFunc) (*Issue, *Response, error) {
-	return do[*Issue](s.client,
-		withMethod(http.MethodPost),
-		withPath("projects/%s/issues/%d/move", ProjectID{pid}, issue),
-		withAPIOpts(opt),
-		withRequestOpts(options...),
-	)
+// GitLab API docs: https://docs.gitlab.com/ee/api/issues.html#move-an-issue
+func (s *IssuesService) MoveIssue(pid interface{}, issue int, opt *MoveIssueOptions, options ...RequestOptionFunc) (*Issue, *Response, error) {
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, nil, err
+	}
+	u := fmt.Sprintf("projects/%s/issues/%d/move", PathEscape(project), issue)
+
+	req, err := s.client.NewRequest(http.MethodPost, u, opt, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	i := new(Issue)
+	resp, err := s.client.Do(req, i)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return i, resp, nil
 }
 
 // SubscribeToIssue subscribes the authenticated user to the given issue to
@@ -568,13 +580,26 @@ func (s *IssuesService) MoveIssue(pid any, issue int64, opt *MoveIssueOptions, o
 // status code 304 is returned.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/api/issues/#subscribe-to-an-issue
-func (s *IssuesService) SubscribeToIssue(pid any, issue int64, options ...RequestOptionFunc) (*Issue, *Response, error) {
-	return do[*Issue](s.client,
-		withMethod(http.MethodPost),
-		withPath("projects/%s/issues/%d/subscribe", ProjectID{pid}, issue),
-		withRequestOpts(options...),
-	)
+// https://docs.gitlab.com/ee/api/issues.html#subscribe-to-an-issue
+func (s *IssuesService) SubscribeToIssue(pid interface{}, issue int, options ...RequestOptionFunc) (*Issue, *Response, error) {
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, nil, err
+	}
+	u := fmt.Sprintf("projects/%s/issues/%d/subscribe", PathEscape(project), issue)
+
+	req, err := s.client.NewRequest(http.MethodPost, u, nil, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	i := new(Issue)
+	resp, err := s.client.Do(req, i)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return i, resp, nil
 }
 
 // UnsubscribeFromIssue unsubscribes the authenticated user from the given
@@ -582,13 +607,26 @@ func (s *IssuesService) SubscribeToIssue(pid any, issue int64, options ...Reques
 // is not subscribed to the issue, status code 304 is returned.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/api/issues/#unsubscribe-from-an-issue
-func (s *IssuesService) UnsubscribeFromIssue(pid any, issue int64, options ...RequestOptionFunc) (*Issue, *Response, error) {
-	return do[*Issue](s.client,
-		withMethod(http.MethodPost),
-		withPath("projects/%s/issues/%d/unsubscribe", ProjectID{pid}, issue),
-		withRequestOpts(options...),
-	)
+// https://docs.gitlab.com/ee/api/issues.html#unsubscribe-from-an-issue
+func (s *IssuesService) UnsubscribeFromIssue(pid interface{}, issue int, options ...RequestOptionFunc) (*Issue, *Response, error) {
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, nil, err
+	}
+	u := fmt.Sprintf("projects/%s/issues/%d/unsubscribe", PathEscape(project), issue)
+
+	req, err := s.client.NewRequest(http.MethodPost, u, nil, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	i := new(Issue)
+	resp, err := s.client.Do(req, i)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return i, resp, nil
 }
 
 // CreateTodo creates a todo for the current user for an issue.
@@ -596,106 +634,158 @@ func (s *IssuesService) UnsubscribeFromIssue(pid any, issue int64, options ...Re
 // 304 is returned.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/api/issues/#create-a-to-do-item
-func (s *IssuesService) CreateTodo(pid any, issue int64, options ...RequestOptionFunc) (*Todo, *Response, error) {
-	return do[*Todo](s.client,
-		withMethod(http.MethodPost),
-		withPath("projects/%s/issues/%d/todo", ProjectID{pid}, issue),
-		withRequestOpts(options...),
-	)
+// https://docs.gitlab.com/ee/api/issues.html#create-a-to-do-item
+func (s *IssuesService) CreateTodo(pid interface{}, issue int, options ...RequestOptionFunc) (*Todo, *Response, error) {
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, nil, err
+	}
+	u := fmt.Sprintf("projects/%s/issues/%d/todo", PathEscape(project), issue)
+
+	req, err := s.client.NewRequest(http.MethodPost, u, nil, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	t := new(Todo)
+	resp, err := s.client.Do(req, t)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return t, resp, nil
 }
 
 // ListMergeRequestsClosingIssueOptions represents the available
 // ListMergeRequestsClosingIssue() options.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/api/issues/#list-merge-requests-that-close-a-particular-issue-on-merge
-type ListMergeRequestsClosingIssueOptions struct {
-	ListOptions
-}
+// https://docs.gitlab.com/ee/api/issues.html#list-merge-requests-that-close-a-particular-issue-on-merge
+type ListMergeRequestsClosingIssueOptions ListOptions
 
 // ListMergeRequestsClosingIssue gets all the merge requests that will close
 // issue when merged.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/api/issues/#list-merge-requests-that-close-a-particular-issue-on-merge
-func (s *IssuesService) ListMergeRequestsClosingIssue(pid any, issue int64, opt *ListMergeRequestsClosingIssueOptions, options ...RequestOptionFunc) ([]*BasicMergeRequest, *Response, error) {
-	return do[[]*BasicMergeRequest](s.client,
-		withPath("projects/%s/issues/%d/closed_by", ProjectID{pid}, issue),
-		withAPIOpts(opt),
-		withRequestOpts(options...),
-	)
+// https://docs.gitlab.com/ee/api/issues.html#list-merge-requests-that-close-a-particular-issue-on-merge
+func (s *IssuesService) ListMergeRequestsClosingIssue(pid interface{}, issue int, opt *ListMergeRequestsClosingIssueOptions, options ...RequestOptionFunc) ([]*MergeRequest, *Response, error) {
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, nil, err
+	}
+	u := fmt.Sprintf("projects/%s/issues/%d/closed_by", PathEscape(project), issue)
+
+	req, err := s.client.NewRequest(http.MethodGet, u, opt, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var m []*MergeRequest
+	resp, err := s.client.Do(req, &m)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return m, resp, nil
 }
 
 // ListMergeRequestsRelatedToIssueOptions represents the available
 // ListMergeRequestsRelatedToIssue() options.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/api/issues/#list-merge-requests-related-to-issue
-type ListMergeRequestsRelatedToIssueOptions struct {
-	ListOptions
-}
+// https://docs.gitlab.com/ee/api/issues.html#list-merge-requests-related-to-issue
+type ListMergeRequestsRelatedToIssueOptions ListOptions
 
 // ListMergeRequestsRelatedToIssue gets all the merge requests that are
 // related to the issue
 //
 // GitLab API docs:
-// https://docs.gitlab.com/api/issues/#list-merge-requests-related-to-issue
-func (s *IssuesService) ListMergeRequestsRelatedToIssue(pid any, issue int64, opt *ListMergeRequestsRelatedToIssueOptions, options ...RequestOptionFunc) ([]*BasicMergeRequest, *Response, error) {
-	return do[[]*BasicMergeRequest](s.client,
-		withPath("projects/%s/issues/%d/related_merge_requests", ProjectID{pid}, issue),
-		withAPIOpts(opt),
-		withRequestOpts(options...),
+// https://docs.gitlab.com/ee/api/issues.html#list-merge-requests-related-to-issue
+func (s *IssuesService) ListMergeRequestsRelatedToIssue(pid interface{}, issue int, opt *ListMergeRequestsRelatedToIssueOptions, options ...RequestOptionFunc) ([]*MergeRequest, *Response, error) {
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, nil, err
+	}
+	u := fmt.Sprintf("projects/%s/issues/%d/related_merge_requests",
+		PathEscape(project),
+		issue,
 	)
+
+	req, err := s.client.NewRequest(http.MethodGet, u, opt, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var m []*MergeRequest
+	resp, err := s.client.Do(req, &m)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return m, resp, nil
 }
 
 // SetTimeEstimate sets the time estimate for a single project issue.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/api/issues/#set-a-time-estimate-for-an-issue
-func (s *IssuesService) SetTimeEstimate(pid any, issue int64, opt *SetTimeEstimateOptions, options ...RequestOptionFunc) (*TimeStats, *Response, error) {
+// https://docs.gitlab.com/ee/api/issues.html#set-a-time-estimate-for-an-issue
+func (s *IssuesService) SetTimeEstimate(pid interface{}, issue int, opt *SetTimeEstimateOptions, options ...RequestOptionFunc) (*TimeStats, *Response, error) {
 	return s.timeStats.setTimeEstimate(pid, "issues", issue, opt, options...)
 }
 
 // ResetTimeEstimate resets the time estimate for a single project issue.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/api/issues/#reset-the-time-estimate-for-an-issue
-func (s *IssuesService) ResetTimeEstimate(pid any, issue int64, options ...RequestOptionFunc) (*TimeStats, *Response, error) {
+// https://docs.gitlab.com/ee/api/issues.html#reset-the-time-estimate-for-an-issue
+func (s *IssuesService) ResetTimeEstimate(pid interface{}, issue int, options ...RequestOptionFunc) (*TimeStats, *Response, error) {
 	return s.timeStats.resetTimeEstimate(pid, "issues", issue, options...)
 }
 
 // AddSpentTime adds spent time for a single project issue.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/api/issues/#add-spent-time-for-an-issue
-func (s *IssuesService) AddSpentTime(pid any, issue int64, opt *AddSpentTimeOptions, options ...RequestOptionFunc) (*TimeStats, *Response, error) {
+// https://docs.gitlab.com/ee/api/issues.html#add-spent-time-for-an-issue
+func (s *IssuesService) AddSpentTime(pid interface{}, issue int, opt *AddSpentTimeOptions, options ...RequestOptionFunc) (*TimeStats, *Response, error) {
 	return s.timeStats.addSpentTime(pid, "issues", issue, opt, options...)
 }
 
 // ResetSpentTime resets the spent time for a single project issue.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/api/issues/#reset-spent-time-for-an-issue
-func (s *IssuesService) ResetSpentTime(pid any, issue int64, options ...RequestOptionFunc) (*TimeStats, *Response, error) {
+// https://docs.gitlab.com/ee/api/issues.html#reset-spent-time-for-an-issue
+func (s *IssuesService) ResetSpentTime(pid interface{}, issue int, options ...RequestOptionFunc) (*TimeStats, *Response, error) {
 	return s.timeStats.resetSpentTime(pid, "issues", issue, options...)
 }
 
 // GetTimeSpent gets the spent time for a single project issue.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/api/issues/#get-time-tracking-stats
-func (s *IssuesService) GetTimeSpent(pid any, issue int64, options ...RequestOptionFunc) (*TimeStats, *Response, error) {
+// https://docs.gitlab.com/ee/api/issues.html#get-time-tracking-stats
+func (s *IssuesService) GetTimeSpent(pid interface{}, issue int, options ...RequestOptionFunc) (*TimeStats, *Response, error) {
 	return s.timeStats.getTimeSpent(pid, "issues", issue, options...)
 }
 
 // GetParticipants gets a list of issue participants.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/api/issues/#list-participants-in-an-issue
-func (s *IssuesService) GetParticipants(pid any, issue int64, options ...RequestOptionFunc) ([]*BasicUser, *Response, error) {
-	return do[[]*BasicUser](s.client,
-		withPath("projects/%s/issues/%d/participants", ProjectID{pid}, issue),
-		withRequestOpts(options...),
-	)
+// https://docs.gitlab.com/ee/api/issues.html#participants-on-issues
+func (s *IssuesService) GetParticipants(pid interface{}, issue int, options ...RequestOptionFunc) ([]*BasicUser, *Response, error) {
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, nil, err
+	}
+	u := fmt.Sprintf("projects/%s/issues/%d/participants", PathEscape(project), issue)
+
+	req, err := s.client.NewRequest(http.MethodGet, u, nil, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var bu []*BasicUser
+	resp, err := s.client.Do(req, &bu)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return bu, resp, nil
 }

@@ -20,7 +20,7 @@ func MakePR(t *testing.T, bprovider bitbucketcloud.Provider, runcnx *params.Run,
 	commitAuthor := "OpenShift Pipelines E2E test"
 	commitEmail := "e2e-pipelines@redhat.com"
 
-	bbfiles := make([]bitbucket.File, 0, len(entries))
+	bbfiles := []bitbucket.File{}
 	for k, v := range entries {
 		tmpfile := fs.NewFile(t, "pipelinerun", fs.WithContent(v))
 		defer tmpfile.Remove()
@@ -30,7 +30,7 @@ func MakePR(t *testing.T, bprovider bitbucketcloud.Provider, runcnx *params.Run,
 		})
 	}
 
-	err := bprovider.Client().Workspaces.Repositories.Repository.WriteFileBlob(&bitbucket.RepositoryBlobWriteOptions{
+	err := bprovider.Client.Workspaces.Repositories.Repository.WriteFileBlob(&bitbucket.RepositoryBlobWriteOptions{
 		Owner:    opts.Organization,
 		RepoSlug: opts.Repo,
 		Files:    bbfiles,
@@ -41,14 +41,14 @@ func MakePR(t *testing.T, bprovider bitbucketcloud.Provider, runcnx *params.Run,
 	assert.NilError(t, err)
 	runcnx.Clients.Log.Infof("Using repo %s branch %s", bcrepo.Full_name, targetRefName)
 
-	repobranch, err := bprovider.Client().Repositories.Repository.GetBranch(&bitbucket.RepositoryBranchOptions{
+	repobranch, err := bprovider.Client.Repositories.Repository.GetBranch(&bitbucket.RepositoryBranchOptions{
 		Owner:      opts.Organization,
 		RepoSlug:   opts.Repo,
 		BranchName: targetRefName,
 	})
 	assert.NilError(t, err)
 
-	intf, err := bprovider.Client().Repositories.PullRequests.Create(&bitbucket.PullRequestsOptions{
+	intf, err := bprovider.Client.Repositories.PullRequests.Create(&bitbucket.PullRequestsOptions{
 		Owner:        opts.Organization,
 		RepoSlug:     opts.Repo,
 		Title:        title,

@@ -55,6 +55,7 @@ func AddLabelsAndAnnotations(event *info.Event, pipelineRun *tektonv1.PipelineRu
 		keys.SourceBranch:  event.HeadBranch,
 		keys.Repository:    repo.GetName(),
 		keys.GitProvider:   providerConfig.Name,
+		keys.State:         StateStarted,
 		keys.ControllerInfo: fmt.Sprintf(`{"name":"%s","configmap":"%s","secret":"%s", "gRepo": "%s"}`,
 			paramsinfo.Controller.Name, paramsinfo.Controller.Configmap, paramsinfo.Controller.Secret, paramsinfo.Controller.GlobalRepository),
 	}
@@ -76,10 +77,10 @@ func AddLabelsAndAnnotations(event *info.Event, pipelineRun *tektonv1.PipelineRu
 
 	// GitLab
 	if event.SourceProjectID != 0 {
-		annotations[keys.SourceProjectID] = strconv.Itoa(int(event.SourceProjectID))
+		annotations[keys.SourceProjectID] = strconv.Itoa(event.SourceProjectID)
 	}
 	if event.TargetProjectID != 0 {
-		annotations[keys.TargetProjectID] = strconv.Itoa(int(event.TargetProjectID))
+		annotations[keys.TargetProjectID] = strconv.Itoa(event.TargetProjectID)
 	}
 
 	if value, ok := pipelineRun.GetObjectMeta().GetAnnotations()[keys.CancelInProgress]; ok {

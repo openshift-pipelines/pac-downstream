@@ -18,6 +18,10 @@ limitations under the License.
 
 package v1beta1
 
+// ClusterTaskListerExpansion allows custom methods to be added to
+// ClusterTaskLister.
+type ClusterTaskListerExpansion interface{}
+
 // CustomRunListerExpansion allows custom methods to be added to
 // CustomRunLister.
 type CustomRunListerExpansion interface{}

@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	"github.com/grpc-ecosystem/grpc-gateway/v2/internal/httprule"
-	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/grpclog"
 	"google.golang.org/grpc/health/grpc_health_v1"
@@ -72,7 +71,6 @@ type ServeMux struct {
 	routingErrorHandler       RoutingErrorHandlerFunc
 	disablePathLengthFallback bool
 	unescapingMode            UnescapingMode
-	writeContentLength        bool
 }
 
 // ServeMuxOption is an option that can be given to a ServeMux on construction.
@@ -260,13 +258,6 @@ func WithDisablePathLengthFallback() ServeMuxOption {
 	}
 }
 
-// WithWriteContentLength returns a ServeMuxOption to enable writing content length on non-streaming responses
-func WithWriteContentLength() ServeMuxOption {
-	return func(serveMux *ServeMux) {
-		serveMux.writeContentLength = true
-	}
-}
-
 // WithHealthEndpointAt returns a ServeMuxOption that will add an endpoint to the created ServeMux at the path specified by endpointPath.
 // When called the handler will forward the request to the upstream grpc service health check (defined in the
 // gRPC Health Checking Protocol).
@@ -282,19 +273,12 @@ func WithHealthEndpointAt(healthCheckClient grpc_health_v1.HealthClient, endpoin
 			http.MethodGet, endpointPath, func(w http.ResponseWriter, r *http.Request, _ map[string]string,
 			) {
 				_, outboundMarshaler := MarshalerForRequest(s, r)
-				annotatedContext, err := AnnotateContext(r.Context(), s, r, grpc_health_v1.Health_Check_FullMethodName, WithHTTPPathPattern(endpointPath))
+
+				resp, err := healthCheckClient.Check(r.Context(), &grpc_health_v1.HealthCheckRequest{
+					Service: r.URL.Query().Get("service"),
+				})
 				if err != nil {
 					s.errorHandler(r.Context(), s, outboundMarshaler, w, r, err)
-					return
-				}
-
-				var md ServerMetadata
-				resp, err := healthCheckClient.Check(annotatedContext, &grpc_health_v1.HealthCheckRequest{
-					Service: r.URL.Query().Get("service"),
-				}, grpc.Header(&md.HeaderMD), grpc.Trailer(&md.TrailerMD))
-				annotatedContext = NewServerMetadataContext(annotatedContext, md)
-				if err != nil {
-					s.errorHandler(annotatedContext, s, outboundMarshaler, w, r, err)
 					return
 				}
 
@@ -308,7 +292,7 @@ func WithHealthEndpointAt(healthCheckClient grpc_health_v1.HealthClient, endpoin
 						err = status.Error(codes.NotFound, resp.String())
 					}
 
-					s.errorHandler(annotatedContext, s, outboundMarshaler, w, r, err)
+					s.errorHandler(r.Context(), s, outboundMarshaler, w, r, err)
 					return
 				}
 

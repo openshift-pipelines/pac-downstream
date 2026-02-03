@@ -20,15 +20,6 @@ This is not needed when fixing a bug or adding an enhancement, as long as the
 enhancement you are trying to add can be found in the public GitLab API docs as
 this project only supports what is in the public API docs.
 
-### Use community fork to contribute
-
-To contribute to this project we recommend that you use the
-[community fork](https://gitlab.com/gitlab-community/api/client-go).
-Have a look at the
-[community fork README](https://gitlab.com/gitlab-community#gitlab-community-forks)
-to learn more about what it is and why you should prefer it over
-creating your own fork to contribute.
-
 ## Coding style
 
 We try to follow the Go best practices, where it makes sense, and use
@@ -43,24 +34,21 @@ New `struct` fields or methods should be placed (as much as possible) in the sam
 order as the ordering used in the public API docs. The idea is that this makes it
 easier to find things.
 
-## Setting up your local development environment to contribute
+### Setting up your local development environment to contribute
 
+1. [Fork](https://gitlab.com/gitlab-org/api/client-go), then clone the repository.
+   ```sh
+   git clone https://gitlab.com/<your-username>/client-go.git
+   # or via ssh
+   git clone git@gitlab.com:<your-username>/client-go.git
+   ```
 1. Install dependencies:
-
    ```sh
    make setup
    ```
-
-1. Make your changes on your feature branch in the community fork or your personal fork
-1. Run the reviewable command, which tests, lints and formats the code:
-
+1. Make your changes on your feature branch
+1. Run the tests and `gofumpt`
    ```sh
-   make reviewable
+   make test && make fmt
    ```
-
-1. Push your feature branch upstream
 1. Open up your merge request
-
-## Development Guides
-
-For more detailed advice on adding new features, please see our dedicated [guide for adding new APIs or Endpoints](./docs/guides/AddingAPISupport.md).

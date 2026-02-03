@@ -45,25 +45,11 @@ spec:
         key: companyname
 ```
 
-Lastly, if no default value makes sense for a custom param, it can be defined
-without a value:
-
-```yaml
-spec:
-  params:
-    - name: start_time
-```
-
-If the custom parameter is not defined with any value, it is only expanded
-if a value is supplied via [a GitOps command]({{< relref "/docs/guide/gitops_commands#passing-parameters-to-gitops-commands-as-arguments" >}}).
-
 {{< hint info >}}
 
 - If you have a `value` and a `secret_ref` defined, the `value` will be used.
-- If you don't have a `value` or a `secret_ref`, and the parameter is not
-  [overridden by a GitOps command]({{< relref "/docs/guide/gitops_commands#passing-parameters-to-gitops-commands-as-arguments" >}}),
-  the parameter will not be parsed, and it will be shown as `{{ param }}` in
-  the `PipelineRun`.
+- If you don't have a `value` or a `secret_ref`, the parameter will not be
+  parsed, and it will be shown as `{{ param }}` in the `PipelineRun`.
 - If you don't have a `name` in the `params`, the parameter will not be parsed.
 - If you have multiple `params` with the same `name`, the last one will be used.
 {{< /hint >}}
@@ -122,73 +108,3 @@ and a pull request event.
 - [GitHub Documentation for webhook events](https://docs.github.com/webhooks-and-events/webhooks/webhook-events-and-payloads?actionType=auto_merge_disabled#pull_request)
 - [GitLab Documentation for webhook events](https://docs.gitlab.com/ee/user/project/integrations/webhook_events.html)
 {{< /hint >}}
-
-### Using custom parameters in CEL matching expressions
-
-In addition to template expansion (`{{ param }}`), custom parameters defined in the Repository CR are available as CEL variables in the `on-cel-expression` annotation. This allows you to control which PipelineRuns are triggered based on repository-specific configuration.
-
-For example, with this Repository CR configuration:
-
-```yaml
-apiVersion: pipelinesascode.tekton.dev/v1alpha1
-kind: Repository
-metadata:
-  name: my-repo
-spec:
-  url: "https://github.com/owner/repo"
-  params:
-    - name: enable_ci
-      value: "true"
-    - name: environment
-      value: "staging"
-```
-
-You can use these parameters directly in your PipelineRun's CEL expression:
-
-```yaml
-apiVersion: tekton.dev/v1
-kind: PipelineRun
-metadata:
-  name: my-pipeline
-  annotations:
-    pipelinesascode.tekton.dev/on-cel-expression: |
-      event == "push" && enable_ci == "true" && environment == "staging"
-spec:
-  # ... pipeline spec
-```
-
-This approach is particularly useful for:
-
-- **Conditional CI**: Enable or disable CI for specific repositories without changing PipelineRun files
-- **Environment-specific matching**: Run different pipelines based on environment configuration
-- **Feature flags**: Control which pipelines run using repository-level feature flags
-
-Custom parameters from secrets are also available:
-
-```yaml
-apiVersion: pipelinesascode.tekton.dev/v1alpha1
-kind: Repository
-metadata:
-  name: my-repo
-spec:
-  url: "https://github.com/owner/repo"
-  params:
-    - name: api_key
-      secret_ref:
-        name: my-secret
-        key: key
-```
-
-```yaml
-apiVersion: tekton.dev/v1
-kind: PipelineRun
-metadata:
-  name: my-pipeline-with-secret
-  annotations:
-    pipelinesascode.tekton.dev/on-cel-expression: |
-      event == "push" && api_key != ""
-spec:
-  # ... pipeline spec
-```
-
-For more information on CEL expressions and event matching, see the [Advanced event matching using CEL]({{< relref "/docs/guide/matchingevents#advanced-event-matching-using-cel" >}}) documentation.

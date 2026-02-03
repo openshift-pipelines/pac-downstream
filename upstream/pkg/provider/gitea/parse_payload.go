@@ -6,12 +6,12 @@ import (
 	"fmt"
 	"net/http"
 
+	giteaStructs "code.gitea.io/gitea/modules/structs"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/opscomments"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/gitea/forgejostructs"
 )
 
 func (v *Provider) ParsePayload(_ context.Context, _ *params.Run, request *http.Request,
@@ -33,7 +33,7 @@ func (v *Provider) ParsePayload(_ context.Context, _ *params.Run, request *http.
 	_ = json.Unmarshal(payloadB, &eventInt)
 
 	switch gitEvent := eventInt.(type) {
-	case *forgejostructs.PullRequestPayload:
+	case *giteaStructs.PullRequestPayload:
 		processedEvent = info.NewEvent()
 		// // Organization:  event.GetRepo().GetOwner().GetLogin(),
 		processedEvent.Sender = gitEvent.Sender.UserName
@@ -52,15 +52,15 @@ func (v *Provider) ParsePayload(_ context.Context, _ *params.Run, request *http.
 		processedEvent.TriggerTarget = triggertype.PullRequest
 		processedEvent.EventType = triggertype.PullRequest.String()
 		if provider.Valid(string(gitEvent.Action), []string{pullRequestLabelUpdated}) {
-			processedEvent.EventType = string(triggertype.PullRequestLabeled)
+			processedEvent.EventType = string(triggertype.LabelUpdate)
 		}
 		for _, label := range gitEvent.PullRequest.Labels {
 			processedEvent.PullRequestLabel = append(processedEvent.PullRequestLabel, label.Name)
 		}
-		if gitEvent.Action == forgejostructs.HookIssueClosed {
+		if gitEvent.Action == giteaStructs.HookIssueClosed {
 			processedEvent.TriggerTarget = triggertype.PullRequestClosed
 		}
-	case *forgejostructs.PushPayload:
+	case *giteaStructs.PushPayload:
 		processedEvent = info.NewEvent()
 		processedEvent.SHA = gitEvent.HeadCommit.ID
 		if processedEvent.SHA == "" {
@@ -79,7 +79,7 @@ func (v *Provider) ParsePayload(_ context.Context, _ *params.Run, request *http.
 		processedEvent.BaseURL = gitEvent.Repo.HTMLURL
 		processedEvent.HeadURL = processedEvent.BaseURL // in push events Head URL is the same as BaseURL
 		processedEvent.TriggerTarget = "push"
-	case *forgejostructs.IssueCommentPayload:
+	case *giteaStructs.IssueCommentPayload:
 		if gitEvent.Issue.PullRequest == nil {
 			return info.NewEvent(), fmt.Errorf("issue comment is not coming from a pull_request")
 		}

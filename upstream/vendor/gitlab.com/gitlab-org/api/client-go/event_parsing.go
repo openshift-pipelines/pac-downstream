@@ -18,12 +18,11 @@ package gitlab
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 )
 
-// EventType represents a GitLab event type.
+// EventType represents a Gitlab event type.
 type EventType string
 
 // List of available event types.
@@ -63,12 +62,10 @@ const (
 )
 
 type noteEvent struct {
-	ObjectKind       string                    `json:"object_kind"`
-	ObjectAttributes noteEventObjectAttributes `json:"object_attributes"`
-}
-
-type noteEventObjectAttributes struct {
-	NoteableType string `json:"noteable_type"`
+	ObjectKind       string `json:"object_kind"`
+	ObjectAttributes struct {
+		NoteableType string `json:"noteable_type"`
+	} `json:"object_attributes"`
 }
 
 type serviceEvent struct {
@@ -106,7 +103,7 @@ func HookEventType(r *http.Request) EventType {
 //	    ...
 //	    }
 //	}
-func ParseHook(eventType EventType, payload []byte) (event any, err error) {
+func ParseHook(eventType EventType, payload []byte) (event interface{}, err error) {
 	switch eventType {
 	case EventTypeSystemHook:
 		return ParseSystemhook(payload)
@@ -134,7 +131,7 @@ func ParseHook(eventType EventType, payload []byte) (event any, err error) {
 //	    ...
 //	    }
 //	}
-func ParseSystemhook(payload []byte) (event any, err error) {
+func ParseSystemhook(payload []byte) (event interface{}, err error) {
 	e := &systemHookEvent{}
 	err = json.Unmarshal(payload, e)
 	if err != nil {
@@ -218,7 +215,7 @@ func WebhookEventType(r *http.Request) EventType {
 //	    ...
 //	    }
 //	}
-func ParseWebhook(eventType EventType, payload []byte) (event any, err error) {
+func ParseWebhook(eventType EventType, payload []byte) (event interface{}, err error) {
 	switch eventType {
 	case EventTypeBuild:
 		event = &BuildEvent{}
@@ -264,7 +261,7 @@ func ParseWebhook(eventType EventType, payload []byte) (event any, err error) {
 	case EventTypeRelease:
 		event = &ReleaseEvent{}
 	case EventTypeResourceAccessToken:
-		data := map[string]any{}
+		data := map[string]interface{}{}
 		err := json.Unmarshal(payload, &data)
 		if err != nil {
 			return nil, err
@@ -279,7 +276,7 @@ func ParseWebhook(eventType EventType, payload []byte) (event any, err error) {
 		case projectEvent:
 			event = &ProjectResourceAccessTokenEvent{}
 		default:
-			return nil, errors.New("unexpected resource access token payload")
+			return nil, fmt.Errorf("unexpected resource access token payload")
 		}
 	case EventTypeServiceHook:
 		service := &serviceEvent{}

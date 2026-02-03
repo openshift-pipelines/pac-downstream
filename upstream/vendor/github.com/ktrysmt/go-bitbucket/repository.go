@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"io/ioutil"
 	"net/url"
 	"path"
@@ -441,17 +440,11 @@ func (r *Repository) ListRefs(rbo *RepositoryRefOptions) (*RepositoryRefs, error
 	return decodeRepositoryRefs(bodyString)
 }
 
-// ListBranches gets all branches in the Bitbucket repository and returns them as a RepositoryBranches.
-// You can pass query parameter to filter branches by name.
-//
-// Bitbucket API docs: https://developer.atlassian.com/cloud/bitbucket/rest/api-group-refs/#api-repositories-workspace-repo-slug-refs-get
 func (r *Repository) ListBranches(rbo *RepositoryBranchOptions) (*RepositoryBranches, error) {
-	params := url.Values{}
 
+	params := url.Values{}
 	if rbo.Query != "" {
-		// https://developer.atlassian.com/cloud/bitbucket/rest/intro/#operators
-		query := fmt.Sprintf("name ~ \"%s\"", rbo.Query)
-		params.Set("q", query)
+		params.Add("q", rbo.Query)
 	}
 
 	if rbo.Sort != "" {
@@ -475,12 +468,12 @@ func (r *Repository) ListBranches(rbo *RepositoryBranchOptions) (*RepositoryBran
 	if err != nil {
 		return nil, err
 	}
-	bodyBytes, err := io.ReadAll(response)
+	bodyBytes, err := ioutil.ReadAll(response)
 	if err != nil {
 		return nil, err
 	}
-
-	return decodeRepositoryBranches(string(bodyBytes))
+	bodyString := string(bodyBytes)
+	return decodeRepositoryBranches(bodyString)
 }
 
 func (r *Repository) GetBranch(rbo *RepositoryBranchOptions) (*RepositoryBranch, error) {

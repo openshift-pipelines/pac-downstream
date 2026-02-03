@@ -8,18 +8,16 @@ import (
 	"sync"
 
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/configutil"
-	hubType "github.com/openshift-pipelines/pipelines-as-code/pkg/hub/vars"
 	"go.uber.org/zap"
 )
 
 const (
 	PACApplicationNameDefaultValue = "Pipelines as Code CI"
 
-	HubURLKey                          = "hub-url"
-	HubCatalogNameKey                  = "hub-catalog-name"
-	HubCatalogTypeKey                  = "hub-catalog-type"
-	ArtifactHubCatalogNameDefaultValue = "artifacthub"
-	ArtifactHubURLDefaultValue         = "https://artifacthub.io/api/v1"
+	HubURLKey                  = "hub-url"
+	HubCatalogNameKey          = "hub-catalog-name"
+	HubURLDefaultValue         = "https://api.hub.tekton.dev/v1"
+	HubCatalogNameDefaultValue = "tekton"
 
 	CustomConsoleNameKey         = "custom-console-name"
 	CustomConsoleURLKey          = "custom-console-url"
@@ -40,38 +38,30 @@ type HubCatalog struct {
 	Index string
 	Name  string
 	URL   string
-	Type  string
 }
 
 // if there is a change performed on the default value,
 // update the same on "config/302-pac-configmap.yaml".
 type Settings struct {
-	ApplicationName                     string `default:"Pipelines as Code CI" json:"application-name"`
-	HubCatalogs                         *sync.Map
-	RemoteTasks                         bool   `default:"true"                                 json:"remote-tasks"`
-	MaxKeepRunsUpperLimit               int    `json:"max-keep-run-upper-limit"`
-	DefaultMaxKeepRuns                  int    `json:"default-max-keep-runs"`
-	BitbucketCloudCheckSourceIP         bool   `default:"true"                                 json:"bitbucket-cloud-check-source-ip"`
-	BitbucketCloudAdditionalSourceIP    string `json:"bitbucket-cloud-additional-source-ip"`
-	TektonDashboardURL                  string `json:"tekton-dashboard-url"`
-	AutoConfigureNewGitHubRepo          bool   `default:"false"                                json:"auto-configure-new-github-repo"`
-	AutoConfigureRepoNamespaceTemplate  string `json:"auto-configure-repo-namespace-template"`
-	AutoConfigureRepoRepositoryTemplate string `json:"auto-configure-repo-repository-template"`
+	ApplicationName                    string `default:"Pipelines as Code CI" json:"application-name"`
+	HubCatalogs                        *sync.Map
+	RemoteTasks                        bool   `default:"true"                                json:"remote-tasks"`
+	MaxKeepRunsUpperLimit              int    `json:"max-keep-run-upper-limit"`
+	DefaultMaxKeepRuns                 int    `json:"default-max-keep-runs"`
+	BitbucketCloudCheckSourceIP        bool   `default:"true"                                json:"bitbucket-cloud-check-source-ip"`
+	BitbucketCloudAdditionalSourceIP   string `json:"bitbucket-cloud-additional-source-ip"`
+	TektonDashboardURL                 string `json:"tekton-dashboard-url"`
+	AutoConfigureNewGitHubRepo         bool   `default:"false"                               json:"auto-configure-new-github-repo"`
+	AutoConfigureRepoNamespaceTemplate string `json:"auto-configure-repo-namespace-template"`
 
 	SecretAutoCreation               bool   `default:"true"                             json:"secret-auto-create"`
 	SecretGHAppRepoScoped            bool   `default:"true"                             json:"secret-github-app-token-scoped"`
 	SecretGhAppTokenScopedExtraRepos string `json:"secret-github-app-scope-extra-repos"`
 
-	ErrorLogSnippet              bool   `default:"true"                                                                          json:"error-log-snippet"`
-	ErrorLogSnippetNumberOfLines int    `default:"3"                                                                             json:"error-log-snippet-number-of-lines"`
-	ErrorDetection               bool   `default:"true"                                                                          json:"error-detection-from-container-logs"`
-	ErrorDetectionNumberOfLines  int    `default:"50"                                                                            json:"error-detection-max-number-of-lines"`
-	ErrorDetectionSimpleRegexp   string `default:"^(?P<filename>[^:]*):(?P<line>[0-9]+):(?P<column>[0-9]+)?([ ]*)?(?P<error>.*)" json:"error-detection-simple-regexp"`
-
-	EnableCancelInProgressOnPullRequests bool `json:"enable-cancel-in-progress-on-pull-requests"`
-	EnableCancelInProgressOnPush         bool `json:"enable-cancel-in-progress-on-push"`
-
-	SkipPushEventForPRCommits bool `json:"skip-push-event-for-pr-commits" default:"true"` // nolint:tagalign
+	ErrorLogSnippet             bool   `default:"true"                                                                          json:"error-log-snippet"`
+	ErrorDetection              bool   `default:"true"                                                                          json:"error-detection-from-container-logs"`
+	ErrorDetectionNumberOfLines int    `default:"50"                                                                            json:"error-detection-max-number-of-lines"`
+	ErrorDetectionSimpleRegexp  string `default:"^(?P<filename>[^:]*):(?P<line>[0-9]+):(?P<column>[0-9]+)?([ ]*)?(?P<error>.*)" json:"error-detection-simple-regexp"`
 
 	CustomConsoleName         string `json:"custom-console-name"`
 	CustomConsoleURL          string `json:"custom-console-url"`
@@ -79,8 +69,7 @@ type Settings struct {
 	CustomConsolePRTaskLog    string `json:"custom-console-url-pr-tasklog"`
 	CustomConsoleNamespaceURL string `json:"custom-console-url-namespace"`
 
-	RememberOKToTest   bool `json:"remember-ok-to-test"`
-	RequireOkToTestSHA bool `json:"require-ok-to-test-sha"`
+	RememberOKToTest bool `default:"true" json:"remember-ok-to-test"`
 }
 
 func (s *Settings) DeepCopy(out *Settings) {
@@ -92,8 +81,8 @@ func DefaultSettings() Settings {
 	hubCatalog := &sync.Map{}
 	hubCatalog.Store("default", HubCatalog{
 		Index: "default",
-		URL:   ArtifactHubURLDefaultValue,
-		Type:  hubType.ArtifactHubType,
+		Name:  HubCatalogNameDefaultValue,
+		URL:   HubURLDefaultValue,
 	})
 	newSettings.HubCatalogs = hubCatalog
 

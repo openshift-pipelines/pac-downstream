@@ -58,26 +58,15 @@ annotations:
 This will match the pipeline `pipeline-push-on-1.0-tags` when you push the 1.0
 tags into your repository.
 
-{{< hint warning >}}
-GitHub does not send webhook events when more than three tags are pushed simultaneously (e.g., with `git push origin --tags`). To ensure pipeline runs are triggered for all tags, push them in batches of three or fewer. [See GitHub's docs here](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#create).
-{{< /hint >}}
-
-Matching annotations are currently required; otherwise, Pipelines-as-Code will not
+Matching annotations are currently required; otherwise, `Pipelines-as-Code` will not
 match your `PipelineRun`.
 
 When multiple PipelineRuns match an event, it will run them in parallel
 and post the results to the provider as soon as the PipelineRun finishes.
 
 {{< hint info >}}
-
-* Payload matching happens only for events supported by `Pipelines-as-Code`,
-such as when a `Pull Request` is opened, updated, or when a branch receives a
-`Push`.
-
-* Typically, you need both `on-target-branch` and `on-event` annotations to
-match, except when using [CEL expressions](#advanced-event-matching-using-cel)
-or [matching based on a
-comment](#matching-a-pipelinerun-on-a-regex-in-a-comment).
+Payload matching only occurs for events that `Pipelines-as-Code` supports, such as
+when a `Pull Request` is opened, updated, or when a branch receives a `Push`.
 {{< /hint >}}
 
 ## Matching a PipelineRun to Specific Path Changes
@@ -189,7 +178,7 @@ files.
 ## Matching a PipelineRun on a Regex in a comment
 
 {{< tech_preview "Matching PipelineRun on regex in comments" >}}
-{{< support_matrix github_app="true" github_webhook="true" gitea="true" gitlab="true" bitbucket_cloud="false" bitbucket_datacenter="false" >}}
+{{< support_matrix github_app="true" github_webhook="true" gitea="true" gitlab="true" bitbucket_cloud="false" bitbucket_server="false" >}}
 
 You can trigger a PipelineRun based on a comment on a Pull Request or a [Pushed
 Commit]({{< relref
@@ -239,7 +228,7 @@ relref "/docs/guide/gitops_commands.md#gitops-commands-on-pushed-commits" >}}).
 ## Matching PipelineRun to a Pull Request labels
 
 {{< tech_preview "Matching PipelineRun to a Pull-Request label" >}}
-{{< support_matrix github_app="true" github_webhook="true" gitea="true" gitlab="true" bitbucket_cloud="false" bitbucket_datacenter="false" >}}
+{{< support_matrix github_app="true" github_webhook="true" gitea="true" gitlab="true" bitbucket_cloud="false" bitbucket_server="false" >}}
 
 Using the annotation `pipelinesascode.tekton.dev/on-label`, you can match a
 PipelineRun to a Pull Request label. For example, if you want to match the
@@ -250,27 +239,21 @@ can use this annotation:
 metadata:
   name: match-bugs-or-defect
   annotations:
-    pipelinesascode.tekton.dev/on-label: "[bug, defect]"
-    pipelinesascode.tekton.dev/on-target-branch: "[main]"
-    pipelinesascode.tekton.dev/on-event: "[pull_request]"
+    pipelinesascode.tekton.dev/on-label: [bug, defect]
 ```
 
-* The `on-label` annotation respects the `pull_request` [Policy]({{< relref
+- The `on-label` annotation respects the `pull_request` [Policy]({{< relref
   "/docs/guide/policy" >}}) rules.
-* The `on-target-branch` is still needed to match the Pull Request event on the
-  targeted branch.
-* The `on-event` is still needed to match the Pull Request event on the
-  proper targeted event.
-* This annotation is currently supported only on GitHub, Gitea, and GitLab
-  providers. Bitbucket Cloud and Bitbucket Data Center do not support adding labels
+- This annotation is currently supported only on GitHub, Gitea, and GitLab
+  providers. Bitbucket Cloud and Bitbucket Server do not support adding labels
   to Pull Requests.
-* When you add a label to a Pull Request, the corresponding PipelineRun is
+- When you add a label to a Pull Request, the corresponding PipelineRun is
   triggered immediately, and no other PipelineRun matching the same Pull Request
   will be activated.
-* If you update the Pull Request by sending a new commit, the PipelineRun
+- If you update the Pull Request by sending a new commit, the PipelineRun
   with a matching `on-label` annotation will be triggered again if the label is
   still present.
-* You can access the `Pull Request` labels with the [dynamic variable]({{<
+- You can access the `Pull Request` labels with the [dynamic variable]({{<
   relref "/docs/guide/authoringprs#dynamic-variables" >}}) `{{ pull_request_labels }}`.
   The labels are separated by a Unix newline `\n`.
   For example, with a shell script, you can do this to print them:
@@ -286,10 +269,9 @@ metadata:
 If you need to do some advanced matching, `Pipelines-as-Code` supports CEL
 expressions to do advanced filtering on the specific event you need to be matched.
 
-{{< hint danger >}}
-If you use the `on-cel-expression` annotation in the same PipelineRun as an `on-event`, `on-target-branch`, `on-label`, `on-path-change`, or `on-path-change-ignore`
-annotation, the `on-cel-expression` annotation takes priority and Pipelines-as-Code ignores the other annotations.
-{{< /hint >}}
+If you have the `pipelinesascode.tekton.dev/on-cel-expression` annotation in
+your PipelineRun, the CEL expression will be used and the `on-target-branch` or
+`on-event` annotations will be skipped.
 
 This example will match a `pull_request` event targeting the branch `main`
 coming from a branch called `wip`:
@@ -301,29 +283,27 @@ pipelinesascode.tekton.dev/on-cel-expression: |
 
 The fields available are:
 
-| **Field** | **Description** |
-| --- | --- |
-| `event` | `push`, `pull_request` or `incoming`. |
-| `event_type` | The event type from the webhook payload header. Provider-specific (e.g., GitHub sends `pull_request`, GitLab is `Merge Request`, etc). |
-| `target_branch` | The branch we are targeting. |
-| `source_branch` | The branch where this pull_request comes from. (On `push`, this is the same as `target_branch`.) |
-| `target_url` | The URL of the repository we are targeting. |
-| `source_url` | The URL of the repository where this pull_request comes from. (On `push`, this is the same as `target_url`.) |
-| `event_title` | Matches the title of the event. For `push`, it matches the commit title. For PR, it matches the Pull/Merge Request title. (Only supported for `GitHub`, `GitLab`, and `BitbucketCloud` providers.) |
-| `body` | The full body as passed by the Git provider. Example: `body.pull_request.number` retrieves the pull request number on GitHub. |
-| `headers` | The full set of headers as passed by the Git provider. Example: `headers['x-github-event']` retrieves the event type on GitHub. |
-| `.pathChanged` | A suffix function to a string that can be a glob of a path to check if changed. (Supported only for `GitHub` and `GitLab` providers.) |
-| `files` | The list of files that changed in the event (`all`, `added`, `deleted`, `modified`, and `renamed`). Example: `files.all` or `files.deleted`. For pull requests, every file belonging to the pull request will be listed. |
-| Custom params | Any [custom parameters]({{< relref "/docs/guide/customparams" >}}) provided from the Repository CR `spec.params` are available as CEL variables. Example: `enable_ci == "true"`. See [Using custom parameters in CEL expressions: limitations](#using-custom-parameters-in-cel-expressions-limitations) below for important details. |
+| **Field**         | **Description**                                                                                                                  |
+|-------------------|----------------------------------------------------------------------------------------------------------------------------------|
+| `event`           | `push`, `pull_request` or `incoming`.                                                                                            |
+| `target_branch`   | The branch we are targeting.                                                                                                     |
+| `source_branch`   | The branch where this pull_request comes from. (On `push`, this is the same as `target_branch`.)                                 |
+| `target_url`      | The URL of the repository we are targeting.                                                                                      |
+| `source_url`      | The URL of the repository where this pull_request comes from. (On `push`, this is the same as `target_url`.)                     |
+| `event_title`     | Matches the title of the event. For `push`, it matches the commit title. For PR, it matches the Pull/Merge Request title. (Only supported for `GitHub`, `Gitlab`, and `BitbucketCloud` providers.) |
+| `body`            | The full body as passed by the Git provider. Example: `body.pull_request.number` retrieves the pull request number on GitHub.    |
+| `headers`         | The full set of headers as passed by the Git provider. Example: `headers['x-github-event']` retrieves the event type on GitHub.  |
+| `.pathChanged`    | A suffix function to a string that can be a glob of a path to check if changed. (Supported only for `GitHub` and `Gitlab` providers.) |
+| `files`           | The list of files that changed in the event (`all`, `added`, `deleted`, `modified`, and `renamed`). Example: `files.all` or `files.deleted`. For pull requests, every file belonging to the pull request will be listed. |
 
 CEL expressions let you do more complex filtering compared to the simple `on-target` annotation matching and enable more advanced scenarios.
 
-For example, if you want to have a `PipelineRun` targeting a `pull_request` but
+For example, if I want to have a `PipelineRun` targeting a `pull_request` but
 not the `experimental` branch you could have:
 
 ```yaml
 pipelinesascode.tekton.dev/on-cel-expression: |
-  event == "pull_request" && target_branch != "experimental"
+  event == "pull_request" && target_branch != experimental"
 ```
 
 {{< hint info >}}
@@ -331,66 +311,6 @@ You can find more information about the CEL language spec here:
 
 <https://github.com/google/cel-spec/blob/master/doc/langdef.md>
 {{< /hint >}}
-
-### Using custom parameters in CEL expressions: limitations
-
-#### Filtered custom parameters and CEL evaluation
-
-When using a custom parameter with a `filter` in a CEL expression, be aware that if the filter condition
-is **not met**, the parameter will be **undefined**, causing a CEL evaluation error rather than evaluating to false.
-
-For example, consider this Repository CR:
-
-```yaml
-apiVersion: pipelinesascode.tekton.dev/v1alpha1
-kind: Repository
-metadata:
-  name: my-repo
-spec:
-  url: "https://github.com/owner/repo"
-  params:
-    - name: docker_registry
-      value: "registry.staging.example.com"
-      filter: pac.event_type == "pull_request"
-```
-
-And this PipelineRun:
-
-```yaml
-apiVersion: tekton.dev/v1
-kind: PipelineRun
-metadata:
-  name: my-pipeline
-  annotations:
-    pipelinesascode.tekton.dev/on-cel-expression: |
-      docker_registry == "registry.staging.example.com"
-spec:
-  # ... pipeline spec
-```
-
-On a **push event**, the `docker_registry` parameter will not be defined (since the filter only matches pull
-requests), and the CEL expression will produce an **error**, not `false`. The PipelineRun will not be
-evaluated and an error will be reported.
-
-To avoid undefined parameter errors, ensure your CEL expressions only reference custom parameters when their
-filter conditions match, or use parameters without filters for CEL matching. We recommend testing your CEL
-expressions with different event types using the [tkn pac cel]({{< relref "/docs/guide/cli#tkn-pac-cel" >}})
-command to verify they work correctly across all scenarios
-
-#### Custom parameters do not override standard CEL variables
-
-Custom parameters defined in the Repository CR cannot override the built-in CEL variables provided by
-Pipelines-as-Code, such as:
-
-* `event` (or `event_type`)
-* `target_branch`
-* `source_branch`
-* `trigger_target`
-* And other default variables documented in the table above
-
-If you define a custom parameter with the same name as a standard CEL variable, the standard variable will
-take precedence in CEL expressions. Custom parameters should use unique names that don't conflict with
-built-in variables.
 
 ### Matching a PipelineRun to a branch with a regex
 
@@ -441,38 +361,13 @@ This example will match modified files with the name of test.go:
       files.modified.exists(x, x.matches('test.go'))
 ```
 
-### Filtering PipelineRuns to exclude non-code changes
-
-This example demonstrates how to filter `pull_request` events to exclude changes that only affect documentation, configuration files, or other non-code files. This is useful when you want to run tests only when actual code changes occur:
-
-```yaml
-pipelinesascode.tekton.dev/on-cel-expression: |
-  event == "pull_request"
-  && target_branch == "main"
-  && !files.all.all(x, x.matches('^docs/') || x.matches('\\.md$') || x.matches('(\\.gitignore|OWNERS|PROJECT|LICENSE)$'))
-```
-
-This expression will:
-
-* Only match `pull_request` events targeting the `main` branch
-* **Exclude** the PipelineRun if all changed files match any of the following patterns:
-  * Files in the `docs/` directory (`^docs/`)
-  * Markdown files (`\\.md$`)
-  * Common repository metadata files (`\\.gitignore`, `OWNERS`, `PROJECT`, `LICENSE`)
-
-The `!files.all.all(x, x.matches('pattern1') || x.matches('pattern2') || ...)` syntax means "not all files match any of these patterns", which effectively means "trigger only if at least one file doesn't match the exclusion patterns" (i.e., there are meaningful code changes).
-
-{{< hint warning >}}
-**Important**: When using regex patterns in CEL expressions, remember to properly escape special characters. The backslash (`\`) needs to be doubled (`\\`) to escape properly within the CEL string context. Using logical OR (`||`) operators within the `matches()` function is more reliable than combining patterns with pipe (`|`) characters in a single regex.
-{{< /hint >}}
-
 ### Matching PipelineRun to an event (commit, pull_request) title
 
 This example will match all pull requests starting with the title `[DOWNSTREAM]`:
 
 ```yaml
 pipelinesascode.tekton.dev/on-cel-expression: |
-  event == "pull_request" && event_title.startsWith("[DOWNSTREAM]")
+  event == "pull_request && event_title.startsWith("[DOWNSTREAM]")
 ```
 
 The event title will be the pull request title on `pull_request` and the
@@ -548,97 +443,3 @@ main and the branch called `release,nightly` you can do this:
 ```yaml
 pipelinesascode.tekton.dev/on-target-branch: [main, release&#44;nightly]
 ```
-
-## Skip CI Commands
-
-Pipelines-as-Code supports skip commands in commit messages that allow you to skip
-PipelineRun execution for specific commits. This is useful when making documentation
-changes, minor fixes, or work-in-progress commits where running the full CI pipeline
-is unnecessary.
-
-### Supported Skip Commands
-
-You can include any of the following commands anywhere in your commit message to skip
-PipelineRun execution:
-
-* `[skip ci]` - Skip continuous integration
-* `[ci skip]` - Alternative format for skipping CI
-* `[skip tkn]` - Skip Tekton PipelineRuns
-* `[tkn skip]` - Alternative format for skipping Tekton
-
-**Note:** Skip commands are **case-sensitive** and must be in lowercase with brackets.
-
-### Example Usage
-
-```text
-docs: update README with installation instructions [skip ci]
-```
-
-or
-
-```text
-WIP: refactor authentication module
-
-This is still in progress and not ready for testing yet.
-
-[ci skip]
-```
-
-### How Skip Commands Work
-
-When a commit message contains a skip command:
-
-1. **Pull Requests**: No PipelineRuns will be created when the PR is opened or updated and HEAD commit contains skip command. A neutral status check will be displayed on the PR indicating that CI was skipped.
-2. **Push Events**: No PipelineRuns will be created when pushing to a branch with that commit message. A neutral status check will be displayed on the commit.
-
-**Note:** A neutral status check is created on your git provider to provide visibility that the commit was acknowledged but CI was intentionally skipped. This helps distinguish between commits that were ignored due to skip commands versus commits where CI hasn't run.
-
-### GitOps Commands Override Skip CI
-
-**Important:** Skip CI commands can be overridden by using GitOps commands. Even if
-a commit contains a skip command like `[skip ci]`, you can still manually trigger
-PipelineRuns using:
-
-* `/test` - Trigger all matching PipelineRuns
-* `/test <pipelinerun-name>` - Trigger a specific PipelineRun
-* `/retest` - Retrigger failed PipelineRuns
-* `/retest <pipelinerun-name>` - Retrigger a specific PipelineRun
-* `/ok-to-test` - Allow running CI for external contributors
-* `/custom-comment` - Trigger PipelineRun having on-comment annotation
-
-This allows you to skip automatic CI execution while still maintaining the ability
-to manually trigger builds when needed.
-
-### Example: Skipping CI Then Manually Triggering
-
-```bash
-# Initial commit with skip command
-git commit -m "docs: update contributing guide [skip ci]"
-git push origin my-feature-branch
-# No PipelineRuns are created automatically
-# A neutral status check is displayed on the commit/PR
-
-# Later, you can manually trigger CI by commenting on the PR:
-# /test
-# This will create PipelineRuns despite the [skip ci] command
-```
-
-### Examples of When to Use Skip Commands
-
-Skip commands are useful for:
-
-* Documentation-only changes
-* README updates
-* Comment or formatting changes
-* Work-in-progress commits
-* Minor typo fixes
-* Configuration file updates that don't affect code
-
-### Examples of When NOT to Use Skip Commands
-
-Avoid using skip commands for:
-
-* Code changes that affect functionality
-* Changes to CI/CD pipeline definitions
-* Dependency updates
-* Any changes that should be tested before merging

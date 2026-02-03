@@ -22,47 +22,38 @@ import (
 	"time"
 )
 
-type (
-	ResourceIterationEventsServiceInterface interface {
-		ListIssueIterationEvents(pid any, issue int64, opt *ListIterationEventsOptions, options ...RequestOptionFunc) ([]*IterationEvent, *Response, error)
-		GetIssueIterationEvent(pid any, issue int64, event int64, options ...RequestOptionFunc) (*IterationEvent, *Response, error)
-	}
-
-	// ResourceIterationEventsService handles communication with the event related
-	// methods of the GitLab API.
-	//
-	// GitLab API docs: https://docs.gitlab.com/api/resource_iteration_events/
-	ResourceIterationEventsService struct {
-		client *Client
-	}
-)
-
-var _ ResourceIterationEventsServiceInterface = (*ResourceIterationEventsService)(nil)
+// ResourceIterationEventsService handles communication with the event related
+// methods of the GitLab API.
+//
+// GitLab API docs: https://docs.gitlab.com/ee/api/resource_iteration_events.html
+type ResourceIterationEventsService struct {
+	client *Client
+}
 
 // IterationEvent represents a resource iteration event.
 //
-// GitLab API docs: https://docs.gitlab.com/api/resource_iteration_events/
+// GitLab API docs: https://docs.gitlab.com/ee/api/resource_iteration_events.html
 type IterationEvent struct {
-	ID           int64      `json:"id"`
+	ID           int        `json:"id"`
 	User         *BasicUser `json:"user"`
 	CreatedAt    *time.Time `json:"created_at"`
 	ResourceType string     `json:"resource_type"`
-	ResourceID   int64      `json:"resource_id"`
+	ResourceID   int        `json:"resource_id"`
 	Iteration    *Iteration `json:"iteration"`
 	Action       string     `json:"action"`
 }
 
 // Iteration represents a project issue iteration.
 //
-// GitLab API docs: https://docs.gitlab.com/api/resource_iteration_events/
+// GitLab API docs: https://docs.gitlab.com/ee/api/resource_iteration_events.html
 type Iteration struct {
-	ID          int64      `json:"id"`
-	IID         int64      `json:"iid"`
-	Sequence    int64      `json:"sequence"`
-	GroupID     int64      `json:"group_id"`
+	ID          int        `json:"id"`
+	IID         int        `json:"iid"`
+	Sequence    int        `json:"sequence"`
+	GroupID     int        `json:"group_id"`
 	Title       string     `json:"title"`
 	Description string     `json:"description"`
-	State       int64      `json:"state"`
+	State       int        `json:"state"`
 	CreatedAt   *time.Time `json:"created_at"`
 	UpdatedAt   *time.Time `json:"updated_at"`
 	DueDate     *ISOTime   `json:"due_date"`
@@ -74,7 +65,7 @@ type Iteration struct {
 // events list methods.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/api/resource_iteration_events/#list-project-issue-iteration-events
+// https://docs.gitlab.com/ee/api/resource_iteration_events.html#list-project-issue-iteration-events
 type ListIterationEventsOptions struct {
 	ListOptions
 }
@@ -83,8 +74,8 @@ type ListIterationEventsOptions struct {
 // specified project and issue.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/api/resource_iteration_events/#list-project-issue-iteration-events
-func (s *ResourceIterationEventsService) ListIssueIterationEvents(pid any, issue int64, opt *ListIterationEventsOptions, options ...RequestOptionFunc) ([]*IterationEvent, *Response, error) {
+// https://docs.gitlab.com/ee/api/resource_iteration_events.html#list-project-issue-iteration-events
+func (s *ResourceIterationEventsService) ListIssueIterationEvents(pid interface{}, issue int, opt *ListIterationEventsOptions, options ...RequestOptionFunc) ([]*IterationEvent, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err
@@ -108,8 +99,8 @@ func (s *ResourceIterationEventsService) ListIssueIterationEvents(pid any, issue
 // GetIssueIterationEvent gets a single issue iteration event.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/api/resource_iteration_events/#get-single-issue-iteration-event
-func (s *ResourceIterationEventsService) GetIssueIterationEvent(pid any, issue int64, event int64, options ...RequestOptionFunc) (*IterationEvent, *Response, error) {
+// https://docs.gitlab.com/ee/api/resource_iteration_events.html#get-single-issue-iteration-event
+func (s *ResourceIterationEventsService) GetIssueIterationEvent(pid interface{}, issue int, event int, options ...RequestOptionFunc) (*IterationEvent, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/go-github/v81/github"
+	"github.com/google/go-github/v68/github"
 	apipac "github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	pacv1a1 "github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/formatting"
@@ -25,6 +25,7 @@ import (
 
 const (
 	maxPipelineRunStatusRun = 5
+	logSnippetNumLines      = 3
 )
 
 var backoffSchedule = []time.Duration{
@@ -73,7 +74,6 @@ func (r *Reconciler) updateRepoRunStatus(ctx context.Context, logger *zap.Sugare
 			continue
 		}
 		logger.Infof("Repository status of %s has been updated", nrepo.Name)
-		logger.Warn("The `pipelinerun_status` field in the Repository CR is scheduled for deprecation and will be removed in a future release. Please avoid relying on it.")
 		return nil
 	}
 
@@ -81,11 +81,7 @@ func (r *Reconciler) updateRepoRunStatus(ctx context.Context, logger *zap.Sugare
 }
 
 func (r *Reconciler) getFailureSnippet(ctx context.Context, pr *tektonv1.PipelineRun) string {
-	lines := int64(settings.DefaultSettings().ErrorLogSnippetNumberOfLines)
-	if r.run.Info.Pac != nil {
-		lines = int64(r.run.Info.Pac.ErrorLogSnippetNumberOfLines)
-	}
-	taskinfos := kstatus.CollectFailedTasksLogSnippet(ctx, r.run, r.kinteract, pr, lines)
+	taskinfos := kstatus.CollectFailedTasksLogSnippet(ctx, r.run, r.kinteract, pr, logSnippetNumLines)
 	if len(taskinfos) == 0 {
 		return ""
 	}
@@ -142,7 +138,7 @@ func (r *Reconciler) postFinalStatus(ctx context.Context, logger *zap.SugaredLog
 		}
 	}
 	var tmplStatusText string
-	if tmplStatusText, err = mt.MakeTemplate(vcx.GetTemplate(provider.PipelineRunStatusType)); err != nil {
+	if tmplStatusText, err = mt.MakeTemplate(formatting.PipelineRunStatusText); err != nil {
 		return nil, fmt.Errorf("cannot create message template: %w", err)
 	}
 

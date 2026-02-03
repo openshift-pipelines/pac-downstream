@@ -173,7 +173,6 @@ var (
 
 	WithTarget          = http.WithTarget
 	WithHeader          = http.WithHeader
-	WithHost            = http.WithHost
 	WithShutdownTimeout = http.WithShutdownTimeout
 	//WithEncoding           = http.WithEncoding
 	//WithStructuredEncoding = http.WithStructuredEncoding // TODO: expose new way

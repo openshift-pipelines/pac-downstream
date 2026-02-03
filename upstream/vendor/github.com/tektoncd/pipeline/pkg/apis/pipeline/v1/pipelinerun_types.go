@@ -47,7 +47,6 @@ import (
 // PipelineRun creates TaskRuns for Tasks in the referenced Pipeline.
 //
 // +k8s:openapi-gen=true
-// +kubebuilder:storageversion
 type PipelineRun struct {
 	metav1.TypeMeta `json:",inline"`
 	// +optional
@@ -82,16 +81,6 @@ func (pr *PipelineRun) IsDone() bool {
 // HasStarted function check whether pipelinerun has valid start time set in its status
 func (pr *PipelineRun) HasStarted() bool {
 	return pr.Status.StartTime != nil && !pr.Status.StartTime.IsZero()
-}
-
-// IsSuccessful returns true if the PipelineRun's status indicates that it has succeeded.
-func (pr *PipelineRun) IsSuccessful() bool {
-	return pr != nil && pr.Status.GetCondition(apis.ConditionSucceeded).IsTrue()
-}
-
-// IsFailure returns true if the PipelineRun's status indicates that it has failed.
-func (pr *PipelineRun) IsFailure() bool {
-	return pr != nil && pr.Status.GetCondition(apis.ConditionSucceeded).IsFalse()
 }
 
 // IsCancelled returns true if the PipelineRun's spec status is set to Cancelled state
@@ -261,13 +250,11 @@ type PipelineRunSpec struct {
 	// +optional
 	PipelineRef *PipelineRef `json:"pipelineRef,omitempty"`
 	// Specifying PipelineSpec can be disabled by setting
-	// `disable-inline-spec` feature flag.
-	// See Pipeline.spec (API version: tekton.dev/v1)
+	// `disable-inline-spec` feature flag..
 	// +optional
-	// +kubebuilder:pruning:PreserveUnknownFields
-	// +kubebuilder:validation:Schemaless
 	PipelineSpec *PipelineSpec `json:"pipelineSpec,omitempty"`
 	// Params is a list of parameter names and values.
+	// +listType=atomic
 	Params Params `json:"params,omitempty"`
 
 	// Used for cancelling a pipelinerun (and maybe more later on)
@@ -293,12 +280,6 @@ type PipelineRunSpec struct {
 	// +optional
 	// +listType=atomic
 	TaskRunSpecs []PipelineTaskRunSpec `json:"taskRunSpecs,omitempty"`
-	// ManagedBy indicates which controller is responsible for reconciling
-	// this resource. If unset or set to "tekton.dev/pipeline", the default
-	// Tekton controller will manage this resource.
-	// This field is immutable.
-	// +optional
-	ManagedBy *string `json:"managedBy,omitempty"`
 }
 
 // TimeoutFields allows granular specification of pipeline, task, and finally timeouts
@@ -532,10 +513,7 @@ type PipelineRunStatusFields struct {
 	// +listType=atomic
 	Results []PipelineRunResult `json:"results,omitempty"`
 
-	// PipelineSpec contains the exact spec used to instantiate the run.
-	// See Pipeline.spec (API version: tekton.dev/v1)
-	// +kubebuilder:pruning:PreserveUnknownFields
-	// +kubebuilder:validation:Schemaless
+	// PipelineRunSpec contains the exact spec used to instantiate the run
 	PipelineSpec *PipelineSpec `json:"pipelineSpec,omitempty"`
 
 	// list of tasks that were skipped due to when expressions evaluating to false
@@ -608,8 +586,6 @@ type PipelineRunResult struct {
 	Name string `json:"name"`
 
 	// Value is the result returned from the execution of this PipelineRun
-	// +kubebuilder:pruning:PreserveUnknownFields
-	// +kubebuilder:validation:Schemaless
 	Value ResultValue `json:"value"`
 }
 
@@ -672,13 +648,6 @@ type PipelineTaskRunSpec struct {
 
 	// Compute resources to use for this TaskRun
 	ComputeResources *corev1.ResourceRequirements `json:"computeResources,omitempty"`
-
-	// Duration after which the TaskRun times out. Overrides the timeout specified
-	// on the Task's spec if specified. Takes lower precedence to PipelineRun's
-	// `spec.timeouts.tasks`
-	// Refer Go's ParseDuration documentation for expected format: https://golang.org/pkg/time/#ParseDuration
-	// +optional
-	Timeout *metav1.Duration `json:"timeout,omitempty"`
 }
 
 // GetTaskRunSpec returns the task specific spec for a given
@@ -701,7 +670,6 @@ func (pr *PipelineRun) GetTaskRunSpec(pipelineTaskName string) PipelineTaskRunSp
 			s.SidecarSpecs = task.SidecarSpecs
 			s.Metadata = task.Metadata
 			s.ComputeResources = task.ComputeResources
-			s.Timeout = task.Timeout
 		}
 	}
 	return s

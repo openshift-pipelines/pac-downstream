@@ -6,11 +6,11 @@ import (
 	"net/http"
 	"strings"
 
-	"codeberg.org/mvdkleijn/forgejo-sdk/forgejo/v2"
+	giteaStructs "code.gitea.io/gitea/modules/structs"
+	"code.gitea.io/sdk/gitea"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/acl"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/policy"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/gitea/forgejostructs"
 )
 
 func (v *Provider) CheckPolicyAllowing(_ context.Context, event *info.Event, allowedTeams []string) (bool, string) {
@@ -18,7 +18,7 @@ func (v *Provider) CheckPolicyAllowing(_ context.Context, event *info.Event, all
 		return true, ""
 	}
 	// TODO: caching
-	orgTeams, resp, err := v.Client().ListOrgTeams(event.Organization, forgejo.ListTeamsOptions{})
+	orgTeams, resp, err := v.Client.ListOrgTeams(event.Organization, gitea.ListTeamsOptions{})
 	if resp.StatusCode == http.StatusNotFound {
 		// we explicitly disallow the policy when there is no team on org
 		return false, fmt.Sprintf("no teams on org %s", event.Organization)
@@ -30,7 +30,7 @@ func (v *Provider) CheckPolicyAllowing(_ context.Context, event *info.Event, all
 	for _, allowedTeam := range allowedTeams {
 		for _, orgTeam := range orgTeams {
 			if orgTeam.Name == allowedTeam {
-				teamMember, _, err := v.Client().GetTeamMember(orgTeam.ID, event.Sender)
+				teamMember, _, err := v.Client.GetTeamMember(orgTeam.ID, event.Sender)
 				if err != nil {
 					v.Logger.Infof("error while getting team member: %s, error: %s", event.Sender, err.Error())
 					continue
@@ -105,14 +105,14 @@ func (v *Provider) aclAllowedOkToTestFromAnOwner(ctx context.Context, event *inf
 	}
 
 	switch event := revent.Event.(type) {
-	case *forgejostructs.IssueCommentPayload:
+	case *giteaStructs.IssueCommentPayload:
 		// if we don't need to check old comments, then on issue comment we
 		// need to check if comment have /ok-to-test and is from allowed user
 		if !v.pacInfo.RememberOKToTest {
 			return v.aclAllowedOkToTestCurrentComment(ctx, revent, event.Comment.ID)
 		}
 		revent.URL = event.Issue.URL
-	case *forgejostructs.PullRequestPayload:
+	case *giteaStructs.PullRequestPayload:
 		// if we don't need to check old comments, then on push event we don't need
 		// to check anything for the non-allowed user
 		if !v.pacInfo.RememberOKToTest {
@@ -144,7 +144,7 @@ func (v *Provider) aclAllowedOkToTestFromAnOwner(ctx context.Context, event *inf
 // aclAllowedOkToTestCurrentEvent only check if this is issue comment event
 // have /ok-to-test regex and sender is allowed.
 func (v *Provider) aclAllowedOkToTestCurrentComment(ctx context.Context, revent *info.Event, id int64) (bool, error) {
-	comment, _, err := v.Client().GetIssueComment(revent.Organization, revent.Repository, id)
+	comment, _, err := v.Client.GetIssueComment(revent.Organization, revent.Repository, id)
 	if err != nil {
 		return false, err
 	}
@@ -204,7 +204,7 @@ func (v *Provider) IsAllowedOwnersFile(ctx context.Context, rev *info.Event) (bo
 }
 
 func (v *Provider) checkSenderRepoMembership(_ context.Context, runevent *info.Event) (bool, error) {
-	ret, _, err := v.Client().IsCollaborator(runevent.Organization, runevent.Repository, runevent.Sender)
+	ret, _, err := v.Client.IsCollaborator(runevent.Organization, runevent.Repository, runevent.Sender)
 	return ret, err
 }
 
@@ -220,14 +220,14 @@ func (v *Provider) getFileFromDefaultBranch(ctx context.Context, path string, ru
 
 // GetStringPullRequestComment return the comment if we find a regexp in one of
 // the comments text of a pull request.
-func (v *Provider) GetStringPullRequestComment(_ context.Context, runevent *info.Event, reg string) ([]*forgejo.Comment, error) {
-	var ret []*forgejo.Comment
+func (v *Provider) GetStringPullRequestComment(_ context.Context, runevent *info.Event, reg string) ([]*gitea.Comment, error) {
+	var ret []*gitea.Comment
 	prNumber, err := convertPullRequestURLtoNumber(runevent.URL)
 	if err != nil {
 		return nil, err
 	}
 
-	comments, _, err := v.Client().ListIssueComments(runevent.Organization, runevent.Repository, int64(prNumber), forgejo.ListIssueCommentOptions{})
+	comments, _, err := v.Client.ListIssueComments(runevent.Organization, runevent.Repository, int64(prNumber), gitea.ListIssueCommentOptions{})
 	if err != nil {
 		return nil, err
 	}

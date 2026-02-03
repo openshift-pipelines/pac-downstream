@@ -10,7 +10,6 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
-	"slices"
 	"strings"
 
 	jsoniter "github.com/json-iterator/go"
@@ -150,8 +149,10 @@ func WriteJson(in *Event, writer io.Writer) error {
 			mediaType = strings.TrimSpace(strings.ToLower(contentType[0:i]))
 		}
 
-		// If IsJSON and no encoding to base64, we don't need to perform additional steps
-		if isJSON(mediaType) && !isBase64 {
+		isJson := mediaType == "" || mediaType == ApplicationJSON || mediaType == TextJSON
+
+		// If isJson and no encoding to base64, we don't need to perform additional steps
+		if isJson && !isBase64 {
 			stream.WriteObjectField("data")
 			_, err := stream.Write(in.DataEncoded)
 			if err != nil {
@@ -178,16 +179,10 @@ func WriteJson(in *Event, writer io.Writer) error {
 		return fmt.Errorf("error while writing the event data: %w", stream.Error)
 	}
 
-	// Add extensions in a deterministic predictable order, similar to how Go maps are serialized in a predictable order.
-	extensionNames := make([]string, 0, len(ext))
-	for extName := range ext {
-		extensionNames = append(extensionNames, extName)
-	}
-	slices.Sort(extensionNames)
-	for _, extName := range extensionNames {
+	for k, v := range ext {
 		stream.WriteMore()
-		stream.WriteObjectField(extName)
-		stream.WriteVal(ext[extName])
+		stream.WriteObjectField(k)
+		stream.WriteVal(v)
 	}
 
 	stream.WriteObjectEnd()

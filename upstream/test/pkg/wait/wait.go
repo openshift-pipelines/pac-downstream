@@ -9,8 +9,6 @@ import (
 	pacv1alpha1 "github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/kubeinteraction"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/clients"
-
-	v1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -29,11 +27,7 @@ func UntilMinPRAppeared(ctx context.Context, clients clients.Clients, opts Opts,
 	ctx, cancel := context.WithTimeout(ctx, opts.PollTimeout)
 	defer cancel()
 	return kubeinteraction.PollImmediateWithContext(ctx, opts.PollTimeout, func() (bool, error) {
-		listOpts := metav1.ListOptions{}
-		if opts.TargetSHA != "" {
-			listOpts.LabelSelector = fmt.Sprintf("%s=%s", keys.SHA, opts.TargetSHA)
-		}
-		prs, err := clients.Tekton.TektonV1().PipelineRuns(opts.Namespace).List(ctx, listOpts)
+		prs, err := clients.Tekton.TektonV1().PipelineRuns(opts.Namespace).List(ctx, metav1.ListOptions{})
 		if err != nil {
 			return false, err
 		}
@@ -90,31 +84,7 @@ func UntilPipelineRunCreated(ctx context.Context, clients clients.Clients, opts 
 			return true, err
 		}
 
-		clients.Log.Infof("waiting for pipelinerun to be created: selector %s=%s, MinNumberStatus=%d pr.Items=%d", keys.SHA, opts.TargetSHA, opts.MinNumberStatus, len(prs.Items))
+		clients.Log.Info("still waiting for pipelinerun to be created")
 		return len(prs.Items) == opts.MinNumberStatus, nil
-	})
-}
-
-// UntilPipelineRunHasReason Checks for certain reason of PipelineRuns.
-func UntilPipelineRunHasReason(ctx context.Context, clients clients.Clients, desiredReason v1.PipelineRunReason, opts Opts) error {
-	ctx, cancel := context.WithTimeout(ctx, opts.PollTimeout)
-	defer cancel()
-	return kubeinteraction.PollImmediateWithContext(ctx, opts.PollTimeout, func() (bool, error) {
-		prs, err := clients.Tekton.TektonV1().PipelineRuns(opts.Namespace).List(ctx, metav1.ListOptions{
-			LabelSelector: fmt.Sprintf("%s=%s", keys.SHA, opts.TargetSHA),
-		})
-		if err != nil {
-			return true, err
-		}
-
-		var prsWithReason []v1.PipelineRun
-		for _, pr := range prs.Items {
-			if len(pr.Status.Conditions) > 0 && pr.Status.Conditions[0].Reason == desiredReason.String() {
-				prsWithReason = append(prsWithReason, pr)
-			}
-		}
-
-		clients.Log.Infof("still waiting for pipelinerun to have reason %s in %s namespace", desiredReason.String(), opts.Namespace)
-		return len(prsWithReason) >= opts.MinNumberStatus, nil
 	})
 }

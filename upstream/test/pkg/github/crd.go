@@ -5,7 +5,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/google/go-github/v81/github"
+	ghlib "github.com/google/go-github/v68/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/test/pkg/options"
@@ -15,14 +15,13 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-func CreateCRD(ctx context.Context, t *testing.T, repoinfo *github.Repository, run *params.Run, opts options.E2E, targetNS string) error {
+func CreateCRD(ctx context.Context, t *testing.T, repoinfo *ghlib.Repository, run *params.Run, opts options.E2E, targetNS string) error {
 	repo := &v1alpha1.Repository{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: targetNS,
 		},
 		Spec: v1alpha1.RepositorySpec{
-			URL:      repoinfo.GetHTMLURL(),
-			Settings: &opts.Settings,
+			URL: repoinfo.GetHTMLURL(),
 		},
 	}
 
@@ -65,7 +64,7 @@ func CreateCRD(ctx context.Context, t *testing.T, repoinfo *github.Repository, r
 
 var intPtr = func(val int) *int { return &val }
 
-func CreateCRDIncoming(ctx context.Context, t *testing.T, repoinfo *github.Repository, run *params.Run, incomings *[]v1alpha1.Incoming, opts options.E2E, targetNS string) error {
+func CreateCRDIncoming(ctx context.Context, t *testing.T, repoinfo *ghlib.Repository, run *params.Run, incomings *[]v1alpha1.Incoming, opts options.E2E, targetNS string) error {
 	repo := &v1alpha1.Repository{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: targetNS,

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/google/go-github/v81/github"
+	"github.com/google/go-github/v68/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/test/logger"
 	"gotest.tools/v3/assert"
 )
@@ -18,7 +18,7 @@ func TestProvider_Detect(t *testing.T) {
 		wantErrString string
 		isGH          bool
 		processReq    bool
-		event         any
+		event         interface{}
 		eventType     string
 		wantReason    string
 	}{
@@ -204,15 +204,6 @@ func TestProvider_Detect(t *testing.T) {
 			name: "pull request event",
 			event: github.PullRequestEvent{
 				Action: github.Ptr("opened"),
-			},
-			eventType:  "pull_request",
-			isGH:       true,
-			processReq: true,
-		},
-		{
-			name: "pull request event converted from draft to active",
-			event: github.PullRequestEvent{
-				Action: github.Ptr("ready_for_review"),
 			},
 			eventType:  "pull_request",
 			isGH:       true,

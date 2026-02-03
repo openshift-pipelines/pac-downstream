@@ -22,30 +22,21 @@ import (
 	"time"
 )
 
-type (
-	KeysServiceInterface interface {
-		GetKeyWithUser(key int64, options ...RequestOptionFunc) (*Key, *Response, error)
-		GetKeyByFingerprint(opt *GetKeyByFingerprintOptions, options ...RequestOptionFunc) (*Key, *Response, error)
-	}
-
-	// KeysService handles communication with the
-	// keys related methods of the GitLab API.
-	//
-	// GitLab API docs:
-	// https://docs.gitlab.com/api/keys/
-	KeysService struct {
-		client *Client
-	}
-)
-
-var _ KeysServiceInterface = (*KeysService)(nil)
+// KeysService handles communication with the
+// keys related methods of the GitLab API.
+//
+// GitLab API docs:
+// https://docs.gitlab.com/ee/api/keys.html
+type KeysService struct {
+	client *Client
+}
 
 // Key represents a GitLab user's SSH key.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/api/keys/
+// https://docs.gitlab.com/ee/api/keys.html
 type Key struct {
-	ID        int64      `json:"id"`
+	ID        int        `json:"id"`
 	Title     string     `json:"title"`
 	Key       string     `json:"key"`
 	CreatedAt *time.Time `json:"created_at"`
@@ -56,8 +47,8 @@ type Key struct {
 // user information.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/api/keys/#get-ssh-key-with-user-by-id-of-an-ssh-key
-func (s *KeysService) GetKeyWithUser(key int64, options ...RequestOptionFunc) (*Key, *Response, error) {
+// https://docs.gitlab.com/ee/api/keys.html#get-ssh-key-with-user-by-id-of-an-ssh-key
+func (s *KeysService) GetKeyWithUser(key int, options ...RequestOptionFunc) (*Key, *Response, error) {
 	u := fmt.Sprintf("keys/%d", key)
 
 	req, err := s.client.NewRequest(http.MethodGet, u, nil, options)
@@ -78,8 +69,8 @@ func (s *KeysService) GetKeyWithUser(key int64, options ...RequestOptionFunc) (*
 // options.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/api/keys/#get-user-by-fingerprint-of-ssh-key
-// https://docs.gitlab.com/api/keys/#get-user-by-deploy-key-fingerprint
+// https://docs.gitlab.com/ee/api/keys.html#get-user-by-fingerprint-of-ssh-key
+// https://docs.gitlab.com/ee/api/keys.html#get-user-by-deploy-key-fingerprint
 type GetKeyByFingerprintOptions struct {
 	Fingerprint string `url:"fingerprint" json:"fingerprint"`
 }
@@ -88,8 +79,8 @@ type GetKeyByFingerprintOptions struct {
 // along with the associated user information.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/api/keys/#get-user-by-fingerprint-of-ssh-key
-// https://docs.gitlab.com/api/keys/#get-user-by-deploy-key-fingerprint
+// https://docs.gitlab.com/ee/api/keys.html#get-user-by-fingerprint-of-ssh-key
+// https://docs.gitlab.com/ee/api/keys.html#get-user-by-deploy-key-fingerprint
 func (s *KeysService) GetKeyByFingerprint(opt *GetKeyByFingerprintOptions, options ...RequestOptionFunc) (*Key, *Response, error) {
 	req, err := s.client.NewRequest(http.MethodGet, "keys", opt, options)
 	if err != nil {

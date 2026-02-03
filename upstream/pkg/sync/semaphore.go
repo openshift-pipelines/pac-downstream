@@ -39,7 +39,7 @@ func (s *prioritySemaphore) getLimit() int {
 }
 
 func (s *prioritySemaphore) getCurrentPending() []string {
-	keys := make([]string, 0, len(s.pending.items))
+	keys := []string{}
 	for _, item := range s.pending.items {
 		keys = append(keys, item.key)
 	}
@@ -47,7 +47,7 @@ func (s *prioritySemaphore) getCurrentPending() []string {
 }
 
 func (s *prioritySemaphore) getCurrentRunning() []string {
-	keys := make([]string, 0, len(s.running))
+	keys := []string{}
 	for k := range s.running {
 		keys = append(keys, k)
 	}
@@ -166,8 +166,7 @@ func (s *prioritySemaphore) tryAcquire(key string) (bool, string) {
 		}
 	}
 
-	if s.semaphore.TryAcquire(1) {
-		s.running[key] = true
+	if s.acquire(nextKey) {
 		s.pending.pop()
 		return true, ""
 	}
@@ -176,9 +175,6 @@ func (s *prioritySemaphore) tryAcquire(key string) (bool, string) {
 }
 
 func (s *prioritySemaphore) acquire(key string) bool {
-	s.lock.Lock()
-	defer s.lock.Unlock()
-
 	if s.semaphore.TryAcquire(1) {
 		s.running[key] = true
 		return true

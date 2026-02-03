@@ -24,63 +24,46 @@ import (
 	"time"
 )
 
-type (
-	// GenericPackagesServiceInterface defines all the API methods for the GenericPackagesService
-	GenericPackagesServiceInterface interface {
-		FormatPackageURL(pid any, packageName, packageVersion, fileName string) (string, error)
-		PublishPackageFile(pid any, packageName, packageVersion, fileName string, content io.Reader, opt *PublishPackageFileOptions, options ...RequestOptionFunc) (*GenericPackagesFile, *Response, error)
-		DownloadPackageFile(pid any, packageName, packageVersion, fileName string, options ...RequestOptionFunc) ([]byte, *Response, error)
-	}
-
-	// GenericPackagesService handles communication with the packages related
-	// methods of the GitLab API.
-	//
-	// GitLab docs:
-	// https://docs.gitlab.com/user/packages/generic_packages/
-	GenericPackagesService struct {
-		client *Client
-	}
-)
-
-var _ GenericPackagesServiceInterface = (*GenericPackagesService)(nil)
+// GenericPackagesService handles communication with the packages related
+// methods of the GitLab API.
+//
+// GitLab docs:
+// https://docs.gitlab.com/ee/user/packages/generic_packages/index.html
+type GenericPackagesService struct {
+	client *Client
+}
 
 // GenericPackagesFile represents a GitLab generic package file.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/user/packages/generic_packages/#publish-a-single-file
+// https://docs.gitlab.com/ee/user/packages/generic_packages/index.html#publish-a-package-file
 type GenericPackagesFile struct {
-	ID                     int64                  `json:"id"`
-	PackageID              int64                  `json:"package_id"`
-	CreatedAt              *time.Time             `json:"created_at"`
-	UpdatedAt              *time.Time             `json:"updated_at"`
-	Size                   int64                  `json:"size"`
-	FileStore              int64                  `json:"file_store"`
-	FileMD5                string                 `json:"file_md5"`
-	FileSHA1               string                 `json:"file_sha1"`
-	FileName               string                 `json:"file_name"`
-	File                   GenericPackagesFileURL `json:"file"`
-	FileSHA256             string                 `json:"file_sha256"`
-	VerificationRetryAt    *time.Time             `json:"verification_retry_at"`
-	VerifiedAt             *time.Time             `json:"verified_at"`
-	VerificationFailure    bool                   `json:"verification_failure"`
-	VerificationRetryCount int64                  `json:"verification_retry_count"`
-	VerificationChecksum   string                 `json:"verification_checksum"`
-	VerificationState      int64                  `json:"verification_state"`
-	VerificationStartedAt  *time.Time             `json:"verification_started_at"`
-	NewFilePath            string                 `json:"new_file_path"`
-}
-
-// GenericPackagesFileURL represents a GitLab generic package file URL.
-//
-// GitLab API docs:
-// https://docs.gitlab.com/user/packages/generic_packages/#publish-a-single-file
-type GenericPackagesFileURL struct {
-	URL string `json:"url"`
+	ID        int        `json:"id"`
+	PackageID int        `json:"package_id"`
+	CreatedAt *time.Time `json:"created_at"`
+	UpdatedAt *time.Time `json:"updated_at"`
+	Size      int        `json:"size"`
+	FileStore int        `json:"file_store"`
+	FileMD5   string     `json:"file_md5"`
+	FileSHA1  string     `json:"file_sha1"`
+	FileName  string     `json:"file_name"`
+	File      struct {
+		URL string `json:"url"`
+	} `json:"file"`
+	FileSHA256             string     `json:"file_sha256"`
+	VerificationRetryAt    *time.Time `json:"verification_retry_at"`
+	VerifiedAt             *time.Time `json:"verified_at"`
+	VerificationFailure    bool       `json:"verification_failure"`
+	VerificationRetryCount int        `json:"verification_retry_count"`
+	VerificationChecksum   string     `json:"verification_checksum"`
+	VerificationState      int        `json:"verification_state"`
+	VerificationStartedAt  *time.Time `json:"verification_started_at"`
+	NewFilePath            string     `json:"new_file_path"`
 }
 
 // FormatPackageURL returns the GitLab Package Registry URL for the given artifact metadata, without the BaseURL.
 // This does not make a GitLab API request, but rather computes it based on their documentation.
-func (s *GenericPackagesService) FormatPackageURL(pid any, packageName, packageVersion, fileName string) (string, error) {
+func (s *GenericPackagesService) FormatPackageURL(pid interface{}, packageName, packageVersion, fileName string) (string, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return "", err
@@ -99,7 +82,7 @@ func (s *GenericPackagesService) FormatPackageURL(pid any, packageName, packageV
 // options.
 //
 // GitLab docs:
-// https://docs.gitlab.com/user/packages/generic_packages/#publish-a-single-file
+// https://docs.gitlab.com/ee/user/packages/generic_packages/index.html#publish-a-package-file
 type PublishPackageFileOptions struct {
 	Status *GenericPackageStatusValue `url:"status,omitempty" json:"status,omitempty"`
 	Select *GenericPackageSelectValue `url:"select,omitempty" json:"select,omitempty"`
@@ -108,8 +91,8 @@ type PublishPackageFileOptions struct {
 // PublishPackageFile uploads a file to a project's package registry.
 //
 // GitLab docs:
-// https://docs.gitlab.com/user/packages/generic_packages/#publish-a-single-file
-func (s *GenericPackagesService) PublishPackageFile(pid any, packageName, packageVersion, fileName string, content io.Reader, opt *PublishPackageFileOptions, options ...RequestOptionFunc) (*GenericPackagesFile, *Response, error) {
+// https://docs.gitlab.com/ee/user/packages/generic_packages/index.html#publish-a-package-file
+func (s *GenericPackagesService) PublishPackageFile(pid interface{}, packageName, packageVersion, fileName string, content io.Reader, opt *PublishPackageFileOptions, options ...RequestOptionFunc) (*GenericPackagesFile, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err
@@ -146,8 +129,8 @@ func (s *GenericPackagesService) PublishPackageFile(pid any, packageName, packag
 // DownloadPackageFile allows you to download the package file.
 //
 // GitLab docs:
-// https://docs.gitlab.com/user/packages/generic_packages/#download-a-single-file
-func (s *GenericPackagesService) DownloadPackageFile(pid any, packageName, packageVersion, fileName string, options ...RequestOptionFunc) ([]byte, *Response, error) {
+// https://docs.gitlab.com/ee/user/packages/generic_packages/index.html#download-package-file
+func (s *GenericPackagesService) DownloadPackageFile(pid interface{}, packageName, packageVersion, fileName string, options ...RequestOptionFunc) ([]byte, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err

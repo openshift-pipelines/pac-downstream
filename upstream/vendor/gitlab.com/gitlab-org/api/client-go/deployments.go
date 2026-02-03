@@ -16,112 +16,60 @@
 package gitlab
 
 import (
+	"fmt"
 	"net/http"
 	"time"
 )
 
-type (
-	// DeploymentsServiceInterface defines all the API methods for the DeploymentsService
-	DeploymentsServiceInterface interface {
-		// ListProjectDeployments gets a list of deployments in a project.
-		//
-		// GitLab API docs:
-		// https://docs.gitlab.com/api/deployments/#list-project-deployments
-		// ListProjectDeployments gets a list of deployments in a project.
-		//
-		// GitLab API docs:
-		// https://docs.gitlab.com/api/deployments/#list-project-deployments
-		ListProjectDeployments(pid any, opts *ListProjectDeploymentsOptions, options ...RequestOptionFunc) ([]*Deployment, *Response, error)
+// DeploymentsService handles communication with the deployment related methods
+// of the GitLab API.
+//
+// GitLab API docs: https://docs.gitlab.com/ee/api/deployments.html
+type DeploymentsService struct {
+	client *Client
+}
 
-		// GetProjectDeployment gets a specific deployment for a project.
-		//
-		// GitLab API docs:
-		// https://docs.gitlab.com/api/deployments/#get-a-specific-deployment
-		GetProjectDeployment(pid any, deployment int64, options ...RequestOptionFunc) (*Deployment, *Response, error)
-
-		// CreateProjectDeployment creates a project deployment.
-		//
-		// GitLab API docs:
-		// https://docs.gitlab.com/api/deployments/#create-a-deployment
-		CreateProjectDeployment(pid any, opt *CreateProjectDeploymentOptions, options ...RequestOptionFunc) (*Deployment, *Response, error)
-
-		// UpdateProjectDeployment updates a project deployment.
-		//
-		// GitLab API docs:
-		// https://docs.gitlab.com/api/deployments/#update-a-deployment
-		UpdateProjectDeployment(pid any, deployment int64, opt *UpdateProjectDeploymentOptions, options ...RequestOptionFunc) (*Deployment, *Response, error)
-
-		// ApproveOrRejectProjectDeployment approves or rejects a blocked deployment.
-		//
-		// GitLab API docs:
-		// https://docs.gitlab.com/api/deployments/#approve-or-reject-a-blocked-deployment
-		ApproveOrRejectProjectDeployment(pid any, deployment int64, opt *ApproveOrRejectProjectDeploymentOptions, options ...RequestOptionFunc) (*Response, error)
-
-		// DeleteProjectDeployment deletes a specific deployment.
-		//
-		// GitLab API docs:
-		// https://docs.gitlab.com/api/deployments/#delete-a-specific-deployment
-		DeleteProjectDeployment(pid any, deployment int64, options ...RequestOptionFunc) (*Response, error)
-	}
-
-	// DeploymentsService handles communication with the deployment related methods
-	// of the GitLab API.
-	//
-	// GitLab API docs: https://docs.gitlab.com/api/deployments/
-	DeploymentsService struct {
-		client *Client
-	}
-)
-
-var _ DeploymentsServiceInterface = (*DeploymentsService)(nil)
-
-// Deployment represents the GitLab deployment
+// Deployment represents the Gitlab deployment
 type Deployment struct {
-	ID          int64                `json:"id"`
-	IID         int64                `json:"iid"`
-	Ref         string               `json:"ref"`
-	SHA         string               `json:"sha"`
-	Status      string               `json:"status"`
-	CreatedAt   *time.Time           `json:"created_at"`
-	UpdatedAt   *time.Time           `json:"updated_at"`
-	User        *ProjectUser         `json:"user"`
-	Environment *Environment         `json:"environment"`
-	Deployable  DeploymentDeployable `json:"deployable"`
-}
-
-// DeploymentDeployable represents the Gitlab deployment deployable
-type DeploymentDeployable struct {
-	ID         int64                        `json:"id"`
-	Status     string                       `json:"status"`
-	Stage      string                       `json:"stage"`
-	Name       string                       `json:"name"`
-	Ref        string                       `json:"ref"`
-	Tag        bool                         `json:"tag"`
-	Coverage   float64                      `json:"coverage"`
-	CreatedAt  *time.Time                   `json:"created_at"`
-	StartedAt  *time.Time                   `json:"started_at"`
-	FinishedAt *time.Time                   `json:"finished_at"`
-	Duration   float64                      `json:"duration"`
-	User       *User                        `json:"user"`
-	Commit     *Commit                      `json:"commit"`
-	Pipeline   DeploymentDeployablePipeline `json:"pipeline"`
-	Runner     *Runner                      `json:"runner"`
-}
-
-// DeploymentDeployablePipeline represents the Gitlab deployment deployable pipeline
-type DeploymentDeployablePipeline struct {
-	ID        int64      `json:"id"`
-	SHA       string     `json:"sha"`
-	Ref       string     `json:"ref"`
-	Status    string     `json:"status"`
-	CreatedAt *time.Time `json:"created_at"`
-	UpdatedAt *time.Time `json:"updated_at"`
+	ID          int          `json:"id"`
+	IID         int          `json:"iid"`
+	Ref         string       `json:"ref"`
+	SHA         string       `json:"sha"`
+	Status      string       `json:"status"`
+	CreatedAt   *time.Time   `json:"created_at"`
+	UpdatedAt   *time.Time   `json:"updated_at"`
+	User        *ProjectUser `json:"user"`
+	Environment *Environment `json:"environment"`
+	Deployable  struct {
+		ID         int        `json:"id"`
+		Status     string     `json:"status"`
+		Stage      string     `json:"stage"`
+		Name       string     `json:"name"`
+		Ref        string     `json:"ref"`
+		Tag        bool       `json:"tag"`
+		Coverage   float64    `json:"coverage"`
+		CreatedAt  *time.Time `json:"created_at"`
+		StartedAt  *time.Time `json:"started_at"`
+		FinishedAt *time.Time `json:"finished_at"`
+		Duration   float64    `json:"duration"`
+		User       *User      `json:"user"`
+		Commit     *Commit    `json:"commit"`
+		Pipeline   struct {
+			ID        int        `json:"id"`
+			SHA       string     `json:"sha"`
+			Ref       string     `json:"ref"`
+			Status    string     `json:"status"`
+			CreatedAt *time.Time `json:"created_at"`
+			UpdatedAt *time.Time `json:"updated_at"`
+		} `json:"pipeline"`
+		Runner *Runner `json:"runner"`
+	} `json:"deployable"`
 }
 
 // ListProjectDeploymentsOptions represents the available ListProjectDeployments() options.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/api/deployments/#list-project-deployments
+// https://docs.gitlab.com/ee/api/deployments.html#list-project-deployments
 type ListProjectDeploymentsOptions struct {
 	ListOptions
 	OrderBy     *string `url:"order_by,omitempty" json:"order_by,omitempty"`
@@ -129,35 +77,70 @@ type ListProjectDeploymentsOptions struct {
 	Environment *string `url:"environment,omitempty" json:"environment,omitempty"`
 	Status      *string `url:"status,omitempty" json:"status,omitempty"`
 
-	// Only for GitLab versions less than 14
+	// Only for Gitlab versions less than 14
 	UpdatedAfter  *time.Time `url:"updated_after,omitempty" json:"updated_after,omitempty"`
 	UpdatedBefore *time.Time `url:"updated_before,omitempty" json:"updated_before,omitempty"`
 
-	// Only for GitLab 14 or higher
+	// Only for Gitlab 14 or higher
 	FinishedAfter  *time.Time `url:"finished_after,omitempty" json:"finished_after,omitempty"`
 	FinishedBefore *time.Time `url:"finished_before,omitempty" json:"finished_before,omitempty"`
 }
 
-func (s *DeploymentsService) ListProjectDeployments(pid any, opts *ListProjectDeploymentsOptions, options ...RequestOptionFunc) ([]*Deployment, *Response, error) {
-	return do[[]*Deployment](s.client,
-		withPath("projects/%s/deployments", ProjectID{pid}),
-		withAPIOpts(opts),
-		withRequestOpts(options...),
-	)
+// ListProjectDeployments gets a list of deployments in a project.
+//
+// GitLab API docs:
+// https://docs.gitlab.com/ee/api/deployments.html#list-project-deployments
+func (s *DeploymentsService) ListProjectDeployments(pid interface{}, opts *ListProjectDeploymentsOptions, options ...RequestOptionFunc) ([]*Deployment, *Response, error) {
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, nil, err
+	}
+	u := fmt.Sprintf("projects/%s/deployments", PathEscape(project))
+
+	req, err := s.client.NewRequest(http.MethodGet, u, opts, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var ds []*Deployment
+	resp, err := s.client.Do(req, &ds)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return ds, resp, nil
 }
 
-func (s *DeploymentsService) GetProjectDeployment(pid any, deployment int64, options ...RequestOptionFunc) (*Deployment, *Response, error) {
-	return do[*Deployment](s.client,
-		withPath("projects/%s/deployments/%d", ProjectID{pid}, deployment),
-		withRequestOpts(options...),
-	)
+// GetProjectDeployment get a deployment for a project.
+//
+// GitLab API docs:
+// https://docs.gitlab.com/ee/api/deployments.html#get-a-specific-deployment
+func (s *DeploymentsService) GetProjectDeployment(pid interface{}, deployment int, options ...RequestOptionFunc) (*Deployment, *Response, error) {
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, nil, err
+	}
+	u := fmt.Sprintf("projects/%s/deployments/%d", PathEscape(project), deployment)
+
+	req, err := s.client.NewRequest(http.MethodGet, u, nil, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	d := new(Deployment)
+	resp, err := s.client.Do(req, d)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return d, resp, nil
 }
 
 // CreateProjectDeploymentOptions represents the available
 // CreateProjectDeployment() options.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/api/deployments/#create-a-deployment
+// https://docs.gitlab.com/ee/api/deployments.html#create-a-deployment
 type CreateProjectDeploymentOptions struct {
 	Environment *string                `url:"environment,omitempty" json:"environment,omitempty"`
 	Ref         *string                `url:"ref,omitempty" json:"ref,omitempty"`
@@ -166,59 +149,112 @@ type CreateProjectDeploymentOptions struct {
 	Status      *DeploymentStatusValue `url:"status,omitempty" json:"status,omitempty"`
 }
 
-func (s *DeploymentsService) CreateProjectDeployment(pid any, opt *CreateProjectDeploymentOptions, options ...RequestOptionFunc) (*Deployment, *Response, error) {
-	return do[*Deployment](s.client,
-		withMethod(http.MethodPost),
-		withPath("projects/%s/deployments", ProjectID{pid}),
-		withAPIOpts(opt),
-		withRequestOpts(options...),
-	)
+// CreateProjectDeployment creates a project deployment.
+//
+// GitLab API docs:
+// https://docs.gitlab.com/ee/api/deployments.html#create-a-deployment
+func (s *DeploymentsService) CreateProjectDeployment(pid interface{}, opt *CreateProjectDeploymentOptions, options ...RequestOptionFunc) (*Deployment, *Response, error) {
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, nil, err
+	}
+	u := fmt.Sprintf("projects/%s/deployments", PathEscape(project))
+
+	req, err := s.client.NewRequest(http.MethodPost, u, opt, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	d := new(Deployment)
+	resp, err := s.client.Do(req, &d)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return d, resp, nil
 }
 
 // UpdateProjectDeploymentOptions represents the available
 // UpdateProjectDeployment() options.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/api/deployments/#update-a-deployment
+// https://docs.gitlab.com/ee/api/deployments.html#update-a-deployment
 type UpdateProjectDeploymentOptions struct {
 	Status *DeploymentStatusValue `url:"status,omitempty" json:"status,omitempty"`
 }
 
-func (s *DeploymentsService) UpdateProjectDeployment(pid any, deployment int64, opt *UpdateProjectDeploymentOptions, options ...RequestOptionFunc) (*Deployment, *Response, error) {
-	return do[*Deployment](s.client,
-		withMethod(http.MethodPut),
-		withPath("projects/%s/deployments/%d", ProjectID{pid}, deployment),
-		withAPIOpts(opt),
-		withRequestOpts(options...),
-	)
+// UpdateProjectDeployment updates a project deployment.
+//
+// GitLab API docs:
+// https://docs.gitlab.com/ee/api/deployments.html#update-a-deployment
+func (s *DeploymentsService) UpdateProjectDeployment(pid interface{}, deployment int, opt *UpdateProjectDeploymentOptions, options ...RequestOptionFunc) (*Deployment, *Response, error) {
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, nil, err
+	}
+	u := fmt.Sprintf("projects/%s/deployments/%d", PathEscape(project), deployment)
+
+	req, err := s.client.NewRequest(http.MethodPut, u, opt, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	d := new(Deployment)
+	resp, err := s.client.Do(req, &d)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return d, resp, nil
 }
 
 // ApproveOrRejectProjectDeploymentOptions represents the available
 // ApproveOrRejectProjectDeployment() options.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/api/deployments/#approve-or-reject-a-blocked-deployment
+// https://docs.gitlab.com/ee/api/deployments.html#approve-or-reject-a-blocked-deployment
 type ApproveOrRejectProjectDeploymentOptions struct {
 	Status        *DeploymentApprovalStatus `url:"status,omitempty" json:"status,omitempty"`
 	Comment       *string                   `url:"comment,omitempty" json:"comment,omitempty"`
 	RepresentedAs *string                   `url:"represented_as,omitempty" json:"represented_as,omitempty"`
 }
 
-func (s *DeploymentsService) ApproveOrRejectProjectDeployment(pid any, deployment int64, opt *ApproveOrRejectProjectDeploymentOptions, options ...RequestOptionFunc) (*Response, error) {
-	_, resp, err := do[none](s.client,
-		withMethod(http.MethodPost),
-		withPath("projects/%s/deployments/%d/approval", ProjectID{pid}, deployment),
-		withAPIOpts(opt),
-		withRequestOpts(options...),
-	)
-	return resp, err
+// ApproveOrRejectProjectDeployment approve or reject a blocked deployment.
+//
+// GitLab API docs:
+// https://docs.gitlab.com/ee/api/deployments.html#approve-or-reject-a-blocked-deployment
+func (s *DeploymentsService) ApproveOrRejectProjectDeployment(pid interface{}, deployment int,
+	opt *ApproveOrRejectProjectDeploymentOptions, options ...RequestOptionFunc,
+) (*Response, error) {
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, err
+	}
+	u := fmt.Sprintf("projects/%s/deployments/%d/approval", PathEscape(project), deployment)
+
+	req, err := s.client.NewRequest(http.MethodPost, u, opt, options)
+	if err != nil {
+		return nil, err
+	}
+
+	return s.client.Do(req, nil)
 }
 
-func (s *DeploymentsService) DeleteProjectDeployment(pid any, deployment int64, options ...RequestOptionFunc) (*Response, error) {
-	_, resp, err := do[none](s.client,
-		withMethod(http.MethodDelete),
-		withPath("projects/%s/deployments/%d", ProjectID{pid}, deployment),
-		withRequestOpts(options...),
-	)
-	return resp, err
+// DeleteProjectDeployment delete a project deployment.
+//
+// GitLab API docs:
+// https://docs.gitlab.com/ee/api/deployments.html#delete-a-specific-deployment
+func (s *DeploymentsService) DeleteProjectDeployment(pid interface{}, deployment int, options ...RequestOptionFunc) (*Response, error) {
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, err
+	}
+	u := fmt.Sprintf("projects/%s/deployments/%d", PathEscape(project), deployment)
+
+	req, err := s.client.NewRequest(http.MethodDelete, u, nil, options)
+	if err != nil {
+		return nil, err
+	}
+
+	return s.client.Do(req, nil)
 }

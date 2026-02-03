@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/google/go-github/v81/github"
+	"github.com/google/go-github/v68/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/events"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
@@ -85,14 +85,6 @@ func TestProcessTemplates(t *testing.T) {
 			},
 			template: `{{ repo_url }}`,
 			expected: "https://cloneurl",
-		},
-		{
-			name: "test git_tag variable",
-			event: &info.Event{
-				BaseBranch: "refs/tags/v1.0",
-			},
-			template: `{{ git_tag }}`,
-			expected: "v1.0",
 		},
 		{
 			name:     "replace target_namespace",

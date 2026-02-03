@@ -8,6 +8,7 @@ metadata:
     pipelinesascode.tekton.dev/on-target-branch: "[*]"
     pipelinesascode.tekton.dev/max-keep-runs: "2"
     pipelinesascode.tekton.dev/cancel-in-progress: "true"
+    pipelinesascode.tekton.dev/task: "[git-clone]"
 spec:
   params:
     - name: repo_url
@@ -29,7 +30,7 @@ spec:
                 resolver: http
                 params:
                   - name: url
-                    value: https://raw.githubusercontent.com/openshift-pipelines/pipelines-as-code/refs/heads/main/.tekton/stepactions/git-clone.yaml
+                    value: https://raw.githubusercontent.com/tektoncd/catalog/main/stepaction/git-clone/0.1/git-clone.yaml
               params:
                 - name: output-path
                   value: $(workspaces.source.path)
@@ -37,13 +38,11 @@ spec:
                   value: "$(params.repo_url)"
                 - name: revision
                   value: "$(params.revision)"
-                - name: depth
-                  value: 1000
             - name: generate-release-yaml
               image: registry.access.redhat.com/ubi9/python-312
               workingDir: $(workspaces.source.path)
               script: |
-                set -euxo pipefail
+                set -x
                 mkdir -p bin/ # ignored in .gitignore
                 ./hack/generate-releaseyaml.sh  > bin/release.yaml
             - name: codespell
@@ -58,169 +57,46 @@ spec:
               workingDir: $(workspaces.source.path)
               script: |
                 shellcheck $(find hack/ -type f -regex ".*sh" -print)
-            - name: commit-validation
-              displayName: "Git commit validation (gitlint + conventional commits)"
+            - name: gitlint
+              displayName: "Git commit linter"
               image: registry.access.redhat.com/ubi9/python-312
               workingDir: $(workspaces.source.path)
               script: |
-                set -euxo pipefail
-
-                # Configure git
-                git config --global user.name "Pipelines as Code"
-                git config --global user.email "pac@tekton.dev"
-                git config --global --add safe.directory $(workspaces.source.path)
-
-                # Check if this is a GitHub event
+                set -x
                 if [[ "{{ headers['X-Github-Event'] }}" == "" ]]; then
-                  echo "Not a GitHub event, skipping commit validation"
+                  echo "Not a GitHub event, skipping gitlint"
                   exit 0
                 fi
 
-                # Only run on pull requests
                 if [[ "{{ headers['X-Github-Event'] }}" != "pull_request" ]]; then
-                  echo "Not a pull request, skipping commit validation"
+                  echo "Not a pull request, skipping gitlint"
                   exit 0
                 fi
 
-                # Get base SHA and validate
-                base_sha="{{ body.pull_request.base.sha }}"
-                if [[ -z "$base_sha" ]]; then
-                  echo "Base SHA is empty, cannot determine commit range"
-                  exit 1
-                fi
-
-                echo "Validating commits between $base_sha and HEAD"
-
-                # Install gitlint
-                echo "Installing gitlint..."
-                if ! pip3 install gitlint; then
-                  echo "Failed to install gitlint"
-                  exit 1
-                fi
-
-                # Define conventional commit regex
-                conv_regexp='^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert|deps)(\([a-z0-9-]+\))?: .+'
-
-                # Validate commits
-                gitlint_failed=()
-                conventional_failed=()
-
-                while read -r commit_hash; do
-                  if [[ -n "$commit_hash" ]]; then
-                    echo "Validating commit: $commit_hash"
-
-                    # Get commit message
-                    commit_msg=$(git log -1 --pretty=format:%s "$commit_hash")
-                    commit_body=$(git log -1 --pretty=format:%B "$commit_hash")
-
-                    # Skip merge commits
-                    if echo "$commit_msg" | grep -E -q '^Merge branch'; then
-                      echo "  Skipping merge commit: $commit_hash"
-                      continue
-                    fi
-
-                    # Skip revert commits
-                    if echo "$commit_msg" | grep -E -q '^Revert '; then
-                      echo "  Skipping revert commit: $commit_hash"
-                      continue
-                    fi
-                    # Run gitlint check
-                    if ! echo "$commit_body" | gitlint --staged; then
-                      echo "  Gitlint failed for commit: $commit_hash"
-                      gitlint_failed+=("$commit_hash")
-                    fi
-
-                    # Run conventional commit check
-                    if ! echo "$commit_msg" | grep -E -q "${conv_regexp}"; then
-                      echo "  Conventional commit check failed for: $commit_hash"
-                      echo "  Message: $commit_msg"
-                      conventional_failed+=("$commit_hash")
-                    fi
-                  fi
-                done < <(git log "${base_sha}..HEAD" --format=format:%H --no-merges)
-
-                # Report results
-                exit_code=0
-
-                if [ "${#gitlint_failed[@]}" -ne 0 ]; then
-                  echo ""
-                  echo "ERROR: Gitlint failed for commits: ${gitlint_failed[*]}"
-                  exit_code=1
-                fi
-
-                if [ "${#conventional_failed[@]}" -ne 0 ]; then
-                  echo ""
-                  echo "ERROR: Conventional commit format failed for commits: ${conventional_failed[*]}"
-                  echo "Expected format: type(scope): description"
-                  echo "Types: feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert, deps"
-                  echo "See: https://www.conventionalcommits.org/en/v1.0.0/#summary"
-                  exit_code=1
-                fi
-
-                if [ $exit_code -eq 0 ]; then
-                  echo ""
-                  echo "All commit validations passed successfully!"
-                fi
-
-                exit $exit_code
-
-            - name: check-generated-schemas
-              displayName: "Check generated OpenAPI schemas"
-              image: golang:1.25
-              workingDir: $(workspaces.source.path)
-              env:
-                - name: HUB_TOKEN
-                  valueFrom:
-                    secretKeyRef:
-                      name: "nightly-ci-github-hub-token"
-                      key: "hub-token"
-              script: |
-                set -eu
                 git config --global --add safe.directory $(workspaces.source.path)
-
-                if uname -m | grep -q aarch64; then
-                  arch=arm64
-                else
-                  arch=amd64
-                fi
-
-                # version=$(curl -H "Authorization: Bearer ${HUB_TOKEN}" -L -s https://api.github.com/repos/mikefarah/yq/releases/latest|python3 -c 'import sys, json;dico=json.load(sys.stdin);print(dico["tag_name"])')
-                version=v4.45.2
-                curl -sH "Authorization: Bearer ${HUB_TOKEN}" -L https://github.com/mikefarah/yq/releases/download/${version}/yq_linux_${arch} -o /usr/bin/yq && \
-                  chmod +x /usr/bin/yq
-
-                curl -L -o/usr/bin/kubectl "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/${arch}/kubectl" && \
-                  chmod +x /usr/bin/kubectl
-
-                make update-schemas
-                # check now that there are no changes in config with git
-                git diff --exit-code config/ || { echo "Error: you need to run 'make update-schemas' and commit it."; exit 1; }
+                git log -1 --format=format:%s |grep -E -q '^Merge branch' && exit 0
+                pip3 install gitlint
+                gitlint --commit "$(git log --format=format:%H --no-merges -1)" --ignore "Merge branch"
 
             - name: yamllint
               displayName: "YAML Linter"
               image: cytopia/yamllint
               workingDir: $(workspaces.source.path)
               script: |
-                set -euxo pipefail
+                set -x
                 yamllint -f parsable -c .yamllint $(find . -type f -regex ".*y[a]ml" -print)
 
             - name: ruff-lint
               displayName: "Python Linter (ruff)"
-              image: registry.access.redhat.com/ubi9/python-312
+              image: ghcr.io/astral-sh/ruff
               workingDir: $(workspaces.source.path)
-              script: |
-                set -euxo pipefail
-                pip3 install ruff
-                ruff check .
+              args: ["check", "$(workspaces.source.path)"]
 
             - name: ruff-format
               displayName: "Python Formatter (ruff)"
-              image: registry.access.redhat.com/ubi9/python-312
+              image: ghcr.io/astral-sh/ruff
               workingDir: $(workspaces.source.path)
-              script: |
-                set -euxo pipefail
-                pip3 install ruff
-                ruff format . --check
+              args: ["format", "$(workspaces.source.path)", "--check"]
 
             - name: markdownlint
               displayName: "Markdown Linter"
