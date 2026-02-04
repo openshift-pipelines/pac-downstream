@@ -13,6 +13,7 @@ import (
 
 	"github.com/ktrysmt/go-bitbucket"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/settings"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/bitbucketcloud/types"
 	"gotest.tools/v3/assert"
@@ -47,7 +48,7 @@ func SetupBBCloudClient(t *testing.T) (*bitbucket.Client, *http.ServeMux, func()
 		restoreEnv()
 	}
 
-	client := bitbucket.NewBasicAuth("", "")
+	client, _ := bitbucket.NewBasicAuth("", "")
 	client.HttpClient = server.Client()
 	return client, mux, tearDown
 }
@@ -177,7 +178,7 @@ func MuxRepoInfo(t *testing.T, mux *http.ServeMux, event *info.Event, repo *bitb
 	})
 }
 
-func MuxCreateCommitstatus(t *testing.T, mux *http.ServeMux, event *info.Event, expectedDescSubstr string, expStatus provider.StatusOpts) {
+func MuxCreateCommitstatus(t *testing.T, mux *http.ServeMux, event *info.Event, expectedDescSubstr, applicationName string, expStatus provider.StatusOpts) {
 	t.Helper()
 
 	path := fmt.Sprintf("/repositories/%s/%s/commit/%s/statuses/build", event.Organization, event.Repository, event.SHA)
@@ -186,6 +187,8 @@ func MuxCreateCommitstatus(t *testing.T, mux *http.ServeMux, event *info.Event, 
 		bit, _ := io.ReadAll(r.Body)
 		err := json.Unmarshal(bit, cso)
 		assert.NilError(t, err)
+		pacOpts := &info.PacOpts{Settings: settings.Settings{ApplicationName: applicationName}}
+		assert.Equal(t, provider.GetCheckName(expStatus, pacOpts), cso.Key)
 
 		if expStatus.DetailsURL != "" {
 			assert.Equal(t, expStatus.DetailsURL, cso.Url)
