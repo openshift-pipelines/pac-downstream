@@ -3,7 +3,7 @@ package gitea
 import (
 	"context"
 
-	"codeberg.org/mvdkleijn/forgejo-sdk/forgejo/v2"
+	"code.gitea.io/sdk/gitea"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	pacrepo "github.com/openshift-pipelines/pipelines-as-code/test/pkg/repository"
@@ -13,9 +13,9 @@ import (
 
 // CreateToken creates gitea token with all scopes.
 func CreateToken(topts *TestOpts) (string, error) {
-	token, _, err := topts.GiteaCNX.Client().CreateAccessToken(forgejo.CreateAccessTokenOption{
+	token, _, err := topts.GiteaCNX.Client().CreateAccessToken(gitea.CreateAccessTokenOption{
 		Name:   topts.TargetNS,
-		Scopes: []forgejo.AccessTokenScope{forgejo.AccessTokenScopeAll},
+		Scopes: []gitea.AccessTokenScope{gitea.AccessTokenScopeAll},
 	})
 	if err != nil {
 		return "", err

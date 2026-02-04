@@ -50,8 +50,7 @@ check out the code that is being tested.
 | Variable              | Description                                                                                                                                                                       | Example                               | Example Output                                                                                                                                                  |
 | --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | body                  | The full payload body (see [below](#using-the-body-and-headers-in-a-pipelines-as-code-parameter))                                                                                 | `{{body.pull_request.user.email }}`   | <email@domain.com>                                                                                                                                              |
-| event                 | The normalized event type (`push`, `pull_request`, or `incoming`)                                                                                                                 | `{{event}}`                           | pull_request                                                                                                                                                    |
-| event_type            | The provider-specific event type from the webhook payload header (eg: GitHub sends `pull_request`, GitLab sends `Merge Request`, etc.)                                            | `{{event_type}}`                      | pull_request          (see the note for GitOps Comments [here]({{< relref "/docs/guide/gitops_commands.md#event-type-annotation-and-dynamic-variables" >}}) )   |
+| event_type            | The event type (eg: `pull_request` or `push`)                                                                                                                                     | `{{event_type}}`                      | pull_request          (see the note for GitOps Comments [here]({{< relref "/docs/guide/gitops_commands.md#event-type-annotation-and-dynamic-variables" >}}) )   |
 | git_auth_secret       | The secret name auto-generated with provider token to check out private repos.                                                                                                    | `{{git_auth_secret}}`                 | pac-gitauth-xkxkx                                                                                                                                               |
 | headers               | The request headers (see [below](#using-the-body-and-headers-in-a-pipelines-as-code-parameter))                                                                                   | `{{headers['x-github-event']}}`       | push                                                                                                                                                            |
 | pull_request_number   | The pull or merge request number, only defined when we are in a `pull_request` event or push event occurred when pull request is merged.                                          | `{{pull_request_number}}`             | 1                                                                                                                                                               |
@@ -152,7 +151,7 @@ doesn't:
 taskSpec:
   steps:
     - name: check-label
-      image: registry.access.redhat.com/ubi10/ubi
+      image: registry.access.redhat.com/ubi9/ubi
       script: |
         #!/usr/bin/env python3
         import json
@@ -169,7 +168,7 @@ The expressions are CEL expressions so you can as well make some conditional:
 
 ```yaml
 - name: bash
-  image: registry.access.redhat.com/ubi10/ubi
+  image: registry.access.redhat.com/ubi9/ubi
   script: |
     if {{ body.pull_request.state == "open" }}; then
       echo "PR is Open"
@@ -188,77 +187,6 @@ for example, this will show the GitHub event type for a GitHub event:
 
 and then you can do the same conditional or access as described above for the `body` keyword.
 
-## Using the cel: prefix for advanced CEL expressions
-
-For more complex CEL expressions that go beyond simple property access, you can
-use the `cel:` prefix. This allows you to write arbitrary CEL expressions with
-access to all available data sources.
-
-The `cel:` prefix provides access to:
-
-- `body` - The full webhook payload
-- `headers` - HTTP request headers
-- `files` - Changed files information (`files.all`, `files.added`, `files.deleted`, `files.modified`, `files.renamed`)
-- `pac` - Standard PAC parameters (`pac.revision`, `pac.target_branch`, `pac.source_branch`, etc.)
-
-### Examples
-
-**Conditional values based on event action:**
-
-```yaml
-params:
-  - name: pr-status
-    value: "{{ cel: body.action == \"opened\" ? \"new-pr\" : \"updated-pr\" }}"
-```
-
-**Environment selection based on target branch:**
-
-```yaml
-params:
-  - name: environment
-    value: "{{ cel: pac.target_branch == \"main\" ? \"production\" : \"staging\" }}"
-```
-
-**Safe field access with has() function:**
-
-Use the `has()` function to safely check if a field exists before accessing it:
-
-```yaml
-params:
-  - name: commit-type
-    value: "{{ cel: has(body.head_commit) && body.head_commit.message.startsWith(\"Merge\") ? \"merge\" : \"regular\" }}"
-```
-
-**Check if Go files were modified:**
-
-```yaml
-params:
-  - name: run-go-tests
-    value: "{{ cel: files.all.exists(f, f.endsWith(\".go\")) ? \"true\" : \"false\" }}"
-```
-
-**String concatenation:**
-
-```yaml
-params:
-  - name: greeting
-    value: "{{ cel: \"Build for \" + pac.repo_name + \" on \" + pac.target_branch }}"
-```
-
-**Count changed files:**
-
-```yaml
-params:
-  - name: file-count
-    value: "{{ cel: files.all.size() }}"
-```
-
-{{< hint info >}}
-If a `cel:` expression has a syntax error or fails to evaluate, it returns an
-empty string. This allows PipelineRuns to continue even if an optional dynamic
-value cannot be computed.
-{{< /hint >}}
-
 ## Using the temporary GitHub APP Token for GitHub API operations
 
 You can use the temporary installation token that is generated by Pipelines as
@@ -269,10 +197,15 @@ repositories](../privaterepo/) in the key `git-provider-token`.
 
 As an example, if you want to add a comment to your pull request, you can use the
 [github-add-comment](https://artifacthub.io/packages/tekton-task/tekton-catalog-tasks/github-add-comment)
-task from [Artifact Hub](https://artifacthub.io) using a [Pipelines-as-Code annotation](../resolver/#hub-support-for-tasks):
+task from [Artifact Hub](https://artifacthub.io) or the same task from
+[Tekton Hub](https://hub.tekton.dev/) using a [Pipelines-as-Code annotation](../resolver/#hub-support-for-tasks):
 
 ```yaml
+# Using Artifact Hub (default)
 pipelinesascode.tekton.dev/task: "github-add-comment"
+
+# Or explicitly using Tekton Hub
+pipelinesascode.tekton.dev/task: "tektonhub://github-add-comment"
 ```
 
 you can then add the task to your [tasks section](https://tekton.dev/docs/pipelines/pipelines/#adding-tasks-to-the-pipeline) (or [finally](https://tekton.dev/docs/pipelines/pipelines/#adding-finally-to-the-pipeline) tasks) of your PipelineRun :
