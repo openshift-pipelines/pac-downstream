@@ -109,7 +109,7 @@ func (v *Provider) CreateStatus(_ context.Context, event *info.Event, statusopts
 	}
 
 	cso := &bitbucket.CommitStatusOptions{
-		Key:         v.pacInfo.ApplicationName,
+		Key:         provider.GetCheckName(statusopts, v.pacInfo),
 		Url:         detailsURL,
 		State:       statusopts.Conclusion,
 		Description: statusopts.Title,
@@ -202,7 +202,11 @@ func (v *Provider) SetClient(_ context.Context, run *params.Run, event *info.Eve
 	if event.Provider.User == "" {
 		return fmt.Errorf("no git_provider.user has been in repo crd")
 	}
-	v.bbClient = bitbucket.NewBasicAuth(event.Provider.User, event.Provider.Token)
+	bbClient, err := bitbucket.NewBasicAuth(event.Provider.User, event.Provider.Token)
+	if err != nil {
+		return fmt.Errorf("failed to create bitbucket client: %w", err)
+	}
+	v.bbClient = bbClient
 
 	// Added log for security audit purposes to log client access when a token is used
 	run.Clients.Log.Infof("bitbucket-cloud: initialized client with provided token for user=%s", event.Provider.User)
@@ -275,6 +279,7 @@ func (v *Provider) GetCommitInfo(_ context.Context, event *info.Event) error {
 	}
 	// Note: Bitbucket Cloud API doesn't provide author email or timestamps in the basic commit response
 
+	event.HasSkipCommand = provider.SkipCI(commitinfo.Message)
 	// now to get the default branch from repository.Get
 	repo, err := v.Client().Repositories.Repository.Get(&bitbucket.RepositoryOptions{
 		Owner:    event.Organization,

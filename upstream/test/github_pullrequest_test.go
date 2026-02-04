@@ -23,7 +23,7 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/test/pkg/options"
 	twait "github.com/openshift-pipelines/pipelines-as-code/test/pkg/wait"
 
-	"github.com/google/go-github/v74/github"
+	"github.com/google/go-github/v81/github"
 	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 	"github.com/tektoncd/pipeline/pkg/names"
 	"gotest.tools/v3/assert"
@@ -43,7 +43,7 @@ func TestGithubPullRequest(t *testing.T) {
 	defer g.TearDown(ctx, t)
 }
 
-func TestGithubPullRequestSecondController(t *testing.T) {
+func TestGithubSecondPullRequest(t *testing.T) {
 	ctx := context.Background()
 	g := &tgithub.PRTest{
 		Label:            "Github Rerequest",
@@ -443,12 +443,78 @@ func TestGithubPullRequestNoOnLabelAnnotation(t *testing.T) {
 
 	// let's wait 10 secs and check every second that a PipelineRun is created or not.
 	for i := 0; i < 10; i++ {
-		prs, err := g.Cnx.Clients.Tekton.TektonV1().PipelineRuns(g.TargetNamespace).List(ctx, metav1.ListOptions{})
+		prs, err := g.Cnx.Clients.Tekton.TektonV1().PipelineRuns(g.TargetNamespace).List(ctx, metav1.ListOptions{
+			LabelSelector: fmt.Sprintf("%s=%s", keys.SHA, g.SHA),
+		})
 		assert.NilError(t, err)
 		// after adding a label on the PR we need to make sure that it doesn't trigger another PipelineRun.
 		assert.Equal(t, len(prs.Items), 1)
 		time.Sleep(1 * time.Second)
 	}
+}
+
+func TestGithubPullRequestCELLabelEvent(t *testing.T) {
+	ctx := context.Background()
+	g := &tgithub.PRTest{
+		Label:         "Github CEL Label Event",
+		YamlFiles:     []string{"testdata/pipelinerun-cel-label-event.yaml"},
+		NoStatusCheck: true,
+	}
+	g.RunPullRequest(ctx, t)
+	defer g.TearDown(ctx, t)
+
+	g.Cnx.Clients.Log.Infof("Verifying no PipelineRun created on PR creation")
+	prs, err := g.Cnx.Clients.Tekton.TektonV1().PipelineRuns(g.TargetNamespace).List(ctx, metav1.ListOptions{
+		LabelSelector: fmt.Sprintf("%s=%s", keys.SHA, g.SHA),
+	})
+	assert.NilError(t, err)
+	assert.Equal(t, len(prs.Items), 0, "No PipelineRun should be created on PR creation")
+
+	// wait a bit that GitHub processed or we will get double events
+	time.Sleep(5 * time.Second)
+
+	g.Cnx.Clients.Log.Infof("Creating a label 'bug' on PullRequest")
+	_, _, err = g.Provider.Client().Issues.AddLabelsToIssue(ctx,
+		g.Options.Organization,
+		g.Options.Repo, g.PRNumber,
+		[]string{"bug"})
+	assert.NilError(t, err)
+
+	sopt := twait.SuccessOpt{
+		Title:           g.CommitTitle,
+		OnEvent:         triggertype.PullRequestLabeled.String(),
+		TargetNS:        g.TargetNamespace,
+		NumberofPRMatch: len(g.YamlFiles),
+		SHA:             g.SHA,
+	}
+	twait.Succeeded(ctx, t, g.Cnx, g.Options, sopt)
+
+	opt := github.ListOptions{}
+	res := &github.ListCheckRunsResults{}
+	resp := &github.Response{}
+	counter := 0
+	for {
+		res, resp, err = g.Provider.Client().Checks.ListCheckRunsForRef(ctx, g.Options.Organization, g.Options.Repo, g.SHA, &github.ListCheckRunsOptions{
+			AppID:       g.Provider.ApplicationID,
+			ListOptions: opt,
+		})
+		assert.NilError(t, err)
+		assert.Equal(t, resp.StatusCode, 200)
+		if len(res.CheckRuns) > 0 {
+			break
+		}
+		g.Cnx.Clients.Log.Infof("Waiting for the check run to be created")
+		if counter > 10 {
+			t.Errorf("Check run not created after 10 tries")
+			break
+		}
+		time.Sleep(5 * time.Second)
+		counter++
+	}
+	assert.Equal(t, len(res.CheckRuns), 1)
+	expected := fmt.Sprintf("%s / %s", settings.PACApplicationNameDefaultValue, "pipelinerun-cel-label-event-")
+	checkName := res.CheckRuns[0].GetName()
+	assert.Assert(t, strings.HasPrefix(checkName, expected), "checkName %s != expected %s", checkName, expected)
 }
 
 func TestGithubPullRequestNoPipelineRunCancelledOnPRClosed(t *testing.T) {
@@ -482,7 +548,9 @@ func TestGithubPullRequestNoPipelineRunCancelledOnPRClosed(t *testing.T) {
 	var prReason string
 
 	for range 10 {
-		prs, err := g.Cnx.Clients.Tekton.TektonV1().PipelineRuns(g.TargetNamespace).List(ctx, metav1.ListOptions{})
+		prs, err := g.Cnx.Clients.Tekton.TektonV1().PipelineRuns(g.TargetNamespace).List(ctx, metav1.ListOptions{
+			LabelSelector: fmt.Sprintf("%s=%s", keys.SHA, g.SHA),
+		})
 		if err != nil {
 			t.Logf("failed to list PipelineRuns: %v", err)
 			time.Sleep(1 * time.Second)
@@ -614,7 +682,7 @@ func TestGithubPullandPushMatchTriggerOnlyPull(t *testing.T) {
 	assert.NilError(t, err)
 	ctx = info.StoreNS(ctx, globalNs)
 
-	reg := regexp.MustCompile(fmt.Sprintf("commit.*is part of pull request #%d.*skipping push event", g.PRNumber))
+	reg := regexp.MustCompile(fmt.Sprintf("Skipping push event for commit.*as it belongs to pull request #%d", g.PRNumber))
 	maxLines := int64(100)
 	err = twait.RegexpMatchingInControllerLog(ctx, g.Cnx, *reg, 20, "controller", &maxLines)
 	assert.NilError(t, err)
@@ -683,6 +751,54 @@ func TestGithubIgnoreTagPushCommitsFromSkipPushEventsSetting(t *testing.T) {
 	err = tgithub.DeleteTag(ctx, g.Provider, g.Options, tag)
 	assert.NilError(t, err)
 	g.Cnx.Clients.Log.Infof("Tag %s has been deleted", tag)
+}
+
+// TestGithubPullRequestCelPrefix tests the cel: prefix for arbitrary CEL expressions.
+// The cel: prefix allows evaluating full CEL expressions with access to body, headers, files, and pac namespaces.
+func TestGithubPullRequestCelPrefix(t *testing.T) {
+	ctx := context.Background()
+	g := &tgithub.PRTest{
+		Label:     "Github CEL Prefix",
+		YamlFiles: []string{"testdata/pipelinerun-cel-prefix-github.yaml"},
+	}
+	g.RunPullRequest(ctx, t)
+	defer g.TearDown(ctx, t)
+
+	// Wait for repository status to be updated
+	waitOpts := twait.Opts{
+		RepoName:        g.TargetNamespace,
+		Namespace:       g.TargetNamespace,
+		MinNumberStatus: 1,
+		PollTimeout:     twait.DefaultTimeout,
+		TargetSHA:       g.SHA,
+	}
+	_, err := twait.UntilRepositoryUpdated(ctx, g.Cnx.Clients, waitOpts)
+	assert.NilError(t, err)
+
+	prs, err := g.Cnx.Clients.Tekton.TektonV1().PipelineRuns(g.TargetNamespace).List(ctx, metav1.ListOptions{})
+	assert.NilError(t, err)
+	assert.Assert(t, len(prs.Items) >= 1, "Expected at least one PipelineRun")
+
+	// Verify cel: prefix expressions evaluated correctly using golden file
+	// Expected output:
+	// cel_ternary: new-pr (body.action == "opened" for a new PR)
+	// cel_pac_branch: matched (pac.target_branch matches the target branch)
+	// cel_has_function: has-pr (body.pull_request exists)
+	// cel_string_concat: Build on <target_branch>
+	// cel_files_check: has-files (files.all.size() > 0 since we have changed files)
+	// cel_github_header: pull_request (X-Github-Event header value)
+	// cel_error_handling: (empty string - cel: prefix returns empty on error)
+	err = twait.RegexpMatchingInPodLog(
+		ctx,
+		g.Cnx,
+		g.TargetNamespace,
+		fmt.Sprintf("tekton.dev/pipelineRun=%s,tekton.dev/pipelineTask=cel-prefix-test", prs.Items[0].Name),
+		"step-test-cel-prefix-values",
+		regexp.Regexp{},
+		t.Name(),
+		2,
+	)
+	assert.NilError(t, err)
 }
 
 // Local Variables:
