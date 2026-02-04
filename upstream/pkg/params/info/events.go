@@ -78,8 +78,8 @@ type Event struct {
 	Provider *Provider
 
 	// GitLab
-	SourceProjectID int64
-	TargetProjectID int64
+	SourceProjectID int
+	TargetProjectID int
 }
 
 type State struct {

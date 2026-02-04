@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"codeberg.org/mvdkleijn/forgejo-sdk/forgejo/v2"
-	"github.com/google/go-github/v81/github"
+	"code.gitea.io/sdk/gitea"
+	"github.com/google/go-github/v74/github"
 	"github.com/tektoncd/pipeline/pkg/names"
 	"gotest.tools/v3/assert"
 	"gotest.tools/v3/env"
@@ -63,6 +63,35 @@ func TestGiteaPullRequestTaskAnnotations(t *testing.T) {
 			"RemoteTaskURL":  options.RemoteTaskURL,
 			"RemoteTaskName": options.RemoteTaskName,
 		},
+	}
+	_, f := tgitea.TestPR(t, topts)
+	defer f()
+}
+
+func TestGiteaTaskResolutionFromMultipleHubs(t *testing.T) {
+	topts := &tgitea.TestOpts{
+		Regexp:      successRegexp,
+		TargetEvent: triggertype.PullRequest.String(),
+		YAMLFiles: map[string]string{
+			".tekton/pr1.yaml": "testdata/pipelinerun-multi-hub-tasks-1.yaml",
+			".tekton/pr2.yaml": "testdata/pipelinerun-multi-hub-tasks-2.yaml",
+		},
+		CheckForNumberStatus: 2,
+		CheckForStatus:       "success",
+	}
+	_, f := tgitea.TestPR(t, topts)
+	defer f()
+}
+
+func TestGiteaPipelineResolutionFromHub(t *testing.T) {
+	topts := &tgitea.TestOpts{
+		Regexp:      successRegexp,
+		TargetEvent: triggertype.PullRequest.String(),
+		YAMLFiles: map[string]string{
+			".tekton/pr.yaml": "testdata/pipelinerun-remote-pipeline-from-hub.yaml",
+		},
+		CheckForNumberStatus: 1,
+		CheckForStatus:       "success",
 	}
 	_, f := tgitea.TestPR(t, topts)
 	defer f()
@@ -197,7 +226,7 @@ func TestGiteaBadYamlReportingOnPR(t *testing.T) {
 	topts.Regexp = regexp.MustCompile(`.*bad-valid | .json: cannot unmarshal array into Go struct field PipelineRunSpec.spec.pipelineSpec of type v1.PipelineSpec.*`)
 	tgitea.WaitForPullRequestCommentMatch(t, topts)
 
-	comments, _, err := topts.GiteaCNX.Client().ListRepoIssueComments(topts.PullRequest.Base.Repository.Owner.UserName, topts.PullRequest.Base.Repository.Name, forgejo.ListIssueCommentOptions{})
+	comments, _, err := topts.GiteaCNX.Client().ListRepoIssueComments(topts.PullRequest.Base.Repository.Owner.UserName, topts.PullRequest.Base.Repository.Name, gitea.ListIssueCommentOptions{})
 	assert.NilError(t, err)
 	assert.Equal(t, len(comments), 1, "should have only one comment")
 
@@ -221,7 +250,7 @@ func TestGiteaBadYamlReportingOnPR(t *testing.T) {
 	entries := map[string]string{".tekton/pr-bad-validation.yaml": processed}
 	_ = scm.PushFilesToRefGit(t, scmOpts, entries)
 
-	comments, _, err = topts.GiteaCNX.Client().ListRepoIssueComments(topts.PullRequest.Base.Repository.Owner.UserName, topts.PullRequest.Base.Repository.Name, forgejo.ListIssueCommentOptions{})
+	comments, _, err = topts.GiteaCNX.Client().ListRepoIssueComments(topts.PullRequest.Base.Repository.Owner.UserName, topts.PullRequest.Base.Repository.Name, gitea.ListIssueCommentOptions{})
 	assert.NilError(t, err)
 	assert.Equal(t, len(comments), 1, "should have only one comment")
 }
@@ -235,7 +264,7 @@ func TestGiteaYamlReportingNotReportingNotTektonResources(t *testing.T) {
 
 	_, f := tgitea.TestPR(t, topts)
 	defer f()
-	comments, _, err := topts.GiteaCNX.Client().ListRepoIssueComments(topts.PullRequest.Base.Repository.Owner.UserName, topts.PullRequest.Base.Repository.Name, forgejo.ListIssueCommentOptions{})
+	comments, _, err := topts.GiteaCNX.Client().ListRepoIssueComments(topts.PullRequest.Base.Repository.Owner.UserName, topts.PullRequest.Base.Repository.Name, gitea.ListIssueCommentOptions{})
 	assert.NilError(t, err)
 	assert.Equal(t, len(comments), 0, "should have zero comments")
 }
@@ -489,7 +518,7 @@ func TestGiteaConfigCancelInProgress(t *testing.T) {
 	}
 	_ = scm.PushFilesToRefGit(t, scmOpts, entries)
 
-	pr, _, err := topts.GiteaCNX.Client().CreatePullRequest(topts.Opts.Organization, topts.Opts.Repo, forgejo.CreatePullRequestOption{
+	pr, _, err := topts.GiteaCNX.Client().CreatePullRequest(topts.Opts.Organization, topts.Opts.Repo, gitea.CreatePullRequestOption{
 		Title: "Test Pull Request - " + targetRef,
 		Head:  targetRef,
 		Base:  topts.DefaultBranch,
@@ -551,10 +580,9 @@ func TestGiteaConfigCancelInProgressAfterPRClosed(t *testing.T) {
 	err := twait.UntilPipelineRunCreated(context.Background(), topts.ParamsRun.Clients, waitOpts)
 	assert.NilError(t, err)
 
-	closed := forgejo.StateClosed
-	_, _, err = topts.GiteaCNX.Client().EditPullRequest(topts.Opts.Organization, topts.Opts.Repo, topts.PullRequest.Index, forgejo.EditPullRequestOption{
+	closed := gitea.StateClosed
+	_, _, err = topts.GiteaCNX.Client().EditPullRequest(topts.Opts.Organization, topts.Opts.Repo, topts.PullRequest.Index, gitea.EditPullRequestOption{
 		State: &closed,
-		Body:  topts.PullRequest.Body,
 	})
 	assert.NilError(t, err)
 
@@ -581,7 +609,7 @@ func TestGiteaPush(t *testing.T) {
 	_, f := tgitea.TestPR(t, topts)
 	defer f()
 	merged, resp, err := topts.GiteaCNX.Client().MergePullRequest(topts.Opts.Organization, topts.Opts.Repo, topts.PullRequest.Index,
-		forgejo.MergePullRequestOption{
+		gitea.MergePullRequestOption{
 			Title: "Merged with Panache",
 			Style: "merge",
 		},
@@ -899,7 +927,7 @@ func TestGiteaErrorSnippetCustomLines(t *testing.T) {
 	topts.Regexp = regexp.MustCompile(`Hey man i just wanna to say i am not such a failure, i am useful in my failure`)
 	tgitea.WaitForPullRequestCommentMatch(t, topts)
 
-	comments, _, err := topts.GiteaCNX.Client().ListRepoIssueComments(topts.PullRequest.Base.Repository.Owner.UserName, topts.PullRequest.Base.Repository.Name, forgejo.ListIssueCommentOptions{})
+	comments, _, err := topts.GiteaCNX.Client().ListRepoIssueComments(topts.PullRequest.Base.Repository.Owner.UserName, topts.PullRequest.Base.Repository.Name, gitea.ListIssueCommentOptions{})
 	assert.NilError(t, err)
 	assert.Assert(t, len(comments) > 0)
 	lastComment := comments[len(comments)-1]
@@ -1132,7 +1160,7 @@ func verifyProvenance(t *testing.T, topts *tgitea.TestOpts, expectedOutput, cNam
 	scmOpts.TargetRefName = targetRef
 	_ = scm.PushFilesToRefGit(t, scmOpts, entries)
 
-	pr, _, err := topts.GiteaCNX.Client().CreatePullRequest(topts.Opts.Organization, targetRef, forgejo.CreatePullRequestOption{
+	pr, _, err := topts.GiteaCNX.Client().CreatePullRequest(topts.Opts.Organization, targetRef, gitea.CreatePullRequestOption{
 		Title: "Test Pull Request - " + targetRef,
 		Head:  targetRef,
 		Base:  options.MainBranch,

@@ -48,7 +48,7 @@ func SetupBBCloudClient(t *testing.T) (*bitbucket.Client, *http.ServeMux, func()
 		restoreEnv()
 	}
 
-	client, _ := bitbucket.NewBasicAuth("", "")
+	client := bitbucket.NewBasicAuth("", "")
 	client.HttpClient = server.Client()
 	return client, mux, tearDown
 }
@@ -122,48 +122,15 @@ func MuxListDirFiles(t *testing.T, mux *http.ServeMux, event *info.Event, dirs m
 	}
 }
 
-// MuxCommit mocks the GetCommit API (single commit, not paginated).
-func MuxCommit(t *testing.T, mux *http.ServeMux, event *info.Event, commit types.Commit) {
+func MuxCommits(t *testing.T, mux *http.ServeMux, event *info.Event, commits []types.Commit) {
 	t.Helper()
 
-	shas := []string{}
-	if event.SHA != "" {
-		shas = append(shas, event.SHA)
-	}
-	if commit.Hash != "" && commit.Hash != event.SHA {
-		shas = append(shas, commit.Hash)
-	}
-	if len(shas) == 0 {
-		shas = append(shas, "HEAD")
-	}
-
-	for _, sha := range shas {
-		path := fmt.Sprintf("/repositories/%s/%s/commit/%s", event.Organization, event.Repository, sha)
-		mux.HandleFunc(path, func(rw http.ResponseWriter, _ *http.Request) {
-			// GetCommit returns a single commit object, not {values: [...]}
-			b, _ := json.Marshal(commit)
-			fmt.Fprint(rw, string(b))
-		})
-	}
-}
-
-func MuxBranch(t *testing.T, mux *http.ServeMux, event *info.Event, commit types.Commit) {
-	t.Helper()
-
-	if event.HeadBranch == "" {
-		return
-	}
-
-	path := fmt.Sprintf("/repositories/%s/%s/refs/branches/%s", event.Organization, event.Repository, event.HeadBranch)
+	path := fmt.Sprintf("/repositories/%s/%s/commits/%s", event.Organization, event.Repository, event.SHA)
 	mux.HandleFunc(path, func(rw http.ResponseWriter, _ *http.Request) {
-		// Return the commit hash that this branch points to
-		branch := map[string]interface{}{
-			"name": event.HeadBranch,
-			"target": map[string]interface{}{
-				"hash": commit.Hash,
-			},
+		dircontents := map[string][]types.Commit{
+			"values": commits,
 		}
-		b, _ := json.Marshal(branch)
+		b, _ := json.Marshal(dircontents)
 		fmt.Fprint(rw, string(b))
 	})
 }

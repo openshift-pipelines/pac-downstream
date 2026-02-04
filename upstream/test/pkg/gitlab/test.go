@@ -4,11 +4,11 @@ import (
 	"fmt"
 	"net/http"
 
-	gitlab "gitlab.com/gitlab-org/api/client-go"
+	ghlib "gitlab.com/gitlab-org/api/client-go"
 )
 
-func CreateMR(client *gitlab.Client, pid int, sourceBranch, targetBranch, title string) (int, error) {
-	mr, _, err := client.MergeRequests.CreateMergeRequest(pid, &gitlab.CreateMergeRequestOptions{
+func CreateMR(client *ghlib.Client, pid int, sourceBranch, targetBranch, title string) (int, error) {
+	mr, _, err := client.MergeRequests.CreateMergeRequest(pid, &ghlib.CreateMergeRequestOptions{
 		Title:        &title,
 		SourceBranch: &sourceBranch,
 		TargetBranch: &targetBranch,
@@ -16,13 +16,13 @@ func CreateMR(client *gitlab.Client, pid int, sourceBranch, targetBranch, title 
 	if err != nil {
 		return -1, err
 	}
-	return int(mr.IID), nil
+	return mr.IID, nil
 }
 
-func CreateTag(client *gitlab.Client, pid int, tagName string) error {
-	_, resp, err := client.Tags.CreateTag(pid, &gitlab.CreateTagOptions{
-		TagName: gitlab.Ptr(tagName),
-		Ref:     gitlab.Ptr("main"),
+func CreateTag(client *ghlib.Client, pid int, tagName string) error {
+	_, resp, err := client.Tags.CreateTag(pid, &ghlib.CreateTagOptions{
+		TagName: ghlib.Ptr(tagName),
+		Ref:     ghlib.Ptr("main"),
 	})
 	if err != nil {
 		return err
@@ -35,7 +35,7 @@ func CreateTag(client *gitlab.Client, pid int, tagName string) error {
 	return nil
 }
 
-func DeleteTag(client *gitlab.Client, pid int, tagName string) error {
+func DeleteTag(client *ghlib.Client, pid int, tagName string) error {
 	resp, err := client.Tags.DeleteTag(pid, tagName)
 	if err != nil {
 		return err

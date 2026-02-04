@@ -59,7 +59,7 @@ create_second_github_app_controller_on_ghe() {
     --namespace="pipelines-as-code" \
     ghe | tee /tmp/generated.yaml
 
-  ko apply --insecure-registry -f /tmp/generated.yaml
+  ko apply -f /tmp/generated.yaml
   kubectl delete secret -n pipelines-as-code ghe-secret || true
   kubectl -n pipelines-as-code create secret generic ghe-secret \
     --from-literal github-private-key="${test_github_second_private_key}" \
@@ -71,73 +71,22 @@ create_second_github_app_controller_on_ghe() {
 }
 
 get_tests() {
-  local target="$1"
-  local -a testfiles
-  local all_tests
+  target=$1
   mapfile -t testfiles < <(find test/ -maxdepth 1 -name '*.go')
-  all_tests=$(grep -hioP '^func[[:space:]]+Test[[:alnum:]_]+' "${testfiles[@]}" | sed -E 's/^func[[:space:]]+//')
-
-  local -a gitea_tests
-  local chunk_size remainder
-  if [[ "${target}" == *"gitea"* ]]; then
-    # Filter Gitea tests, excluding Concurrency tests
-    mapfile -t gitea_tests < <(echo "${all_tests}" | grep -iP '^TestGitea' 2>/dev/null | grep -ivP 'Concurrency' 2>/dev/null | sort 2>/dev/null)
-    # Remove any non-Gitea entries that might have been captured
-    local -a filtered_tests
-    for test in "${gitea_tests[@]}"; do
-      if [[ "${test}" =~ ^TestGitea ]] && [[ ! "${test}" =~ Concurrency ]]; then
-        filtered_tests+=("${test}")
-      fi
-    done
-    gitea_tests=("${filtered_tests[@]}")
-    chunk_size=$((${#gitea_tests[@]} / 3))
-    remainder=$((${#gitea_tests[@]} % 3))
-  fi
-
-  case "${target}" in
-  concurrency)
-    printf '%s\n' "${all_tests}" | grep -iP 'Concurrency'
-    ;;
-  github)
-    printf '%s\n' "${all_tests}" | grep -iP 'Github' | grep -ivP 'Concurrency|GithubSecond'
-    ;;
-  github_second_controller)
-    printf '%s\n' "${all_tests}" | grep -iP 'GithubSecond' | grep -ivP 'Concurrency'
-    ;;
-  gitlab_bitbucket)
-    printf '%s\n' "${all_tests}" | grep -iP 'Gitlab|Bitbucket' | grep -ivP 'Concurrency'
-    ;;
-  gitea_1)
-    if [[ ${#gitea_tests[@]} -gt 0 ]]; then
-      printf '%s\n' "${gitea_tests[@]:0:${chunk_size}}"
-    fi
-    ;;
-  gitea_2)
-    if [[ ${#gitea_tests[@]} -gt 0 ]]; then
-      printf '%s\n' "${gitea_tests[@]:${chunk_size}:${chunk_size}}"
-    fi
-    ;;
-  gitea_3)
-    if [[ ${#gitea_tests[@]} -gt 0 ]]; then
-      local start_idx=$((chunk_size * 2))
-      printf '%s\n' "${gitea_tests[@]:${start_idx}:$((chunk_size + remainder))}"
-    fi
-    ;;
-  gitea_others)
-    # Deprecated: Use gitea_1, gitea_2, gitea_3 instead
-    printf '%s\n' "${all_tests}" | grep -ivP 'Github|Gitlab|Bitbucket|Concurrency'
-    ;;
-  *)
+  ghglabre="Github|Gitlab|Bitbucket"
+  if [[ ${target} == "providers" ]]; then
+    grep -hioP "^func Test.*(${ghglabre})(\w+)\(" "${testfiles[@]}" | sed -e 's/func[ ]*//' -e 's/($//'
+    elif [[ ${target} == "gitea_others" ]]; then
+    grep -hioP '^func Test(\w+)\(' "${testfiles[@]}" | grep -iPv "(${ghglabre})" | sed -e 's/func[ ]*//' -e 's/($//'
+  else
     echo "Invalid target: ${target}"
-    echo "supported targets: github, github_second_controller, gitlab_bitbucket, gitea_1, gitea_2, gitea_3, concurrency"
-    ;;
-  esac
+    echo "supported targets: githubgitlab, others"
+  fi
 }
 
 run_e2e_tests() {
   set +x
   target="${TEST_PROVIDER}"
-  export PAC_E2E_KEEP_NS=true
 
   mapfile -t tests < <(get_tests "${target}")
   echo "About to run ${#tests[@]} tests: ${tests[*]}"
@@ -165,13 +114,7 @@ collect_logs() {
   kubectl logs -n pipelines-as-code -l app.kubernetes.io/part-of=pipelines-as-code \
     --all-containers=true --tail=1000 >/tmp/logs/pac-pods.log
   kind export logs /tmp/logs
-
-  # Collect all gosmee data in organized directory
-  mkdir -p /tmp/logs/gosmee
-  [[ -d /tmp/gosmee-replay ]] && cp -a /tmp/gosmee-replay /tmp/logs/gosmee/replay
-  [[ -d /tmp/gosmee-replay-ghe ]] && cp -a /tmp/gosmee-replay-ghe /tmp/logs/gosmee/replay-ghe
-  [[ -f /tmp/gosmee-main.log ]] && cp /tmp/gosmee-main.log /tmp/logs/gosmee/main.log
-  [[ -f /tmp/gosmee-ghe.log ]] && cp /tmp/gosmee-ghe.log /tmp/logs/gosmee/ghe.log
+  [[ -d /tmp/gosmee-replay ]] && cp -a /tmp/gosmee-replay /tmp/logs/
 
   kubectl get pipelineruns -A -o yaml >/tmp/logs/pac-pipelineruns.yaml
   kubectl get repositories.pipelinesascode.tekton.dev -A -o yaml >/tmp/logs/pac-repositories.yaml

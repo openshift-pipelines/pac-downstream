@@ -11,8 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/go-github/v81/github"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
+	"github.com/google/go-github/v74/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/random"
 	tgithub "github.com/openshift-pipelines/pipelines-as-code/test/pkg/github"
@@ -106,18 +105,10 @@ func TestGithubSecondPullRequestConcurrencyMultiplePR(t *testing.T) {
 		}
 	}
 
-	shas := make([]string, 0, len(allPullRequests))
-	for _, pr := range allPullRequests {
-		shas = append(shas, pr.SHA)
-	}
-	labelSelector := fmt.Sprintf("%s in (%s)", keys.SHA, strings.Join(shas, ","))
-
 	finished := false
 	for i := 0; i < loopMax; i++ {
 		unsuccessful := 0
-		prs, err := runcnx.Clients.Tekton.TektonV1().PipelineRuns(targetNS).List(ctx, metav1.ListOptions{
-			LabelSelector: labelSelector,
-		})
+		prs, err := runcnx.Clients.Tekton.TektonV1().PipelineRuns(targetNS).List(ctx, metav1.ListOptions{})
 		assert.NilError(t, err)
 		for _, pr := range prs.Items {
 			if pr.Status.GetConditions() == nil {
@@ -147,9 +138,7 @@ func TestGithubSecondPullRequestConcurrencyMultiplePR(t *testing.T) {
 	success := false
 	allPipelineRunsNamesAndStatus := []string{}
 	for i := range maxWaitLoopRun {
-		prs, err := runcnx.Clients.Tekton.TektonV1().PipelineRuns(targetNS).List(ctx, metav1.ListOptions{
-			LabelSelector: labelSelector,
-		})
+		prs, err := runcnx.Clients.Tekton.TektonV1().PipelineRuns(targetNS).List(ctx, metav1.ListOptions{})
 		assert.NilError(t, err)
 		for _, pr := range prs.Items {
 			allPipelineRunsNamesAndStatus = append(allPipelineRunsNamesAndStatus, fmt.Sprintf("%s %s", pr.Name, pr.Status.GetConditions()))

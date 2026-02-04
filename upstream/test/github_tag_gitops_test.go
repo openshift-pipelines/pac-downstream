@@ -4,12 +4,11 @@ package test
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"path/filepath"
 	"testing"
 
-	"github.com/google/go-github/v81/github"
+	"github.com/google/go-github/v74/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	tgithub "github.com/openshift-pipelines/pipelines-as-code/test/pkg/github"
 	"github.com/openshift-pipelines/pipelines-as-code/test/pkg/payload"
@@ -119,9 +118,7 @@ func TestGithubGitOpsCommentOnTag(t *testing.T) {
 	assert.NilError(t, err)
 	assert.Equal(t, repo.Status[len(repo.Status)-1].Conditions[0].Status, corev1.ConditionTrue)
 
-	pruns, err := runcnx.Clients.Tekton.TektonV1().PipelineRuns(targetNS).List(ctx, metav1.ListOptions{
-		LabelSelector: fmt.Sprintf("%s=%s", keys.SHA, sha),
-	})
+	pruns, err := runcnx.Clients.Tekton.TektonV1().PipelineRuns(targetNS).List(ctx, metav1.ListOptions{})
 	assert.NilError(t, err)
 	assert.Equal(t, len(pruns.Items), numberOfPRs)
 
