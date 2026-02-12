@@ -23,15 +23,16 @@ COPY --from=builder /tmp/pipelines-as-code-controller ${KO_APP}/pipelines-as-cod
 COPY head ${KO_DATA_PATH}/HEAD
 
 LABEL \
-      com.redhat.component="openshift-pipelines-pipelines-as-code-controller-container" \
-      name="openshift-pipelines/pipelines-pipelines-as-code-controller-rhel9" \
-      version=$VERSION \
-      summary="Red Hat OpenShift Pipelines Pipelines as Code Controller" \
+      com.redhat.component="openshift-pipelines-pipelines-as-code-controller-rhel9-container" \
+      cpe="cpe:/a:redhat:openshift_pipelines:1.22::el9" \
+      description="Red Hat OpenShift Pipelines pac-downstream controller" \
+      io.k8s.description="Red Hat OpenShift Pipelines pac-downstream controller" \
+      io.k8s.display-name="Red Hat OpenShift Pipelines pac-downstream controller" \
+      io.openshift.tags="tekton,openshift,pac-downstream,controller" \
       maintainer="pipelines-extcomm@redhat.com" \
-      description="Red Hat OpenShift Pipelines Pipelines as Code Controller" \
-      io.k8s.display-name="Red Hat OpenShift Pipelines Pipelines as Code Controller" \
-      io.k8s.description="Red Hat OpenShift Pipelines Pipelines as Code Controller" \
-      io.openshift.tags="pipelines,tekton,openshift"
+      name="openshift-pipelines/pipelines-pipelines-as-code-controller-rhel9" \
+      summary="Red Hat OpenShift Pipelines pac-downstream controller" \
+      version="v1.22.0"
 
 RUN groupadd -r -g 65532 nonroot && \
     useradd --no-log-init -r -u 65532 -g nonroot nonroot
