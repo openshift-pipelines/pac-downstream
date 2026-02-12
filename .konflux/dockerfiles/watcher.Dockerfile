@@ -23,15 +23,16 @@ COPY --from=builder /tmp/pipelines-as-code-watcher ${KO_APP}/pipelines-as-code-w
 COPY head ${KO_DATA_PATH}/HEAD
 
 LABEL \
-      com.redhat.component="openshift-pipelines-pipelines-as-code-watcher-container" \
-      name="openshift-pipelines/pipelines-as-code-watcher-rhel9" \
-      version=$VERSION \
-      summary="Red Hat OpenShift Pipelines Pipelines as Code Watcher" \
+      com.redhat.component="openshift-pipelines-pipelines-as-code-watcher-rhel9-container" \
+      cpe="cpe:/a:redhat:openshift_pipelines:1.22::el9" \
+      description="Red Hat OpenShift Pipelines pac-downstream watcher" \
+      io.k8s.description="Red Hat OpenShift Pipelines pac-downstream watcher" \
+      io.k8s.display-name="Red Hat OpenShift Pipelines pac-downstream watcher" \
+      io.openshift.tags="tekton,openshift,pac-downstream,watcher" \
       maintainer="pipelines-extcomm@redhat.com" \
-      description="Red Hat OpenShift Pipelines Pipelines as Code Watcher" \
-      io.k8s.display-name="Red Hat OpenShift Pipelines Pipelines as Code Watcher" \
-      io.k8s.description="Red Hat OpenShift Pipelines Pipelines as Code Watcher" \
-      io.openshift.tags="pipelines,tekton,openshift"
+      name="openshift-pipelines/pipelines-pipelines-as-code-watcher-rhel9" \
+      summary="Red Hat OpenShift Pipelines pac-downstream watcher" \
+      version="v1.22.0"
 
 RUN groupadd -r -g 65532 nonroot && \
     useradd --no-log-init -r -u 65532 -g nonroot nonroot

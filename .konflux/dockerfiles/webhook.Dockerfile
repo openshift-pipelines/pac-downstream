@@ -23,15 +23,16 @@ COPY --from=builder /tmp/pipelines-as-code-webhook ${KO_APP}/pipelines-as-code-w
 COPY head ${KO_DATA_PATH}/HEAD
 
 LABEL \
-      com.redhat.component="openshift-pipelines-pipelines-as-code-webhook-container" \
-      name="openshift-pipelines/pipelines-pipelines-as-code-webhook-rhel9" \
-      version=$VERSION \
-      summary="Red Hat OpenShift Pipelines Pipelines as Code Webhook" \
+      com.redhat.component="openshift-pipelines-pipelines-as-code-webhook-rhel9-container" \
+      cpe="cpe:/a:redhat:openshift_pipelines:1.22::el9" \
+      description="Red Hat OpenShift Pipelines pac-downstream webhook" \
+      io.k8s.description="Red Hat OpenShift Pipelines pac-downstream webhook" \
+      io.k8s.display-name="Red Hat OpenShift Pipelines pac-downstream webhook" \
+      io.openshift.tags="tekton,openshift,pac-downstream,webhook" \
       maintainer="pipelines-extcomm@redhat.com" \
-      description="Red Hat OpenShift Pipelines Pipelines as Code Webhook" \
-      io.k8s.display-name="Red Hat OpenShift Pipelines Pipelines as Code Webhook" \
-      io.k8s.description="Red Hat OpenShift Pipelines Pipelines as Code Webhook" \
-      io.openshift.tags="pipelines,tekton,openshift"
+      name="openshift-pipelines/pipelines-pipelines-as-code-webhook-rhel9" \
+      summary="Red Hat OpenShift Pipelines pac-downstream webhook" \
+      version="v1.22.0"
 
 RUN groupadd -r -g 65532 nonroot && \
     useradd --no-log-init -r -u 65532 -g nonroot nonroot

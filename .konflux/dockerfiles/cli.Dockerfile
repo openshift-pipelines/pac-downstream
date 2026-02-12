@@ -20,15 +20,16 @@ ARG VERSION=pipelines-as-code-cli-next
 COPY --from=builder /tmp/tkn-pac /usr/bin
 
 LABEL \
-      com.redhat.component="openshift-pipelines-cli-tkn-pac-container" \
-      name="openshift-pipelines/pipelines-cli-tkn-pac-rhel9" \
-      version=$VERSION \
-      summary="Red Hat OpenShift pipelines tkn pac CLI" \
+      com.redhat.component="openshift-pipelines-pipelines-as-code-cli-rhel9-container" \
+      cpe="cpe:/a:redhat:openshift_pipelines:1.22::el9" \
+      description="Red Hat OpenShift Pipelines pac-downstream cli" \
+      io.k8s.description="Red Hat OpenShift Pipelines pac-downstream cli" \
+      io.k8s.display-name="Red Hat OpenShift Pipelines pac-downstream cli" \
+      io.openshift.tags="tekton,openshift,pac-downstream,cli" \
       maintainer="pipelines-extcomm@redhat.com" \
-      description="CLI client 'tkn-pac' for managing openshift pipelines" \
-      io.k8s.display-name="Red Hat OpenShift Pipelines tkn pac CLI" \
-      io.k8s.description="Red Hat OpenShift Pipelines tkn pac CLI" \
-      io.openshift.tags="pipelines,tekton,openshift"
+      name="openshift-pipelines/pipelines-pipelines-as-code-cli-rhel9" \
+      summary="Red Hat OpenShift Pipelines pac-downstream cli" \
+      version="v1.22.0"
 
 RUN groupadd -r -g 65532 nonroot && \
     useradd --no-log-init -r -u 65532 -g nonroot nonroot
