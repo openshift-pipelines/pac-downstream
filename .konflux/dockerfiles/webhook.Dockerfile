@@ -40,3 +40,4 @@ RUN groupadd -r -g 65532 nonroot && \
 USER 65532
 
 ENTRYPOINT ["/ko-app/pipelines-as-code-webhook"]
+# trigger rebuild 2026-02-14

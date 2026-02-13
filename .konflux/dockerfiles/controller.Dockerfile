@@ -39,3 +39,4 @@ RUN groupadd -r -g 65532 nonroot && useradd --no-log-init -r -u 65532 -g nonroot
 USER 65532
 
 ENTRYPOINT ["/ko-app/pipelines-as-code-controller"]
+# trigger rebuild 2026-02-14
