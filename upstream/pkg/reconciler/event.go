@@ -93,12 +93,10 @@ func buildEventFromPipelineRun(pr *tektonv1.PipelineRun) *info.Event {
 
 	// GitLab
 	if projectID, ok := prAnno[keys.SourceProjectID]; ok {
-		id, _ := strconv.ParseInt(projectID, 10, 64)
-		event.SourceProjectID = id
+		event.SourceProjectID, _ = strconv.Atoi(projectID)
 	}
 	if projectID, ok := prAnno[keys.TargetProjectID]; ok {
-		id, _ := strconv.ParseInt(projectID, 10, 64)
-		event.TargetProjectID = id
+		event.TargetProjectID, _ = strconv.Atoi(projectID)
 	}
 	return event
 }

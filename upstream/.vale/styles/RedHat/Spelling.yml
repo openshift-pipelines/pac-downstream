@@ -1,22 +1,20 @@
+#file: noinspection IncorrectFormatting
 ---
 extends: spelling
 level: warning
-link: https://redhat-documentation.github.io/vale-at-red-hat/reference-guide.html#spelling
+link: https://redhat-documentation.github.io/vale-at-red-hat/docs/main/reference-guide/spelling/
 message: "Verify the word '%s'. It is not in the American English spelling dictionary used by Vale."
 # A "filter" is a case-sensitive regular expression specifying words to ignore during spell checking.
 # Spelling rule applies to individual words
 # There is no need to add plural forms (s?) to the regex
 filters:
   - "[aA]ccessor"
-  - "[aA]lexa"
   - "[aA]llowlist"
   - "[aA]utogenerate"
   - "[aA]utoinstall"
   - "[aA]utomount"
   - "[aA]utonumber"
-  - "[aA]utoscal(er|ing)"
   - "[aA]utostart"
-  - "[aA]vro"
   - "[bB]ackfilling"
   - "[bB]ackport"
   - "[bB]ackported"
@@ -24,12 +22,7 @@ filters:
   - "[bB]indable"
   - "[bB]oolean"
   - "[bB]ootable"
-  - "[bB]orrowable"
   - "[bB]reakpoint(s)?"
-  - "[bB]ugfix(es)?"
-  - "[bB]uildah"
-  - "[bB]undler"
-  - "[cC]atalogd"
   - "[cC]hrony"
   - "[cC]lassloading"
   - "[cC]lasspath"
@@ -42,7 +35,6 @@ filters:
   - "[cC]yberattack"
   - "[cC]ybercrime"
   - "[cC]ybersecurity"
-  - "[dD]aemonless"
   - "[dD]atasource"
   - "[dD]eclaratively"
   - "[dD]ecompiler"
@@ -62,19 +54,15 @@ filters:
   - "[fF]ailback"
   - "[fF]ailover"
   - "[fF]indability"
-  - "[fF]irehose"
   - "[gG]bps"
   - "[gG]ibibyte"
   - "[gG]lock"
-  - "[gG]olang"
   - "[gG]radle"
   - "[gG]rafana"
   - "[hH]ardcoding"
   - "[hH]eatmap"
   - "[hH]ostname"
-  - "[hH]ostpath"
   - "[hH]yperconverged"
-  - "[hH]yperscale"
   - "[iI]nferencing"
   - "[Ii]nferencing"
   - "[iI]node"
@@ -141,7 +129,6 @@ filters:
   - "[oO]mnichannel"
   - "[oO]nboarding"
   - "[oO]perator"
-  - "[oO]vercommit"
   - "[oO]verridable"
   - "[oO]verstrike"
   - "[pP]luggable"
@@ -205,23 +192,22 @@ filters:
   - "[sS]ervlet"
   - "[sS]etter"
   - "[sS]harding"
-  - "[sS]ubcommand"
-  - "[sS]ubmenu"
-  - "[sS]ubnet?"
-  - "[sS]ubnetwork"
-  - "[sS]ubpackage"
-  - "[sS]ubpath"
-  - "[sS]ubstep"
-  - "[sS]ubtest"
-  - "[sS]ubuser"
-  - "[sS]ubvolume"
+  - "[sS]ubcommand(s)?"
+  - "[sS]ubmenu(s)?"
+  - "[sS]ubnet(s)?"
+  - "[sS]ubnetwork(s)?"
+  - "[sS]ubpackage(s)?"
+  - "[sS]ubpath(s)?"
+  - "[sS]ubstep(s)?"
+  - "[sS]ubtest(s)?"
+  - "[sS]ubuser(s)?"
+  - "[sS]ubvolume(s)?"
   - "[sS]ysctl"
   - "[sS]yslog"
   - "[sS]ystemd"
   - "[tT]elco"
   - "[tT]emplated"
   - "[tT]heia"
-  - "[tT]ika"
   - "[tT]olerations"
   - "[tT]raceback"
   - "[tT]ruststore"
@@ -230,7 +216,6 @@ filters:
   - "[uU]ndercloud"
   - "[uU]nderrun"
   - "[uU]nformatted"
-  - "[uU]nidled"
   - "[uU]ninstallation"
   - "[uU]nmount"
   - "[uU]nmounting"
@@ -240,10 +225,16 @@ filters:
   - "[uU]psell"
   - "[uU]pselling"
   - "[vV]alidator"
-  - "[wW]atercooler"
-  - "[wW]eb[sS]ocket"
   - "I/O"
   - "Let\\'s Encrypt"
+  - '\.NET'
+  - '\b[cC]he\b'
+  - '\b[cC]onfig\b'
+  - '\b[dD]ev\b'
+  - '\b[gG]it\b'
+  - '\b[iI]tem\b'
+  - '\b[Ss]u\b'
+  - 'Node\.js'
   - '[Ff]inetune'
   - '[Ff]inetuning'
   - '[Mm]ultimodal'
@@ -255,16 +246,7 @@ filters:
   - '[Ss]parsification'
   - '[Ss]parsified'
   - '[Ss]parsify'
-  - '[Tt]okenizer'
-  - '\.NET'
-  - '\b[cC]he\b'
-  - '\b[cC]onfigs?\b'
-  - '\b[cC]onfig\b'
-  - '\b[dD]ev\b'
-  - '\b[gG]it\b'
-  - '\b[iI]tem\b'
-  - '\b[Ss]u\b'
-  - 'Node\.js'
+  - '[Tt]okenizers?'
   - ACLs
   - adoc
   - AGPLv
@@ -277,7 +259,6 @@ filters:
   - Arcee
   - Asciidoctor
   - AssertJ
-  - auditable
   - autoconfigure
   - autolink
   - aws
@@ -309,7 +290,8 @@ filters:
   - ConfigMap
   - Containerfile
   - Cookiecutter
-  - CPU
+  - CPUs
+  - CPUs?
   - CR
   - CRD
   - CRDs
@@ -324,14 +306,14 @@ filters:
   - dataclass
   - dataclasses
   - Datadog
-  - dataloader
-  - Dependabot
+  - dataloaders?
   - Dev
   - DevWorkspace
   - Dex
   - DNS
   - Docker
   - Dockerfile
+  - Dockerfiles
   - Dotnet
   - Dyninst
   - Endevor
@@ -340,7 +322,6 @@ filters:
   - eServer
   - Esprima
   - etcd
-  - exe
   - Exif
   - extranet
   - Fabrice
@@ -363,7 +344,7 @@ filters:
   - GitLab
   - Gluster
   - GNUPro
-  - GPU
+  - GPUs?
   - GraalVM
   - GraphQL
   - Graylog
@@ -382,8 +363,10 @@ filters:
   - HTTP
   - https
   - HTTPS
+  - https?
   - Hunyuan
   - IDE
+  - IDEs
   - IKEv
   - impactful
   - inferencing
@@ -414,7 +397,6 @@ filters:
   - Kerberos
   - keystore
   - Kibana
-  - klusterlet
   - Knative
   - Knowledgebase
   - Kogito
@@ -423,7 +405,6 @@ filters:
   - kubelet
   - Kubernetes
   - Kubespray
-  - Kueue
   - Kylin
   - Laravel
   - layernorm
@@ -432,17 +413,15 @@ filters:
   - librados
   - librbd
   - Libreswan
-  - Lightspeed
   - linearization
   - linearize
   - Liquibase
-  - LLM
+  - LLMs?
   - Logstash
   - Lombok
   - Makefile
   - Mattermost
   - Maven
-  - MCP
   - MicroProfile
   - Microsoft
   - Minicpm
@@ -468,7 +447,6 @@ filters:
   - NVMe
   - OAuth
   - objectClass
-  - OCI
   - ocp
   - OmniSharp
   - OpenID
@@ -490,9 +468,7 @@ filters:
   - PHP
   - PIDs
   - pixtral
-  - podman
   - Podman
-  - Postgres
   - PostgreSQL
   - PowerShell
   - precache
@@ -510,11 +486,9 @@ filters:
   - Quiltflower
   - Qute
   - Qwen
-  - RamaLama
   - Realtime
   - rebase
   - Redis
-  - redistributable
   - Redistributions
   - relaxngDatatype
   - Reranker
@@ -527,8 +501,7 @@ filters:
   - rootful
   - rootless
   - RPMs
-  - Rubygems
-  - safetensor
+  - safetensors?
   - Sakila
   - sbt
   - SCM
@@ -559,7 +532,7 @@ filters:
   - Texinfo
   - tokenization
   - Toolset
-  - TPU
+  - TPUs?
   - Traefik
   - Uber
   - UIDs
@@ -594,4 +567,3 @@ filters:
   - Yeoman
   - ZCentral
   - Zowe
-  - Zulip

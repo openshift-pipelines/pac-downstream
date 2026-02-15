@@ -121,11 +121,7 @@ func (bb *bitbucketCloudConfig) askBBWebhookConfig(repositoryURL, controllerURL,
 
 func (bb *bitbucketCloudConfig) create() error {
 	if bb.Client == nil {
-		var err error
-		bb.Client, err = bitbucket.NewBasicAuth(bb.repoOwner, bb.personalAccessToken)
-		if err != nil {
-			return err
-		}
+		bb.Client = bitbucket.NewBasicAuth(bb.repoOwner, bb.personalAccessToken)
 	}
 	if bb.APIURL != "" {
 		parsedURL, err := url.Parse(bb.APIURL)

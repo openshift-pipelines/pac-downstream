@@ -31,7 +31,6 @@ const (
 	CompletedStatus   = "completed"
 	inProgressStatus  = "in_progress"
 	queuedStatus      = "queued"
-	successConclusion = "success"
 	failureConclusion = "failure"
 	pendingConclusion = "pending"
 	neutralConclusion = "neutral"
