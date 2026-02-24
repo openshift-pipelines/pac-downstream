@@ -28,7 +28,8 @@ LABEL \
       description="CLI client 'tkn-pac' for managing openshift pipelines" \
       io.k8s.display-name="Red Hat OpenShift Pipelines tkn pac CLI" \
       io.k8s.description="Red Hat OpenShift Pipelines tkn pac CLI" \
-      io.openshift.tags="pipelines,tekton,openshift"
+      io.openshift.tags="pipelines,tekton,openshift" \
+      cpe="cpe:/a:redhat:openshift_pipelines:1.21::el9"
 
 RUN groupadd -r -g 65532 nonroot && \
     useradd --no-log-init -r -u 65532 -g nonroot nonroot
