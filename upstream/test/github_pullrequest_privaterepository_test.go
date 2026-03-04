@@ -28,18 +28,18 @@ func TestGithubPullRequestGitClone(t *testing.T) {
 	ctx, err := cctx.GetControllerCtxInfo(ctx, g.Cnx)
 	assert.NilError(t, err)
 
-	maxLines := int64(50)
+	maxLines := int64(1000)
 	assert.NilError(t, wait.RegexpMatchingInControllerLog(ctx, g.Cnx, *regexp.MustCompile(".*fetched git-clone task"),
 		10, "controller", &maxLines), "Error while checking the logs of the pipelines-as-code controller pod")
 	defer g.TearDown(ctx, t)
 }
 
-func TestGithubSecondPullRequestGitClone(t *testing.T) {
+func TestGithubGHEPullRequestGitClone(t *testing.T) {
 	ctx := context.Background()
 	g := &tgithub.PRTest{
-		Label:            "Github GHE - Private Repo",
-		YamlFiles:        []string{"testdata/pipelinerun_git_clone_private.yaml"},
-		SecondController: true,
+		Label:     "Github GHE - Private Repo",
+		YamlFiles: []string{"testdata/pipelinerun_git_clone_private.yaml"},
+		GHE:       true,
 	}
 	g.RunPullRequest(ctx, t)
 	defer g.TearDown(ctx, t)
