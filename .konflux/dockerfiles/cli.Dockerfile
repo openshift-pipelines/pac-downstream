@@ -22,13 +22,13 @@ COPY --from=builder /tmp/tkn-pac /usr/bin
 LABEL \
       com.redhat.component="openshift-pipelines-pipelines-as-code-cli-rhel9-container" \
       cpe="cpe:/a:redhat:openshift_pipelines:1.21::el9" \
-      description="Red Hat OpenShift Pipelines pac-downstream cli" \
-      io.k8s.description="Red Hat OpenShift Pipelines pac-downstream cli" \
-      io.k8s.display-name="Red Hat OpenShift Pipelines pac-downstream cli" \
-      io.openshift.tags="tekton,openshift,pac-downstream,cli" \
+      description="Red Hat OpenShift Pipelines pipelines-as-code cli" \
+      io.k8s.description="Red Hat OpenShift Pipelines pipelines-as-code cli" \
+      io.k8s.display-name="Red Hat OpenShift Pipelines pipelines-as-code cli" \
+      io.openshift.tags="tekton,openshift,pipelines-as-code,cli" \
       maintainer="pipelines-extcomm@redhat.com" \
       name="openshift-pipelines/pipelines-pipelines-as-code-cli-rhel9" \
-      summary="Red Hat OpenShift Pipelines pac-downstream cli" \
+      summary="Red Hat OpenShift Pipelines pipelines-as-code cli" \
       version="v1.21.1"
 
 RUN groupadd -r -g 65532 nonroot && \

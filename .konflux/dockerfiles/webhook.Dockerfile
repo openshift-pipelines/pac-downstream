@@ -25,13 +25,13 @@ COPY head ${KO_DATA_PATH}/HEAD
 LABEL \
       com.redhat.component="openshift-pipelines-pipelines-as-code-webhook-rhel9-container" \
       cpe="cpe:/a:redhat:openshift_pipelines:1.21::el9" \
-      description="Red Hat OpenShift Pipelines pac-downstream webhook" \
-      io.k8s.description="Red Hat OpenShift Pipelines pac-downstream webhook" \
-      io.k8s.display-name="Red Hat OpenShift Pipelines pac-downstream webhook" \
-      io.openshift.tags="tekton,openshift,pac-downstream,webhook" \
+      description="Red Hat OpenShift Pipelines pipelines-as-code webhook" \
+      io.k8s.description="Red Hat OpenShift Pipelines pipelines-as-code webhook" \
+      io.k8s.display-name="Red Hat OpenShift Pipelines pipelines-as-code webhook" \
+      io.openshift.tags="tekton,openshift,pipelines-as-code,webhook" \
       maintainer="pipelines-extcomm@redhat.com" \
       name="openshift-pipelines/pipelines-pipelines-as-code-webhook-rhel9" \
-      summary="Red Hat OpenShift Pipelines pac-downstream webhook" \
+      summary="Red Hat OpenShift Pipelines pipelines-as-code webhook" \
       version="v1.21.1"
 
 RUN groupadd -r -g 65532 nonroot && \

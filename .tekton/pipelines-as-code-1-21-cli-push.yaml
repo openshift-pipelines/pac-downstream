@@ -13,13 +13,13 @@ metadata:
       == "release-v1.21.x" &&
       ("upstream/***".pathChanged() || ".konflux/patches/***".pathChanged() || ".konflux/rpms/***".pathChanged() ||
       ".konflux/dockerfiles/cli.Dockerfile".pathChanged() ||
-      ".tekton/pac-downstream-1-21-cli-push.yaml".pathChanged())
+      ".tekton/pipelines-as-code-1-21-cli-push.yaml".pathChanged())
   creationTimestamp: null
   labels:
     appstudio.openshift.io/application: openshift-pipelines-core-1-21
-    appstudio.openshift.io/component: pac-downstream-1-21-cli
+    appstudio.openshift.io/component: pipelines-as-code-1-21-cli
     pipelines.appstudio.openshift.io/type: build
-  name: pac-downstream-1-21-cli-on-push
+  name: pipelines-as-code-1-21-cli-on-push
   namespace: tekton-ecosystem-tenant
 spec:
   params:
@@ -42,7 +42,7 @@ spec:
   pipelineRef:
     name: docker-build-ta
   taskRunTemplate:
-    serviceAccountName: build-pipeline-pac-downstream-1-21-cli
+    serviceAccountName: build-pipeline-pipelines-as-code-1-21-cli
   workspaces:
   - name: git-auth
     secret:
