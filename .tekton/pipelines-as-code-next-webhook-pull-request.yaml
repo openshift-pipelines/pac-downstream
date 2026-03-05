@@ -13,13 +13,13 @@ metadata:
     pipelinesascode.tekton.dev/on-cel-expression: event == "pull_request" && target_branch
       == "next" &&
       ("upstream/***".pathChanged() || ".konflux/patches/***".pathChanged() || ".konflux/rpms/***".pathChanged() ||
-      ".konflux/dockerfiles/controller.Dockerfile".pathChanged() ||
-      ".tekton/pac-downstream-next-controller-pull-request.yaml".pathChanged())
+      ".konflux/dockerfiles/webhook.Dockerfile".pathChanged() ||
+      ".tekton/pipelines-as-code-next-webhook-pull-request.yaml".pathChanged())
   labels:
     appstudio.openshift.io/application: openshift-pipelines-core-next
-    appstudio.openshift.io/component: pac-downstream-next-controller
+    appstudio.openshift.io/component: pipelines-as-code-next-webhook
     pipelines.appstudio.openshift.io/type: build
-  name: pac-downstream-next-controller-on-pull-request
+  name: pipelines-as-code-next-webhook-on-pull-request
   namespace: tekton-ecosystem-tenant
 spec:
   params:
@@ -30,11 +30,11 @@ spec:
   - name: revision
     value: '{{revision}}'
   - name: output-image
-    value: quay.io/redhat-user-workloads/tekton-ecosystem-tenant/pipelines-pipelines-as-code-controller-rhel9:on-pr-{{revision}}
+    value: quay.io/redhat-user-workloads/tekton-ecosystem-tenant/pipelines-pipelines-as-code-webhook-rhel9:on-pr-{{revision}}
   - name: image-expires-after
     value: 5d
   - name: dockerfile
-    value: .konflux/dockerfiles/controller.Dockerfile
+    value: .konflux/dockerfiles/webhook.Dockerfile
   - name: additional-tags
     value:
       - "on-pr-next"
@@ -47,7 +47,7 @@ spec:
   pipelineRef:
     name: docker-build-ta
   taskRunTemplate:
-    serviceAccountName: build-pipeline-pac-downstream-next-controller
+    serviceAccountName: build-pipeline-pipelines-as-code-next-webhook
   workspaces:
   - name: git-auth
     secret:
