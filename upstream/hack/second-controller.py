@@ -1,4 +1,11 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv --quiet run --script
+# /// script
+# requires-python = ">=3.12"
+# dependencies = [
+#     "requests",
+#     "PyYAML",
+# ]
+# ///
 # Author: Chmouel Boudjnah <chmouel@redhat.com>
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -192,7 +199,7 @@ spec:
               "-o",
               "json",
               "--saveDir",
-              "/tmp/save",
+              "/tmp/gosmee-replay-ghe",
               "{args.smee_url}",
               "http://{args.label}-controller.{args.namespace}:8080",
             ]

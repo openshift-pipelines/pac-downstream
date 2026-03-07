@@ -1,5 +1,4 @@
 //go:build e2e
-// +build e2e
 
 package test
 
@@ -15,7 +14,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-func TestRepoValidation(t *testing.T) {
+func TestOthersRepoValidation(t *testing.T) {
 	ctx := context.TODO()
 	run := params.New()
 	assert.NilError(t, run.Clients.NewClients(ctx, &run.Info))

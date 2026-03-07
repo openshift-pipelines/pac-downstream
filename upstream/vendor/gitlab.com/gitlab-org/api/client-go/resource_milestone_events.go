@@ -22,23 +22,34 @@ import (
 	"time"
 )
 
-// ResourceMilestoneEventsService handles communication with the event related
-// methods of the GitLab API.
-//
-// GitLab API docs: https://docs.gitlab.com/ee/api/resource_milestone_events.html
-type ResourceMilestoneEventsService struct {
-	client *Client
-}
+type (
+	ResourceMilestoneEventsServiceInterface interface {
+		ListIssueMilestoneEvents(pid any, issue int64, opt *ListMilestoneEventsOptions, options ...RequestOptionFunc) ([]*MilestoneEvent, *Response, error)
+		GetIssueMilestoneEvent(pid any, issue int64, event int64, options ...RequestOptionFunc) (*MilestoneEvent, *Response, error)
+		ListMergeMilestoneEvents(pid any, request int64, opt *ListMilestoneEventsOptions, options ...RequestOptionFunc) ([]*MilestoneEvent, *Response, error)
+		GetMergeRequestMilestoneEvent(pid any, request int64, event int64, options ...RequestOptionFunc) (*MilestoneEvent, *Response, error)
+	}
+
+	// ResourceMilestoneEventsService handles communication with the event related
+	// methods of the GitLab API.
+	//
+	// GitLab API docs: https://docs.gitlab.com/api/resource_milestone_events/
+	ResourceMilestoneEventsService struct {
+		client *Client
+	}
+)
+
+var _ ResourceMilestoneEventsServiceInterface = (*ResourceMilestoneEventsService)(nil)
 
 // MilestoneEvent represents a resource milestone event.
 //
-// GitLab API docs: https://docs.gitlab.com/ee/api/resource_milestone_events.html
+// GitLab API docs: https://docs.gitlab.com/api/resource_milestone_events/
 type MilestoneEvent struct {
-	ID           int        `json:"id"`
+	ID           int64      `json:"id"`
 	User         *BasicUser `json:"user"`
 	CreatedAt    *time.Time `json:"created_at"`
 	ResourceType string     `json:"resource_type"`
-	ResourceID   int        `json:"resource_id"`
+	ResourceID   int64      `json:"resource_id"`
 	Milestone    *Milestone `json:"milestone"`
 	Action       string     `json:"action"`
 }
@@ -47,7 +58,7 @@ type MilestoneEvent struct {
 // list methods.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/ee/api/resource_milestone_events.html#list-project-issue-milestone-events
+// https://docs.gitlab.com/api/resource_milestone_events/#list-project-issue-milestone-events
 type ListMilestoneEventsOptions struct {
 	ListOptions
 }
@@ -56,8 +67,8 @@ type ListMilestoneEventsOptions struct {
 // project and issue.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/ee/api/resource_milestone_events.html#list-project-issue-milestone-events
-func (s *ResourceMilestoneEventsService) ListIssueMilestoneEvents(pid interface{}, issue int, opt *ListMilestoneEventsOptions, options ...RequestOptionFunc) ([]*MilestoneEvent, *Response, error) {
+// https://docs.gitlab.com/api/resource_milestone_events/#list-project-issue-milestone-events
+func (s *ResourceMilestoneEventsService) ListIssueMilestoneEvents(pid any, issue int64, opt *ListMilestoneEventsOptions, options ...RequestOptionFunc) ([]*MilestoneEvent, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err
@@ -81,8 +92,8 @@ func (s *ResourceMilestoneEventsService) ListIssueMilestoneEvents(pid interface{
 // GetIssueMilestoneEvent gets a single issue milestone event.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/ee/api/resource_milestone_events.html#get-single-issue-milestone-event
-func (s *ResourceMilestoneEventsService) GetIssueMilestoneEvent(pid interface{}, issue int, event int, options ...RequestOptionFunc) (*MilestoneEvent, *Response, error) {
+// https://docs.gitlab.com/api/resource_milestone_events/#get-single-issue-milestone-event
+func (s *ResourceMilestoneEventsService) GetIssueMilestoneEvent(pid any, issue int64, event int64, options ...RequestOptionFunc) (*MilestoneEvent, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err
@@ -107,8 +118,8 @@ func (s *ResourceMilestoneEventsService) GetIssueMilestoneEvent(pid interface{},
 // project and merge request.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/ee/api/resource_milestone_events.html#list-project-merge-request-milestone-events
-func (s *ResourceMilestoneEventsService) ListMergeMilestoneEvents(pid interface{}, request int, opt *ListMilestoneEventsOptions, options ...RequestOptionFunc) ([]*MilestoneEvent, *Response, error) {
+// https://docs.gitlab.com/api/resource_milestone_events/#list-project-merge-request-milestone-events
+func (s *ResourceMilestoneEventsService) ListMergeMilestoneEvents(pid any, request int64, opt *ListMilestoneEventsOptions, options ...RequestOptionFunc) ([]*MilestoneEvent, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err
@@ -132,8 +143,8 @@ func (s *ResourceMilestoneEventsService) ListMergeMilestoneEvents(pid interface{
 // GetMergeRequestMilestoneEvent gets a single merge request milestone event.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/ee/api/resource_milestone_events.html#get-single-merge-request-milestone-event
-func (s *ResourceMilestoneEventsService) GetMergeRequestMilestoneEvent(pid interface{}, request int, event int, options ...RequestOptionFunc) (*MilestoneEvent, *Response, error) {
+// https://docs.gitlab.com/api/resource_milestone_events/#get-single-merge-request-milestone-event
+func (s *ResourceMilestoneEventsService) GetMergeRequestMilestoneEvent(pid any, request int64, event int64, options ...RequestOptionFunc) (*MilestoneEvent, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err

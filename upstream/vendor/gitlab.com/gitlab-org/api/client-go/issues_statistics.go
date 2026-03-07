@@ -17,50 +17,68 @@
 package gitlab
 
 import (
-	"fmt"
-	"net/http"
 	"time"
 )
 
-// IssuesStatisticsService handles communication with the issues statistics
-// related methods of the GitLab API.
-//
-// GitLab API docs: https://docs.gitlab.com/ee/api/issues_statistics.html
-type IssuesStatisticsService struct {
-	client *Client
-}
+type (
+	IssuesStatisticsServiceInterface interface {
+		GetIssuesStatistics(opt *GetIssuesStatisticsOptions, options ...RequestOptionFunc) (*IssuesStatistics, *Response, error)
+		GetGroupIssuesStatistics(gid any, opt *GetGroupIssuesStatisticsOptions, options ...RequestOptionFunc) (*IssuesStatistics, *Response, error)
+		GetProjectIssuesStatistics(pid any, opt *GetProjectIssuesStatisticsOptions, options ...RequestOptionFunc) (*IssuesStatistics, *Response, error)
+	}
+
+	// IssuesStatisticsService handles communication with the issues statistics
+	// related methods of the GitLab API.
+	//
+	// GitLab API docs: https://docs.gitlab.com/api/issues_statistics/
+	IssuesStatisticsService struct {
+		client *Client
+	}
+)
+
+var _ IssuesStatisticsServiceInterface = (*IssuesStatisticsService)(nil)
 
 // IssuesStatistics represents a GitLab issues statistic.
 //
-// GitLab API docs: https://docs.gitlab.com/ee/api/issues_statistics.html
+// GitLab API docs: https://docs.gitlab.com/api/issues_statistics/
 type IssuesStatistics struct {
-	Statistics struct {
-		Counts struct {
-			All    int `json:"all"`
-			Closed int `json:"closed"`
-			Opened int `json:"opened"`
-		} `json:"counts"`
-	} `json:"statistics"`
+	Statistics IssuesStatisticsStatistics `json:"statistics"`
 }
 
 func (n IssuesStatistics) String() string {
 	return Stringify(n)
 }
 
+// IssuesStatisticsStatistics represents a GitLab issues statistic statistics.
+//
+// GitLab API docs: https://docs.gitlab.com/api/issues_statistics/
+type IssuesStatisticsStatistics struct {
+	Counts IssuesStatisticsCounts `json:"counts"`
+}
+
+// IssuesStatisticsCounts represents a GitLab issues statistic counts.
+//
+// GitLab API docs: https://docs.gitlab.com/api/issues_statistics/
+type IssuesStatisticsCounts struct {
+	All    int64 `json:"all"`
+	Closed int64 `json:"closed"`
+	Opened int64 `json:"opened"`
+}
+
 // GetIssuesStatisticsOptions represents the available GetIssuesStatistics() options.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/ee/api/issues_statistics.html#get-issues-statistics
+// https://docs.gitlab.com/api/issues_statistics/#get-issues-statistics
 type GetIssuesStatisticsOptions struct {
 	Labels           *LabelOptions `url:"labels,omitempty" json:"labels,omitempty"`
 	Milestone        *string       `url:"milestone,omitempty" json:"milestone,omitempty"`
 	Scope            *string       `url:"scope,omitempty" json:"scope,omitempty"`
-	AuthorID         *int          `url:"author_id,omitempty" json:"author_id,omitempty"`
+	AuthorID         *int64        `url:"author_id,omitempty" json:"author_id,omitempty"`
 	AuthorUsername   *string       `url:"author_username,omitempty" json:"author_username,omitempty"`
-	AssigneeID       *int          `url:"assignee_id,omitempty" json:"assignee_id,omitempty"`
+	AssigneeID       *int64        `url:"assignee_id,omitempty" json:"assignee_id,omitempty"`
 	AssigneeUsername *[]string     `url:"assignee_username,omitempty" json:"assignee_username,omitempty"`
 	MyReactionEmoji  *string       `url:"my_reaction_emoji,omitempty" json:"my_reaction_emoji,omitempty"`
-	IIDs             *[]int        `url:"iids[],omitempty" json:"iids,omitempty"`
+	IIDs             *[]int64      `url:"iids[],omitempty" json:"iids,omitempty"`
 	Search           *string       `url:"search,omitempty" json:"search,omitempty"`
 	In               *string       `url:"in,omitempty" json:"in,omitempty"`
 	CreatedAfter     *time.Time    `url:"created_after,omitempty" json:"created_after,omitempty"`
@@ -74,35 +92,28 @@ type GetIssuesStatisticsOptions struct {
 // user has access to.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/ee/api/issues_statistics.html#get-issues-statistics
+// https://docs.gitlab.com/api/issues_statistics/#get-issues-statistics
 func (s *IssuesStatisticsService) GetIssuesStatistics(opt *GetIssuesStatisticsOptions, options ...RequestOptionFunc) (*IssuesStatistics, *Response, error) {
-	req, err := s.client.NewRequest(http.MethodGet, "issues_statistics", opt, options)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	is := new(IssuesStatistics)
-	resp, err := s.client.Do(req, is)
-	if err != nil {
-		return nil, resp, err
-	}
-
-	return is, resp, nil
+	return do[*IssuesStatistics](s.client,
+		withPath("issues_statistics"),
+		withAPIOpts(opt),
+		withRequestOpts(options...),
+	)
 }
 
 // GetGroupIssuesStatisticsOptions represents the available GetGroupIssuesStatistics()
 // options.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/ee/api/issues_statistics.html#get-group-issues-statistics
+// https://docs.gitlab.com/api/issues_statistics/#get-group-issues-statistics
 type GetGroupIssuesStatisticsOptions struct {
 	Labels           *LabelOptions `url:"labels,omitempty" json:"labels,omitempty"`
-	IIDs             *[]int        `url:"iids[],omitempty" json:"iids,omitempty"`
+	IIDs             *[]int64      `url:"iids[],omitempty" json:"iids,omitempty"`
 	Milestone        *string       `url:"milestone,omitempty" json:"milestone,omitempty"`
 	Scope            *string       `url:"scope,omitempty" json:"scope,omitempty"`
-	AuthorID         *int          `url:"author_id,omitempty" json:"author_id,omitempty"`
+	AuthorID         *int64        `url:"author_id,omitempty" json:"author_id,omitempty"`
 	AuthorUsername   *string       `url:"author_username,omitempty" json:"author_username,omitempty"`
-	AssigneeID       *int          `url:"assignee_id,omitempty" json:"assignee_id,omitempty"`
+	AssigneeID       *int64        `url:"assignee_id,omitempty" json:"assignee_id,omitempty"`
 	AssigneeUsername *[]string     `url:"assignee_username,omitempty" json:"assignee_username,omitempty"`
 	MyReactionEmoji  *string       `url:"my_reaction_emoji,omitempty" json:"my_reaction_emoji,omitempty"`
 	Search           *string       `url:"search,omitempty" json:"search,omitempty"`
@@ -116,41 +127,28 @@ type GetGroupIssuesStatisticsOptions struct {
 // GetGroupIssuesStatistics gets issues count statistics for given group.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/ee/api/issues_statistics.html#get-group-issues-statistics
-func (s *IssuesStatisticsService) GetGroupIssuesStatistics(gid interface{}, opt *GetGroupIssuesStatisticsOptions, options ...RequestOptionFunc) (*IssuesStatistics, *Response, error) {
-	group, err := parseID(gid)
-	if err != nil {
-		return nil, nil, err
-	}
-	u := fmt.Sprintf("groups/%s/issues_statistics", PathEscape(group))
-
-	req, err := s.client.NewRequest(http.MethodGet, u, opt, options)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	is := new(IssuesStatistics)
-	resp, err := s.client.Do(req, is)
-	if err != nil {
-		return nil, resp, err
-	}
-
-	return is, resp, nil
+// https://docs.gitlab.com/api/issues_statistics/#get-group-issues-statistics
+func (s *IssuesStatisticsService) GetGroupIssuesStatistics(gid any, opt *GetGroupIssuesStatisticsOptions, options ...RequestOptionFunc) (*IssuesStatistics, *Response, error) {
+	return do[*IssuesStatistics](s.client,
+		withPath("groups/%s/issues_statistics", GroupID{gid}),
+		withAPIOpts(opt),
+		withRequestOpts(options...),
+	)
 }
 
 // GetProjectIssuesStatisticsOptions represents the available
 // GetProjectIssuesStatistics() options.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/ee/api/issues_statistics.html#get-project-issues-statistics
+// https://docs.gitlab.com/api/issues_statistics/#get-project-issues-statistics
 type GetProjectIssuesStatisticsOptions struct {
-	IIDs             *[]int        `url:"iids[],omitempty" json:"iids,omitempty"`
+	IIDs             *[]int64      `url:"iids[],omitempty" json:"iids,omitempty"`
 	Labels           *LabelOptions `url:"labels,omitempty" json:"labels,omitempty"`
 	Milestone        *string       `url:"milestone,omitempty" json:"milestone,omitempty"`
 	Scope            *string       `url:"scope,omitempty" json:"scope,omitempty"`
-	AuthorID         *int          `url:"author_id,omitempty" json:"author_id,omitempty"`
+	AuthorID         *int64        `url:"author_id,omitempty" json:"author_id,omitempty"`
 	AuthorUsername   *string       `url:"author_username,omitempty" json:"author_username,omitempty"`
-	AssigneeID       *int          `url:"assignee_id,omitempty" json:"assignee_id,omitempty"`
+	AssigneeID       *int64        `url:"assignee_id,omitempty" json:"assignee_id,omitempty"`
 	AssigneeUsername *[]string     `url:"assignee_username,omitempty" json:"assignee_username,omitempty"`
 	MyReactionEmoji  *string       `url:"my_reaction_emoji,omitempty" json:"my_reaction_emoji,omitempty"`
 	Search           *string       `url:"search,omitempty" json:"search,omitempty"`
@@ -164,24 +162,11 @@ type GetProjectIssuesStatisticsOptions struct {
 // GetProjectIssuesStatistics gets issues count statistics for given project.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/ee/api/issues_statistics.html#get-project-issues-statistics
-func (s *IssuesStatisticsService) GetProjectIssuesStatistics(pid interface{}, opt *GetProjectIssuesStatisticsOptions, options ...RequestOptionFunc) (*IssuesStatistics, *Response, error) {
-	project, err := parseID(pid)
-	if err != nil {
-		return nil, nil, err
-	}
-	u := fmt.Sprintf("projects/%s/issues_statistics", PathEscape(project))
-
-	req, err := s.client.NewRequest(http.MethodGet, u, opt, options)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	is := new(IssuesStatistics)
-	resp, err := s.client.Do(req, is)
-	if err != nil {
-		return nil, resp, err
-	}
-
-	return is, resp, nil
+// https://docs.gitlab.com/api/issues_statistics/#get-project-issues-statistics
+func (s *IssuesStatisticsService) GetProjectIssuesStatistics(pid any, opt *GetProjectIssuesStatisticsOptions, options ...RequestOptionFunc) (*IssuesStatistics, *Response, error) {
+	return do[*IssuesStatistics](s.client,
+		withPath("projects/%s/issues_statistics", ProjectID{pid}),
+		withAPIOpts(opt),
+		withRequestOpts(options...),
+	)
 }

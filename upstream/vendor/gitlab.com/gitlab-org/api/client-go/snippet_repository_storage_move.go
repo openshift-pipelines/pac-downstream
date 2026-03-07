@@ -22,21 +22,34 @@ import (
 	"time"
 )
 
-// SnippetRepositoryStorageMoveService handles communication with the
-// snippets related methods of the GitLab API.
-//
-// GitLab API docs:
-// https://docs.gitlab.com/ee/api/snippet_repository_storage_moves.html
-type SnippetRepositoryStorageMoveService struct {
-	client *Client
-}
+type (
+	SnippetRepositoryStorageMoveServiceInterface interface {
+		RetrieveAllStorageMoves(opts RetrieveAllSnippetStorageMovesOptions, options ...RequestOptionFunc) ([]*SnippetRepositoryStorageMove, *Response, error)
+		RetrieveAllStorageMovesForSnippet(snippet int64, opts RetrieveAllSnippetStorageMovesOptions, options ...RequestOptionFunc) ([]*SnippetRepositoryStorageMove, *Response, error)
+		GetStorageMove(repositoryStorage int64, options ...RequestOptionFunc) (*SnippetRepositoryStorageMove, *Response, error)
+		GetStorageMoveForSnippet(snippet int64, repositoryStorage int64, options ...RequestOptionFunc) (*SnippetRepositoryStorageMove, *Response, error)
+		ScheduleStorageMoveForSnippet(snippet int64, opts ScheduleStorageMoveForSnippetOptions, options ...RequestOptionFunc) (*SnippetRepositoryStorageMove, *Response, error)
+		ScheduleAllStorageMoves(opts ScheduleAllSnippetStorageMovesOptions, options ...RequestOptionFunc) (*Response, error)
+	}
+
+	// SnippetRepositoryStorageMoveService handles communication with the
+	// snippets related methods of the GitLab API.
+	//
+	// GitLab API docs:
+	// https://docs.gitlab.com/api/snippet_repository_storage_moves/
+	SnippetRepositoryStorageMoveService struct {
+		client *Client
+	}
+)
+
+var _ SnippetRepositoryStorageMoveServiceInterface = (*SnippetRepositoryStorageMoveService)(nil)
 
 // SnippetRepositoryStorageMove represents the status of a repository move.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/ee/api/snippet_repository_storage_moves.html
+// https://docs.gitlab.com/api/snippet_repository_storage_moves/
 type SnippetRepositoryStorageMove struct {
-	ID                     int                `json:"id"`
+	ID                     int64              `json:"id"`
 	CreatedAt              *time.Time         `json:"created_at"`
 	State                  string             `json:"state"`
 	SourceStorageName      string             `json:"source_storage_name"`
@@ -45,13 +58,13 @@ type SnippetRepositoryStorageMove struct {
 }
 
 type RepositorySnippet struct {
-	ID            int             `json:"id"`
+	ID            int64           `json:"id"`
 	Title         string          `json:"title"`
 	Description   string          `json:"description"`
 	Visibility    VisibilityValue `json:"visibility"`
 	UpdatedAt     *time.Time      `json:"updated_at"`
 	CreatedAt     *time.Time      `json:"created_at"`
-	ProjectID     int             `json:"project_id"`
+	ProjectID     int64           `json:"project_id"`
 	WebURL        string          `json:"web_url"`
 	RawURL        string          `json:"raw_url"`
 	SSHURLToRepo  string          `json:"ssh_url_to_repo"`
@@ -62,14 +75,17 @@ type RepositorySnippet struct {
 // RetrieveAllStorageMoves() options.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/ee/api/snippet_repository_storage_moves.html#retrieve-all-repository-storage-moves-for-a-snippet
-type RetrieveAllSnippetStorageMovesOptions ListOptions
+// https://docs.gitlab.com/api/snippet_repository_storage_moves/#retrieve-all-snippet-repository-storage-moves
+// https://docs.gitlab.com/api/snippet_repository_storage_moves/#retrieve-all-repository-storage-moves-for-a-snippet
+type RetrieveAllSnippetStorageMovesOptions struct {
+	ListOptions
+}
 
 // RetrieveAllStorageMoves retrieves all snippet repository storage moves
 // accessible by the authenticated user.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/ee/api/snippet_repository_storage_moves.html#retrieve-all-repository-storage-moves-for-a-snippet
+// https://docs.gitlab.com/api/snippet_repository_storage_moves/#retrieve-all-snippet-repository-storage-moves
 func (s SnippetRepositoryStorageMoveService) RetrieveAllStorageMoves(opts RetrieveAllSnippetStorageMovesOptions, options ...RequestOptionFunc) ([]*SnippetRepositoryStorageMove, *Response, error) {
 	req, err := s.client.NewRequest(http.MethodGet, "snippet_repository_storage_moves", opts, options)
 	if err != nil {
@@ -89,8 +105,8 @@ func (s SnippetRepositoryStorageMoveService) RetrieveAllStorageMoves(opts Retrie
 // a single snippet accessible by the authenticated user.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/ee/api/snippet_repository_storage_moves.html#retrieve-all-repository-storage-moves-for-a-snippet
-func (s SnippetRepositoryStorageMoveService) RetrieveAllStorageMovesForSnippet(snippet int, opts RetrieveAllSnippetStorageMovesOptions, options ...RequestOptionFunc) ([]*SnippetRepositoryStorageMove, *Response, error) {
+// https://docs.gitlab.com/api/snippet_repository_storage_moves/#retrieve-all-repository-storage-moves-for-a-snippet
+func (s SnippetRepositoryStorageMoveService) RetrieveAllStorageMovesForSnippet(snippet int64, opts RetrieveAllSnippetStorageMovesOptions, options ...RequestOptionFunc) ([]*SnippetRepositoryStorageMove, *Response, error) {
 	u := fmt.Sprintf("snippets/%d/repository_storage_moves", snippet)
 
 	req, err := s.client.NewRequest(http.MethodGet, u, opts, options)
@@ -110,8 +126,8 @@ func (s SnippetRepositoryStorageMoveService) RetrieveAllStorageMovesForSnippet(s
 // GetStorageMove gets a single snippet repository storage move.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/ee/api/snippet_repository_storage_moves.html#get-a-single-snippet-repository-storage-move
-func (s SnippetRepositoryStorageMoveService) GetStorageMove(repositoryStorage int, options ...RequestOptionFunc) (*SnippetRepositoryStorageMove, *Response, error) {
+// https://docs.gitlab.com/api/snippet_repository_storage_moves/#get-a-single-snippet-repository-storage-move
+func (s SnippetRepositoryStorageMoveService) GetStorageMove(repositoryStorage int64, options ...RequestOptionFunc) (*SnippetRepositoryStorageMove, *Response, error) {
 	u := fmt.Sprintf("snippet_repository_storage_moves/%d", repositoryStorage)
 
 	req, err := s.client.NewRequest(http.MethodGet, u, nil, options)
@@ -131,8 +147,8 @@ func (s SnippetRepositoryStorageMoveService) GetStorageMove(repositoryStorage in
 // GetStorageMoveForSnippet gets a single repository storage move for a snippet.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/ee/api/snippet_repository_storage_moves.html#get-a-single-repository-storage-move-for-a-snippet
-func (s SnippetRepositoryStorageMoveService) GetStorageMoveForSnippet(snippet int, repositoryStorage int, options ...RequestOptionFunc) (*SnippetRepositoryStorageMove, *Response, error) {
+// https://docs.gitlab.com/api/snippet_repository_storage_moves/#get-a-single-repository-storage-move-for-a-snippet
+func (s SnippetRepositoryStorageMoveService) GetStorageMoveForSnippet(snippet int64, repositoryStorage int64, options ...RequestOptionFunc) (*SnippetRepositoryStorageMove, *Response, error) {
 	u := fmt.Sprintf("snippets/%d/repository_storage_moves/%d", snippet, repositoryStorage)
 
 	req, err := s.client.NewRequest(http.MethodGet, u, nil, options)
@@ -153,7 +169,7 @@ func (s SnippetRepositoryStorageMoveService) GetStorageMoveForSnippet(snippet in
 // ScheduleStorageMoveForSnippet() options.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/ee/api/snippet_repository_storage_moves.html#schedule-a-repository-storage-move-for-a-snippet
+// https://docs.gitlab.com/api/snippet_repository_storage_moves/#schedule-a-repository-storage-move-for-a-snippet
 type ScheduleStorageMoveForSnippetOptions struct {
 	DestinationStorageName *string `url:"destination_storage_name,omitempty" json:"destination_storage_name,omitempty"`
 }
@@ -161,8 +177,8 @@ type ScheduleStorageMoveForSnippetOptions struct {
 // ScheduleStorageMoveForSnippet schedule a repository to be moved for a snippet.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/ee/api/snippet_repository_storage_moves.html#schedule-a-repository-storage-move-for-a-snippet
-func (s SnippetRepositoryStorageMoveService) ScheduleStorageMoveForSnippet(snippet int, opts ScheduleStorageMoveForSnippetOptions, options ...RequestOptionFunc) (*SnippetRepositoryStorageMove, *Response, error) {
+// https://docs.gitlab.com/api/snippet_repository_storage_moves/#schedule-a-repository-storage-move-for-a-snippet
+func (s SnippetRepositoryStorageMoveService) ScheduleStorageMoveForSnippet(snippet int64, opts ScheduleStorageMoveForSnippetOptions, options ...RequestOptionFunc) (*SnippetRepositoryStorageMove, *Response, error) {
 	u := fmt.Sprintf("snippets/%d/repository_storage_moves", snippet)
 
 	req, err := s.client.NewRequest(http.MethodPost, u, opts, options)
@@ -183,7 +199,7 @@ func (s SnippetRepositoryStorageMoveService) ScheduleStorageMoveForSnippet(snipp
 // ScheduleAllStorageMoves() options.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/ee/api/snippet_repository_storage_moves.html#schedule-repository-storage-moves-for-all-snippets-on-a-storage-shard
+// https://docs.gitlab.com/api/snippet_repository_storage_moves/#schedule-repository-storage-moves-for-all-snippets-on-a-storage-shard
 type ScheduleAllSnippetStorageMovesOptions struct {
 	SourceStorageName      *string `url:"source_storage_name,omitempty" json:"source_storage_name,omitempty"`
 	DestinationStorageName *string `url:"destination_storage_name,omitempty" json:"destination_storage_name,omitempty"`
@@ -192,7 +208,7 @@ type ScheduleAllSnippetStorageMovesOptions struct {
 // ScheduleAllStorageMoves schedules all snippet repositories to be moved.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/ee/api/snippet_repository_storage_moves.html#schedule-repository-storage-moves-for-all-snippets-on-a-storage-shard
+// https://docs.gitlab.com/api/snippet_repository_storage_moves/#schedule-repository-storage-moves-for-all-snippets-on-a-storage-shard
 func (s SnippetRepositoryStorageMoveService) ScheduleAllStorageMoves(opts ScheduleAllSnippetStorageMovesOptions, options ...RequestOptionFunc) (*Response, error) {
 	req, err := s.client.NewRequest(http.MethodPost, "snippet_repository_storage_moves", opts, options)
 	if err != nil {
