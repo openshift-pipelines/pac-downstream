@@ -17,24 +17,42 @@
 package gitlab
 
 import (
-	"fmt"
 	"net/http"
 	"time"
 )
 
-// EnvironmentsService handles communication with the environment related methods
-// of the GitLab API.
-//
-// GitLab API docs: https://docs.gitlab.com/ee/api/environments.html
-type EnvironmentsService struct {
-	client *Client
-}
+type (
+	// EnvironmentsServiceInterface defines all the API methods for the EnvironmentsService
+	EnvironmentsServiceInterface interface {
+		// ListEnvironments gets a list of environments from a project, sorted by name
+		// alphabetically.
+		//
+		// GitLab API docs:
+		// https://docs.gitlab.com/api/environments/#list-environments
+		ListEnvironments(pid any, opts *ListEnvironmentsOptions, options ...RequestOptionFunc) ([]*Environment, *Response, error)
+		GetEnvironment(pid any, environment int64, options ...RequestOptionFunc) (*Environment, *Response, error)
+		CreateEnvironment(pid any, opt *CreateEnvironmentOptions, options ...RequestOptionFunc) (*Environment, *Response, error)
+		EditEnvironment(pid any, environment int64, opt *EditEnvironmentOptions, options ...RequestOptionFunc) (*Environment, *Response, error)
+		DeleteEnvironment(pid any, environment int64, options ...RequestOptionFunc) (*Response, error)
+		StopEnvironment(pid any, environmentID int64, opt *StopEnvironmentOptions, options ...RequestOptionFunc) (*Environment, *Response, error)
+	}
+
+	// EnvironmentsService handles communication with the environment related methods
+	// of the GitLab API.
+	//
+	// GitLab API docs: https://docs.gitlab.com/api/environments/
+	EnvironmentsService struct {
+		client *Client
+	}
+)
+
+var _ EnvironmentsServiceInterface = (*EnvironmentsService)(nil)
 
 // Environment represents a GitLab environment.
 //
-// GitLab API docs: https://docs.gitlab.com/ee/api/environments.html
+// GitLab API docs: https://docs.gitlab.com/api/environments/
 type Environment struct {
-	ID                  int         `json:"id"`
+	ID                  int64       `json:"id"`
 	Name                string      `json:"name"`
 	Slug                string      `json:"slug"`
 	Description         string      `json:"description"`
@@ -48,6 +66,8 @@ type Environment struct {
 	ClusterAgent        *Agent      `json:"cluster_agent"`
 	KubernetesNamespace string      `json:"kubernetes_namespace"`
 	FluxResourcePath    string      `json:"flux_resource_path"`
+	AutoStopAt          *time.Time  `json:"auto_stop_at"`
+	AutoStopSetting     string      `json:"auto_stop_setting"`
 }
 
 func (env Environment) String() string {
@@ -57,7 +77,7 @@ func (env Environment) String() string {
 // ListEnvironmentsOptions represents the available ListEnvironments() options.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/ee/api/environments.html#list-environments
+// https://docs.gitlab.com/api/environments/#list-environments
 type ListEnvironmentsOptions struct {
 	ListOptions
 	Name   *string `url:"name,omitempty" json:"name,omitempty"`
@@ -65,186 +85,91 @@ type ListEnvironmentsOptions struct {
 	States *string `url:"states,omitempty" json:"states,omitempty"`
 }
 
-// ListEnvironments gets a list of environments from a project, sorted by name
-// alphabetically.
-//
-// GitLab API docs:
-// https://docs.gitlab.com/ee/api/environments.html#list-environments
-func (s *EnvironmentsService) ListEnvironments(pid interface{}, opts *ListEnvironmentsOptions, options ...RequestOptionFunc) ([]*Environment, *Response, error) {
-	project, err := parseID(pid)
-	if err != nil {
-		return nil, nil, err
-	}
-	u := fmt.Sprintf("projects/%s/environments", PathEscape(project))
-
-	req, err := s.client.NewRequest(http.MethodGet, u, opts, options)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	var envs []*Environment
-	resp, err := s.client.Do(req, &envs)
-	if err != nil {
-		return nil, resp, err
-	}
-
-	return envs, resp, nil
+func (s *EnvironmentsService) ListEnvironments(pid any, opts *ListEnvironmentsOptions, options ...RequestOptionFunc) ([]*Environment, *Response, error) {
+	return do[[]*Environment](s.client,
+		withPath("projects/%s/environments", ProjectID{pid}),
+		withAPIOpts(opts),
+		withRequestOpts(options...),
+	)
 }
 
-// GetEnvironment gets a specific environment from a project.
-//
-// GitLab API docs:
-// https://docs.gitlab.com/ee/api/environments.html#get-a-specific-environment
-func (s *EnvironmentsService) GetEnvironment(pid interface{}, environment int, options ...RequestOptionFunc) (*Environment, *Response, error) {
-	project, err := parseID(pid)
-	if err != nil {
-		return nil, nil, err
-	}
-	u := fmt.Sprintf("projects/%s/environments/%d", PathEscape(project), environment)
-
-	req, err := s.client.NewRequest(http.MethodGet, u, nil, options)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	env := new(Environment)
-	resp, err := s.client.Do(req, env)
-	if err != nil {
-		return nil, resp, err
-	}
-
-	return env, resp, nil
+func (s *EnvironmentsService) GetEnvironment(pid any, environment int64, options ...RequestOptionFunc) (*Environment, *Response, error) {
+	return do[*Environment](s.client,
+		withPath("projects/%s/environments/%d", ProjectID{pid}, environment),
+		withRequestOpts(options...),
+	)
 }
 
 // CreateEnvironmentOptions represents the available CreateEnvironment() options.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/ee/api/environments.html#create-a-new-environment
+// https://docs.gitlab.com/api/environments/#create-a-new-environment
 type CreateEnvironmentOptions struct {
 	Name                *string `url:"name,omitempty" json:"name,omitempty"`
 	Description         *string `url:"description,omitempty" json:"description,omitempty"`
 	ExternalURL         *string `url:"external_url,omitempty" json:"external_url,omitempty"`
 	Tier                *string `url:"tier,omitempty" json:"tier,omitempty"`
-	ClusterAgentID      *int    `url:"cluster_agent_id,omitempty" json:"cluster_agent_id,omitempty"`
+	ClusterAgentID      *int64  `url:"cluster_agent_id,omitempty" json:"cluster_agent_id,omitempty"`
 	KubernetesNamespace *string `url:"kubernetes_namespace,omitempty" json:"kubernetes_namespace,omitempty"`
 	FluxResourcePath    *string `url:"flux_resource_path,omitempty" json:"flux_resource_path,omitempty"`
+	AutoStopSetting     *string `url:"auto_stop_setting,omitempty" json:"auto_stop_setting,omitempty"`
 }
 
-// CreateEnvironment adds an environment to a project. This is an idempotent
-// method and can be called multiple times with the same parameters. Createing
-// an environment that is already a environment does not affect the
-// existing environmentship.
-//
-// GitLab API docs:
-// https://docs.gitlab.com/ee/api/environments.html#create-a-new-environment
-func (s *EnvironmentsService) CreateEnvironment(pid interface{}, opt *CreateEnvironmentOptions, options ...RequestOptionFunc) (*Environment, *Response, error) {
-	project, err := parseID(pid)
-	if err != nil {
-		return nil, nil, err
-	}
-	u := fmt.Sprintf("projects/%s/environments", PathEscape(project))
-
-	req, err := s.client.NewRequest(http.MethodPost, u, opt, options)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	env := new(Environment)
-	resp, err := s.client.Do(req, env)
-	if err != nil {
-		return nil, resp, err
-	}
-
-	return env, resp, nil
+func (s *EnvironmentsService) CreateEnvironment(pid any, opt *CreateEnvironmentOptions, options ...RequestOptionFunc) (*Environment, *Response, error) {
+	return do[*Environment](s.client,
+		withMethod(http.MethodPost),
+		withPath("projects/%s/environments", ProjectID{pid}),
+		withAPIOpts(opt),
+		withRequestOpts(options...),
+	)
 }
 
 // EditEnvironmentOptions represents the available EditEnvironment() options.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/ee/api/environments.html#update-an-existing-environment
+// https://docs.gitlab.com/api/environments/#update-an-existing-environment
 type EditEnvironmentOptions struct {
 	Name                *string `url:"name,omitempty" json:"name,omitempty"`
 	Description         *string `url:"description,omitempty" json:"description,omitempty"`
 	ExternalURL         *string `url:"external_url,omitempty" json:"external_url,omitempty"`
 	Tier                *string `url:"tier,omitempty" json:"tier,omitempty"`
-	ClusterAgentID      *int    `url:"cluster_agent_id,omitempty" json:"cluster_agent_id,omitempty"`
+	ClusterAgentID      *int64  `url:"cluster_agent_id,omitempty" json:"cluster_agent_id,omitempty"`
 	KubernetesNamespace *string `url:"kubernetes_namespace,omitempty" json:"kubernetes_namespace,omitempty"`
 	FluxResourcePath    *string `url:"flux_resource_path,omitempty" json:"flux_resource_path,omitempty"`
+	AutoStopSetting     *string `url:"auto_stop_setting,omitempty" json:"auto_stop_setting,omitempty"`
 }
 
-// EditEnvironment updates a project team environment to a specified access level..
-//
-// GitLab API docs:
-// https://docs.gitlab.com/ee/api/environments.html#update-an-existing-environment
-func (s *EnvironmentsService) EditEnvironment(pid interface{}, environment int, opt *EditEnvironmentOptions, options ...RequestOptionFunc) (*Environment, *Response, error) {
-	project, err := parseID(pid)
-	if err != nil {
-		return nil, nil, err
-	}
-	u := fmt.Sprintf("projects/%s/environments/%d", PathEscape(project), environment)
-
-	req, err := s.client.NewRequest(http.MethodPut, u, opt, options)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	env := new(Environment)
-	resp, err := s.client.Do(req, env)
-	if err != nil {
-		return nil, resp, err
-	}
-
-	return env, resp, nil
+func (s *EnvironmentsService) EditEnvironment(pid any, environment int64, opt *EditEnvironmentOptions, options ...RequestOptionFunc) (*Environment, *Response, error) {
+	return do[*Environment](s.client,
+		withMethod(http.MethodPut),
+		withPath("projects/%s/environments/%d", ProjectID{pid}, environment),
+		withAPIOpts(opt),
+		withRequestOpts(options...),
+	)
 }
 
-// DeleteEnvironment removes an environment from a project team.
-//
-// GitLab API docs:
-// https://docs.gitlab.com/ee/api/environments.html#delete-an-environment
-func (s *EnvironmentsService) DeleteEnvironment(pid interface{}, environment int, options ...RequestOptionFunc) (*Response, error) {
-	project, err := parseID(pid)
-	if err != nil {
-		return nil, err
-	}
-	u := fmt.Sprintf("projects/%s/environments/%d", PathEscape(project), environment)
-
-	req, err := s.client.NewRequest(http.MethodDelete, u, nil, options)
-	if err != nil {
-		return nil, err
-	}
-
-	return s.client.Do(req, nil)
+func (s *EnvironmentsService) DeleteEnvironment(pid any, environment int64, options ...RequestOptionFunc) (*Response, error) {
+	_, resp, err := do[none](s.client,
+		withMethod(http.MethodDelete),
+		withPath("projects/%s/environments/%d", ProjectID{pid}, environment),
+		withRequestOpts(options...),
+	)
+	return resp, err
 }
 
 // StopEnvironmentOptions represents the available StopEnvironment() options.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/ee/api/environments.html#stop-an-environment
+// https://docs.gitlab.com/api/environments/#stop-an-environment
 type StopEnvironmentOptions struct {
 	Force *bool `url:"force,omitempty" json:"force,omitempty"`
 }
 
-// StopEnvironment stops an environment within a specific project.
-//
-// GitLab API docs:
-// https://docs.gitlab.com/ee/api/environments.html#stop-an-environment
-func (s *EnvironmentsService) StopEnvironment(pid interface{}, environmentID int, opt *StopEnvironmentOptions, options ...RequestOptionFunc) (*Environment, *Response, error) {
-	project, err := parseID(pid)
-	if err != nil {
-		return nil, nil, err
-	}
-	u := fmt.Sprintf("projects/%s/environments/%d/stop", PathEscape(project), environmentID)
-
-	req, err := s.client.NewRequest(http.MethodPost, u, opt, options)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	env := new(Environment)
-	resp, err := s.client.Do(req, env)
-	if err != nil {
-		return nil, resp, err
-	}
-
-	return env, resp, nil
+func (s *EnvironmentsService) StopEnvironment(pid any, environmentID int64, opt *StopEnvironmentOptions, options ...RequestOptionFunc) (*Environment, *Response, error) {
+	return do[*Environment](s.client,
+		withMethod(http.MethodPost),
+		withPath("projects/%s/environments/%d/stop", ProjectID{pid}, environmentID),
+		withAPIOpts(opt),
+		withRequestOpts(options...),
+	)
 }

@@ -10,7 +10,7 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/bitbucketcloud"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/bitbucketserver"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/bitbucketdatacenter"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/gitea"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/gitlab"
@@ -18,6 +18,13 @@ import (
 	"go.uber.org/zap"
 )
 
+// detectProvider detects the git provider for the given PipelineRun and
+// initializes the corresponding provider interface. It returns the provider
+// interface, event information, and an error if any occurs during detection or
+// initialization.
+//
+// Supported providers: github, gitlab, bitbucket-cloud, bitbucket-datacenter, forgejo (gitea)
+// any new provider should be added to the switch case below.
 func (r *Reconciler) detectProvider(ctx context.Context, logger *zap.SugaredLogger, pr *tektonv1.PipelineRun) (provider.Interface, *info.Event, error) {
 	gitProvider, ok := pr.GetAnnotations()[keys.GitProvider]
 	if !ok {
@@ -42,9 +49,9 @@ func (r *Reconciler) detectProvider(ctx context.Context, logger *zap.SugaredLogg
 		provider = &gitlab.Provider{}
 	case "bitbucket-cloud":
 		provider = &bitbucketcloud.Provider{}
-	case "bitbucket-server":
-		provider = &bitbucketserver.Provider{}
-	case "gitea":
+	case "bitbucket-datacenter":
+		provider = &bitbucketdatacenter.Provider{}
+	case "gitea", "forgejo":
 		provider = &gitea.Provider{}
 	default:
 		return nil, nil, fmt.Errorf("failed to detect provider for pipelinerun: %s : unknown provider", pr.GetName())
@@ -72,6 +79,7 @@ func buildEventFromPipelineRun(pr *tektonv1.PipelineRun) *info.Event {
 	prNumber := prAnno[keys.PullRequest]
 	if prNumber != "" {
 		event.PullRequestNumber, _ = strconv.Atoi(prNumber)
+		event.TriggerTarget = triggertype.PullRequest
 	}
 
 	// GitHub
@@ -83,12 +91,14 @@ func buildEventFromPipelineRun(pr *tektonv1.PipelineRun) *info.Event {
 		event.GHEURL = gheURL
 	}
 
-	// Gitlab
+	// GitLab
 	if projectID, ok := prAnno[keys.SourceProjectID]; ok {
-		event.SourceProjectID, _ = strconv.Atoi(projectID)
+		id, _ := strconv.ParseInt(projectID, 10, 64)
+		event.SourceProjectID = id
 	}
 	if projectID, ok := prAnno[keys.TargetProjectID]; ok {
-		event.TargetProjectID, _ = strconv.Atoi(projectID)
+		id, _ := strconv.ParseInt(projectID, 10, 64)
+		event.TargetProjectID = id
 	}
 	return event
 }

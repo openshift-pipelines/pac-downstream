@@ -106,7 +106,7 @@ func PushFilesToRefGit(t *testing.T, opts *Opts, entries map[string]string) stri
 	assert.NilError(t, err)
 
 	for filename, content := range entries {
-		assert.NilError(t, os.MkdirAll(filepath.Dir(filename), 0o755))
+		assert.NilError(t, os.MkdirAll(filepath.Dir(filename), 0o750))
 		// write content to filename
 		assert.NilError(t, os.WriteFile(filename, []byte(content), 0o600))
 	}
@@ -130,7 +130,7 @@ func PushFilesToRefGit(t *testing.T, opts *Opts, entries map[string]string) stri
 	assert.NilError(t, err)
 
 	gitPushPullRetry(t, opts, path)
-	return sha
+	return strings.TrimSpace(sha)
 }
 
 func ChangeFilesRefGit(t *testing.T, opts *Opts, fileChanges []FileChange) {

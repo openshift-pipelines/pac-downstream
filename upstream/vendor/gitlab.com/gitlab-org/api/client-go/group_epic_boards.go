@@ -16,26 +16,30 @@
 
 package gitlab
 
-import (
-	"fmt"
-	"net/http"
+type (
+	GroupEpicBoardsServiceInterface interface {
+		ListGroupEpicBoards(gid any, opt *ListGroupEpicBoardsOptions, options ...RequestOptionFunc) ([]*GroupEpicBoard, *Response, error)
+		GetGroupEpicBoard(gid any, board int64, options ...RequestOptionFunc) (*GroupEpicBoard, *Response, error)
+	}
+
+	// GroupEpicBoardsService handles communication with the group epic board
+	// related methods of the GitLab API.
+	//
+	// GitLab API docs:
+	// https://docs.gitlab.com/api/group_epic_boards/
+	GroupEpicBoardsService struct {
+		client *Client
+	}
 )
 
-// GroupEpicBoardsService handles communication with the group epic board
-// related methods of the GitLab API.
-//
-// GitLab API docs:
-// https://docs.gitlab.com/ee/api/group_epic_boards.html
-type GroupEpicBoardsService struct {
-	client *Client
-}
+var _ GroupEpicBoardsServiceInterface = (*GroupEpicBoardsService)(nil)
 
 // GroupEpicBoard represents a GitLab group epic board.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/ee/api/group_epic_boards.html
+// https://docs.gitlab.com/api/group_epic_boards/
 type GroupEpicBoard struct {
-	ID     int             `json:"id"`
+	ID     int64           `json:"id"`
 	Name   string          `json:"name"`
 	Group  *Group          `json:"group"`
 	Labels []*LabelDetails `json:"labels"`
@@ -50,55 +54,30 @@ func (b GroupEpicBoard) String() string {
 // ListGroupEpicBoards() options.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/ee/api/group_epic_boards.html#list-all-epic-boards-in-a-group
-type ListGroupEpicBoardsOptions ListOptions
+// https://docs.gitlab.com/api/group_epic_boards/#list-all-epic-boards-in-a-group
+type ListGroupEpicBoardsOptions struct {
+	ListOptions
+}
 
 // ListGroupEpicBoards gets a list of all epic boards in a group.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/ee/api/group_epic_boards.html#list-all-epic-boards-in-a-group
-func (s *GroupEpicBoardsService) ListGroupEpicBoards(gid interface{}, opt *ListGroupEpicBoardsOptions, options ...RequestOptionFunc) ([]*GroupEpicBoard, *Response, error) {
-	group, err := parseID(gid)
-	if err != nil {
-		return nil, nil, err
-	}
-	u := fmt.Sprintf("groups/%s/epic_boards", PathEscape(group))
-
-	req, err := s.client.NewRequest(http.MethodGet, u, opt, options)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	var gs []*GroupEpicBoard
-	resp, err := s.client.Do(req, &gs)
-	if err != nil {
-		return nil, resp, err
-	}
-
-	return gs, resp, nil
+// https://docs.gitlab.com/api/group_epic_boards/#list-all-epic-boards-in-a-group
+func (s *GroupEpicBoardsService) ListGroupEpicBoards(gid any, opt *ListGroupEpicBoardsOptions, options ...RequestOptionFunc) ([]*GroupEpicBoard, *Response, error) {
+	return do[[]*GroupEpicBoard](s.client,
+		withPath("groups/%s/epic_boards", GroupID{gid}),
+		withAPIOpts(opt),
+		withRequestOpts(options...),
+	)
 }
 
 // GetGroupEpicBoard gets a single epic board of a group.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/ee/api/group_epic_boards.html#single-group-epic-board
-func (s *GroupEpicBoardsService) GetGroupEpicBoard(gid interface{}, board int, options ...RequestOptionFunc) (*GroupEpicBoard, *Response, error) {
-	group, err := parseID(gid)
-	if err != nil {
-		return nil, nil, err
-	}
-	u := fmt.Sprintf("groups/%s/epic_boards/%d", PathEscape(group), board)
-
-	req, err := s.client.NewRequest(http.MethodGet, u, nil, options)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	gib := new(GroupEpicBoard)
-	resp, err := s.client.Do(req, gib)
-	if err != nil {
-		return nil, resp, err
-	}
-
-	return gib, resp, nil
+// https://docs.gitlab.com/api/group_epic_boards/#single-group-epic-board
+func (s *GroupEpicBoardsService) GetGroupEpicBoard(gid any, board int64, options ...RequestOptionFunc) (*GroupEpicBoard, *Response, error) {
+	return do[*GroupEpicBoard](s.client,
+		withPath("groups/%s/epic_boards/%d", GroupID{gid}, board),
+		withRequestOpts(options...),
+	)
 }

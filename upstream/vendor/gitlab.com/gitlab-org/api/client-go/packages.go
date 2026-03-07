@@ -22,19 +22,31 @@ import (
 	"time"
 )
 
-// PackagesService handles communication with the packages related methods
-// of the GitLab API.
-//
-// GitLab API docs: https://docs.gitlab.com/ee/api/packages.html
-type PackagesService struct {
-	client *Client
-}
+type (
+	PackagesServiceInterface interface {
+		ListProjectPackages(pid any, opt *ListProjectPackagesOptions, options ...RequestOptionFunc) ([]*Package, *Response, error)
+		ListGroupPackages(gid any, opt *ListGroupPackagesOptions, options ...RequestOptionFunc) ([]*GroupPackage, *Response, error)
+		ListPackageFiles(pid any, pkg int64, opt *ListPackageFilesOptions, options ...RequestOptionFunc) ([]*PackageFile, *Response, error)
+		DeleteProjectPackage(pid any, pkg int64, options ...RequestOptionFunc) (*Response, error)
+		DeletePackageFile(pid any, pkg, file int64, options ...RequestOptionFunc) (*Response, error)
+	}
+
+	// PackagesService handles communication with the packages related methods
+	// of the GitLab API.
+	//
+	// GitLab API docs: https://docs.gitlab.com/api/packages/
+	PackagesService struct {
+		client *Client
+	}
+)
+
+var _ PackagesServiceInterface = (*PackagesService)(nil)
 
 // Package represents a GitLab package.
 //
-// GitLab API docs: https://docs.gitlab.com/ee/api/packages.html
+// GitLab API docs: https://docs.gitlab.com/api/packages/
 type Package struct {
-	ID               int           `json:"id"`
+	ID               int64         `json:"id"`
 	Name             string        `json:"name"`
 	Version          string        `json:"version"`
 	PackageType      string        `json:"package_type"`
@@ -51,10 +63,10 @@ func (s Package) String() string {
 
 // GroupPackage represents a GitLab group package.
 //
-// GitLab API docs: https://docs.gitlab.com/ee/api/packages.html
+// GitLab API docs: https://docs.gitlab.com/api/packages/
 type GroupPackage struct {
 	Package
-	ProjectID   int    `json:"project_id"`
+	ProjectID   int64  `json:"project_id"`
 	ProjectPath string `json:"project_path"`
 }
 
@@ -74,8 +86,8 @@ func (s PackageLinks) String() string {
 
 // PackageTag holds label information about the package
 type PackageTag struct {
-	ID        int        `json:"id"`
-	PackageID int        `json:"package_id"`
+	ID        int64      `json:"id"`
+	PackageID int64      `json:"package_id"`
 	Name      string     `json:"name"`
 	CreatedAt *time.Time `json:"created_at"`
 	UpdatedAt *time.Time `json:"updated_at"`
@@ -87,13 +99,13 @@ func (s PackageTag) String() string {
 
 // PackageFile represents one file contained within a package.
 //
-// GitLab API docs: https://docs.gitlab.com/ee/api/packages.html
+// GitLab API docs: https://docs.gitlab.com/api/packages/
 type PackageFile struct {
-	ID         int         `json:"id"`
-	PackageID  int         `json:"package_id"`
+	ID         int64       `json:"id"`
+	PackageID  int64       `json:"package_id"`
 	CreatedAt  *time.Time  `json:"created_at"`
 	FileName   string      `json:"file_name"`
-	Size       int         `json:"size"`
+	Size       int64       `json:"size"`
 	FileMD5    string      `json:"file_md5"`
 	FileSHA1   string      `json:"file_sha1"`
 	FileSHA256 string      `json:"file_sha256"`
@@ -108,7 +120,7 @@ func (s PackageFile) String() string {
 // options.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/ee/api/packages.html#within-a-project
+// https://docs.gitlab.com/api/packages/#for-a-project
 type ListProjectPackagesOptions struct {
 	ListOptions
 	OrderBy            *string `url:"order_by,omitempty" json:"order_by,omitempty"`
@@ -123,8 +135,8 @@ type ListProjectPackagesOptions struct {
 // ListProjectPackages gets a list of packages in a project.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/ee/api/packages.html#within-a-project
-func (s *PackagesService) ListProjectPackages(pid interface{}, opt *ListProjectPackagesOptions, options ...RequestOptionFunc) ([]*Package, *Response, error) {
+// https://docs.gitlab.com/api/packages/#for-a-project
+func (s *PackagesService) ListProjectPackages(pid any, opt *ListProjectPackagesOptions, options ...RequestOptionFunc) ([]*Package, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err
@@ -149,7 +161,7 @@ func (s *PackagesService) ListProjectPackages(pid interface{}, opt *ListProjectP
 // options.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/ee/api/packages.html#within-a-group
+// https://docs.gitlab.com/api/packages/#for-a-group
 type ListGroupPackagesOptions struct {
 	ListOptions
 	ExcludeSubGroups   *bool   `url:"exclude_subgroups,omitempty" json:"exclude_subgroups,omitempty"`
@@ -164,8 +176,8 @@ type ListGroupPackagesOptions struct {
 // ListGroupPackages gets a list of packages in a group.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/ee/api/packages.html#within-a-group
-func (s *PackagesService) ListGroupPackages(gid interface{}, opt *ListGroupPackagesOptions, options ...RequestOptionFunc) ([]*GroupPackage, *Response, error) {
+// https://docs.gitlab.com/api/packages/#for-a-group
+func (s *PackagesService) ListGroupPackages(gid any, opt *ListGroupPackagesOptions, options ...RequestOptionFunc) ([]*GroupPackage, *Response, error) {
 	group, err := parseID(gid)
 	if err != nil {
 		return nil, nil, err
@@ -190,14 +202,16 @@ func (s *PackagesService) ListGroupPackages(gid interface{}, opt *ListGroupPacka
 // options.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/ee/api/packages.html#list-package-files
-type ListPackageFilesOptions ListOptions
+// https://docs.gitlab.com/api/packages/#list-package-files
+type ListPackageFilesOptions struct {
+	ListOptions
+}
 
 // ListPackageFiles gets a list of files that are within a package
 //
 // GitLab API docs:
-// https://docs.gitlab.com/ee/api/packages.html#list-package-files
-func (s *PackagesService) ListPackageFiles(pid interface{}, pkg int, opt *ListPackageFilesOptions, options ...RequestOptionFunc) ([]*PackageFile, *Response, error) {
+// https://docs.gitlab.com/api/packages/#list-package-files
+func (s *PackagesService) ListPackageFiles(pid any, pkg int64, opt *ListPackageFilesOptions, options ...RequestOptionFunc) ([]*PackageFile, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err
@@ -225,8 +239,8 @@ func (s *PackagesService) ListPackageFiles(pid interface{}, pkg int, opt *ListPa
 // DeleteProjectPackage deletes a package in a project.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/ee/api/packages.html#delete-a-project-package
-func (s *PackagesService) DeleteProjectPackage(pid interface{}, pkg int, options ...RequestOptionFunc) (*Response, error) {
+// https://docs.gitlab.com/api/packages/#delete-a-project-package
+func (s *PackagesService) DeleteProjectPackage(pid any, pkg int64, options ...RequestOptionFunc) (*Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, err
@@ -244,8 +258,8 @@ func (s *PackagesService) DeleteProjectPackage(pid interface{}, pkg int, options
 // DeletePackageFile deletes a file in project package
 //
 // GitLab API docs:
-// https://docs.gitlab.com/ee/api/packages.html#delete-a-package-file
-func (s *PackagesService) DeletePackageFile(pid interface{}, pkg, file int, options ...RequestOptionFunc) (*Response, error) {
+// https://docs.gitlab.com/api/packages/#delete-a-package-file
+func (s *PackagesService) DeletePackageFile(pid any, pkg, file int64, options ...RequestOptionFunc) (*Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, err

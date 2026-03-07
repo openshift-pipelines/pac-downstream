@@ -2,15 +2,21 @@ package gitea
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"path"
+	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
-	"code.gitea.io/sdk/gitea"
+	"codeberg.org/mvdkleijn/forgejo-sdk/forgejo/v2"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/changedfiles"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/events"
@@ -19,6 +25,7 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
+	providerMetrics "github.com/openshift-pipelines/pipelines-as-code/pkg/provider/providermetrics"
 	"go.uber.org/zap"
 )
 
@@ -37,13 +44,16 @@ const (
 </td></tr>
 {{- end }}
 </table>`
+
+	ForgejoSignatureHeader = "X-Forgejo-Signature"
+	GiteaSignatureHeader   = "X-Gitea-Signature"
 )
 
 // validate the struct to interface.
 var _ provider.Interface = (*Provider)(nil)
 
 type Provider struct {
-	Client           *gitea.Client
+	giteaClient      *forgejo.Client
 	Logger           *zap.SugaredLogger
 	pacInfo          *info.PacOpts
 	Token            *string
@@ -53,6 +63,57 @@ type Provider struct {
 	repo         *v1alpha1.Repository
 	eventEmitter *events.EventEmitter
 	run          *params.Run
+	triggerEvent string
+}
+
+func (v *Provider) Client() *forgejo.Client {
+	providerMetrics.RecordAPIUsage(
+		v.Logger,
+		// URL used instead of "gitea" to differentiate in the case of a CI cluster which
+		// serves multiple Gitea instances
+		v.giteaInstanceURL,
+		v.triggerEvent,
+		v.repo,
+	)
+	return v.giteaClient
+}
+
+func (v *Provider) SetGiteaClient(client *forgejo.Client) {
+	v.giteaClient = client
+}
+
+func (v *Provider) CreateComment(_ context.Context, event *info.Event, commit, updateMarker string) error {
+	if v.giteaClient == nil {
+		return fmt.Errorf("no gitea client has been initialized")
+	}
+
+	if event.PullRequestNumber == 0 {
+		return fmt.Errorf("create comment only works on pull requests")
+	}
+
+	// List comments of the PR
+	if updateMarker != "" {
+		comments, _, err := v.Client().ListIssueComments(event.Organization, event.Repository, int64(event.PullRequestNumber), forgejo.ListIssueCommentOptions{})
+		if err != nil {
+			return err
+		}
+
+		re := regexp.MustCompile(updateMarker)
+		for _, comment := range comments {
+			if re.MatchString(comment.Body) {
+				_, _, err := v.Client().EditIssueComment(event.Organization, event.Repository, comment.ID, forgejo.EditIssueCommentOption{
+					Body: commit,
+				})
+				return err
+			}
+		}
+	}
+
+	_, _, err := v.Client().CreateIssueComment(event.Organization, event.Repository, int64(event.PullRequestNumber), forgejo.CreateIssueCommentOption{
+		Body: commit,
+	})
+
+	return err
 }
 
 func (v *Provider) SetPacInfo(pacInfo *info.PacOpts) {
@@ -68,9 +129,36 @@ func (v *Provider) SetLogger(logger *zap.SugaredLogger) {
 	v.Logger = logger
 }
 
-func (v *Provider) Validate(_ context.Context, _ *params.Run, _ *info.Event) error {
-	// TODO: figure out why gitea doesn't work with mac validation as github which seems to be the same
-	v.Logger.Debug("no secret and signature found, skipping validation for gitea")
+func (v *Provider) Validate(_ context.Context, _ *params.Run, event *info.Event) error {
+	signature := event.Request.Header.Get(ForgejoSignatureHeader)
+	if signature == "" {
+		signature = event.Request.Header.Get(GiteaSignatureHeader)
+	}
+	if signature == "" {
+		return fmt.Errorf("no signature has been detected, for security reason we are not allowing webhooks without a secret")
+	}
+
+	secret := event.Provider.WebhookSecret
+	if secret == "" {
+		return fmt.Errorf("no webhook secret has been set, in repository CR or secret")
+	}
+
+	return validateSignature(signature, event.Request.Payload, []byte(secret))
+}
+
+func validateSignature(signature string, payload, secret []byte) error {
+	signatureBytes, err := hex.DecodeString(signature)
+	if err != nil {
+		return fmt.Errorf("gitea/forgejo webhook signature is not valid hex: %w", err)
+	}
+
+	mac := hmac.New(sha256.New, secret)
+	mac.Write(payload)
+	expectedMAC := mac.Sum(nil)
+
+	if subtle.ConstantTimeCompare(signatureBytes, expectedMAC) != 1 {
+		return fmt.Errorf("gitea/forgejo webhook signature validation failed")
+	}
 	return nil
 }
 
@@ -96,25 +184,30 @@ func (v *Provider) SetClient(_ context.Context, run *params.Run, runevent *info.
 	apiURL := runevent.Provider.URL
 	// password is not exposed to CRD, it's only used from the e2e tests
 	if v.Password != "" && runevent.Provider.User != "" {
-		v.Client, err = gitea.NewClient(apiURL, gitea.SetBasicAuth(runevent.Provider.User, v.Password))
+		v.giteaClient, err = forgejo.NewClient(apiURL, forgejo.SetBasicAuth(runevent.Provider.User, v.Password))
 	} else {
 		if runevent.Provider.Token == "" {
 			return fmt.Errorf("no git_provider.secret has been set in the repo crd")
 		}
-		v.Client, err = gitea.NewClient(apiURL, gitea.SetToken(runevent.Provider.Token))
+		v.giteaClient, err = forgejo.NewClient(apiURL, forgejo.SetToken(runevent.Provider.Token))
 	}
 	if err != nil {
 		return err
 	}
+
+	// Added log for security audit purposes to log client access when a token is used
+	run.Clients.Log.Infof("gitea: initialized API client with provided credentials user=%s providerURL=%s", runevent.Provider.User, apiURL)
+
 	v.giteaInstanceURL = runevent.Provider.URL
 	v.eventEmitter = emitter
 	v.repo = repo
 	v.run = run
+	v.triggerEvent = runevent.EventType
 	return nil
 }
 
 func (v *Provider) CreateStatus(_ context.Context, event *info.Event, statusOpts provider.StatusOpts) error {
-	if v.Client == nil {
+	if v.giteaClient == nil {
 		return fmt.Errorf("cannot set status on gitea no token or url set")
 	}
 	switch statusOpts.Conclusion {
@@ -152,27 +245,45 @@ func (v *Provider) CreateStatus(_ context.Context, event *info.Event, statusOpts
 }
 
 func (v *Provider) createStatusCommit(event *info.Event, pacopts *info.PacOpts, status provider.StatusOpts) error {
-	state := gitea.StatusState(status.Conclusion)
+	state := forgejo.StatusState(status.Conclusion)
 	switch status.Conclusion {
 	case "neutral":
-		state = gitea.StatusSuccess // We don't have a choice than setting as success, no pending here.c
+		state = forgejo.StatusSuccess // We don't have a choice than setting as success, no pending here.c
 	case "pending":
 		if status.Title != "" {
-			state = gitea.StatusPending
+			state = forgejo.StatusPending
 		}
 	}
 	if status.Status == "in_progress" {
-		state = gitea.StatusPending
+		state = forgejo.StatusPending
 	}
 
-	gStatus := gitea.CreateStatusOption{
+	gStatus := forgejo.CreateStatusOption{
 		State:       state,
 		TargetURL:   status.DetailsURL,
 		Description: status.Title,
 		Context:     provider.GetCheckName(status, pacopts),
 	}
-	if _, _, err := v.Client.CreateStatus(event.Organization, event.Repository, event.SHA, gStatus); err != nil {
-		return err
+
+	// Retry logic for transient errors (e.g., "user does not exist" under concurrent load)
+	maxRetries := 3
+	var lastErr error
+	for i := range maxRetries {
+		if _, _, err := v.Client().CreateStatus(event.Organization, event.Repository, event.SHA, gStatus); err != nil {
+			lastErr = err
+			// Only retry on transient "user does not exist" errors
+			if strings.Contains(err.Error(), "user does not exist") {
+				v.Logger.Warnf("CreateStatus failed with transient error, retrying %d/%d: %v", i+1, maxRetries, err)
+				time.Sleep(time.Duration(i+1) * 500 * time.Millisecond)
+				continue
+			}
+			return err
+		}
+		lastErr = nil
+		break
+	}
+	if lastErr != nil {
+		return lastErr
 	}
 
 	eventType := triggertype.IsPullRequestType(event.EventType)
@@ -181,8 +292,8 @@ func (v *Provider) createStatusCommit(event *info.Event, pacopts *info.PacOpts, 
 	}
 	if status.Text != "" && (eventType == triggertype.PullRequest || event.TriggerTarget == triggertype.PullRequest) {
 		status.Text = strings.ReplaceAll(strings.TrimSpace(status.Text), "<br>", "\n")
-		_, _, err := v.Client.CreateIssueComment(event.Organization, event.Repository,
-			int64(event.PullRequestNumber), gitea.CreateIssueCommentOption{
+		_, _, err := v.Client().CreateIssueComment(event.Organization, event.Repository,
+			int64(event.PullRequestNumber), forgejo.CreateIssueCommentOption{
 				Body: fmt.Sprintf("%s\n%s", status.Summary, status.Text),
 			},
 		)
@@ -200,11 +311,14 @@ func (v *Provider) GetTektonDir(_ context.Context, event *info.Event, path, prov
 		revision = event.DefaultBranch
 		v.Logger.Infof("Using PipelineRun definition from default_branch: %s", event.DefaultBranch)
 	} else {
-		v.Logger.Infof("Using PipelineRun definition from source pull request SHA: %s", event.SHA)
+		v.Logger.Infof("Using PipelineRun definition from source %s commit SHA: %s", event.TriggerTarget.String(), event.SHA)
 	}
 
 	tektonDirSha := ""
-	rootobjects, _, err := v.Client.GetTrees(event.Organization, event.Repository, revision, false)
+	opt := forgejo.GetTreesOptions{
+		Recursive: false,
+	}
+	rootobjects, _, err := v.Client().GetTrees(event.Organization, event.Repository, revision, opt)
 	if err != nil {
 		return "", err
 	}
@@ -223,14 +337,15 @@ func (v *Provider) GetTektonDir(_ context.Context, event *info.Event, path, prov
 	}
 	// Get all files in the .tekton directory recursively
 	// TODO: figure out if there is a object limit we need to handle here
-	tektonDirObjects, _, err := v.Client.GetTrees(event.Organization, event.Repository, tektonDirSha, true)
+	opts := forgejo.GetTreesOptions{Recursive: false}
+	tektonDirObjects, _, err := v.Client().GetTrees(event.Organization, event.Repository, tektonDirSha, opts)
 	if err != nil {
 		return "", err
 	}
 	return v.concatAllYamlFiles(tektonDirObjects.Entries, event)
 }
 
-func (v *Provider) concatAllYamlFiles(objects []gitea.GitEntry, event *info.Event) (string,
+func (v *Provider) concatAllYamlFiles(objects []forgejo.GitEntry, event *info.Event) (string,
 	error,
 ) {
 	var allTemplates string
@@ -255,7 +370,7 @@ func (v *Provider) concatAllYamlFiles(objects []gitea.GitEntry, event *info.Even
 }
 
 func (v *Provider) getObject(sha string, event *info.Event) ([]byte, error) {
-	blob, _, err := v.Client.GetBlob(event.Organization, event.Repository, sha)
+	blob, _, err := v.Client().GetBlob(event.Organization, event.Repository, sha)
 	if err != nil {
 		return nil, err
 	}
@@ -272,7 +387,7 @@ func (v *Provider) GetFileInsideRepo(_ context.Context, runevent *info.Event, pa
 		ref = runevent.BaseBranch
 	}
 
-	content, _, err := v.Client.GetContents(runevent.Organization, runevent.Repository, ref, path)
+	content, _, err := v.Client().GetContents(runevent.Organization, runevent.Repository, ref, path)
 	if err != nil {
 		return "", err
 	}
@@ -285,20 +400,20 @@ func (v *Provider) GetFileInsideRepo(_ context.Context, runevent *info.Event, pa
 }
 
 func (v *Provider) GetCommitInfo(_ context.Context, runevent *info.Event) error {
-	if v.Client == nil {
+	if v.giteaClient == nil {
 		return fmt.Errorf("no gitea client has been initialized, " +
 			"exiting... (hint: did you forget setting a secret on your repo?)")
 	}
 
 	sha := runevent.SHA
 	if sha == "" && runevent.HeadBranch != "" {
-		branchinfo, _, err := v.Client.GetRepoBranch(runevent.Organization, runevent.Repository, runevent.HeadBranch)
+		branchinfo, _, err := v.Client().GetRepoBranch(runevent.Organization, runevent.Repository, runevent.HeadBranch)
 		if err != nil {
 			return err
 		}
 		sha = branchinfo.Commit.ID
 	} else if sha == "" && runevent.PullRequestNumber != 0 {
-		pr, _, err := v.Client.GetPullRequest(runevent.Organization, runevent.Repository, int64(runevent.PullRequestNumber))
+		pr, _, err := v.Client().GetPullRequest(runevent.Organization, runevent.Repository, int64(runevent.PullRequestNumber))
 		if err != nil {
 			return err
 		}
@@ -307,17 +422,40 @@ func (v *Provider) GetCommitInfo(_ context.Context, runevent *info.Event) error 
 		runevent.BaseBranch = pr.Base.Ref
 		sha = pr.Head.Sha
 	}
-	commit, _, err := v.Client.GetSingleCommit(runevent.Organization, runevent.Repository, sha)
+	commit, _, err := v.Client().GetSingleCommit(runevent.Organization, runevent.Repository, sha)
 	if err != nil {
 		return err
 	}
 	runevent.SHAURL = commit.HTMLURL
 	runevent.SHATitle = strings.Split(commit.RepoCommit.Message, "\n\n")[0]
 	runevent.SHA = commit.SHA
+
+	// Populate full commit information for LLM context
+	runevent.SHAMessage = commit.RepoCommit.Message
+	if commit.RepoCommit.Author != nil {
+		runevent.SHAAuthorName = commit.RepoCommit.Author.Name
+		runevent.SHAAuthorEmail = commit.RepoCommit.Author.Email
+		if commit.RepoCommit.Author.Date != "" {
+			if authorDate, err := time.Parse(time.RFC3339, commit.RepoCommit.Author.Date); err == nil {
+				runevent.SHAAuthorDate = authorDate
+			}
+		}
+	}
+	if commit.RepoCommit.Committer != nil {
+		runevent.SHACommitterName = commit.RepoCommit.Committer.Name
+		runevent.SHACommitterEmail = commit.RepoCommit.Committer.Email
+		if commit.RepoCommit.Committer.Date != "" {
+			if committerDate, err := time.Parse(time.RFC3339, commit.RepoCommit.Committer.Date); err == nil {
+				runevent.SHACommitterDate = committerDate
+			}
+		}
+	}
+	runevent.HasSkipCommand = provider.SkipCI(commit.RepoCommit.Message)
+
 	return nil
 }
 
-func ShouldGetNextPage(resp *gitea.Response, currentPage int) (bool, int) {
+func ShouldGetNextPage(resp *forgejo.Response, currentPage int) (bool, int) {
 	val, exists := resp.Header[http.CanonicalHeaderKey("x-pagecount")]
 	if !exists {
 		return false, 0
@@ -333,7 +471,7 @@ func ShouldGetNextPage(resp *gitea.Response, currentPage int) (bool, int) {
 }
 
 type PushPayload struct {
-	Commits []gitea.PayloadCommit `json:"commits,omitempty"`
+	Commits []forgejo.PayloadCommit `json:"commits,omitempty"`
 }
 
 func (v *Provider) GetFiles(_ context.Context, runevent *info.Event) (changedfiles.ChangedFiles, error) {
@@ -342,10 +480,10 @@ func (v *Provider) GetFiles(_ context.Context, runevent *info.Event) (changedfil
 	//nolint:exhaustive // we don't need to handle all cases
 	switch runevent.TriggerTarget {
 	case triggertype.PullRequest, triggertype.PullRequestClosed:
-		opt := gitea.ListPullRequestFilesOptions{ListOptions: gitea.ListOptions{Page: 1, PageSize: 50}}
+		opt := forgejo.ListPullRequestFilesOptions{ListOptions: forgejo.ListOptions{Page: 1, PageSize: 50}}
 		shouldGetNextPage := false
 		for {
-			prChangedFiles, resp, err := v.Client.ListPullRequestFiles(runevent.Organization, runevent.Repository, int64(runevent.PullRequestNumber), opt)
+			prChangedFiles, resp, err := v.Client().ListPullRequestFiles(runevent.Organization, runevent.Repository, int64(runevent.PullRequestNumber), opt)
 			if err != nil {
 				return changedfiles.ChangedFiles{}, err
 			}
@@ -402,4 +540,8 @@ func (v *Provider) GetFiles(_ context.Context, runevent *info.Event) (changedfil
 
 func (v *Provider) CreateToken(_ context.Context, _ []string, _ *info.Event) (string, error) {
 	return "", nil
+}
+
+func (v *Provider) GetTemplate(commentType provider.CommentType) string {
+	return provider.GetHTMLTemplate(commentType)
 }
