@@ -1,4 +1,4 @@
-# Generated for Konflux Application openshift-pipelines-core-1.20 by openshift-pipelines/hack. DO NOT EDIT
+# Generated for Konflux Application openshift-pipelines-core by openshift-pipelines/hack. DO NOT EDIT
 apiVersion: tekton.dev/v1
 kind: PipelineRun
 metadata:
@@ -13,27 +13,31 @@ metadata:
     pipelinesascode.tekton.dev/on-cel-expression: event == "pull_request" && target_branch
       == "release-v1.20.x" &&
       ("upstream/***".pathChanged() || ".konflux/patches/***".pathChanged() || ".konflux/rpms/***".pathChanged() ||
-      ".konflux/dockerfiles/controller.Dockerfile".pathChanged() ||
-      ".tekton/pac-downstream-1-20-controller-pull-request.yaml".pathChanged())
-  creationTimestamp: null
+      ".konflux/dockerfiles/webhook.Dockerfile".pathChanged() ||
+      ".tekton/pipelines-as-code-1-20-webhook-pull-request.yaml".pathChanged())
   labels:
     appstudio.openshift.io/application: openshift-pipelines-core-1-20
-    appstudio.openshift.io/component: pac-downstream-1-20-controller
+    appstudio.openshift.io/component: pipelines-as-code-1-20-webhook
     pipelines.appstudio.openshift.io/type: build
-  name: pac-downstream-1-20-controller-on-pull-request
+  name: pipelines-as-code-1-20-webhook-on-pull-request
   namespace: tekton-ecosystem-tenant
 spec:
   params:
   - name: git-url
     value: '{{source_url}}'
+  - name: upstream-git-url
+    value: 'https://github.com/openshift-pipelines/pipelines-as-code'
   - name: revision
     value: '{{revision}}'
   - name: output-image
-    value: quay.io/redhat-user-workloads/tekton-ecosystem-tenant/1-20/pipelines-as-code-controller-rhel9:on-pr-{{revision}}
+    value: quay.io/redhat-user-workloads/tekton-ecosystem-tenant/pipelines-pipelines-as-code-webhook-rhel9:on-pr-{{revision}}
   - name: image-expires-after
     value: 5d
   - name: dockerfile
-    value: .konflux/dockerfiles/controller.Dockerfile
+    value: .konflux/dockerfiles/webhook.Dockerfile
+  - name: additional-tags
+    value:
+      - "on-pr-v1.20.4"
   - name: build-platforms
     value:
     - linux/x86_64
@@ -43,7 +47,7 @@ spec:
   pipelineRef:
     name: docker-build-ta
   taskRunTemplate:
-    serviceAccountName: build-pipeline-pac-downstream-1-20-controller
+    serviceAccountName: build-pipeline-pipelines-as-code-1-20-webhook
   workspaces:
   - name: git-auth
     secret:
