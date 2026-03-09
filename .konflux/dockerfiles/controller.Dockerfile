@@ -1,5 +1,5 @@
 # Rebuild trigger: 1.15.4 release 2026-01-19
-ARG GO_BUILDER=registry.access.redhat.com/ubi8/go-toolset:1.25.7-1772050971
+ARG GO_BUILDER=registry.access.redhat.com/ubi9/go-toolset:1.25
 ARG RUNTIME=registry.access.redhat.com/ubi8/ubi-minimal:latest@sha256:6ed9271b3d3e7147728afaf8917a936c0db2f1badba59550288c2cc772afb58f
 
 FROM $GO_BUILDER AS builder
@@ -14,7 +14,7 @@ RUN go build -ldflags="-X 'knative.dev/pkg/changeset.rev=$(cat HEAD)'" -mod=vend
     ./cmd/pipelines-as-code-controller
 
 FROM $RUNTIME
-ARG VERSION=pipelines-as-code-controller-1.15.4
+ARG VERSION=1.15
 
 ENV KO_APP=/ko-app \
     KO_DATA_PATH=/kodata
@@ -23,16 +23,16 @@ COPY --from=builder /tmp/pipelines-as-code-controller ${KO_APP}/pipelines-as-cod
 COPY head ${KO_DATA_PATH}/HEAD
 
 LABEL \
-      com.redhat.component="openshift-pipelines-pipelines-as-code-controller-container" \
-      name="openshift-pipelines/pipelines-pipelines-as-code-controller-rhel8" \
-      version=$VERSION \
-      cpe="cpe:/a:redhat:openshift_pipelines:1.15::el8" \
-      summary="Red Hat OpenShift Pipelines Pipelines as Code Controller" \
-      maintainer="pipelines-extcomm@redhat.com" \
-      description="Red Hat OpenShift Pipelines Pipelines as Code Controller" \
-      io.k8s.display-name="Red Hat OpenShift Pipelines Pipelines as Code Controller" \
-      io.k8s.description="Red Hat OpenShift Pipelines Pipelines as Code Controller" \
-      io.openshift.tags="pipelines,tekton,openshift"
+    com.redhat.component="openshift-pipelines-pipelines-as-code-controller-rhel9-container" \
+    cpe="cpe:/a:redhat:openshift_pipelines:1.15::el9" \
+    description="Red Hat OpenShift Pipelines pipelines-as-code controller" \
+    io.k8s.description="Red Hat OpenShift Pipelines pipelines-as-code controller" \
+    io.k8s.display-name="Red Hat OpenShift Pipelines pipelines-as-code controller" \
+    io.openshift.tags="tekton,openshift,pipelines-as-code,controller" \
+    maintainer="pipelines-extcomm@redhat.com" \
+    name="openshift-pipelines/pipelines-pipelines-as-code-controller-rhel9" \
+    summary="Red Hat OpenShift Pipelines pipelines-as-code controller" \
+    version="v1.15.5"
 
 RUN microdnf install -y shadow-utils
 RUN groupadd -r -g 65532 nonroot && useradd --no-log-init -r -u 65532 -g nonroot nonroot
