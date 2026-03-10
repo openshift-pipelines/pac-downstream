@@ -23,10 +23,10 @@ import (
 
 type (
 	ProtectedTagsServiceInterface interface {
-		ListProtectedTags(pid interface{}, opt *ListProtectedTagsOptions, options ...RequestOptionFunc) ([]*ProtectedTag, *Response, error)
-		GetProtectedTag(pid interface{}, tag string, options ...RequestOptionFunc) (*ProtectedTag, *Response, error)
-		ProtectRepositoryTags(pid interface{}, opt *ProtectRepositoryTagsOptions, options ...RequestOptionFunc) (*ProtectedTag, *Response, error)
-		UnprotectRepositoryTags(pid interface{}, tag string, options ...RequestOptionFunc) (*Response, error)
+		ListProtectedTags(pid any, opt *ListProtectedTagsOptions, options ...RequestOptionFunc) ([]*ProtectedTag, *Response, error)
+		GetProtectedTag(pid any, tag string, options ...RequestOptionFunc) (*ProtectedTag, *Response, error)
+		ProtectRepositoryTags(pid any, opt *ProtectRepositoryTagsOptions, options ...RequestOptionFunc) (*ProtectedTag, *Response, error)
+		UnprotectRepositoryTags(pid any, tag string, options ...RequestOptionFunc) (*Response, error)
 	}
 
 	// ProtectedTagsService handles communication with the protected tag methods
@@ -50,14 +50,15 @@ type ProtectedTag struct {
 	CreateAccessLevels []*TagAccessDescription `json:"create_access_levels"`
 }
 
-// TagAccessDescription reperesents the access decription for a protected tag.
+// TagAccessDescription represents the access description for a protected tag.
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/protected_tags/
 type TagAccessDescription struct {
-	ID                     int              `json:"id"`
-	UserID                 int              `json:"user_id"`
-	GroupID                int              `json:"group_id"`
+	ID                     int64            `json:"id"`
+	UserID                 int64            `json:"user_id"`
+	GroupID                int64            `json:"group_id"`
+	DeployKeyID            int64            `json:"deploy_key_id"`
 	AccessLevel            AccessLevelValue `json:"access_level"`
 	AccessLevelDescription string           `json:"access_level_description"`
 }
@@ -67,13 +68,15 @@ type TagAccessDescription struct {
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/protected_tags/#list-protected-tags
-type ListProtectedTagsOptions ListOptions
+type ListProtectedTagsOptions struct {
+	ListOptions
+}
 
 // ListProtectedTags returns a list of protected tags from a project.
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/protected_tags/#list-protected-tags
-func (s *ProtectedTagsService) ListProtectedTags(pid interface{}, opt *ListProtectedTagsOptions, options ...RequestOptionFunc) ([]*ProtectedTag, *Response, error) {
+func (s *ProtectedTagsService) ListProtectedTags(pid any, opt *ListProtectedTagsOptions, options ...RequestOptionFunc) ([]*ProtectedTag, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err
@@ -98,7 +101,7 @@ func (s *ProtectedTagsService) ListProtectedTags(pid interface{}, opt *ListProte
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/protected_tags/#get-a-single-protected-tag-or-wildcard-protected-tag
-func (s *ProtectedTagsService) GetProtectedTag(pid interface{}, tag string, options ...RequestOptionFunc) (*ProtectedTag, *Response, error) {
+func (s *ProtectedTagsService) GetProtectedTag(pid any, tag string, options ...RequestOptionFunc) (*ProtectedTag, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err
@@ -135,8 +138,9 @@ type ProtectRepositoryTagsOptions struct {
 // GitLab API docs:
 // https://docs.gitlab.com/api/protected_tags/#protect-repository-tags
 type TagsPermissionOptions struct {
-	UserID      *int              `url:"user_id,omitempty" json:"user_id,omitempty"`
-	GroupID     *int              `url:"group_id,omitempty" json:"group_id,omitempty"`
+	UserID      *int64            `url:"user_id,omitempty" json:"user_id,omitempty"`
+	GroupID     *int64            `url:"group_id,omitempty" json:"group_id,omitempty"`
+	DeployKeyID *int64            `url:"deploy_key_id,omitempty" json:"deploy_key_id,omitempty"`
 	AccessLevel *AccessLevelValue `url:"access_level,omitempty" json:"access_level,omitempty"`
 }
 
@@ -145,7 +149,7 @@ type TagsPermissionOptions struct {
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/protected_tags/#protect-repository-tags
-func (s *ProtectedTagsService) ProtectRepositoryTags(pid interface{}, opt *ProtectRepositoryTagsOptions, options ...RequestOptionFunc) (*ProtectedTag, *Response, error) {
+func (s *ProtectedTagsService) ProtectRepositoryTags(pid any, opt *ProtectRepositoryTagsOptions, options ...RequestOptionFunc) (*ProtectedTag, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err
@@ -171,7 +175,7 @@ func (s *ProtectedTagsService) ProtectRepositoryTags(pid interface{}, opt *Prote
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/protected_tags/#unprotect-repository-tags
-func (s *ProtectedTagsService) UnprotectRepositoryTags(pid interface{}, tag string, options ...RequestOptionFunc) (*Response, error) {
+func (s *ProtectedTagsService) UnprotectRepositoryTags(pid any, tag string, options ...RequestOptionFunc) (*Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, err

@@ -1,10 +1,10 @@
 ---
 title: Bitbucket Data Center
-weight: 15
+weight: 16
 ---
-# Install Pipelines-As-Code on Bitbucket Data Center
+# Install Pipelines-as-Code on Bitbucket Data Center
 
-Pipelines-As-Code has a full support of [Bitbucket
+Pipelines-as-Code has full support for [Bitbucket
 Data Center](https://www.atlassian.com/software/bitbucket/enterprise).
 
 After following the [installation](/docs/install/installation):
@@ -15,6 +15,17 @@ After following the [installation](/docs/install/installation):
 <https://confluence.atlassian.com/bitbucketserver/personal-access-tokens-939515499.html>
 
 The token will need to have the `PROJECT_ADMIN` and `REPOSITORY_ADMIN` permissions.
+
+{{< hint info >}}
+
+The service account user that owns the token must be a **licensed Bitbucket
+user** (i.e., granted the `LICENSED_USER` global permission) for group-based
+permission checks to work. If the service account is an unlicensed technical
+user, group membership cannot be resolved and users with group-only access
+will not be able to trigger builds. As a workaround, add those users
+individually to the project or repository permissions.
+
+{{< /hint >}}
 
 Note that the token needs to be able to have access to the forked repository in
 pull requests, or it would not be able to process and access the pull request.
@@ -87,7 +98,7 @@ recreate it.
 ## Notes
 
 * `git_provider.secret` cannot reference a secret in another namespace,
-  Pipelines as code always assumes it will be the same namespace as where the
+  Pipelines-as-Code always assumes it will be in the same namespace where the
   repository has been created.
 
 * `tkn-pac create` and `bootstrap` is not supported on Bitbucket Data Center.

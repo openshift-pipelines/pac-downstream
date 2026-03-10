@@ -5,7 +5,8 @@ import (
 	"time"
 
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/metrics"
+	prmetrics "github.com/openshift-pipelines/pipelines-as-code/pkg/pipelinerunmetrics"
+	metricsutils "github.com/openshift-pipelines/pipelines-as-code/pkg/test/metricstest"
 	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
@@ -75,6 +76,18 @@ func TestCountPipelineRun(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name: "provider is Forgejo",
+			annotations: map[string]string{
+				keys.GitProvider: "forgejo",
+				keys.EventType:   "push",
+			},
+			tags: map[string]string{
+				"provider":   "forgejo-webhook",
+				"event-type": "push",
+			},
+			wantErr: false,
+		},
+		{
 			name: "unsupported provider",
 			annotations: map[string]string{
 				keys.GitProvider: "unsupported",
@@ -86,8 +99,8 @@ func TestCountPipelineRun(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			unregisterMetrics()
-			m, err := metrics.NewRecorder()
+			metricsutils.ResetMetrics()
+			m, err := prmetrics.NewRecorder()
 			assert.NilError(t, err)
 			r := &Reconciler{
 				metrics: m,
@@ -224,8 +237,8 @@ func TestCalculatePipelineRunDuration(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			unregisterMetrics()
-			m, err := metrics.NewRecorder()
+			metricsutils.ResetMetrics()
+			m, err := prmetrics.NewRecorder()
 			assert.NilError(t, err)
 			r := &Reconciler{
 				metrics: m,
@@ -291,8 +304,8 @@ func TestCountRunningPRs(t *testing.T) {
 		prl = append(prl, pr)
 	}
 
-	unregisterMetrics()
-	m, err := metrics.NewRecorder()
+	metricsutils.ResetMetrics()
+	m, err := prmetrics.NewRecorder()
 	assert.NilError(t, err)
 	r := &Reconciler{
 		metrics: m,
@@ -305,16 +318,4 @@ func TestCountRunningPRs(t *testing.T) {
 		"repository": "pac-repo",
 	}
 	metricstest.CheckLastValueData(t, "pipelines_as_code_running_pipelineruns_count", tags, float64(numberOfRunningPRs))
-}
-
-func unregisterMetrics() {
-	metricstest.Unregister(
-		"pipelines_as_code_pipelinerun_count",
-		"pipelines_as_code_pipelinerun_duration_seconds_sum",
-		"pipelines_as_code_running_pipelineruns_count",
-		"pipelines_as_code_git_provider_api_request_count",
-	)
-
-	// have to reset sync.Once to allow recreation of Recorder.
-	metrics.ResetRecorder()
 }

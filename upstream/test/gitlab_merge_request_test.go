@@ -12,8 +12,9 @@ import (
 
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 
-	"github.com/google/go-github/v71/github"
+	"github.com/google/go-github/v81/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/formatting"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/opscomments"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
 	"github.com/openshift-pipelines/pipelines-as-code/test/pkg/cctx"
@@ -76,7 +77,7 @@ func TestGitlabMergeRequest(t *testing.T) {
 	mrID, err := tgitlab.CreateMR(glprovider.Client(), opts.ProjectID, targetRefName, projectinfo.DefaultBranch, mrTitle)
 	assert.NilError(t, err)
 	runcnx.Clients.Log.Infof("MergeRequest %s/-/merge_requests/%d has been created", projectinfo.WebURL, mrID)
-	defer tgitlab.TearDown(ctx, t, runcnx, glprovider, mrID, targetRefName, targetNS, opts.ProjectID)
+	defer tgitlab.TearDown(ctx, t, runcnx, glprovider, int(int64(mrID)), targetRefName, targetNS, opts.ProjectID)
 
 	// Send another Push to make an update and make sure we react to it
 	entries, err = payload.GetEntries(map[string]string{
@@ -104,7 +105,7 @@ func TestGitlabMergeRequest(t *testing.T) {
 	}
 
 	// Get the MR to fetch the SHA
-	mr, _, err := glprovider.Client().MergeRequests.GetMergeRequest(opts.ProjectID, mrID, nil)
+	mr, _, err := glprovider.Client().MergeRequests.GetMergeRequest(opts.ProjectID, int64(mrID), nil)
 	assert.NilError(t, err)
 
 	// Check GitLab pipelines via API - should have 1 pipeline from normal MR processing
@@ -115,14 +116,14 @@ func TestGitlabMergeRequest(t *testing.T) {
 	assert.Assert(t, len(pipelines) == 1, "Expected 1 GitLab pipeline from normal MR processing, got %d", len(pipelines))
 
 	runcnx.Clients.Log.Infof("Sending /test comment on MergeRequest %s/-/merge_requests/%d", projectinfo.WebURL, mrID)
-	_, _, err = glprovider.Client().Notes.CreateMergeRequestNote(opts.ProjectID, mrID, &clientGitlab.CreateMergeRequestNoteOptions{
-		Body: clientGitlab.Ptr("/retest"),
+	_, _, err = glprovider.Client().Notes.CreateMergeRequestNote(opts.ProjectID, int64(mrID), &clientGitlab.CreateMergeRequestNoteOptions{
+		Body: clientGitlab.Ptr("/test"),
 	})
 	assert.NilError(t, err)
 
 	sopt = twait.SuccessOpt{
 		Title:           commitTitle,
-		OnEvent:         opscomments.RetestAllCommentEventType.String(),
+		OnEvent:         opscomments.TestAllCommentEventType.String(),
 		TargetNS:        targetNS,
 		NumberofPRMatch: 5, // this is the max we get in repos status
 		SHA:             mr.SHA,
@@ -173,7 +174,7 @@ func TestGitlabOnLabel(t *testing.T) {
 	mrID, err := tgitlab.CreateMR(glprovider.Client(), opts.ProjectID, targetRefName, projectinfo.DefaultBranch, mrTitle)
 	assert.NilError(t, err)
 	runcnx.Clients.Log.Infof("MergeRequest %s/-/merge_requests/%d has been created", projectinfo.WebURL, mrID)
-	defer tgitlab.TearDown(ctx, t, runcnx, glprovider, mrID, targetRefName, targetNS, opts.ProjectID)
+	defer tgitlab.TearDown(ctx, t, runcnx, glprovider, int(int64(mrID)), targetRefName, targetNS, opts.ProjectID)
 
 	runcnx.Clients.Log.Infof("waiting 5 seconds until we make sure nothing happened")
 	time.Sleep(5 * time.Second)
@@ -182,7 +183,7 @@ func TestGitlabOnLabel(t *testing.T) {
 	assert.Assert(t, len(prsNew.Items) == 0)
 
 	// now add a Label
-	mr, _, err := glprovider.Client().MergeRequests.UpdateMergeRequest(opts.ProjectID, mrID, &clientGitlab.UpdateMergeRequestOptions{
+	mr, _, err := glprovider.Client().MergeRequests.UpdateMergeRequest(opts.ProjectID, int64(mrID), &clientGitlab.UpdateMergeRequestOptions{
 		Labels: &clientGitlab.LabelOptions{"bug"},
 	})
 	assert.NilError(t, err)
@@ -242,13 +243,13 @@ func TestGitlabOnComment(t *testing.T) {
 	mrID, err := tgitlab.CreateMR(glprovider.Client(), opts.ProjectID, targetRefName, projectinfo.DefaultBranch, mrTitle)
 	assert.NilError(t, err)
 	runcnx.Clients.Log.Infof("MergeRequest %s/-/merge_requests/%d has been created", projectinfo.WebURL, mrID)
-	defer tgitlab.TearDown(ctx, t, runcnx, glprovider, mrID, targetRefName, targetNS, opts.ProjectID)
+	defer tgitlab.TearDown(ctx, t, runcnx, glprovider, int(int64(mrID)), targetRefName, targetNS, opts.ProjectID)
 
-	note, _, err := glprovider.Client().Notes.CreateMergeRequestNote(opts.ProjectID, mrID, &clientGitlab.CreateMergeRequestNoteOptions{
+	note, _, err := glprovider.Client().Notes.CreateMergeRequestNote(opts.ProjectID, int64(mrID), &clientGitlab.CreateMergeRequestNoteOptions{
 		Body: github.Ptr(triggerComment),
 	})
 	assert.NilError(t, err)
-	runcnx.Clients.Log.Infof("Note %s/-/merge_requests/%d/notes/%d has been created", projectinfo.WebURL, mrID, note.ID)
+	runcnx.Clients.Log.Infof("Note %s/-/merge_requests/%d/notes/%d has been created", projectinfo.WebURL, int64(mrID), note.ID)
 
 	sopt := twait.SuccessOpt{
 		OnEvent:         opscomments.OnCommentEventType.String(),
@@ -259,7 +260,7 @@ func TestGitlabOnComment(t *testing.T) {
 	twait.Succeeded(ctx, t, runcnx, opts, sopt)
 
 	// get pull request info
-	mr, _, err := glprovider.Client().MergeRequests.GetMergeRequest(opts.ProjectID, mrID, nil)
+	mr, _, err := glprovider.Client().MergeRequests.GetMergeRequest(opts.ProjectID, int64(mrID), nil)
 	assert.NilError(t, err)
 
 	waitOpts := twait.Opts{
@@ -320,7 +321,7 @@ func TestGitlabCancelInProgressOnChange(t *testing.T) {
 	mrID, err := tgitlab.CreateMR(glprovider.Client(), opts.ProjectID, targetRefName, projectinfo.DefaultBranch, mrTitle)
 	assert.NilError(t, err)
 	runcnx.Clients.Log.Infof("MergeRequest %s/-/merge_requests/%d has been created", projectinfo.WebURL, mrID)
-	defer tgitlab.TearDown(ctx, t, runcnx, glprovider, mrID, targetRefName, targetNS, opts.ProjectID)
+	defer tgitlab.TearDown(ctx, t, runcnx, glprovider, int(int64(mrID)), targetRefName, targetNS, opts.ProjectID)
 
 	runcnx.Clients.Log.Infof("Waiting for the pipelinerun to be created")
 	originalPipelineWaitOpts := twait.Opts{
@@ -359,7 +360,7 @@ func TestGitlabCancelInProgressOnChange(t *testing.T) {
 	err = twait.UntilPipelineRunCreated(ctx, runcnx.Clients, newPipelineWaitOpts)
 	assert.NilError(t, err)
 
-	runcnx.Clients.Log.Infof("Waiting for old pipelinerun to be canceled")
+	runcnx.Clients.Log.Infof("Waiting for old pipelinerun to be cancelled")
 	cancelledErr := twait.UntilPipelineRunHasReason(ctx, runcnx.Clients, v1.PipelineRunReasonCancelled, originalPipelineWaitOpts)
 	assert.NilError(t, cancelledErr)
 }
@@ -405,7 +406,7 @@ func TestGitlabCancelInProgressOnPRClose(t *testing.T) {
 	mrID, err := tgitlab.CreateMR(glprovider.Client(), opts.ProjectID, targetRefName, projectinfo.DefaultBranch, mrTitle)
 	assert.NilError(t, err)
 	runcnx.Clients.Log.Infof("MergeRequest %s/-/merge_requests/%d has been created", projectinfo.WebURL, mrID)
-	defer tgitlab.TearDown(ctx, t, runcnx, glprovider, mrID, targetRefName, targetNS, opts.ProjectID)
+	defer tgitlab.TearDown(ctx, t, runcnx, glprovider, int(int64(mrID)), targetRefName, targetNS, opts.ProjectID)
 
 	runcnx.Clients.Log.Infof("Waiting for the two pipelinerun to be created")
 	waitOpts := twait.Opts{
@@ -417,7 +418,7 @@ func TestGitlabCancelInProgressOnPRClose(t *testing.T) {
 	}
 	err = twait.UntilPipelineRunCreated(ctx, runcnx.Clients, waitOpts)
 	assert.NilError(t, err)
-	_, _, err = glprovider.Client().MergeRequests.UpdateMergeRequest(opts.ProjectID, mrID, &clientGitlab.UpdateMergeRequestOptions{
+	_, _, err = glprovider.Client().MergeRequests.UpdateMergeRequest(opts.ProjectID, int64(mrID), &clientGitlab.UpdateMergeRequestOptions{
 		StateEvent: clientGitlab.Ptr("close"),
 	})
 	assert.NilError(t, err)
@@ -428,7 +429,7 @@ func TestGitlabCancelInProgressOnPRClose(t *testing.T) {
 	prs, err := runcnx.Clients.Tekton.TektonV1().PipelineRuns(targetNS).List(context.Background(), metav1.ListOptions{})
 	assert.NilError(t, err)
 	assert.Equal(t, len(prs.Items), 1, "should have only one pipelinerun, but we have: %d", len(prs.Items))
-	assert.Equal(t, prs.Items[0].GetStatusCondition().GetCondition(apis.ConditionSucceeded).GetReason(), "Cancelled", "should have been canceled")
+	assert.Equal(t, prs.Items[0].GetStatusCondition().GetCondition(apis.ConditionSucceeded).GetReason(), "Cancelled", "should have been cancelled")
 
 	// failing on `true` condition because for cancelled PipelineRun we want `false` condition.
 	waitOpts.FailOnRepoCondition = corev1.ConditionTrue
@@ -481,9 +482,9 @@ func TestGitlabIssueGitopsComment(t *testing.T) {
 	mrID, err := tgitlab.CreateMR(glprovider.Client(), opts.ProjectID, targetRefName, projectinfo.DefaultBranch, mrTitle)
 	assert.NilError(t, err)
 	runcnx.Clients.Log.Infof("MergeRequest %s/-/merge_requests/%d has been created", projectinfo.WebURL, mrID)
-	defer tgitlab.TearDown(ctx, t, runcnx, glprovider, mrID, targetRefName, targetNS, opts.ProjectID)
+	defer tgitlab.TearDown(ctx, t, runcnx, glprovider, int(int64(mrID)), targetRefName, targetNS, opts.ProjectID)
 
-	_, _, err = glprovider.Client().Notes.CreateMergeRequestNote(opts.ProjectID, mrID, &clientGitlab.CreateMergeRequestNoteOptions{
+	_, _, err = glprovider.Client().Notes.CreateMergeRequestNote(opts.ProjectID, int64(mrID), &clientGitlab.CreateMergeRequestNoteOptions{
 		Body: clientGitlab.Ptr("/test no-match"),
 	})
 	assert.NilError(t, err)
@@ -547,7 +548,7 @@ func TestGitlabDisableCommentsOnMRNotCreated(t *testing.T) {
 	mrID, err := tgitlab.CreateMR(glprovider.Client(), opts.ProjectID, targetRefName, projectinfo.DefaultBranch, mrTitle)
 	assert.NilError(t, err)
 	runcnx.Clients.Log.Infof("MergeRequest %s/-/merge_requests/%d has been created", projectinfo.WebURL, mrID)
-	defer tgitlab.TearDown(ctx, t, runcnx, glprovider, mrID, targetRefName, targetNS, opts.ProjectID)
+	defer tgitlab.TearDown(ctx, t, runcnx, glprovider, int(int64(mrID)), targetRefName, targetNS, opts.ProjectID)
 
 	sopt := twait.SuccessOpt{
 		Title:           commitTitle,
@@ -596,7 +597,7 @@ func TestGitlabDisableCommentsOnMRNotCreated(t *testing.T) {
 		case "success":
 			pipeline = p
 			return true, nil // Success! Stop polling.
-		case "failed", "canceled", "skipped":
+		case "failed", "canceled", "skipped": //nolint:misspell
 			// The pipeline has finished but not successfully.
 			return false, fmt.Errorf("pipeline finished with non-success status: %s", p.Status)
 		default:
@@ -609,7 +610,7 @@ func TestGitlabDisableCommentsOnMRNotCreated(t *testing.T) {
 	runcnx.Clients.Log.Infof("✅ GitLab pipeline ID %d has succeeded!", pipeline.ID)
 
 	// No comments will be added related to pipelineruns info
-	notes, _, err := glprovider.Client().Notes.ListMergeRequestNotes(opts.ProjectID, mrID, nil)
+	notes, _, err := glprovider.Client().Notes.ListMergeRequestNotes(opts.ProjectID, int64(mrID), nil)
 
 	commentRegexp := regexp.MustCompile(`.*Pipelines as Code CI/*`)
 	assert.NilError(t, err)
@@ -669,7 +670,7 @@ func TestGitlabMergeRequestOnUpdateAtAndLabelChange(t *testing.T) {
 	mrID, err := tgitlab.CreateMR(glprovider.Client(), opts.ProjectID, targetRefName, projectinfo.DefaultBranch, mrTitle)
 	assert.NilError(t, err)
 	runcnx.Clients.Log.Infof("MergeRequest %s/-/merge_requests/%d has been created", projectinfo.WebURL, mrID)
-	defer tgitlab.TearDown(ctx, t, runcnx, glprovider, mrID, targetRefName, targetNS, opts.ProjectID)
+	defer tgitlab.TearDown(ctx, t, runcnx, glprovider, int(int64(mrID)), targetRefName, targetNS, opts.ProjectID)
 
 	sopt := twait.SuccessOpt{
 		Title:           commitTitle,
@@ -684,7 +685,7 @@ func TestGitlabMergeRequestOnUpdateAtAndLabelChange(t *testing.T) {
 	assert.Assert(t, len(prsNew.Items) == 2)
 
 	runcnx.Clients.Log.Infof("Changing Title on MergeRequest %s/-/merge_requests/%d", projectinfo.WebURL, mrID)
-	_, _, err = glprovider.Client().MergeRequests.UpdateMergeRequest(opts.ProjectID, mrID, &clientGitlab.UpdateMergeRequestOptions{
+	_, _, err = glprovider.Client().MergeRequests.UpdateMergeRequest(opts.ProjectID, int64(mrID), &clientGitlab.UpdateMergeRequestOptions{
 		Title: clientGitlab.Ptr("test"),
 	})
 	assert.NilError(t, err)
@@ -696,6 +697,424 @@ func TestGitlabMergeRequestOnUpdateAtAndLabelChange(t *testing.T) {
 		assert.Assert(t, len(prs.Items) == 2)
 		time.Sleep(1 * time.Second)
 	}
+}
+
+func TestGitlabMergeRequestValidationErrorsFromFork(t *testing.T) {
+	targetNS := names.SimpleNameGenerator.RestrictLengthWithRandomSuffix("pac-e2e-ns")
+	ctx := context.Background()
+	runcnx, opts, glprovider, err := tgitlab.Setup(ctx)
+	assert.NilError(t, err)
+	ctx, err = cctx.GetControllerCtxInfo(ctx, runcnx)
+	assert.NilError(t, err)
+	runcnx.Clients.Log.Info("Testing GitLab validation error commenting from fork scenario")
+
+	// Get the original project onboarded to PaC
+	originalProject, resp, err := glprovider.Client().Projects.GetProject(opts.ProjectID, nil)
+	assert.NilError(t, err)
+	if resp != nil && resp.StatusCode == http.StatusNotFound {
+		t.Errorf("Repository %d not found", opts.ProjectID)
+	}
+
+	err = tgitlab.CreateCRD(ctx, originalProject, runcnx, opts, targetNS, nil)
+	assert.NilError(t, err)
+
+	// Get an existing fork of the original project
+	projectForks, _, err := glprovider.Client().Projects.ListProjectForks(opts.ProjectID, &clientGitlab.ListProjectsOptions{})
+	assert.NilError(t, err)
+
+	if len(projectForks) == 0 {
+		t.Fatal("No forks available for testing fork scenario. This test requires at least one fork of the project.")
+	}
+
+	forkProject := projectForks[0] // Use the first available fork
+	runcnx.Clients.Log.Infof("Using existing fork project: %s (ID: %d) from original: %s (ID: %d)",
+		forkProject.PathWithNamespace, forkProject.ID, originalProject.PathWithNamespace, originalProject.ID)
+
+	// Commit invalid .tekton files to the fork
+	entries, err := payload.GetEntries(map[string]string{
+		".tekton/bad-yaml.yaml": "testdata/failures/bad-yaml.yaml",
+	}, targetNS, originalProject.DefaultBranch,
+		triggertype.PullRequest.String(), map[string]string{})
+	assert.NilError(t, err)
+
+	targetRefName := names.SimpleNameGenerator.RestrictLengthWithRandomSuffix("pac-e2e-fork-test")
+	forkCloneURL, err := scm.MakeGitCloneURL(forkProject.WebURL, opts.UserName, opts.Password)
+	assert.NilError(t, err)
+
+	commitTitle := "Add invalid .tekton file from fork - " + targetRefName
+	scmOpts := &scm.Opts{
+		GitURL:        forkCloneURL,
+		CommitTitle:   commitTitle,
+		Log:           runcnx.Clients.Log,
+		WebURL:        forkProject.WebURL,
+		TargetRefName: targetRefName,
+		BaseRefName:   originalProject.DefaultBranch,
+	}
+	_ = scm.PushFilesToRefGit(t, scmOpts, entries)
+	runcnx.Clients.Log.Infof("Pushed invalid .tekton files to fork branch: %s", targetRefName)
+
+	// Create merge request from fork to original project
+	mrTitle := "TestValidationErrorsFromFork - " + targetRefName
+	mrOptions := &clientGitlab.CreateMergeRequestOptions{
+		Title:        &mrTitle,
+		SourceBranch: &targetRefName,
+		TargetBranch: &originalProject.DefaultBranch,
+		// Create MR on the target project (original), not the source (fork)
+		TargetProjectID: &originalProject.ID,
+	}
+
+	mr, _, err := glprovider.Client().MergeRequests.CreateMergeRequest(forkProject.ID, mrOptions)
+	assert.NilError(t, err)
+	runcnx.Clients.Log.Infof("Created merge request from fork to original: %s/-/merge_requests/%d",
+		originalProject.WebURL, mr.IID)
+
+	defer func() {
+		// Clean up MR and namespace using TearDown
+		tgitlab.TearDown(ctx, t, runcnx, glprovider, int(mr.IID), "", targetNS, int(originalProject.ID))
+
+		runcnx.Clients.Log.Infof("Deleting branch %s from fork project", targetRefName)
+		_, err := glprovider.Client().Branches.DeleteBranch(forkProject.ID, targetRefName)
+		if err != nil {
+			runcnx.Clients.Log.Warnf("Failed to delete branch from fork: %v", err)
+		}
+	}()
+
+	runcnx.Clients.Log.Info("Waiting for webhook validation to process MR and post validation comment...")
+
+	maxLoop := 12 // Wait up to 72 seconds for webhook processing
+	foundValidationComment := false
+
+	for i := 0; i < maxLoop; i++ {
+		notes, _, err := glprovider.Client().Notes.ListMergeRequestNotes(originalProject.ID, mr.IID, nil)
+		assert.NilError(t, err)
+
+		for _, note := range notes {
+			// Look for the validation error comment that PaC should post via webhook
+			if regexp.MustCompile(`.*There are some errors in your PipelineRun template.*`).MatchString(note.Body) &&
+				regexp.MustCompile(`.*bad-yaml\.yaml.*yaml validation error.*`).MatchString(note.Body) {
+				runcnx.Clients.Log.Info("Found validation error comment on original project's MR!")
+				foundValidationComment = true
+
+				// Verify the comment format matches PaC's validation error format
+				assert.Assert(t, regexp.MustCompile(`\[!CAUTION\]`).MatchString(note.Body), "Comment should contain caution header")
+				break
+			}
+		}
+
+		if foundValidationComment {
+			break
+		}
+
+		runcnx.Clients.Log.Infof("Loop %d/%d: Waiting for webhook validation to post comment (testing TargetProjectID fix)", i+1, maxLoop)
+		time.Sleep(6 * time.Second)
+	}
+
+	assert.Assert(t, foundValidationComment, "Validation error comment should appear on original project's MR. ")
+}
+
+func TestGitlabConsistentCommitStatusOnMR(t *testing.T) {
+	targetNS := names.SimpleNameGenerator.RestrictLengthWithRandomSuffix("pac-e2e-ns")
+	ctx := context.Background()
+	runcnx, opts, glprovider, err := tgitlab.Setup(ctx)
+	assert.NilError(t, err)
+	ctx, err = cctx.GetControllerCtxInfo(ctx, runcnx)
+	assert.NilError(t, err)
+	runcnx.Clients.Log.Info("Testing GitLab consistent commit status on Merge Request scenario")
+
+	projectinfo, resp, err := glprovider.Client().Projects.GetProject(opts.ProjectID, nil)
+	assert.NilError(t, err)
+	if resp != nil && resp.StatusCode == http.StatusNotFound {
+		t.Errorf("Repository %d not found", opts.ProjectID)
+	}
+
+	err = tgitlab.CreateCRD(ctx, projectinfo, runcnx, opts, targetNS, nil)
+	assert.NilError(t, err)
+
+	entries, err := payload.GetEntries(map[string]string{
+		".tekton/bad-pipelinerun.yaml":         "testdata/failures/bad-pipelinerun.yaml",
+		".tekton/always-good-pipelinerun.yaml": "testdata/always-good-pipelinerun.yaml",
+	}, targetNS, projectinfo.DefaultBranch,
+		triggertype.PullRequest.String(), map[string]string{})
+	assert.NilError(t, err)
+
+	targetRefName := names.SimpleNameGenerator.RestrictLengthWithRandomSuffix("pac-e2e-test")
+	cloneURL, err := scm.MakeGitCloneURL(projectinfo.WebURL, opts.UserName, opts.Password)
+	assert.NilError(t, err)
+
+	commitTitle := "Add invalid .tekton file - " + targetRefName
+	scmOpts := &scm.Opts{
+		GitURL:        cloneURL,
+		CommitTitle:   commitTitle,
+		Log:           runcnx.Clients.Log,
+		WebURL:        projectinfo.WebURL,
+		TargetRefName: targetRefName,
+		BaseRefName:   projectinfo.DefaultBranch,
+	}
+	_ = scm.PushFilesToRefGit(t, scmOpts, entries)
+	runcnx.Clients.Log.Infof("Pushed invalid .tekton files to branch: %s", targetRefName)
+
+	mrTitle := "TestConsistentCommitStatusOnMR - " + targetRefName
+	mrOptions := &clientGitlab.CreateMergeRequestOptions{
+		Title:        &mrTitle,
+		SourceBranch: &targetRefName,
+		TargetBranch: &projectinfo.DefaultBranch,
+	}
+
+	mr, _, err := glprovider.Client().MergeRequests.CreateMergeRequest(projectinfo.ID, mrOptions)
+	assert.NilError(t, err)
+	runcnx.Clients.Log.Infof("Created merge request: %s", mr.WebURL)
+
+	defer tgitlab.TearDown(ctx, t, runcnx, glprovider, int(mr.IID), targetRefName, targetNS, int(projectinfo.ID))
+
+	sopt := twait.SuccessOpt{
+		Title:           commitTitle,
+		OnEvent:         "Merge Request",
+		TargetNS:        targetNS,
+		NumberofPRMatch: 1, // there must be one PipelineRun because one is invalid
+		SHA:             mr.SHA,
+	}
+	twait.Succeeded(ctx, t, runcnx, opts, sopt)
+	labelSelector := fmt.Sprintf("%s=%s", keys.SHA, formatting.CleanValueKubernetes(mr.SHA))
+	prsNew, err := runcnx.Clients.Tekton.TektonV1().PipelineRuns(targetNS).List(ctx, metav1.ListOptions{
+		LabelSelector: labelSelector,
+	})
+	assert.NilError(t, err)
+	assert.Assert(t, len(prsNew.Items) == 1)
+
+	commitStatuses, _, err := glprovider.Client().Commits.GetCommitStatuses(projectinfo.ID, mr.SHA, &clientGitlab.GetCommitStatusesOptions{})
+	assert.NilError(t, err)
+	assert.Assert(t, len(commitStatuses) == 2)
+
+	// here we don't know which status is returned first from  GitLab API
+	// so we need to check both by their names
+	for _, cs := range commitStatuses {
+		switch cs.Name {
+		case "Pipelines as Code CI / bad-converts-good-pipelinerun":
+			assert.Assert(t, cs.Status == "failed")
+		case "Pipelines as Code CI / always-good-pipelinerun":
+			assert.Assert(t, cs.Status == "success")
+		default:
+			t.Fatalf("unexpected commit status name: %s", cs.Name)
+		}
+	}
+
+	entries, err = payload.GetEntries(map[string]string{
+		".tekton/bad-pipelinerun.yaml":         "testdata/bad-converts-good-pipelinerun.yaml",
+		".tekton/always-good-pipelinerun.yaml": "testdata/always-good-pipelinerun.yaml",
+	}, targetNS, projectinfo.DefaultBranch,
+		triggertype.PullRequest.String(), map[string]string{})
+	assert.NilError(t, err)
+
+	commitTitle = "Add good .tekton file - " + targetRefName
+	scmOpts = &scm.Opts{
+		GitURL:        cloneURL,
+		CommitTitle:   commitTitle,
+		Log:           runcnx.Clients.Log,
+		WebURL:        projectinfo.WebURL,
+		TargetRefName: targetRefName,
+		BaseRefName:   projectinfo.DefaultBranch,
+		PushForce:     true,
+	}
+	newSHA := scm.PushFilesToRefGit(t, scmOpts, entries)
+	runcnx.Clients.Log.Infof("Pushed good .tekton files to branch: %s", targetRefName)
+
+	sopt = twait.SuccessOpt{
+		Title:           commitTitle,
+		OnEvent:         "Merge Request",
+		TargetNS:        targetNS,
+		NumberofPRMatch: 2,
+		SHA:             newSHA,
+	}
+
+	twait.Succeeded(ctx, t, runcnx, opts, sopt)
+	labelSelector = fmt.Sprintf("%s=%s", keys.SHA, formatting.CleanValueKubernetes(newSHA))
+	prsNew, err = runcnx.Clients.Tekton.TektonV1().PipelineRuns(targetNS).List(ctx, metav1.ListOptions{
+		LabelSelector: labelSelector,
+	})
+	assert.NilError(t, err)
+	assert.Assert(t, len(prsNew.Items) == 2)
+
+	commitStatuses, _, err = glprovider.Client().Commits.GetCommitStatuses(projectinfo.ID, newSHA, &clientGitlab.GetCommitStatusesOptions{})
+	assert.NilError(t, err)
+	assert.Assert(t, len(commitStatuses) == 2)
+
+	// now both should be success
+	for _, cs := range commitStatuses {
+		switch cs.Name {
+		case "Pipelines as Code CI / bad-converts-good-pipelinerun", "Pipelines as Code CI / always-good-pipelinerun":
+			assert.Assert(t, cs.Status == "success")
+		default:
+			t.Fatalf("unexpected commit status name: %s", cs.Name)
+		}
+	}
+}
+
+// TestGitlabMergeRequestCelPrefix tests the cel: prefix for arbitrary CEL expressions.
+// The cel: prefix allows evaluating full CEL expressions with access to body, headers, files, and pac namespaces.
+func TestGitlabMergeRequestCelPrefix(t *testing.T) {
+	targetNS := names.SimpleNameGenerator.RestrictLengthWithRandomSuffix("pac-e2e-ns")
+	ctx := context.Background()
+	runcnx, opts, glprovider, err := tgitlab.Setup(ctx)
+	assert.NilError(t, err)
+	ctx, err = cctx.GetControllerCtxInfo(ctx, runcnx)
+	assert.NilError(t, err)
+	runcnx.Clients.Log.Info("Testing cel: prefix with GitLab")
+
+	projectinfo, resp, err := glprovider.Client().Projects.GetProject(opts.ProjectID, nil)
+	assert.NilError(t, err)
+	if resp != nil && resp.StatusCode == http.StatusNotFound {
+		t.Errorf("Repository %s not found in %s", opts.Organization, opts.Repo)
+	}
+
+	err = tgitlab.CreateCRD(ctx, projectinfo, runcnx, opts, targetNS, nil)
+	assert.NilError(t, err)
+
+	entries, err := payload.GetEntries(map[string]string{
+		".tekton/pipelinerun.yaml": "testdata/pipelinerun-cel-prefix-gitlab.yaml",
+	}, targetNS, projectinfo.DefaultBranch,
+		triggertype.PullRequest.String(), map[string]string{})
+	assert.NilError(t, err)
+
+	targetRefName := names.SimpleNameGenerator.RestrictLengthWithRandomSuffix("pac-e2e-test")
+
+	gitCloneURL, err := scm.MakeGitCloneURL(projectinfo.WebURL, opts.UserName, opts.Password)
+	assert.NilError(t, err)
+	commitTitle := "Testing cel: prefix on " + targetRefName
+	scmOpts := &scm.Opts{
+		GitURL:        gitCloneURL,
+		CommitTitle:   commitTitle,
+		Log:           runcnx.Clients.Log,
+		WebURL:        projectinfo.WebURL,
+		TargetRefName: targetRefName,
+		BaseRefName:   projectinfo.DefaultBranch,
+	}
+	_ = scm.PushFilesToRefGit(t, scmOpts, entries)
+
+	runcnx.Clients.Log.Infof("Branch %s has been created and pushed with cel: prefix test files", targetRefName)
+	mrTitle := "TestCelPrefix - " + targetRefName
+	mrID, err := tgitlab.CreateMR(glprovider.Client(), opts.ProjectID, targetRefName, projectinfo.DefaultBranch, mrTitle)
+	assert.NilError(t, err)
+	runcnx.Clients.Log.Infof("MergeRequest %s/-/merge_requests/%d has been created", projectinfo.WebURL, mrID)
+	defer tgitlab.TearDown(ctx, t, runcnx, glprovider, mrID, targetRefName, targetNS, opts.ProjectID)
+
+	sopt := twait.SuccessOpt{
+		Title:           commitTitle,
+		OnEvent:         "Merge Request",
+		TargetNS:        targetNS,
+		NumberofPRMatch: 1,
+		SHA:             "",
+	}
+	twait.Succeeded(ctx, t, runcnx, opts, sopt)
+
+	prs, err := runcnx.Clients.Tekton.TektonV1().PipelineRuns(targetNS).List(ctx, metav1.ListOptions{})
+	assert.NilError(t, err)
+	assert.Assert(t, len(prs.Items) >= 1, "Expected at least one PipelineRun, got %d", len(prs.Items))
+
+	// Verify cel: prefix expressions evaluated correctly using golden file
+	// Expected output:
+	// cel_ternary: new-mr (body.object_attributes.action == "open" for a new MR)
+	// cel_pac_branch: matched (pac.target_branch matches the target branch)
+	// cel_has_function: has-mr (body.object_attributes exists)
+	// cel_string_concat: Build on <target_branch>
+	// cel_files_check: has-files (files.all.size() > 0 since we have changed files)
+	// cel_gitlab_header: Merge Request Hook (X-Gitlab-Event header value)
+	// cel_error_handling: (empty string - cel: prefix returns empty on error)
+	err = twait.RegexpMatchingInPodLog(
+		ctx,
+		runcnx,
+		targetNS,
+		fmt.Sprintf("tekton.dev/pipelineRun=%s,tekton.dev/pipelineTask=cel-prefix-test", prs.Items[0].Name),
+		"step-test-cel-prefix-values",
+		regexp.Regexp{},
+		t.Name(),
+		2,
+	)
+	assert.NilError(t, err)
+}
+
+// TestGitlabMergeRequestVariableSubs tests variable substitution in PipelineRun annotations
+// by pushing a PipelineRun file to a branch, making a comment on the commit, and verifying
+// that the PipelineRun logs contain the commit message.
+func TestGitlabMergeRequestVariableSubs(t *testing.T) {
+	targetNS := names.SimpleNameGenerator.RestrictLengthWithRandomSuffix("pac-e2e-ns")
+	ctx := context.Background()
+	runcnx, opts, glprovider, err := tgitlab.Setup(ctx)
+	assert.NilError(t, err)
+	ctx, err = cctx.GetControllerCtxInfo(ctx, runcnx)
+	assert.NilError(t, err)
+	runcnx.Clients.Log.Info("Testing variable substitution with GitLab")
+
+	projectinfo, resp, err := glprovider.Client().Projects.GetProject(opts.ProjectID, nil)
+	assert.NilError(t, err)
+	if resp != nil && resp.StatusCode == http.StatusNotFound {
+		t.Errorf("Repository %s not found in %s", opts.Organization, opts.Repo)
+	}
+
+	err = tgitlab.CreateCRD(ctx, projectinfo, runcnx, opts, targetNS, nil)
+	assert.NilError(t, err)
+
+	targetRefName := names.SimpleNameGenerator.RestrictLengthWithRandomSuffix("pac-e2e-test")
+
+	entries, err := payload.GetEntries(map[string]string{
+		".tekton/pipelinerun-variable-subs.yaml": "testdata/pipelinerun-variable-subs.yaml",
+	}, targetNS, targetRefName,
+		triggertype.Push.String(), map[string]string{})
+	assert.NilError(t, err)
+
+	gitCloneURL, err := scm.MakeGitCloneURL(projectinfo.WebURL, opts.UserName, opts.Password)
+	assert.NilError(t, err)
+	commitTitle := "Testing variable substitution on " + targetRefName
+	scmOpts := &scm.Opts{
+		GitURL:        gitCloneURL,
+		CommitTitle:   commitTitle,
+		Log:           runcnx.Clients.Log,
+		WebURL:        projectinfo.WebURL,
+		TargetRefName: targetRefName,
+		BaseRefName:   projectinfo.DefaultBranch,
+	}
+	sha := scm.PushFilesToRefGit(t, scmOpts, entries)
+
+	runcnx.Clients.Log.Infof("Branch %s has been created and pushed with files, commit SHA: %s", targetRefName, sha)
+	defer tgitlab.TearDown(ctx, t, runcnx, glprovider, -1, targetRefName, targetNS, opts.ProjectID)
+
+	// Make a comment on the commit
+	runcnx.Clients.Log.Infof("Creating comment /test pipelinerun-variable-subs on commit %s", sha)
+	commentOpts := &clientGitlab.PostCommitCommentOptions{
+		Note: clientGitlab.Ptr(fmt.Sprintf("/test pipelinerun-variable-subs branch:%s", targetRefName)),
+	}
+	cc, _, err := glprovider.Client().Commits.PostCommitComment(opts.ProjectID, sha, commentOpts)
+	assert.NilError(t, err)
+	runcnx.Clients.Log.Infof("Commit comment %s has been created", cc.Note)
+
+	// Wait for PipelineRun creation
+	waitOpts := twait.Opts{
+		RepoName:        targetNS,
+		Namespace:       targetNS,
+		MinNumberStatus: 2,
+		PollTimeout:     twait.DefaultTimeout,
+		TargetSHA:       sha,
+	}
+	err = twait.UntilPipelineRunHasReason(ctx, runcnx.Clients, v1.PipelineRunReasonSuccessful, waitOpts)
+	assert.NilError(t, err)
+
+	// Get the PipelineRun
+	prs, err := runcnx.Clients.Tekton.TektonV1().PipelineRuns(targetNS).List(ctx, metav1.ListOptions{})
+	assert.NilError(t, err)
+	assert.Assert(t, len(prs.Items) >= 1, "Expected at least one PipelineRun, got %d", len(prs.Items))
+
+	// Check that PipelineRun logs contain the commit message
+	err = twait.RegexpMatchingInPodLog(
+		ctx,
+		runcnx,
+		targetNS,
+		fmt.Sprintf("pipelinesascode.tekton.dev/event-type=%s",
+			opscomments.TestSingleCommentEventType.String()),
+		"step-task",
+		*regexp.MustCompile(regexp.QuoteMeta(commitTitle)),
+		"",
+		2,
+	)
+	assert.NilError(t, err, "PipelineRun logs should contain the commit message: %s", commitTitle)
 }
 
 // Local Variables:

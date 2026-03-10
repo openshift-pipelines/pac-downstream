@@ -9,9 +9,9 @@ import (
 type (
 	// GroupSSHCertificatesServiceInterface defines methods for the GroupSSHCertificatesService.
 	GroupSSHCertificatesServiceInterface interface {
-		ListGroupSSHCertificates(gid interface{}, options ...RequestOptionFunc) ([]*GroupSSHCertificate, *Response, error)
-		CreateGroupSSHCertificate(gid interface{}, opt *CreateGroupSSHCertificateOptions, options ...RequestOptionFunc) (*GroupSSHCertificate, *Response, error)
-		DeleteGroupSSHCertificate(gid interface{}, cert int, options ...RequestOptionFunc) (*Response, error)
+		ListGroupSSHCertificates(gid any, options ...RequestOptionFunc) ([]*GroupSSHCertificate, *Response, error)
+		CreateGroupSSHCertificate(gid any, opt *CreateGroupSSHCertificateOptions, options ...RequestOptionFunc) (*GroupSSHCertificate, *Response, error)
+		DeleteGroupSSHCertificate(gid any, cert int64, options ...RequestOptionFunc) (*Response, error)
 	}
 
 	// GroupSSHCertificatesService handles communication with the group
@@ -29,7 +29,7 @@ var _ GroupSSHCertificatesServiceInterface = (*GroupSSHCertificatesService)(nil)
 //
 // GitLab API docs: https://docs.gitlab.com/api/group_ssh_certificates/
 type GroupSSHCertificate struct {
-	ID        int        `json:"id"`
+	ID        int64      `json:"id"`
 	Title     string     `json:"title"`
 	Key       string     `json:"key"`
 	CreatedAt *time.Time `json:"created_at"`
@@ -38,9 +38,9 @@ type GroupSSHCertificate struct {
 // ListGroupSSHCertificates gets a list of SSH certificates for a specified
 // group.
 //
-// Gitlab API docs:
+// GitLab API docs:
 // https://docs.gitlab.com/api/group_ssh_certificates/#get-all-ssh-certificates-for-a-particular-group
-func (s *GroupSSHCertificatesService) ListGroupSSHCertificates(gid interface{}, options ...RequestOptionFunc) ([]*GroupSSHCertificate, *Response, error) {
+func (s *GroupSSHCertificatesService) ListGroupSSHCertificates(gid any, options ...RequestOptionFunc) ([]*GroupSSHCertificate, *Response, error) {
 	group, err := parseID(gid)
 	if err != nil {
 		return nil, nil, err
@@ -71,11 +71,11 @@ type CreateGroupSSHCertificateOptions struct {
 	Title *string `url:"title,omitempty" json:"title,omitempty"`
 }
 
-// CreateMemberRole creates a new member role for a specified group.
+// CreateGroupSSHCertificate creates a new SSH certificate in the group.
 //
-// Gitlab API docs:
+// GitLab API docs:
 // https://docs.gitlab.com/api/group_ssh_certificates/#create-ssh-certificate
-func (s *GroupSSHCertificatesService) CreateGroupSSHCertificate(gid interface{}, opt *CreateGroupSSHCertificateOptions, options ...RequestOptionFunc) (*GroupSSHCertificate, *Response, error) {
+func (s *GroupSSHCertificatesService) CreateGroupSSHCertificate(gid any, opt *CreateGroupSSHCertificateOptions, options ...RequestOptionFunc) (*GroupSSHCertificate, *Response, error) {
 	group, err := parseID(gid)
 	if err != nil {
 		return nil, nil, err
@@ -98,9 +98,9 @@ func (s *GroupSSHCertificatesService) CreateGroupSSHCertificate(gid interface{},
 
 // DeleteGroupSSHCertificate deletes a SSH certificate from a specified group.
 //
-// Gitlab API docs:
+// GitLab API docs:
 // https://docs.gitlab.com/api/group_ssh_certificates/#delete-group-ssh-certificate
-func (s *GroupSSHCertificatesService) DeleteGroupSSHCertificate(gid interface{}, cert int, options ...RequestOptionFunc) (*Response, error) {
+func (s *GroupSSHCertificatesService) DeleteGroupSSHCertificate(gid any, cert int64, options ...RequestOptionFunc) (*Response, error) {
 	group, err := parseID(gid)
 	if err != nil {
 		return nil, err

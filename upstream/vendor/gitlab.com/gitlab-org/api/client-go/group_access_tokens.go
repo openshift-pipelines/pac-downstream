@@ -17,19 +17,18 @@
 package gitlab
 
 import (
-	"fmt"
 	"net/http"
 )
 
 type (
 	// GroupAccessTokensServiceInterface defines all the API methods for the GroupAccessTokensService
 	GroupAccessTokensServiceInterface interface {
-		ListGroupAccessTokens(gid interface{}, opt *ListGroupAccessTokensOptions, options ...RequestOptionFunc) ([]*GroupAccessToken, *Response, error)
-		GetGroupAccessToken(gid interface{}, id int, options ...RequestOptionFunc) (*GroupAccessToken, *Response, error)
-		CreateGroupAccessToken(gid interface{}, opt *CreateGroupAccessTokenOptions, options ...RequestOptionFunc) (*GroupAccessToken, *Response, error)
-		RotateGroupAccessToken(gid interface{}, id int, opt *RotateGroupAccessTokenOptions, options ...RequestOptionFunc) (*GroupAccessToken, *Response, error)
-		RotateGroupAccessTokenSelf(gid interface{}, opt *RotateGroupAccessTokenOptions, options ...RequestOptionFunc) (*GroupAccessToken, *Response, error)
-		RevokeGroupAccessToken(gid interface{}, id int, options ...RequestOptionFunc) (*Response, error)
+		ListGroupAccessTokens(gid any, opt *ListGroupAccessTokensOptions, options ...RequestOptionFunc) ([]*GroupAccessToken, *Response, error)
+		GetGroupAccessToken(gid any, id int64, options ...RequestOptionFunc) (*GroupAccessToken, *Response, error)
+		CreateGroupAccessToken(gid any, opt *CreateGroupAccessTokenOptions, options ...RequestOptionFunc) (*GroupAccessToken, *Response, error)
+		RotateGroupAccessToken(gid any, id int64, opt *RotateGroupAccessTokenOptions, options ...RequestOptionFunc) (*GroupAccessToken, *Response, error)
+		RotateGroupAccessTokenSelf(gid any, opt *RotateGroupAccessTokenOptions, options ...RequestOptionFunc) (*GroupAccessToken, *Response, error)
+		RevokeGroupAccessToken(gid any, id int64, options ...RequestOptionFunc) (*Response, error)
 	}
 
 	// GroupAccessTokensService handles communication with the
@@ -55,60 +54,45 @@ func (v GroupAccessToken) String() string {
 }
 
 // ListGroupAccessTokensOptions represents the available options for
-// listing variables in a group.
+// listing access tokens in a group.
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/group_access_tokens/#list-all-group-access-tokens
-type ListGroupAccessTokensOptions ListOptions
+type ListGroupAccessTokensOptions struct {
+	ListOptions
+	CreatedAfter   *ISOTime          `url:"created_after,omitempty" json:"created_after,omitempty"`
+	CreatedBefore  *ISOTime          `url:"created_before,omitempty" json:"created_before,omitempty"`
+	LastUsedAfter  *ISOTime          `url:"last_used_after,omitempty" json:"last_used_after,omitempty"`
+	LastUsedBefore *ISOTime          `url:"last_used_before,omitempty" json:"last_used_before,omitempty"`
+	Revoked        *bool             `url:"revoked,omitempty" json:"revoked,omitempty"`
+	Search         *string           `url:"search,omitempty" json:"search,omitempty"`
+	State          *AccessTokenState `url:"state,omitempty" json:"state,omitempty"`
+}
 
 // ListGroupAccessTokens gets a list of all group access tokens in a group.
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/group_access_tokens/#list-all-group-access-tokens
-func (s *GroupAccessTokensService) ListGroupAccessTokens(gid interface{}, opt *ListGroupAccessTokensOptions, options ...RequestOptionFunc) ([]*GroupAccessToken, *Response, error) {
-	groups, err := parseID(gid)
-	if err != nil {
-		return nil, nil, err
-	}
-	u := fmt.Sprintf("groups/%s/access_tokens", PathEscape(groups))
-
-	req, err := s.client.NewRequest(http.MethodGet, u, opt, options)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	var gats []*GroupAccessToken
-	resp, err := s.client.Do(req, &gats)
-	if err != nil {
-		return nil, resp, err
-	}
-
-	return gats, resp, nil
+func (s *GroupAccessTokensService) ListGroupAccessTokens(gid any, opt *ListGroupAccessTokensOptions, options ...RequestOptionFunc) ([]*GroupAccessToken, *Response, error) {
+	return do[[]*GroupAccessToken](s.client,
+		withMethod(http.MethodGet),
+		withPath("groups/%s/access_tokens", GroupID{gid}),
+		withAPIOpts(opt),
+		withRequestOpts(options...),
+	)
 }
 
 // GetGroupAccessToken gets a single group access tokens in a group.
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/group_access_tokens/#get-details-on-a-group-access-token
-func (s *GroupAccessTokensService) GetGroupAccessToken(gid interface{}, id int, options ...RequestOptionFunc) (*GroupAccessToken, *Response, error) {
-	groups, err := parseID(gid)
-	if err != nil {
-		return nil, nil, err
-	}
-	u := fmt.Sprintf("groups/%s/access_tokens/%d", PathEscape(groups), id)
-
-	req, err := s.client.NewRequest(http.MethodGet, u, nil, options)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	gat := new(GroupAccessToken)
-	resp, err := s.client.Do(req, &gat)
-	if err != nil {
-		return nil, resp, err
-	}
-
-	return gat, resp, nil
+func (s *GroupAccessTokensService) GetGroupAccessToken(gid any, id int64, options ...RequestOptionFunc) (*GroupAccessToken, *Response, error) {
+	return do[*GroupAccessToken](s.client,
+		withMethod(http.MethodGet),
+		withPath("groups/%s/access_tokens/%d", GroupID{gid}, id),
+		withAPIOpts(nil),
+		withRequestOpts(options...),
+	)
 }
 
 // CreateGroupAccessTokenOptions represents the available CreateVariable()
@@ -128,25 +112,13 @@ type CreateGroupAccessTokenOptions struct {
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/group_access_tokens/#create-a-group-access-token
-func (s *GroupAccessTokensService) CreateGroupAccessToken(gid interface{}, opt *CreateGroupAccessTokenOptions, options ...RequestOptionFunc) (*GroupAccessToken, *Response, error) {
-	groups, err := parseID(gid)
-	if err != nil {
-		return nil, nil, err
-	}
-	u := fmt.Sprintf("groups/%s/access_tokens", PathEscape(groups))
-
-	req, err := s.client.NewRequest(http.MethodPost, u, opt, options)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	pat := new(GroupAccessToken)
-	resp, err := s.client.Do(req, pat)
-	if err != nil {
-		return nil, resp, err
-	}
-
-	return pat, resp, nil
+func (s *GroupAccessTokensService) CreateGroupAccessToken(gid any, opt *CreateGroupAccessTokenOptions, options ...RequestOptionFunc) (*GroupAccessToken, *Response, error) {
+	return do[*GroupAccessToken](s.client,
+		withMethod(http.MethodPost),
+		withPath("groups/%s/access_tokens", GroupID{gid}),
+		withAPIOpts(opt),
+		withRequestOpts(options...),
+	)
 }
 
 // RotateGroupAccessTokenOptions represents the available RotateGroupAccessToken()
@@ -163,24 +135,13 @@ type RotateGroupAccessTokenOptions struct {
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/group_access_tokens/#rotate-a-group-access-token
-func (s *GroupAccessTokensService) RotateGroupAccessToken(gid interface{}, id int, opt *RotateGroupAccessTokenOptions, options ...RequestOptionFunc) (*GroupAccessToken, *Response, error) {
-	groups, err := parseID(gid)
-	if err != nil {
-		return nil, nil, err
-	}
-	u := fmt.Sprintf("groups/%s/access_tokens/%d/rotate", PathEscape(groups), id)
-	req, err := s.client.NewRequest(http.MethodPost, u, opt, options)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	gat := new(GroupAccessToken)
-	resp, err := s.client.Do(req, gat)
-	if err != nil {
-		return nil, resp, err
-	}
-
-	return gat, resp, nil
+func (s *GroupAccessTokensService) RotateGroupAccessToken(gid any, id int64, opt *RotateGroupAccessTokenOptions, options ...RequestOptionFunc) (*GroupAccessToken, *Response, error) {
+	return do[*GroupAccessToken](s.client,
+		withMethod(http.MethodPost),
+		withPath("groups/%s/access_tokens/%d/rotate", GroupID{gid}, id),
+		withAPIOpts(opt),
+		withRequestOpts(options...),
+	)
 }
 
 // RotateGroupAccessTokenSelf revokes the group access token used for the request
@@ -188,41 +149,25 @@ func (s *GroupAccessTokensService) RotateGroupAccessToken(gid interface{}, id in
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/group_access_tokens/#self-rotate
-func (s *GroupAccessTokensService) RotateGroupAccessTokenSelf(gid interface{}, opt *RotateGroupAccessTokenOptions, options ...RequestOptionFunc) (*GroupAccessToken, *Response, error) {
-	groups, err := parseID(gid)
-	if err != nil {
-		return nil, nil, err
-	}
-	u := fmt.Sprintf("groups/%s/access_tokens/self/rotate", PathEscape(groups))
-	req, err := s.client.NewRequest(http.MethodPost, u, opt, options)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	gat := new(GroupAccessToken)
-	resp, err := s.client.Do(req, gat)
-	if err != nil {
-		return nil, resp, err
-	}
-
-	return gat, resp, nil
+func (s *GroupAccessTokensService) RotateGroupAccessTokenSelf(gid any, opt *RotateGroupAccessTokenOptions, options ...RequestOptionFunc) (*GroupAccessToken, *Response, error) {
+	return do[*GroupAccessToken](s.client,
+		withMethod(http.MethodPost),
+		withPath("groups/%s/access_tokens/self/rotate", GroupID{gid}),
+		withAPIOpts(opt),
+		withRequestOpts(options...),
+	)
 }
 
 // RevokeGroupAccessToken revokes a group access token.
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/group_access_tokens/#revoke-a-group-access-token
-func (s *GroupAccessTokensService) RevokeGroupAccessToken(gid interface{}, id int, options ...RequestOptionFunc) (*Response, error) {
-	groups, err := parseID(gid)
-	if err != nil {
-		return nil, err
-	}
-	u := fmt.Sprintf("groups/%s/access_tokens/%d", PathEscape(groups), id)
-
-	req, err := s.client.NewRequest(http.MethodDelete, u, nil, options)
-	if err != nil {
-		return nil, err
-	}
-
-	return s.client.Do(req, nil)
+func (s *GroupAccessTokensService) RevokeGroupAccessToken(gid any, id int64, options ...RequestOptionFunc) (*Response, error) {
+	_, resp, err := do[none](s.client,
+		withMethod(http.MethodDelete),
+		withPath("groups/%s/access_tokens/%d", GroupID{gid}, id),
+		withAPIOpts(nil),
+		withRequestOpts(options...),
+	)
+	return resp, err
 }

@@ -30,9 +30,22 @@ type RequestOptionFunc func(*retryablehttp.Request) error
 // WithContext runs the request with the provided context
 func WithContext(ctx context.Context) RequestOptionFunc {
 	return func(req *retryablehttp.Request) error {
-		*req = *req.WithContext(ctx)
+		newCtx := copyContextValues(req.Context(), ctx)
+
+		*req = *req.WithContext(newCtx)
 		return nil
 	}
+}
+
+// copyContextValues copy some context key and values in old context
+func copyContextValues(oldCtx context.Context, newCtx context.Context) context.Context {
+	checkRetry := checkRetryFromContext(oldCtx)
+
+	if checkRetry != nil {
+		newCtx = contextWithCheckRetry(newCtx, checkRetry)
+	}
+
+	return newCtx
 }
 
 // WithHeader takes a header name and value and appends it to the request headers.
@@ -59,12 +72,12 @@ func WithHeaders(headers map[string]string) RequestOptionFunc {
 // query parameter in the request with its corresponding response parameter.
 func WithKeysetPaginationParameters(nextLink string) RequestOptionFunc {
 	return func(req *retryablehttp.Request) error {
-		nextUrl, err := url.Parse(nextLink)
+		nextURL, err := url.Parse(nextLink)
 		if err != nil {
 			return err
 		}
 		q := req.URL.Query()
-		for k, values := range nextUrl.Query() {
+		for k, values := range nextURL.Query() {
 			q.Del(k)
 			for _, v := range values {
 				q.Add(k, v)
@@ -77,24 +90,24 @@ func WithKeysetPaginationParameters(nextLink string) RequestOptionFunc {
 
 // WithOffsetPaginationParameters takes a page number and modifies the request
 // to use that page for offset-based pagination, overriding any existing page value.
-func WithOffsetPaginationParameters(page int) RequestOptionFunc {
+func WithOffsetPaginationParameters(page int64) RequestOptionFunc {
 	return func(req *retryablehttp.Request) error {
 		q := req.URL.Query()
 		q.Del("page")
-		q.Add("page", strconv.Itoa(page))
+		q.Add("page", strconv.FormatInt(page, 10))
 		req.URL.RawQuery = q.Encode()
 		return nil
 	}
 }
 
-// WithSudo takes either a username or user ID and sets the SUDO request header.
-func WithSudo(uid interface{}) RequestOptionFunc {
+// WithSudo takes either a username or user ID and sets the Sudo request header.
+func WithSudo(uid any) RequestOptionFunc {
 	return func(req *retryablehttp.Request) error {
 		user, err := parseID(uid)
 		if err != nil {
 			return err
 		}
-		req.Header.Set("SUDO", user)
+		req.Header.Set("Sudo", user)
 		return nil
 	}
 }
@@ -104,12 +117,22 @@ func WithToken(authType AuthType, token string) RequestOptionFunc {
 	return func(req *retryablehttp.Request) error {
 		switch authType {
 		case JobToken:
-			req.Header.Set("JOB-TOKEN", token)
+			req.Header.Set("Job-Token", token)
 		case OAuthToken:
 			req.Header.Set("Authorization", "Bearer "+token)
 		case PrivateToken:
-			req.Header.Set("PRIVATE-TOKEN", token)
+			req.Header.Set("Private-Token", token)
 		}
+		return nil
+	}
+}
+
+// WithRequestRetry takes a `retryablehttp.CheckRetry` which is then used when making this one request.
+func WithRequestRetry(checkRetry retryablehttp.CheckRetry) RequestOptionFunc {
+	return func(req *retryablehttp.Request) error {
+		// Store checkRetry to context
+		ctx := contextWithCheckRetry(req.Context(), checkRetry)
+		*req = *req.WithContext(ctx)
 		return nil
 	}
 }

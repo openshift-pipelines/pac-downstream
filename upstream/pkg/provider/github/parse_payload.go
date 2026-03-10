@@ -10,9 +10,11 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"time"
 
 	ghinstallation "github.com/bradleyfalzon/ghinstallation/v2"
-	"github.com/google/go-github/v71/github"
+	github75 "github.com/google/go-github/v75/github"
+	"github.com/google/go-github/v81/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/opscomments"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
@@ -21,6 +23,12 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
+)
+
+const (
+	maxRetriesForMergeCommit = 3
+	githubNoreplyEmail       = "noreply@github.com"
+	githubWebFlowUser        = "web-flow"
 )
 
 // GetAppIDAndPrivateKey retrieves the GitHub application ID and private key from a secret in the specified namespace.
@@ -55,7 +63,7 @@ func (v *Provider) GetAppToken(ctx context.Context, kube kubernetes.Interface, g
 	if err != nil {
 		return "", err
 	}
-	itr.InstallationTokenOptions = &github.InstallationTokenOptions{
+	itr.InstallationTokenOptions = &github75.InstallationTokenOptions{
 		RepositoryIDs: v.RepositoryIDs,
 	}
 
@@ -177,39 +185,22 @@ func (v *Provider) ParsePayload(ctx context.Context, run *params.Run, request *h
 		return nil, err
 	}
 
+	if processedEvent == nil {
+		return nil, nil
+	}
+
 	processedEvent.Event = eventInt
 	processedEvent.InstallationID = installationIDFrompayload
 	processedEvent.GHEURL = event.Provider.URL
 	processedEvent.Provider.URL = event.Provider.URL
 
-	// regenerate token scoped to the repo IDs
-	if v.pacInfo.SecretGHAppRepoScoped && installationIDFrompayload != -1 && len(v.RepositoryIDs) > 0 {
-		repoLists := []string{}
-		if v.pacInfo.SecretGhAppTokenScopedExtraRepos != "" {
-			// this is going to show up a lot in the logs but i guess that
-			// would make people fix the value instead of being lost into
-			// the top of the logs at controller start.
-			for _, configValue := range strings.Split(v.pacInfo.SecretGhAppTokenScopedExtraRepos, ",") {
-				configValueS := strings.TrimSpace(configValue)
-				if configValueS == "" {
-					continue
-				}
-				repoLists = append(repoLists, configValueS)
-			}
-			v.Logger.Infof("Github token scope extended to %v keeping SecretGHAppRepoScoped to true", repoLists)
-		}
-		token, err := v.CreateToken(ctx, repoLists, processedEvent)
-		if err != nil {
-			return nil, err
-		}
-		processedEvent.Provider.Token = token
-	}
-
 	return processedEvent, nil
 }
 
 // getPullRequestsWithCommit lists the all pull requests associated with given commit.
-func (v *Provider) getPullRequestsWithCommit(ctx context.Context, sha, org, repo string) ([]*github.PullRequest, error) {
+// It implements retry logic with exponential backoff to handle cases where GitHub's API
+// hasn't yet indexed the PR-to-commit association (e.g., immediately after a merge commit).
+func (v *Provider) getPullRequestsWithCommit(ctx context.Context, sha, org, repo string, isMergeCommit bool) ([]*github.PullRequest, error) {
 	if v.ghClient == nil {
 		return nil, fmt.Errorf("github client is not initialized")
 	}
@@ -225,33 +216,65 @@ func (v *Provider) getPullRequestsWithCommit(ctx context.Context, sha, org, repo
 		return nil, fmt.Errorf("repository cannot be empty")
 	}
 
-	opts := &github.ListOptions{
-		PerPage: 100, // GitHub's maximum per page
+	// For merge commits, retry the API call to handle potential delays in GitHub's API indexing the PR-to-commit association.
+	maxRetries := 0
+
+	if isMergeCommit {
+		maxRetries = maxRetriesForMergeCommit
 	}
 
-	pullRequests := []*github.PullRequest{}
+	const initialBackoff = 1 * time.Second
 
-	for {
-		// Use the "List pull requests associated with a commit" API to check if the commit is part of any open PR
-		prs, resp, err := wrapAPI(v, "list_pull_requests_with_commit", func() ([]*github.PullRequest, *github.Response, error) {
-			return v.Client().PullRequests.ListPullRequestsWithCommit(ctx, org, repo, sha, opts)
-		})
-		if err != nil {
-			// Log the error for debugging purposes
-			v.Logger.Debugf("Failed to list pull requests for commit %s in %s/%s: %v", sha, org, repo, err)
-			return nil, fmt.Errorf("failed to list pull requests for commit %s: %w", sha, err)
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		opts := &github.ListOptions{
+			PerPage: 100, // GitHub's maximum per page
 		}
 
-		pullRequests = append(pullRequests, prs...)
+		pullRequests := []*github.PullRequest{}
 
-		// Check if there are more pages
-		if resp.NextPage == 0 {
-			break
+		for {
+			// Use the "List pull requests associated with a commit" API to check if the commit is part of any open PR
+			prs, resp, err := wrapAPI(v, "list_pull_requests_with_commit", func() ([]*github.PullRequest, *github.Response, error) {
+				return v.Client().PullRequests.ListPullRequestsWithCommit(ctx, org, repo, sha, opts)
+			})
+			if err != nil {
+				// Log the error for debugging purposes
+				v.Logger.Debugf("Failed to list pull requests for commit %s in %s/%s: %v", sha, org, repo, err)
+				return nil, fmt.Errorf("failed to list pull requests for commit %s: %w", sha, err)
+			}
+
+			pullRequests = append(pullRequests, prs...)
+
+			// Check if there are more pages
+			if resp.NextPage == 0 {
+				break
+			}
+			opts.Page = resp.NextPage
 		}
-		opts.Page = resp.NextPage
+
+		// If we found pull requests, return them immediately
+		if len(pullRequests) > 0 {
+			return pullRequests, nil
+		}
+
+		// If this is not the last attempt and we got an empty result, retry with exponential backoff
+		// This handles the case where GitHub's API hasn't indexed the PR-to-commit association yet
+		// (common when a PR is merged via Merge Commit strategy)
+		if attempt < maxRetries {
+			backoff := time.Duration(1<<uint(attempt)) * initialBackoff // #nosec G115
+			v.Logger.Debugf("No pull requests found for commit %s in %s/%s (attempt %d/%d), retrying after %v", sha, org, repo, attempt+1, maxRetries+1, backoff)
+
+			// Wait with exponential backoff, but respect context cancellation
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(backoff):
+			}
+		}
 	}
 
-	return pullRequests, nil
+	// After all retries, return empty list (no error, as this is a valid state)
+	return []*github.PullRequest{}, nil
 }
 
 // isCommitPartOfPullRequest checks if the commit from a push event is part of an open pull request
@@ -337,22 +360,32 @@ func (v *Provider) processEvent(ctx context.Context, event *info.Event, eventInt
 		org := gitEvent.GetRepo().GetOwner().GetLogin()
 		repoName := gitEvent.GetRepo().GetName()
 
+		// when the commit is a merge commit, either email is 'noreply@github.com' or name is 'web-flow'
+		isMergeCommit := gitEvent.GetHeadCommit().GetCommitter().GetEmail() == githubNoreplyEmail ||
+			gitEvent.GetHeadCommit().GetCommitter().GetName() == githubWebFlowUser
+
 		// First get all the pull requests associated with this commit so that we can reuse the output to check
 		// whether the commit is included in any PR or not, and if this push is generated on PR merge event, we can
 		// assign PR number to `pull_request_number` variable.
-		prs, err := v.getPullRequestsWithCommit(ctx, sha, org, repoName)
+		prs, err := v.getPullRequestsWithCommit(ctx, sha, org, repoName, isMergeCommit)
 		if err != nil {
 			v.Logger.Warnf("Error getting pull requests associated with the commit in this push event: %v", err)
 		}
 
-		// Only check if the flag is enabled and there are pull requests associated with this commit.
-		if v.pacInfo.SkipPushEventForPRCommits && len(prs) > 0 {
+		isGitTagEvent := strings.HasPrefix(gitEvent.GetRef(), "refs/tags/")
+
+		if v.pacInfo.SkipPushEventForPRCommits && isGitTagEvent {
+			v.Logger.Infof("Processing tag push event for commit %s despite skip-push-events-for-pr-commits being enabled (tag events are excluded from this setting)", sha)
+		}
+
+		// Only check if the flag is enabled, and there are pull requests associated with this commit, and it's not a tag push event.
+		if v.pacInfo.SkipPushEventForPRCommits && len(prs) > 0 && !isGitTagEvent {
 			isPartOfPR, prNumber := v.isCommitPartOfPullRequest(sha, org, repoName, prs)
 
 			// If the commit is part of a PR, skip processing the push event
 			if isPartOfPR {
 				v.Logger.Infof("Skipping push event for commit %s as it belongs to pull request #%d", sha, prNumber)
-				return nil, fmt.Errorf("commit %s is part of pull request #%d, skipping push event", sha, prNumber)
+				return nil, nil
 			}
 		}
 
@@ -494,6 +527,13 @@ func convertPullRequestURLtoNumber(pullRequest string) (int, error) {
 	return prNumber, nil
 }
 
+const (
+	errSHANotProvided        = "a SHA is required in `/ok-to-test` comments, but none was provided"
+	errSHANotProvidedComment = "The `/ok-to-test` needs to be followed by a SHA to verify which commit to test. Try again with:\n\n`/ok-to-test %s`"
+	errSHAPrefixMismatch     = "the SHA provided in the `/ok-to-test` comment (`%s`) is not a prefix of the pull request's HEAD SHA (`%s`)"
+	errSHANotMatch           = "the SHA provided in the `/ok-to-test` comment (`%s`) does not match the pull request's HEAD SHA (`%s`)"
+)
+
 func (v *Provider) handleIssueCommentEvent(ctx context.Context, event *github.IssueCommentEvent) (*info.Event, error) {
 	action := "recheck"
 	runevent := info.NewEvent()
@@ -507,8 +547,9 @@ func (v *Provider) handleIssueCommentEvent(ctx context.Context, event *github.Is
 	}
 	v.userType = event.GetSender().GetType()
 	opscomments.SetEventTypeAndTargetPR(runevent, event.GetComment().GetBody())
+
 	// We are getting the full URL so we have to get the last part to get the PR number,
-	// we don't have to care about URL query string/hash and other stuff because
+	// we don\'t have to care about URL query string/hash and other stuff because
 	// that comes up from the API.
 	var err error
 	runevent.PullRequestNumber, err = convertPullRequestURLtoNumber(event.GetIssue().GetPullRequestLinks().GetHTMLURL())
@@ -517,7 +558,52 @@ func (v *Provider) handleIssueCommentEvent(ctx context.Context, event *github.Is
 	}
 
 	v.Logger.Infof("issue_comment: pipelinerun %s on %s/%s#%d has been requested", action, runevent.Organization, runevent.Repository, runevent.PullRequestNumber)
-	return v.getPullRequest(ctx, runevent)
+	pr, err := v.getPullRequest(ctx, runevent)
+	if err != nil {
+		return nil, err
+	}
+
+	commentBody := event.GetComment().GetBody()
+	if opscomments.IsOkToTestComment(commentBody) && v.pacInfo.RequireOkToTestSHA {
+		shaFromCommentRaw := opscomments.GetSHAFromOkToTestComment(commentBody)
+		if shaFromCommentRaw == "" {
+			v.Logger.Errorf(errSHANotProvided)
+			if err := v.CreateComment(ctx, runevent, fmt.Sprintf(errSHANotProvidedComment, pr.SHA), ""); err != nil {
+				v.Logger.Errorf("failed to create comment: %v", err)
+			}
+			return info.NewEvent(), errors.New(errSHANotProvided)
+		}
+		shaFromComment := strings.ToLower(shaFromCommentRaw)
+		prSHALower := strings.ToLower(pr.SHA)
+		shaLen := len(shaFromCommentRaw)
+
+		// Validate SHA-1 based on length:
+		// - Short SHAs (< 40 chars): must be a prefix of PR HEAD SHA
+		// - Full SHA-1 (40 chars): must match exactly
+		if shaLen < 40 {
+			// Short SHA: verify it's a valid prefix
+			if !strings.HasPrefix(prSHALower, shaFromComment) {
+				msg := fmt.Sprintf(errSHAPrefixMismatch, shaFromCommentRaw, pr.SHA)
+				v.Logger.Errorf(msg)
+				if err := v.CreateComment(ctx, runevent, msg, ""); err != nil {
+					v.Logger.Errorf("failed to create comment: %v", err)
+				}
+				return info.NewEvent(), fmt.Errorf(errSHAPrefixMismatch, shaFromCommentRaw, pr.SHA)
+			}
+		} else if shaLen == 40 {
+			// Full SHA-1: verify exact match
+			if prSHALower != shaFromComment {
+				msg := fmt.Sprintf(errSHANotMatch, shaFromCommentRaw, pr.SHA)
+				v.Logger.Errorf(msg)
+				if err := v.CreateComment(ctx, runevent, msg, ""); err != nil {
+					v.Logger.Errorf("failed to create comment: %v", err)
+				}
+				return info.NewEvent(), fmt.Errorf(errSHANotMatch, shaFromCommentRaw, pr.SHA)
+			}
+		}
+	}
+
+	return pr, nil
 }
 
 func (v *Provider) handleCommitCommentEvent(ctx context.Context, event *github.CommitCommentEvent) (*info.Event, error) {
@@ -536,19 +622,42 @@ func (v *Provider) handleCommitCommentEvent(ctx context.Context, event *github.C
 	runevent.BaseURL = runevent.HeadURL
 	runevent.TriggerTarget = triggertype.Push
 	opscomments.SetEventTypeAndTargetPR(runevent, event.GetComment().GetBody())
+	v.userType = event.GetSender().GetType()
 
 	defaultBranch := event.GetRepo().GetDefaultBranch()
 	// Set Event.Repository.DefaultBranch as default branch to runevent.HeadBranch, runevent.BaseBranch
+
+	commit, _, err := v.Client().Git.GetCommit(ctx, runevent.Organization, runevent.Repository, runevent.SHA)
+	if err != nil {
+		return runevent, fmt.Errorf("error getting commit %s: %w", runevent.SHA, err)
+	}
+
+	// as we're going to make GetCommit API again in GetCommitInfo func, it will be cached in provider
+	// so that we're wasting one API call
+	v.commitInfo = commit
+
+	// when the commit is a merge commit, either email is 'noreply@github.com' or name is 'web-flow'
+	isMergeCommit := commit.GetCommitter().GetEmail() == githubNoreplyEmail ||
+		commit.GetCommitter().GetName() == githubWebFlowUser
+
+	prs, err := v.getPullRequestsWithCommit(ctx, runevent.SHA, runevent.Organization, runevent.Repository, isMergeCommit)
+	if err != nil {
+		v.Logger.Warnf("Error getting pull requests associated with the commit in this commit comment event: %v", err)
+	}
+	if len(prs) > 0 {
+		runevent.PullRequestNumber = prs[0].GetNumber()
+	}
+
 	runevent.HeadBranch, runevent.BaseBranch = defaultBranch, defaultBranch
 	var (
 		branchName string
 		prName     string
-		err        error
+		tagName    string
 	)
 
 	// If it is a /test or /retest comment with pipelinerun name figure out the pipelinerun name
 	if provider.IsTestRetestComment(event.GetComment().GetBody()) {
-		prName, branchName, err = provider.GetPipelineRunAndBranchNameFromTestComment(event.GetComment().GetBody())
+		prName, branchName, tagName, err = provider.GetPipelineRunAndBranchOrTagNameFromTestComment(event.GetComment().GetBody())
 		if err != nil {
 			return runevent, err
 		}
@@ -557,12 +666,51 @@ func (v *Provider) handleCommitCommentEvent(ctx context.Context, event *github.C
 	// Check for /cancel comment
 	if provider.IsCancelComment(event.GetComment().GetBody()) {
 		action = "cancellation"
-		prName, branchName, err = provider.GetPipelineRunAndBranchNameFromCancelComment(event.GetComment().GetBody())
+		prName, branchName, tagName, err = provider.GetPipelineRunAndBranchOrTagNameFromCancelComment(event.GetComment().GetBody())
 		if err != nil {
 			return runevent, err
 		}
 		runevent.CancelPipelineRuns = true
 		runevent.TargetCancelPipelineRun = prName
+	}
+
+	if tagName != "" {
+		tagPath := fmt.Sprintf("refs/tags/%s", tagName)
+		// here in GitHub TAG_SHA and the commit which is tagged for a tag are different
+		// so we need to get the ref for the tag and then get the tag object to get the tag SHA
+		ref, _, err := wrapAPI(v, "get_ref", func() (*github.Reference, *github.Response, error) {
+			return v.Client().Git.GetRef(ctx, runevent.Organization, runevent.Repository, tagPath)
+		})
+		if err != nil {
+			return runevent, fmt.Errorf("error getting ref for tag %s: %w", tagName, err)
+		}
+
+		tagSha := ""
+
+		switch ref.GetObject().GetType() {
+		case "tag":
+			// annotated tag - get the tag object to resolve the commit SHA
+			tag, _, err := wrapAPI(v, "get_tag", func() (*github.Tag, *github.Response, error) {
+				return v.Client().Git.GetTag(ctx, runevent.Organization, runevent.Repository, ref.GetObject().GetSHA())
+			})
+			if err != nil {
+				return runevent, fmt.Errorf("error getting tag %s: %w", tagName, err)
+			}
+			tagSha = tag.GetObject().GetSHA()
+		case "commit":
+			// lightweight tag - ref contains the commit SHA directly.
+			// trying to get the tag object would return an error.
+			tagSha = ref.GetObject().GetSHA()
+		default:
+			return runevent, fmt.Errorf("invalid object type for tag %s: %s", tagName, ref.GetObject().GetType())
+		}
+
+		if tagSha != runevent.SHA {
+			return runevent, fmt.Errorf("provided SHA %s is not the tagged commit for the tag %s", runevent.SHA, tagName)
+		}
+		runevent.HeadBranch = tagPath
+		runevent.BaseBranch = tagPath
+		return runevent, nil
 	}
 
 	// If no branch is specified in GitOps comments, use runevent.HeadBranch

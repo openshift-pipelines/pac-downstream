@@ -9,128 +9,85 @@ weight: 15
 
 It's important: <https://github.com/openshift-pipelines/pipelines-as-code/blob/main/code-of-conduct.md>
 
-## Use the all in one install on kind to develop
+## Local Development Setup with startpaac
 
-It uses kind under docker. You start it with:
+For local development, we recommend using [startpaac](https://github.com/openshift-pipelines/startpaac).
 
-```shell
-make dev
-```
-
-When it finishes, you will have the following installed in your kind cluster:
+startpaac provides an interactive, modular setup that includes:
 
 - Kind Cluster deployment
-- Internal registry to push to from `ko`
-- An ingress controller with nginx for routing.
-- Tekton and Dashboard installed with an ingress route.
-- Pipelines as code deployed from your repo with ko.
-- Gitea service running locally so you can run the E2E tests against it (Gitea has the most comprehensive set of tests).
+- Internal registry for `ko`
+- Nginx ingress controller
+- Tekton and Dashboard
+- Pipelines as Code deployment
+- Forgejo for local E2E testing
 
-### Configuring the Kind Registry Port
-
-By default, the Kind registry runs on port 5000. To use a different port, set the `REG_PORT` environment variable:
+### Quick Start
 
 ```shell
-# Set a custom registry port
-export REG_PORT=5001
-make dev
+git clone https://github.com/openshift-pipelines/startpaac
+cd startpaac
+./startpaac -a
 ```
 
-By default, it will try to install from
-$GOPATH/src/github.com/openshift-pipelines/pipelines-as-code. To override it,
-set the `PAC_DIRS` environment variable.
+See the [startpaac README](https://github.com/openshift-pipelines/startpaac) for configuration options and environment variables.
 
-- It will deploy under the nip.io domain reflector, the URL will be:
+### Redeploying PAC
 
-  - <http://controller.paac-127-0-0-1.nip.io>
-  - <http://dashboard.paac-127-0-0-1.nip.io>
+If you need to redeploy just Pipelines as Code, you can use ko directly:
 
-- You will need to create the secret yourself. If you have the [pass cli](https://www.passwordstore.org/)
-  installed, you can point to a folder that contains: github-application-id, github-private-key, webhook.secret
-  as configured from your GitHub application. Set the `PAC_PASS_SECRET_FOLDER`
-  environment variable to point to it.
-  For example:
+```shell
+env KO_DOCKER_REPO=localhost:5000 ko apply -f config -B
+```
 
-  ```shell
-  pass insert github-app/github-application-id
-  pass insert github-app/webhook.secret
-  pass insert -m github-app/github-private-key
-  ```
+## Forgejo
 
-- If you need to redeploy your pac install (and only pac), you can do:
+Forgejo is supported as a Tech Preview provider. See the [Forgejo installation guide](/docs/install/forgejo) for setup instructions.
 
-  ```shell
-  ./hack/dev/kind/install.sh -p
-  ```
-
-  or
-
-  ```shell
-  make rdev
-  ```
-
-  or you can do this directly with ko:
-
-  ```shell
-  env KO_DOCKER_REPO=localhost:5000 ko apply -f ${1:-"config"} -B
-  ```
-
-- more flags: `-b` to only do the kind creation+nginx+docker image, `-r` to
-  install from the latest stable release (override with the env variable `PAC_RELEASE`)
-  instead of ko. `-c` will only do the pac configuration (i.e., creation of
-  secrets/ingress, etc..)
-
-- see the [install.sh](https://github.com/openshift-pipelines/pipelines-as-code/blob/main/hack/dev/kind/install.sh) -h for all flags
-
-## Gitea
-
-Gitea is "unofficially" supported. You just need to configure Gitea the same way
-you do for other webhook methods with a token.
-
-Here is an example of a Gitea NS/CRD/Secret (set to empty):
+Here is an example of a Forgejo NS/CRD/Secret configuration:
 
 ```yaml
 ---
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: gitea
+  name: forgejo
 
 ---
 apiVersion: "pipelinesascode.tekton.dev/v1alpha1"
 kind: Repository
 metadata:
-  name: gitea
-  namespace: gitea
+  name: forgejo
+  namespace: forgejo
 spec:
-  url: "https://gitea.my.com/owner/repo"
+  url: "https://forgejo.example.com/owner/repo"
   git_provider:
-    user: "git"
-    url: "Your gitea installation URL, i.e: https://gitea.my.com/"
+    type: "forgejo"
+    url: "https://forgejo.example.com/"
     secret:
-      name: "secret"
+      name: "forgejo-secret"
       key: token
     webhook_secret:
-      name: "secret"
+      name: "forgejo-secret"
       key: "webhook"
 ---
 apiVersion: v1
 kind: Secret
 metadata:
-  name: gitea-home-chmouel
-  namespace: gitea
+  name: forgejo-secret
+  namespace: forgejo
 type: Opaque
 stringData:
-  token: "your token has generated in gitea"
-  webhook: "" # make sure it's empty when you set this up on the interface and here
+  token: "your token generated in Forgejo"
+  webhook: "" # Forgejo allows empty webhook secrets
 ```
 
 There are some gotchas with the webhook validation secret. Pipelines-as-Code
-detects a Gitea install and lets the user set an empty webhook secret (by default
+detects a Forgejo install and lets the user set an empty webhook secret (by default
 it's enforced).
 
-The `install.sh` script will by default spin up a new instance of GITEA to play
-with and run the Gitea E2E tests.
+startpaac will by default spin up a new instance of Forgejo to play
+with and run the Forgejo E2E tests.
 
 You will need to create a Hook URL generated from <https://hook.pipelinesascode.com/new>
 into the environment variable `TEST_GITEA_SMEEURL`.
@@ -146,7 +103,7 @@ The E2E tests will automatically create a repo using the admin username for each
 ## Debugging E2E
 
 As long as you have the secrets set up, you should be able to run the e2e tests properly.
-Gitea is the easiest to run (since they are self-contained). For the rest,
+Forgejo is the easiest to run (since they are self-contained). For the rest,
 you will need to set up some environment variables.
 
 See the [e2e on kind
@@ -310,10 +267,10 @@ This shortcode creates a red warning blockquote indicating that a feature is in 
 #### support_matrix
 
 ```markdown
-  { {< support_matrix github_app="true" github_webhook="true|false" gitea="true|false" gitlab="true|false" bitbucket_cloud="true|false" bitbucket_datacenter="true|false" >}}
+  { {< support_matrix github_app="true" github_webhook="true|false" forgejo="true|false" gitlab="true|false" bitbucket_cloud="true|false" bitbucket_datacenter="true|false" >}}
 ```
 
-This shortcode generates a compatibility table showing which Git providers support a particular feature. Each parameter accepts "true" or "false" values, displaying checkmarks (✅) or cross marks (❌) accordingly. The table lists all major Git providers (GitHub App, GitHub Webhook, Gitea, GitLab, Bitbucket Cloud, and Bitbucket Data Center) with their support status for the feature.
+This shortcode generates a compatibility table showing which Git providers support a particular feature. Each parameter accepts "true" or "false" values, displaying checkmarks (✅) or cross marks (❌) accordingly. The table lists all major Git providers (GitHub App, GitHub Webhook, Forgejo, GitLab, Bitbucket Cloud, and Bitbucket Data Center) with their support status for the feature.
 
 ## Documentation when we are doing the Release Process
 
@@ -432,46 +389,64 @@ for arm64.
 - A GitHub action is using [ko](https://ko.build/) to build the amd64 and arm64 images whenever there is
 a push to a branch or for a release.
 
-## Testing External contributor Pull Requests for E2E Testing
+## LLM Assistance Disclosure
 
-When an external contributor submits a pull request (PR), E2E tests may not run
-automatically due to security restrictions. To work around this, maintainers
-can use a script to mirror the external PR to their own fork, allowing E2E
-tests to run safely.
+When submitting a pull request to Pipelines-as-Code, contributors must disclose
+any AI/LLM assistance used during development. This promotes transparency and
+proper attribution in our collaborative development environment.
 
-### Usage
+### Python dependencies
 
-1. Ensure you have the [GitHub CLI (`gh`)](https://cli.github.com/) installed and authenticated and fzf installed.
-2. Fork the repository and configure your fork as a git remote.
-3. Run the script:
+```shell
+cd ./hack/pr-ci
+uv lock -U
+```
 
-   ```bash
-   ./hack/mirror-pr.sh <PR_NUMBER> <YOUR_FORK_REMOTE>
-   ```
+### Required Disclosure
 
-   If you omit the PR number, you'll be prompted to select one interactively.
-   Same for the fork remote, if you omit it, it will get asked with fzf.
+All contributors must:
 
-### What the Script Does
+1. **Check the appropriate boxes** in the PR template's "🤖 AI Assistance"
+   section
+2. **Specify which LLM was used** (GitHub Copilot, ChatGPT, Claude, Cursor,
+   Gemini, etc.)
+3. **Indicate the extent of assistance** (documentation, code generation, PR
+   description, etc.)
+4. **Add Co-authored-by trailers** to commit messages when AI significantly
+   contributed to the code
 
-- Checks out the external PR locally.
-- Pushes the branch to your fork with a unique name.
-- Creates a draft pull request on the upstream repository with a `[MIRRORED] DO NOT MERGE` title and a `do-not-merge` label.
-- Comments on the original PR with a link to the mirrored PR.
+### Adding Co-authored-by Trailers
 
-This process allows E2E tests to run on the mirrored PR, while preventing accidental merges. Once the original PR is merged, the mirrored PR can be closed.
+For commits where AI contributed significantly to the code, add appropriate
+`Co-authored-by` trailers to your commit messages. You can use our helper
+script to automate this process:
 
-See the script (`./hack/mirror-pr.sh`) in the repository for details.
+```shell
+./hack/add-llm-coauthor.sh
+```
 
-### When all is green in the mirrored PR pull request
+This interactive script will:
 
-- You can merge the external contributor original PR.
-- Close the mirrored PR.
-- Cleanup the branches on your fork or on your local repo
+- Help you select commits that used AI assistance
+- Choose which AI assistants to credit
+- Automatically add proper `Co-authored-by` trailers to your commit messages
 
-# Links
+**Examples of Co-authored-by trailers:**
 
-- [Jira Backlog](https://issues.redhat.com/browse/SRVKP-2144?jql=component%20%3D%20%22Pipeline%20as%20Code%22%20%20AND%20status%20!%3D%20Done)
-- [Bitbucket Data Center Rest API](https://docs.atlassian.com/bitbucket-server/rest/7.17.0/bitbucket-rest.html)
-- [GitHub API](https://docs.github.com/en/rest/reference)
-- [GitLab API](https://docs.gitlab.com/ee/api/api_resources.html)
+```text
+Co-authored-by: Claude <noreply@anthropic.com>
+Co-authored-by: ChatGPT <noreply@chatgpt.com>
+Co-authored-by: Cursor <cursor@users.noreply.github.com>
+Co-authored-by: Copilot <Copilot@users.noreply.github.com>
+Co-authored-by: Gemini <gemini@google.com>
+```
+
+### Why We Require This
+
+- **Transparency**: Helps reviewers understand the development process
+- **Attribution**: Properly credits AI tools that significantly contributed
+- **Learning**: Helps the team understand effective AI-assisted development patterns
+- **Compliance**: Meets organizational requirements for AI tool usage tracking
+
+See the [PR template](.github/pull_request_template.md) for complete details on
+the AI assistance disclosure requirements.

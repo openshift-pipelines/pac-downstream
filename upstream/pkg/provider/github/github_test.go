@@ -16,11 +16,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/go-github/v71/github"
+	"github.com/google/go-github/v81/github"
 	"github.com/jonboulle/clockwork"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/metrics"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/clients"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
@@ -29,6 +28,8 @@ import (
 	testclient "github.com/openshift-pipelines/pipelines-as-code/pkg/test/clients"
 	ghtesthelper "github.com/openshift-pipelines/pipelines-as-code/pkg/test/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/test/logger"
+	metricsutils "github.com/openshift-pipelines/pipelines-as-code/pkg/test/metricstest"
+
 	"go.uber.org/zap"
 	zapobserver "go.uber.org/zap/zaptest/observer"
 	"gotest.tools/v3/assert"
@@ -347,7 +348,7 @@ func TestGetTektonDir(t *testing.T) {
 	}
 	for _, tt := range testGetTektonDir {
 		t.Run(tt.name, func(t *testing.T) {
-			resetMetrics()
+			metricsutils.ResetMetrics()
 			observer, exporter := zapobserver.New(zap.InfoLevel)
 			fakelogger := zap.New(observer).Sugar()
 			ctx, _ := rtesting.SetupFakeContext(t)
@@ -595,21 +596,94 @@ func TestGetStringPullRequestComment(t *testing.T) {
 
 func TestGithubGetCommitInfo(t *testing.T) {
 	tests := []struct {
-		name              string
-		event             *info.Event
-		noclient          bool
-		apiReply, wantErr string
-		shaurl, shatitle  string
+		name                          string
+		event                         *info.Event
+		noclient                      bool
+		apiReply, wantErr             string
+		shaurl, shatitle, message     string
+		authorName, authorEmail       string
+		committerName, committerEmail string
+		authorDate, committerDate     string
+		checkExtendedFields           bool
+		wantHasSkipCmd                bool
 	}{
 		{
-			name: "good",
+			name: "good with full commit info",
 			event: &info.Event{
 				Organization: "owner",
 				Repository:   "repository",
 				SHA:          "shacommitinfo",
 			},
-			shaurl:   "https://git.provider/commit/info",
-			shatitle: "My beautiful pony",
+			shaurl:              "https://git.provider/commit/info",
+			shatitle:            "My beautiful pony",
+			message:             "My beautiful pony\n\nThis is the full commit message with details.",
+			authorName:          "John Doe",
+			authorEmail:         "john@example.com",
+			committerName:       "GitHub",
+			committerEmail:      "noreply@github.com",
+			authorDate:          "2024-01-15T10:30:00Z",
+			committerDate:       "2024-01-15T10:31:00Z",
+			checkExtendedFields: true,
+		},
+		{
+			name: "basic fields only",
+			event: &info.Event{
+				Organization: "owner",
+				Repository:   "repository",
+				SHA:          "shacommitinfo",
+			},
+			shaurl:         "https://git.provider/commit/info",
+			shatitle:       "My beautiful pony",
+			message:        "My beautiful pony",
+			wantHasSkipCmd: false,
+		},
+		{
+			name: "commit with skip ci command",
+			event: &info.Event{
+				Organization: "owner",
+				Repository:   "repository",
+				SHA:          "shacommitinfo",
+			},
+			shaurl:         "https://git.provider/commit/info",
+			shatitle:       "fix: some bug",
+			message:        "fix: some bug\n\n[skip ci]",
+			wantHasSkipCmd: true,
+		},
+		{
+			name: "commit with ci skip command in title",
+			event: &info.Event{
+				Organization: "owner",
+				Repository:   "repository",
+				SHA:          "shacommitinfo",
+			},
+			shaurl:         "https://git.provider/commit/info",
+			shatitle:       "feat: new feature [ci skip]",
+			message:        "feat: new feature [ci skip]",
+			wantHasSkipCmd: true,
+		},
+		{
+			name: "commit with skip tkn command in title",
+			event: &info.Event{
+				Organization: "owner",
+				Repository:   "repository",
+				SHA:          "shacommitinfo",
+			},
+			shaurl:         "https://git.provider/commit/info",
+			shatitle:       "docs: update [skip tkn]",
+			message:        "docs: update [skip tkn]",
+			wantHasSkipCmd: true,
+		},
+		{
+			name: "commit with tkn skip command in body",
+			event: &info.Event{
+				Organization: "owner",
+				Repository:   "repository",
+				SHA:          "shacommitinfo",
+			},
+			shaurl:         "https://git.provider/commit/info",
+			shatitle:       "chore: deps",
+			message:        "chore: deps\n\n[tkn skip]",
+			wantHasSkipCmd: true,
 		},
 		{
 			name: "error",
@@ -637,7 +711,59 @@ func TestGithubGetCommitInfo(t *testing.T) {
 					fmt.Fprintf(rw, "%s", tt.apiReply)
 					return
 				}
-				fmt.Fprintf(rw, `{"html_url": "%s", "message": "%s"}`, tt.shaurl, tt.shatitle)
+
+				// Build realistic GitHub commit API response
+				type commitResponse struct {
+					SHA     string `json:"sha"`
+					HTMLURL string `json:"html_url"`
+					Message string `json:"message"`
+					Author  *struct {
+						Name  string `json:"name"`
+						Email string `json:"email"`
+						Date  string `json:"date"`
+					} `json:"author,omitempty"`
+					Committer *struct {
+						Name  string `json:"name"`
+						Email string `json:"email"`
+						Date  string `json:"date"`
+					} `json:"committer,omitempty"`
+				}
+
+				// Use message if provided, otherwise use shatitle as fallback
+				message := tt.message
+				if message == "" && tt.shatitle != "" {
+					message = tt.shatitle
+				}
+
+				resp := commitResponse{
+					SHA:     "shacommitinfo",
+					HTMLURL: tt.shaurl,
+					Message: message,
+				}
+
+				if tt.checkExtendedFields {
+					resp.Author = &struct {
+						Name  string `json:"name"`
+						Email string `json:"email"`
+						Date  string `json:"date"`
+					}{
+						Name:  tt.authorName,
+						Email: tt.authorEmail,
+						Date:  tt.authorDate,
+					}
+					resp.Committer = &struct {
+						Name  string `json:"name"`
+						Email string `json:"email"`
+						Date  string `json:"date"`
+					}{
+						Name:  tt.committerName,
+						Email: tt.committerEmail,
+						Date:  tt.committerDate,
+					}
+				}
+
+				jsonData, _ := json.Marshal(resp)
+				fmt.Fprint(rw, string(jsonData))
 			})
 			ctx, _ := rtesting.SetupFakeContext(t)
 			provider := &Provider{ghClient: fakeclient}
@@ -651,6 +777,22 @@ func TestGithubGetCommitInfo(t *testing.T) {
 			}
 			assert.Equal(t, tt.shatitle, tt.event.SHATitle)
 			assert.Equal(t, tt.shaurl, tt.event.SHAURL)
+
+			// Verify new extended commit fields are populated
+			if tt.checkExtendedFields {
+				assert.Equal(t, tt.message, tt.event.SHAMessage, "SHAMessage should match")
+				assert.Equal(t, tt.authorName, tt.event.SHAAuthorName, "SHAAuthorName should match")
+				assert.Equal(t, tt.authorEmail, tt.event.SHAAuthorEmail, "SHAAuthorEmail should match")
+				assert.Equal(t, tt.committerName, tt.event.SHACommitterName, "SHACommitterName should match")
+				assert.Equal(t, tt.committerEmail, tt.event.SHACommitterEmail, "SHACommitterEmail should match")
+
+				// Verify dates are parsed correctly
+				expectedAuthorDate, _ := time.Parse(time.RFC3339, tt.authorDate)
+				assert.DeepEqual(t, expectedAuthorDate, tt.event.SHAAuthorDate)
+				expectedCommitterDate, _ := time.Parse(time.RFC3339, tt.committerDate)
+				assert.DeepEqual(t, expectedCommitterDate, tt.event.SHACommitterDate)
+			}
+			assert.Equal(t, tt.wantHasSkipCmd, tt.event.HasSkipCommand)
 		})
 	}
 }
@@ -808,6 +950,7 @@ func TestGetFiles(t *testing.T) {
 		wantDeletedFilesCount  int
 		wantModifiedFilesCount int
 		wantRenamedFilesCount  int
+		wantAPIRequestCount    int64
 	}{
 		{
 			name: "pull-request",
@@ -836,6 +979,7 @@ func TestGetFiles(t *testing.T) {
 			wantDeletedFilesCount:  1,
 			wantModifiedFilesCount: 1,
 			wantRenamedFilesCount:  1,
+			wantAPIRequestCount:    2,
 		},
 		{
 			name: "push",
@@ -866,43 +1010,15 @@ func TestGetFiles(t *testing.T) {
 			wantDeletedFilesCount:  1,
 			wantModifiedFilesCount: 1,
 			wantRenamedFilesCount:  1,
+			wantAPIRequestCount:    1,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			fakeclient, mux, _, teardown := ghtesthelper.SetupGH()
 			defer teardown()
-			prCommitFiles := []*github.CommitFile{
-				{
-					Filename: ptr.String("modified.yaml"),
-					Status:   ptr.String("modified"),
-				}, {
-					Filename: ptr.String("added.doc"),
-					Status:   ptr.String("added"),
-				}, {
-					Filename: ptr.String("removed.yaml"),
-					Status:   ptr.String("removed"),
-				}, {
-					Filename: ptr.String("renamed.doc"),
-					Status:   ptr.String("renamed"),
-				},
-			}
+			metricsutils.ResetMetrics()
 
-			pushCommitFiles := []*github.CommitFile{
-				{
-					Filename: ptr.String("modified.yaml"),
-					Status:   ptr.String("modified"),
-				}, {
-					Filename: ptr.String("added.doc"),
-					Status:   ptr.String("added"),
-				}, {
-					Filename: ptr.String("removed.yaml"),
-					Status:   ptr.String("removed"),
-				}, {
-					Filename: ptr.String("renamed.doc"),
-					Status:   ptr.String("renamed"),
-				},
-			}
 			if tt.event.TriggerTarget == "pull_request" {
 				mux.HandleFunc(fmt.Sprintf("/repos/%s/%s/pulls/%d/files",
 					tt.event.Organization, tt.event.Repository, tt.event.PullRequestNumber), func(rw http.ResponseWriter, r *http.Request) {
@@ -910,7 +1026,7 @@ func TestGetFiles(t *testing.T) {
 						rw.Header().Add("Link", fmt.Sprintf("<https://api.github.com/repos/%s/%s/pulls/%d/files?page=2>; rel=\"next\"", tt.event.Organization, tt.event.Repository, tt.event.PullRequestNumber))
 						fmt.Fprint(rw, "[]")
 					} else {
-						b, _ := json.Marshal(prCommitFiles)
+						b, _ := json.Marshal(tt.commitFiles)
 						fmt.Fprint(rw, string(b))
 					}
 				})
@@ -919,17 +1035,26 @@ func TestGetFiles(t *testing.T) {
 				mux.HandleFunc(fmt.Sprintf("/repos/%s/%s/commits/%s",
 					tt.event.Organization, tt.event.Repository, tt.event.SHA), func(rw http.ResponseWriter, _ *http.Request) {
 					c := &github.RepositoryCommit{
-						Files: pushCommitFiles,
+						Files: tt.commit.Files,
 					}
 					b, _ := json.Marshal(c)
 					fmt.Fprint(rw, string(b))
 				})
 			}
 
+			metricsTags := map[string]string{"provider": "github", "event-type": string(tt.event.TriggerTarget)}
+			metricstest.CheckStatsNotReported(t, "pipelines_as_code_git_provider_api_request_count")
+
+			log, _ := logger.GetLogger()
 			ctx, _ := rtesting.SetupFakeContext(t)
 			provider := &Provider{
 				ghClient:      fakeclient,
 				PaginedNumber: 1,
+
+				// necessary for metrics
+				providerName: "github",
+				triggerEvent: string(tt.event.TriggerTarget),
+				Logger:       log,
 			}
 			changedFiles, err := provider.GetFiles(ctx, tt.event)
 			assert.NilError(t, err, nil)
@@ -948,6 +1073,11 @@ func TestGetFiles(t *testing.T) {
 					assert.Equal(t, *tt.commit.Files[i].Filename, changedFiles.All[i])
 				}
 			}
+
+			// Check caching
+			metricstest.CheckCountData(t, "pipelines_as_code_git_provider_api_request_count", metricsTags, tt.wantAPIRequestCount)
+			_, _ = provider.GetFiles(ctx, tt.event)
+			metricstest.CheckCountData(t, "pipelines_as_code_git_provider_api_request_count", metricsTags, tt.wantAPIRequestCount)
 		})
 	}
 }
@@ -1298,26 +1428,15 @@ func TestIsHeadCommitOfBranch(t *testing.T) {
 	}
 }
 
-func resetMetrics() {
-	metricstest.Unregister(
-		"pipelines_as_code_pipelinerun_count",
-		"pipelines_as_code_pipelinerun_duration_seconds_sum",
-		"pipelines_as_code_running_pipelineruns_count",
-		"pipelines_as_code_git_provider_api_request_count",
-	)
-
-	// have to reset sync.Once to allow recreation of Recorder.
-	metrics.ResetRecorder()
-}
-
 func TestCreateComment(t *testing.T) {
 	tests := []struct {
-		name          string
-		event         *info.Event
-		updateMarker  string
-		mockResponses map[string]func(rw http.ResponseWriter, _ *http.Request)
-		wantErr       string
-		clientNil     bool
+		name         string
+		event        *info.Event
+		updateMarker string
+		commentBody  string
+		clientNil    bool
+		wantErr      string
+		setup        func(t *testing.T, mux *http.ServeMux) func(t *testing.T)
 	}{
 		{
 			name:      "nil client error",
@@ -1334,43 +1453,114 @@ func TestCreateComment(t *testing.T) {
 			name:         "create new comment",
 			event:        &info.Event{Organization: "org", Repository: "repo", PullRequestNumber: 123},
 			updateMarker: "",
-			mockResponses: map[string]func(rw http.ResponseWriter, _ *http.Request){
-				"/repos/org/repo/issues/123/comments": func(rw http.ResponseWriter, r *http.Request) {
+			setup: func(t *testing.T, mux *http.ServeMux) func(t *testing.T) {
+				t.Helper()
+				mux.HandleFunc("/repos/org/repo/issues/123/comments", func(rw http.ResponseWriter, r *http.Request) {
 					assert.Equal(t, r.Method, http.MethodPost)
 					rw.WriteHeader(http.StatusCreated)
-				},
+				})
+				return nil
 			},
 		},
 		{
 			name:         "update existing comment",
 			event:        &info.Event{Organization: "org", Repository: "repo", PullRequestNumber: 123},
 			updateMarker: "MARKER",
-			mockResponses: map[string]func(rw http.ResponseWriter, _ *http.Request){
-				"/repos/org/repo/issues/123/comments": func(rw http.ResponseWriter, r *http.Request) {
+			setup: func(t *testing.T, mux *http.ServeMux) func(t *testing.T) {
+				t.Helper()
+				mux.HandleFunc("/repos/org/repo/issues/123/comments", func(rw http.ResponseWriter, r *http.Request) {
 					if r.Method == http.MethodGet {
 						fmt.Fprint(rw, `[{"id": 555, "body": "MARKER"}]`)
 						return
 					}
-				},
-				"/repos/org/repo/issues/comments/555": func(rw http.ResponseWriter, r *http.Request) {
+				})
+				mux.HandleFunc("/repos/org/repo/issues/comments/555", func(rw http.ResponseWriter, r *http.Request) {
 					assert.Equal(t, r.Method, http.MethodPatch)
 					rw.WriteHeader(http.StatusOK)
-				},
+				})
+				return nil
 			},
 		},
 		{
 			name:         "no matching comment creates new",
 			event:        &info.Event{Organization: "org", Repository: "repo", PullRequestNumber: 123},
 			updateMarker: "MARKER",
-			mockResponses: map[string]func(rw http.ResponseWriter, _ *http.Request){
-				"/repos/org/repo/issues/123/comments": func(rw http.ResponseWriter, r *http.Request) {
+			setup: func(t *testing.T, mux *http.ServeMux) func(t *testing.T) {
+				t.Helper()
+				mux.HandleFunc("/repos/org/repo/issues/123/comments", func(rw http.ResponseWriter, r *http.Request) {
 					if r.Method == http.MethodGet {
 						fmt.Fprint(rw, `[{"id": 555, "body": "NO_MATCH"}]`)
 						return
 					}
 					assert.Equal(t, r.Method, http.MethodPost)
 					rw.WriteHeader(http.StatusCreated)
-				},
+				})
+				return nil
+			},
+		},
+		{
+			name:         "deduplicates existing marker comments",
+			event:        &info.Event{Organization: "org", Repository: "repo", PullRequestNumber: 123},
+			updateMarker: "MARKER",
+			commentBody:  "new body MARKER",
+			setup: func(t *testing.T, mux *http.ServeMux) func(t *testing.T) {
+				t.Helper()
+				editedPrimary := false
+				deletedDuplicate := false
+				mux.HandleFunc("/repos/org/repo/issues/123/comments", func(rw http.ResponseWriter, r *http.Request) {
+					assert.Equal(t, r.Method, http.MethodGet)
+					fmt.Fprint(rw, `[{"id": 111, "body": "MARKER old"}, {"id": 222, "body": "MARKER old"}]`)
+				})
+				mux.HandleFunc("/repos/org/repo/issues/comments/111", func(rw http.ResponseWriter, r *http.Request) {
+					assert.Equal(t, r.Method, http.MethodPatch)
+					editedPrimary = true
+					rw.WriteHeader(http.StatusOK)
+				})
+				mux.HandleFunc("/repos/org/repo/issues/comments/222", func(rw http.ResponseWriter, r *http.Request) {
+					assert.Equal(t, r.Method, http.MethodDelete)
+					deletedDuplicate = true
+					rw.WriteHeader(http.StatusNoContent)
+				})
+				return func(t *testing.T) {
+					t.Helper()
+					assert.Assert(t, editedPrimary)
+					assert.Assert(t, deletedDuplicate)
+				}
+			},
+		},
+		{
+			name:         "deduplicates post-create marker comments",
+			event:        &info.Event{Organization: "org", Repository: "repo", PullRequestNumber: 123},
+			updateMarker: "MARKER",
+			commentBody:  "body MARKER",
+			setup: func(t *testing.T, mux *http.ServeMux) func(t *testing.T) {
+				t.Helper()
+				listCalls := 0
+				deletedDuplicate := false
+				mux.HandleFunc("/repos/org/repo/issues/123/comments", func(rw http.ResponseWriter, r *http.Request) {
+					switch r.Method {
+					case http.MethodGet:
+						listCalls++
+						if listCalls <= 2 {
+							fmt.Fprint(rw, `[]`)
+							return
+						}
+						fmt.Fprint(rw, `[{"id": 111, "body": "body MARKER"}, {"id": 222, "body": "body MARKER"}]`)
+					case http.MethodPost:
+						rw.WriteHeader(http.StatusCreated)
+					default:
+						t.Fatalf("unexpected method: %s", r.Method)
+					}
+				})
+				mux.HandleFunc("/repos/org/repo/issues/comments/222", func(rw http.ResponseWriter, r *http.Request) {
+					assert.Equal(t, r.Method, http.MethodDelete)
+					deletedDuplicate = true
+					rw.WriteHeader(http.StatusNoContent)
+				})
+				return func(t *testing.T) {
+					t.Helper()
+					assert.Assert(t, deletedDuplicate)
+				}
 			},
 		},
 	}
@@ -1380,25 +1570,197 @@ func TestCreateComment(t *testing.T) {
 			ctx, _ := rtesting.SetupFakeContext(t)
 
 			var provider *Provider
+			var postAssert func(t *testing.T)
 			if !tt.clientNil {
 				fakeclient, mux, _, teardown := ghtesthelper.SetupGH()
 				defer teardown()
 				provider = &Provider{ghClient: fakeclient}
 
-				for pattern, handler := range tt.mockResponses {
-					mux.HandleFunc(pattern, handler)
+				if tt.setup != nil {
+					postAssert = tt.setup(t, mux)
 				}
 			} else {
 				provider = &Provider{} // nil client
 			}
 
-			err := provider.CreateComment(ctx, tt.event, "comment body", tt.updateMarker)
+			body := tt.commentBody
+			if body == "" {
+				body = "comment body"
+			}
+
+			err := provider.CreateComment(ctx, tt.event, body, tt.updateMarker)
 
 			if tt.wantErr != "" {
 				assert.ErrorContains(t, err, tt.wantErr)
 				return
 			}
 			assert.NilError(t, err)
+			if postAssert != nil {
+				postAssert(t)
+			}
+		})
+	}
+}
+
+func TestCreateCommentDedupLogging(t *testing.T) {
+	tests := []struct {
+		name            string
+		commitBody      string
+		setup           func(t *testing.T, mux *http.ServeMux)
+		expectedPhases  []string
+		unexpectedPhase []string
+	}{
+		{
+			name:       "logs full create flow when marker comment does not exist",
+			commitBody: "new body MARKER",
+			setup: func(t *testing.T, mux *http.ServeMux) {
+				t.Helper()
+				listCalls := 0
+				mux.HandleFunc("/repos/org/repo/issues/123/comments", func(rw http.ResponseWriter, r *http.Request) {
+					switch r.Method {
+					case http.MethodGet:
+						listCalls++
+						switch listCalls {
+						case 1, 2:
+							fmt.Fprint(rw, `[]`)
+						default:
+							fmt.Fprint(rw, `[{"id": 333, "body": "new body MARKER", "created_at": "2024-01-01T00:00:00Z"}]`)
+						}
+					case http.MethodPost:
+						rw.WriteHeader(http.StatusCreated)
+						fmt.Fprint(rw, `{"id": 333, "body": "new body MARKER"}`)
+					default:
+						t.Fatalf("unexpected method %s", r.Method)
+					}
+				})
+			},
+			expectedPhases: []string{
+				"initial_list",
+				"jitter_wait",
+				"post_jitter_list",
+				"pre_create_race_window",
+				"create_comment_start",
+				"create_comment_done",
+				"post_create_list",
+				"dedup_select_primary",
+				"dedup_complete",
+			},
+			unexpectedPhase: []string{"dedup_delete_attempt"},
+		},
+		{
+			name:       "logs dedup select without delete for one existing marker comment",
+			commitBody: "new body MARKER",
+			setup: func(t *testing.T, mux *http.ServeMux) {
+				t.Helper()
+				mux.HandleFunc("/repos/org/repo/issues/123/comments", func(rw http.ResponseWriter, r *http.Request) {
+					assert.Equal(t, r.Method, http.MethodGet)
+					fmt.Fprint(rw, `[{"id": 111, "body": "MARKER old", "created_at": "2024-01-01T00:00:00Z"}]`)
+				})
+				mux.HandleFunc("/repos/org/repo/issues/comments/111", func(rw http.ResponseWriter, r *http.Request) {
+					assert.Equal(t, r.Method, http.MethodPatch)
+					rw.WriteHeader(http.StatusOK)
+				})
+			},
+			expectedPhases: []string{
+				"initial_list",
+				"dedup_select_primary",
+				"dedup_complete",
+			},
+			unexpectedPhase: []string{"create_comment_start", "dedup_delete_attempt"},
+		},
+		{
+			name:       "logs duplicate detection and delete phases for multiple markers",
+			commitBody: "new body MARKER",
+			setup: func(t *testing.T, mux *http.ServeMux) {
+				t.Helper()
+				mux.HandleFunc("/repos/org/repo/issues/123/comments", func(rw http.ResponseWriter, r *http.Request) {
+					assert.Equal(t, r.Method, http.MethodGet)
+					fmt.Fprint(rw, `[{"id": 111, "body": "MARKER old", "created_at": "2024-01-01T00:00:00Z"}, {"id": 222, "body": "MARKER old", "created_at": "2024-01-01T00:01:00Z"}]`)
+				})
+				mux.HandleFunc("/repos/org/repo/issues/comments/111", func(rw http.ResponseWriter, r *http.Request) {
+					assert.Equal(t, r.Method, http.MethodPatch)
+					rw.WriteHeader(http.StatusOK)
+				})
+				mux.HandleFunc("/repos/org/repo/issues/comments/222", func(rw http.ResponseWriter, r *http.Request) {
+					assert.Equal(t, r.Method, http.MethodDelete)
+					rw.WriteHeader(http.StatusNoContent)
+				})
+			},
+			expectedPhases: []string{
+				"initial_list",
+				"duplicate_detected",
+				"dedup_select_primary",
+				"dedup_delete_attempt",
+				"dedup_delete_done",
+				"dedup_complete",
+			},
+			unexpectedPhase: []string{"create_comment_start"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, _ := rtesting.SetupFakeContext(t)
+			ctx = info.StoreCurrentControllerName(ctx, "controller-test")
+
+			fakeclient, mux, _, teardown := ghtesthelper.SetupGH()
+			defer teardown()
+			tt.setup(t, mux)
+
+			core, observedLogs := zapobserver.New(zap.DebugLevel)
+			provider := &Provider{
+				ghClient: fakeclient,
+				Logger:   zap.New(core).Sugar(),
+			}
+			event := &info.Event{
+				Organization:      "org",
+				Repository:        "repo",
+				PullRequestNumber: 123,
+				Request: &info.Request{
+					Header: http.Header{
+						"X-Github-Delivery": []string{"evt-123"},
+					},
+				},
+			}
+
+			err := provider.CreateComment(ctx, event, tt.commitBody, "MARKER")
+			assert.NilError(t, err)
+
+			logEntries := observedLogs.FilterMessage("github comment dedup flow").All()
+			assert.Assert(t, len(logEntries) > 0, "expected debug comment logs to be emitted")
+
+			phaseCounts := map[string]int{}
+			seenDedupTrace := ""
+			for _, entry := range logEntries {
+				fields := entry.ContextMap()
+				phase := fmt.Sprint(fields["phase"])
+				phaseCounts[phase]++
+
+				traceID := fmt.Sprint(fields["dedup_trace"])
+				assert.Assert(t, traceID != "" && traceID != "<nil>")
+				if seenDedupTrace == "" {
+					seenDedupTrace = traceID
+				}
+				assert.Equal(t, seenDedupTrace, traceID)
+
+				eventID, hasEventID := fields["event_id"]
+				assert.Assert(t, hasEventID, "event_id field should be present in %+v", fields)
+				assert.Equal(t, "evt-123", fmt.Sprint(eventID), "event_id should match X-GitHub-Delivery header")
+				assert.Equal(t, "123", fmt.Sprint(fields["pr"]))
+				assert.Equal(t, "controller-test", fmt.Sprint(fields["controller_label"]))
+
+				if phase == "initial_list" || phase == "post_jitter_list" || phase == "post_create_list" {
+					_, hasMatchedCount := fields["matched_count"]
+					assert.Assert(t, hasMatchedCount, "phase=%s should include matched_count fields=%+v", phase, fields)
+				}
+			}
+
+			for _, phase := range tt.expectedPhases {
+				assert.Assert(t, phaseCounts[phase] > 0, "missing phase %s in logs: %+v", phase, phaseCounts)
+			}
+			for _, phase := range tt.unexpectedPhase {
+				assert.Assert(t, phaseCounts[phase] == 0, "unexpected phase %s in logs: %+v", phase, phaseCounts)
+			}
 		})
 	}
 }
@@ -1434,8 +1796,8 @@ func TestSkipPushEventForPRCommits(t *testing.T) {
 				},
 			},
 			isPartOfPR:      true,
-			wantErr:         true,
-			wantErrContains: "commit abc123 is part of pull request #42, skipping push event",
+			wantErr:         false,
+			wantErrContains: "",
 		},
 		{
 			name:           "continue processing push event when commit is not part of PR",
@@ -1561,15 +1923,20 @@ func TestSkipPushEventForPRCommits(t *testing.T) {
 
 			// If no error expected, check the result
 			assert.NilError(t, err)
+
+			// If push event was skipped (commit is part of PR), result should be nil
+			if tt.pacInfoEnabled && tt.isPartOfPR {
+				assert.Assert(t, result == nil, "Expected nil result when push event is skipped for PR commit")
+				return
+			}
+
 			assert.Assert(t, result != nil, "Expected non-nil result when no error occurs")
 
 			// Check event fields were properly processed
-			if !tt.pacInfoEnabled || !tt.isPartOfPR {
-				assert.Equal(t, result.Organization, tt.pushEvent.GetRepo().GetOwner().GetLogin())
-				assert.Equal(t, result.Repository, tt.pushEvent.GetRepo().GetName())
-				assert.Equal(t, result.SHA, tt.pushEvent.GetHeadCommit().GetID())
-				assert.Equal(t, result.Sender, tt.pushEvent.GetSender().GetLogin())
-			}
+			assert.Equal(t, result.Organization, tt.pushEvent.GetRepo().GetOwner().GetLogin())
+			assert.Equal(t, result.Repository, tt.pushEvent.GetRepo().GetName())
+			assert.Equal(t, result.SHA, tt.pushEvent.GetHeadCommit().GetID())
+			assert.Equal(t, result.Sender, tt.pushEvent.GetSender().GetLogin())
 
 			// Check for warning logs if applicable
 			if tt.skipWarnLogContains != "" {

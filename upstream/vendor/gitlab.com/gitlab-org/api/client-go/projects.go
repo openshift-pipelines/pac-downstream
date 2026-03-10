@@ -34,57 +34,59 @@ type (
 	// GitLab API docs: https://docs.gitlab.com/api/projects/
 	ProjectsServiceInterface interface {
 		ListProjects(opt *ListProjectsOptions, options ...RequestOptionFunc) ([]*Project, *Response, error)
-		ListUserProjects(uid interface{}, opt *ListProjectsOptions, options ...RequestOptionFunc) ([]*Project, *Response, error)
-		ListUserContributedProjects(uid interface{}, opt *ListProjectsOptions, options ...RequestOptionFunc) ([]*Project, *Response, error)
-		ListUserStarredProjects(uid interface{}, opt *ListProjectsOptions, options ...RequestOptionFunc) ([]*Project, *Response, error)
-		ListProjectsUsers(pid interface{}, opt *ListProjectUserOptions, options ...RequestOptionFunc) ([]*ProjectUser, *Response, error)
-		ListProjectsGroups(pid interface{}, opt *ListProjectGroupOptions, options ...RequestOptionFunc) ([]*ProjectGroup, *Response, error)
-		GetProjectLanguages(pid interface{}, options ...RequestOptionFunc) (*ProjectLanguages, *Response, error)
-		GetProject(pid interface{}, opt *GetProjectOptions, options ...RequestOptionFunc) (*Project, *Response, error)
+		ListUserProjects(uid any, opt *ListProjectsOptions, options ...RequestOptionFunc) ([]*Project, *Response, error)
+		ListUserContributedProjects(uid any, opt *ListProjectsOptions, options ...RequestOptionFunc) ([]*Project, *Response, error)
+		ListUserStarredProjects(uid any, opt *ListProjectsOptions, options ...RequestOptionFunc) ([]*Project, *Response, error)
+		ListProjectsUsers(pid any, opt *ListProjectUserOptions, options ...RequestOptionFunc) ([]*ProjectUser, *Response, error)
+		ListProjectsGroups(pid any, opt *ListProjectGroupOptions, options ...RequestOptionFunc) ([]*ProjectGroup, *Response, error)
+		GetProjectLanguages(pid any, options ...RequestOptionFunc) (*ProjectLanguages, *Response, error)
+		GetProject(pid any, opt *GetProjectOptions, options ...RequestOptionFunc) (*Project, *Response, error)
 		CreateProject(opt *CreateProjectOptions, options ...RequestOptionFunc) (*Project, *Response, error)
-		CreateProjectForUser(user int, opt *CreateProjectForUserOptions, options ...RequestOptionFunc) (*Project, *Response, error)
-		EditProject(pid interface{}, opt *EditProjectOptions, options ...RequestOptionFunc) (*Project, *Response, error)
-		ForkProject(pid interface{}, opt *ForkProjectOptions, options ...RequestOptionFunc) (*Project, *Response, error)
-		StarProject(pid interface{}, options ...RequestOptionFunc) (*Project, *Response, error)
-		ListProjectsInvitedGroups(pid interface{}, opt *ListProjectInvidedGroupOptions, options ...RequestOptionFunc) ([]*ProjectGroup, *Response, error)
-		UnstarProject(pid interface{}, options ...RequestOptionFunc) (*Project, *Response, error)
-		ArchiveProject(pid interface{}, options ...RequestOptionFunc) (*Project, *Response, error)
-		UnarchiveProject(pid interface{}, options ...RequestOptionFunc) (*Project, *Response, error)
-		DeleteProject(pid interface{}, opt *DeleteProjectOptions, options ...RequestOptionFunc) (*Response, error)
-		ShareProjectWithGroup(pid interface{}, opt *ShareWithGroupOptions, options ...RequestOptionFunc) (*Response, error)
-		DeleteSharedProjectFromGroup(pid interface{}, groupID int, options ...RequestOptionFunc) (*Response, error)
-		ListProjectHooks(pid interface{}, opt *ListProjectHooksOptions, options ...RequestOptionFunc) ([]*ProjectHook, *Response, error)
-		GetProjectHook(pid interface{}, hook int, options ...RequestOptionFunc) (*ProjectHook, *Response, error)
-		AddProjectHook(pid interface{}, opt *AddProjectHookOptions, options ...RequestOptionFunc) (*ProjectHook, *Response, error)
-		EditProjectHook(pid interface{}, hook int, opt *EditProjectHookOptions, options ...RequestOptionFunc) (*ProjectHook, *Response, error)
-		DeleteProjectHook(pid interface{}, hook int, options ...RequestOptionFunc) (*Response, error)
-		TriggerTestProjectHook(pid interface{}, hook int, event ProjectHookEvent, options ...RequestOptionFunc) (*Response, error)
-		SetProjectCustomHeader(pid interface{}, hook int, key string, opt *SetHookCustomHeaderOptions, options ...RequestOptionFunc) (*Response, error)
-		DeleteProjectCustomHeader(pid interface{}, hook int, key string, options ...RequestOptionFunc) (*Response, error)
-		CreateProjectForkRelation(pid interface{}, fork int, options ...RequestOptionFunc) (*ProjectForkRelation, *Response, error)
-		DeleteProjectForkRelation(pid interface{}, options ...RequestOptionFunc) (*Response, error)
-		UploadFile(pid interface{}, content io.Reader, filename string, options ...RequestOptionFunc) (*ProjectFile, *Response, error)
-		UploadAvatar(pid interface{}, avatar io.Reader, filename string, options ...RequestOptionFunc) (*Project, *Response, error)
-		DownloadAvatar(pid interface{}, options ...RequestOptionFunc) (*bytes.Reader, *Response, error)
-		ListProjectForks(pid interface{}, opt *ListProjectsOptions, options ...RequestOptionFunc) ([]*Project, *Response, error)
-		GetProjectPushRules(pid interface{}, options ...RequestOptionFunc) (*ProjectPushRules, *Response, error)
-		AddProjectPushRule(pid interface{}, opt *AddProjectPushRuleOptions, options ...RequestOptionFunc) (*ProjectPushRules, *Response, error)
-		EditProjectPushRule(pid interface{}, opt *EditProjectPushRuleOptions, options ...RequestOptionFunc) (*ProjectPushRules, *Response, error)
-		DeleteProjectPushRule(pid interface{}, options ...RequestOptionFunc) (*Response, error)
-		GetApprovalConfiguration(pid interface{}, options ...RequestOptionFunc) (*ProjectApprovals, *Response, error)
-		ChangeApprovalConfiguration(pid interface{}, opt *ChangeApprovalConfigurationOptions, options ...RequestOptionFunc) (*ProjectApprovals, *Response, error)
-		GetProjectApprovalRules(pid interface{}, opt *GetProjectApprovalRulesListsOptions, options ...RequestOptionFunc) ([]*ProjectApprovalRule, *Response, error)
-		GetProjectApprovalRule(pid interface{}, ruleID int, options ...RequestOptionFunc) (*ProjectApprovalRule, *Response, error)
-		CreateProjectApprovalRule(pid interface{}, opt *CreateProjectLevelRuleOptions, options ...RequestOptionFunc) (*ProjectApprovalRule, *Response, error)
-		UpdateProjectApprovalRule(pid interface{}, approvalRule int, opt *UpdateProjectLevelRuleOptions, options ...RequestOptionFunc) (*ProjectApprovalRule, *Response, error)
-		DeleteProjectApprovalRule(pid interface{}, approvalRule int, options ...RequestOptionFunc) (*Response, error)
-		ChangeAllowedApprovers(pid interface{}, opt *ChangeAllowedApproversOptions, options ...RequestOptionFunc) (*ProjectApprovals, *Response, error)
-		GetProjectPullMirrorDetails(pid interface{}, options ...RequestOptionFunc) (*ProjectPullMirrorDetails, *Response, error)
-		ConfigureProjectPullMirror(pid interface{}, opt *ConfigureProjectPullMirrorOptions, options ...RequestOptionFunc) (*ProjectPullMirrorDetails, *Response, error)
-		StartMirroringProject(pid interface{}, options ...RequestOptionFunc) (*Response, error)
-		TransferProject(pid interface{}, opt *TransferProjectOptions, options ...RequestOptionFunc) (*Project, *Response, error)
-		StartHousekeepingProject(pid interface{}, options ...RequestOptionFunc) (*Response, error)
-		GetRepositoryStorage(pid interface{}, options ...RequestOptionFunc) (*ProjectReposityStorage, *Response, error)
+		CreateProjectForUser(user int64, opt *CreateProjectForUserOptions, options ...RequestOptionFunc) (*Project, *Response, error)
+		EditProject(pid any, opt *EditProjectOptions, options ...RequestOptionFunc) (*Project, *Response, error)
+		ForkProject(pid any, opt *ForkProjectOptions, options ...RequestOptionFunc) (*Project, *Response, error)
+		StarProject(pid any, options ...RequestOptionFunc) (*Project, *Response, error)
+		ListProjectsInvitedGroups(pid any, opt *ListProjectInvitedGroupOptions, options ...RequestOptionFunc) ([]*ProjectGroup, *Response, error)
+		UnstarProject(pid any, options ...RequestOptionFunc) (*Project, *Response, error)
+		ArchiveProject(pid any, options ...RequestOptionFunc) (*Project, *Response, error)
+		UnarchiveProject(pid any, options ...RequestOptionFunc) (*Project, *Response, error)
+		RestoreProject(pid any, options ...RequestOptionFunc) (*Project, *Response, error)
+		DeleteProject(pid any, opt *DeleteProjectOptions, options ...RequestOptionFunc) (*Response, error)
+		ShareProjectWithGroup(pid any, opt *ShareWithGroupOptions, options ...RequestOptionFunc) (*Response, error)
+		DeleteSharedProjectFromGroup(pid any, groupID int64, options ...RequestOptionFunc) (*Response, error)
+		ListProjectHooks(pid any, opt *ListProjectHooksOptions, options ...RequestOptionFunc) ([]*ProjectHook, *Response, error)
+		GetProjectHook(pid any, hook int64, options ...RequestOptionFunc) (*ProjectHook, *Response, error)
+		AddProjectHook(pid any, opt *AddProjectHookOptions, options ...RequestOptionFunc) (*ProjectHook, *Response, error)
+		EditProjectHook(pid any, hook int64, opt *EditProjectHookOptions, options ...RequestOptionFunc) (*ProjectHook, *Response, error)
+		DeleteProjectHook(pid any, hook int64, options ...RequestOptionFunc) (*Response, error)
+		TriggerTestProjectHook(pid any, hook int64, event ProjectHookEvent, options ...RequestOptionFunc) (*Response, error)
+		SetProjectCustomHeader(pid any, hook int64, key string, opt *SetHookCustomHeaderOptions, options ...RequestOptionFunc) (*Response, error)
+		DeleteProjectCustomHeader(pid any, hook int64, key string, options ...RequestOptionFunc) (*Response, error)
+		SetProjectWebhookURLVariable(pid any, hook int64, key string, opt *SetProjectWebhookURLVariableOptions, options ...RequestOptionFunc) (*Response, error)
+		DeleteProjectWebhookURLVariable(pid any, hook int64, key string, options ...RequestOptionFunc) (*Response, error)
+		CreateProjectForkRelation(pid any, fork int64, options ...RequestOptionFunc) (*ProjectForkRelation, *Response, error)
+		DeleteProjectForkRelation(pid any, options ...RequestOptionFunc) (*Response, error)
+		UploadAvatar(pid any, avatar io.Reader, filename string, options ...RequestOptionFunc) (*Project, *Response, error)
+		DownloadAvatar(pid any, options ...RequestOptionFunc) (*bytes.Reader, *Response, error)
+		ListProjectForks(pid any, opt *ListProjectsOptions, options ...RequestOptionFunc) ([]*Project, *Response, error)
+		GetProjectPushRules(pid any, options ...RequestOptionFunc) (*ProjectPushRules, *Response, error)
+		AddProjectPushRule(pid any, opt *AddProjectPushRuleOptions, options ...RequestOptionFunc) (*ProjectPushRules, *Response, error)
+		EditProjectPushRule(pid any, opt *EditProjectPushRuleOptions, options ...RequestOptionFunc) (*ProjectPushRules, *Response, error)
+		DeleteProjectPushRule(pid any, options ...RequestOptionFunc) (*Response, error)
+		GetApprovalConfiguration(pid any, options ...RequestOptionFunc) (*ProjectApprovals, *Response, error)
+		ChangeApprovalConfiguration(pid any, opt *ChangeApprovalConfigurationOptions, options ...RequestOptionFunc) (*ProjectApprovals, *Response, error)
+		GetProjectApprovalRules(pid any, opt *GetProjectApprovalRulesListsOptions, options ...RequestOptionFunc) ([]*ProjectApprovalRule, *Response, error)
+		GetProjectApprovalRule(pid any, ruleID int64, options ...RequestOptionFunc) (*ProjectApprovalRule, *Response, error)
+		CreateProjectApprovalRule(pid any, opt *CreateProjectLevelRuleOptions, options ...RequestOptionFunc) (*ProjectApprovalRule, *Response, error)
+		UpdateProjectApprovalRule(pid any, approvalRule int64, opt *UpdateProjectLevelRuleOptions, options ...RequestOptionFunc) (*ProjectApprovalRule, *Response, error)
+		DeleteProjectApprovalRule(pid any, approvalRule int64, options ...RequestOptionFunc) (*Response, error)
+		GetProjectPullMirrorDetails(pid any, options ...RequestOptionFunc) (*ProjectPullMirrorDetails, *Response, error)
+		ConfigureProjectPullMirror(pid any, opt *ConfigureProjectPullMirrorOptions, options ...RequestOptionFunc) (*ProjectPullMirrorDetails, *Response, error)
+		StartMirroringProject(pid any, options ...RequestOptionFunc) (*Response, error)
+		TransferProject(pid any, opt *TransferProjectOptions, options ...RequestOptionFunc) (*Project, *Response, error)
+		StartHousekeepingProject(pid any, options ...RequestOptionFunc) (*Response, error)
+		GetRepositoryStorage(pid any, options ...RequestOptionFunc) (*ProjectRepositoryStorage, *Response, error)
+		ListProjectStarrers(pid any, opts *ListProjectStarrersOptions, options ...RequestOptionFunc) ([]*ProjectStarrer, *Response, error)
 	}
 
 	// ProjectsService handles communication with the repositories related methods
@@ -102,134 +104,134 @@ var _ ProjectsServiceInterface = (*ProjectsService)(nil)
 //
 // GitLab API docs: https://docs.gitlab.com/api/projects/
 type Project struct {
-	ID                                        int                        `json:"id"`
-	Description                               string                     `json:"description"`
-	DefaultBranch                             string                     `json:"default_branch"`
-	Visibility                                VisibilityValue            `json:"visibility"`
-	SSHURLToRepo                              string                     `json:"ssh_url_to_repo"`
-	HTTPURLToRepo                             string                     `json:"http_url_to_repo"`
-	WebURL                                    string                     `json:"web_url"`
-	ReadmeURL                                 string                     `json:"readme_url"`
-	Topics                                    []string                   `json:"topics"`
-	Owner                                     *User                      `json:"owner"`
-	Name                                      string                     `json:"name"`
-	NameWithNamespace                         string                     `json:"name_with_namespace"`
-	Path                                      string                     `json:"path"`
-	PathWithNamespace                         string                     `json:"path_with_namespace"`
-	OpenIssuesCount                           int                        `json:"open_issues_count"`
-	ResolveOutdatedDiffDiscussions            bool                       `json:"resolve_outdated_diff_discussions"`
-	ContainerExpirationPolicy                 *ContainerExpirationPolicy `json:"container_expiration_policy,omitempty"`
-	ContainerRegistryAccessLevel              AccessControlValue         `json:"container_registry_access_level"`
-	ContainerRegistryImagePrefix              string                     `json:"container_registry_image_prefix,omitempty"`
-	CreatedAt                                 *time.Time                 `json:"created_at,omitempty"`
-	UpdatedAt                                 *time.Time                 `json:"updated_at,omitempty"`
-	LastActivityAt                            *time.Time                 `json:"last_activity_at,omitempty"`
-	CreatorID                                 int                        `json:"creator_id"`
-	Namespace                                 *ProjectNamespace          `json:"namespace"`
-	Permissions                               *Permissions               `json:"permissions"`
-	MarkedForDeletionOn                       *ISOTime                   `json:"marked_for_deletion_on"`
-	EmptyRepo                                 bool                       `json:"empty_repo"`
-	Archived                                  bool                       `json:"archived"`
-	AvatarURL                                 string                     `json:"avatar_url"`
-	LicenseURL                                string                     `json:"license_url"`
-	License                                   *ProjectLicense            `json:"license"`
-	SharedRunnersEnabled                      bool                       `json:"shared_runners_enabled"`
-	GroupRunnersEnabled                       bool                       `json:"group_runners_enabled"`
-	RunnerTokenExpirationInterval             int                        `json:"runner_token_expiration_interval"`
-	ForksCount                                int                        `json:"forks_count"`
-	StarCount                                 int                        `json:"star_count"`
-	RunnersToken                              string                     `json:"runners_token"`
-	AllowMergeOnSkippedPipeline               bool                       `json:"allow_merge_on_skipped_pipeline"`
-	AllowPipelineTriggerApproveDeployment     bool                       `json:"allow_pipeline_trigger_approve_deployment"`
-	OnlyAllowMergeIfPipelineSucceeds          bool                       `json:"only_allow_merge_if_pipeline_succeeds"`
-	OnlyAllowMergeIfAllDiscussionsAreResolved bool                       `json:"only_allow_merge_if_all_discussions_are_resolved"`
-	RemoveSourceBranchAfterMerge              bool                       `json:"remove_source_branch_after_merge"`
-	PreventMergeWithoutJiraIssue              bool                       `json:"prevent_merge_without_jira_issue"`
-	PrintingMergeRequestLinkEnabled           bool                       `json:"printing_merge_request_link_enabled"`
-	LFSEnabled                                bool                       `json:"lfs_enabled"`
-	RepositoryStorage                         string                     `json:"repository_storage"`
-	RequestAccessEnabled                      bool                       `json:"request_access_enabled"`
-	MergeMethod                               MergeMethodValue           `json:"merge_method"`
-	CanCreateMergeRequestIn                   bool                       `json:"can_create_merge_request_in"`
-	ForkedFromProject                         *ForkParent                `json:"forked_from_project"`
-	Mirror                                    bool                       `json:"mirror"`
-	MirrorUserID                              int                        `json:"mirror_user_id"`
-	MirrorTriggerBuilds                       bool                       `json:"mirror_trigger_builds"`
-	OnlyMirrorProtectedBranches               bool                       `json:"only_mirror_protected_branches"`
-	MirrorOverwritesDivergedBranches          bool                       `json:"mirror_overwrites_diverged_branches"`
-	PackagesEnabled                           bool                       `json:"packages_enabled"`
-	ServiceDeskEnabled                        bool                       `json:"service_desk_enabled"`
-	ServiceDeskAddress                        string                     `json:"service_desk_address"`
-	IssuesAccessLevel                         AccessControlValue         `json:"issues_access_level"`
-	ReleasesAccessLevel                       AccessControlValue         `json:"releases_access_level,omitempty"`
-	RepositoryAccessLevel                     AccessControlValue         `json:"repository_access_level"`
-	MergeRequestsAccessLevel                  AccessControlValue         `json:"merge_requests_access_level"`
-	ForkingAccessLevel                        AccessControlValue         `json:"forking_access_level"`
-	WikiAccessLevel                           AccessControlValue         `json:"wiki_access_level"`
-	BuildsAccessLevel                         AccessControlValue         `json:"builds_access_level"`
-	SnippetsAccessLevel                       AccessControlValue         `json:"snippets_access_level"`
-	PagesAccessLevel                          AccessControlValue         `json:"pages_access_level"`
-	OperationsAccessLevel                     AccessControlValue         `json:"operations_access_level"`
-	AnalyticsAccessLevel                      AccessControlValue         `json:"analytics_access_level"`
-	EnvironmentsAccessLevel                   AccessControlValue         `json:"environments_access_level"`
-	FeatureFlagsAccessLevel                   AccessControlValue         `json:"feature_flags_access_level"`
-	InfrastructureAccessLevel                 AccessControlValue         `json:"infrastructure_access_level"`
-	MonitorAccessLevel                        AccessControlValue         `json:"monitor_access_level"`
-	AutocloseReferencedIssues                 bool                       `json:"autoclose_referenced_issues"`
-	SuggestionCommitMessage                   string                     `json:"suggestion_commit_message"`
-	SquashOption                              SquashOptionValue          `json:"squash_option"`
-	EnforceAuthChecksOnUploads                bool                       `json:"enforce_auth_checks_on_uploads,omitempty"`
-	SharedWithGroups                          []struct {
-		GroupID          int    `json:"group_id"`
-		GroupName        string `json:"group_name"`
-		GroupFullPath    string `json:"group_full_path"`
-		GroupAccessLevel int    `json:"group_access_level"`
-	} `json:"shared_with_groups"`
-	Statistics                               *Statistics                                 `json:"statistics"`
-	Links                                    *Links                                      `json:"_links,omitempty"`
-	ImportURL                                string                                      `json:"import_url"`
-	ImportType                               string                                      `json:"import_type"`
-	ImportStatus                             string                                      `json:"import_status"`
-	ImportError                              string                                      `json:"import_error"`
-	CIDefaultGitDepth                        int                                         `json:"ci_default_git_depth"`
-	CIDeletePipelinesInSeconds               int                                         `json:"ci_delete_pipelines_in_seconds,omitempty"`
-	CIForwardDeploymentEnabled               bool                                        `json:"ci_forward_deployment_enabled"`
-	CIForwardDeploymentRollbackAllowed       bool                                        `json:"ci_forward_deployment_rollback_allowed"`
-	CIIdTokenSubClaimComponents              []string                                    `json:"ci_id_token_sub_claim_components"`
-	CISeperateCache                          bool                                        `json:"ci_separated_caches"`
-	CIJobTokenScopeEnabled                   bool                                        `json:"ci_job_token_scope_enabled"`
-	CIOptInJWT                               bool                                        `json:"ci_opt_in_jwt"`
-	CIAllowForkPipelinesToRunInParentProject bool                                        `json:"ci_allow_fork_pipelines_to_run_in_parent_project"`
-	CIRestrictPipelineCancellationRole       AccessControlValue                          `json:"ci_restrict_pipeline_cancellation_role"`
-	PublicJobs                               bool                                        `json:"public_jobs"`
-	BuildTimeout                             int                                         `json:"build_timeout"`
-	AutoCancelPendingPipelines               string                                      `json:"auto_cancel_pending_pipelines"`
-	CIConfigPath                             string                                      `json:"ci_config_path"`
-	CustomAttributes                         []*CustomAttribute                          `json:"custom_attributes"`
-	ComplianceFrameworks                     []string                                    `json:"compliance_frameworks"`
-	BuildCoverageRegex                       string                                      `json:"build_coverage_regex"`
-	IssuesTemplate                           string                                      `json:"issues_template"`
-	MergeRequestsTemplate                    string                                      `json:"merge_requests_template"`
-	IssueBranchTemplate                      string                                      `json:"issue_branch_template"`
-	KeepLatestArtifact                       bool                                        `json:"keep_latest_artifact"`
-	MergePipelinesEnabled                    bool                                        `json:"merge_pipelines_enabled"`
-	MergeTrainsEnabled                       bool                                        `json:"merge_trains_enabled"`
-	CIPipelineVariablesMinimumOverrideRole   CIPipelineVariablesMinimumOverrideRoleValue `json:"ci_pipeline_variables_minimum_override_role"`
-	MergeCommitTemplate                      string                                      `json:"merge_commit_template"`
-	SquashCommitTemplate                     string                                      `json:"squash_commit_template"`
-	AutoDevopsDeployStrategy                 string                                      `json:"auto_devops_deploy_strategy"`
-	AutoDevopsEnabled                        bool                                        `json:"auto_devops_enabled"`
-	BuildGitStrategy                         string                                      `json:"build_git_strategy"`
-	EmailsEnabled                            bool                                        `json:"emails_enabled"`
-	ExternalAuthorizationClassificationLabel string                                      `json:"external_authorization_classification_label"`
-	RequirementsEnabled                      bool                                        `json:"requirements_enabled"`
-	RequirementsAccessLevel                  AccessControlValue                          `json:"requirements_access_level"`
-	SecurityAndComplianceEnabled             bool                                        `json:"security_and_compliance_enabled"`
-	SecurityAndComplianceAccessLevel         AccessControlValue                          `json:"security_and_compliance_access_level"`
-	MergeRequestDefaultTargetSelf            bool                                        `json:"mr_default_target_self"`
-	ModelExperimentsAccessLevel              AccessControlValue                          `json:"model_experiments_access_level"`
-	ModelRegistryAccessLevel                 AccessControlValue                          `json:"model_registry_access_level"`
-	PreReceiveSecretDetectionEnabled         bool                                        `json:"pre_receive_secret_detection_enabled"`
+	ID                                        int64                                       `json:"id"`
+	Description                               string                                      `json:"description"`
+	DefaultBranch                             string                                      `json:"default_branch"`
+	Visibility                                VisibilityValue                             `json:"visibility"`
+	SSHURLToRepo                              string                                      `json:"ssh_url_to_repo"`
+	HTTPURLToRepo                             string                                      `json:"http_url_to_repo"`
+	WebURL                                    string                                      `json:"web_url"`
+	ReadmeURL                                 string                                      `json:"readme_url"`
+	Topics                                    []string                                    `json:"topics"`
+	Owner                                     *User                                       `json:"owner"`
+	Name                                      string                                      `json:"name"`
+	NameWithNamespace                         string                                      `json:"name_with_namespace"`
+	Path                                      string                                      `json:"path"`
+	PathWithNamespace                         string                                      `json:"path_with_namespace"`
+	OpenIssuesCount                           int64                                       `json:"open_issues_count"`
+	ResolveOutdatedDiffDiscussions            bool                                        `json:"resolve_outdated_diff_discussions"`
+	ContainerExpirationPolicy                 *ContainerExpirationPolicy                  `json:"container_expiration_policy,omitempty"`
+	ContainerRegistryAccessLevel              AccessControlValue                          `json:"container_registry_access_level"`
+	ContainerRegistryImagePrefix              string                                      `json:"container_registry_image_prefix,omitempty"`
+	CreatedAt                                 *time.Time                                  `json:"created_at,omitempty"`
+	UpdatedAt                                 *time.Time                                  `json:"updated_at,omitempty"`
+	LastActivityAt                            *time.Time                                  `json:"last_activity_at,omitempty"`
+	CreatorID                                 int64                                       `json:"creator_id"`
+	Namespace                                 *ProjectNamespace                           `json:"namespace"`
+	Permissions                               *Permissions                                `json:"permissions"`
+	MarkedForDeletionOn                       *ISOTime                                    `json:"marked_for_deletion_on"`
+	EmptyRepo                                 bool                                        `json:"empty_repo"`
+	Archived                                  bool                                        `json:"archived"`
+	AvatarURL                                 string                                      `json:"avatar_url"`
+	LicenseURL                                string                                      `json:"license_url"`
+	License                                   *ProjectLicense                             `json:"license"`
+	SharedRunnersEnabled                      bool                                        `json:"shared_runners_enabled"`
+	GroupRunnersEnabled                       bool                                        `json:"group_runners_enabled"`
+	ResourceGroupDefaultProcessMode           ResourceGroupProcessMode                    `json:"resource_group_default_process_mode"`
+	RunnerTokenExpirationInterval             int64                                       `json:"runner_token_expiration_interval"`
+	ForksCount                                int64                                       `json:"forks_count"`
+	StarCount                                 int64                                       `json:"star_count"`
+	RunnersToken                              string                                      `json:"runners_token"`
+	AllowMergeOnSkippedPipeline               bool                                        `json:"allow_merge_on_skipped_pipeline"`
+	AllowPipelineTriggerApproveDeployment     bool                                        `json:"allow_pipeline_trigger_approve_deployment"`
+	OnlyAllowMergeIfPipelineSucceeds          bool                                        `json:"only_allow_merge_if_pipeline_succeeds"`
+	OnlyAllowMergeIfAllDiscussionsAreResolved bool                                        `json:"only_allow_merge_if_all_discussions_are_resolved"`
+	RemoveSourceBranchAfterMerge              bool                                        `json:"remove_source_branch_after_merge"`
+	PreventMergeWithoutJiraIssue              bool                                        `json:"prevent_merge_without_jira_issue"`
+	PrintingMergeRequestLinkEnabled           bool                                        `json:"printing_merge_request_link_enabled"`
+	LFSEnabled                                bool                                        `json:"lfs_enabled"`
+	MaxArtifactsSize                          int64                                       `json:"max_artifacts_size"`
+	RepositoryStorage                         string                                      `json:"repository_storage"`
+	RequestAccessEnabled                      bool                                        `json:"request_access_enabled"`
+	MergeMethod                               MergeMethodValue                            `json:"merge_method"`
+	CanCreateMergeRequestIn                   bool                                        `json:"can_create_merge_request_in"`
+	ForkedFromProject                         *ForkParent                                 `json:"forked_from_project"`
+	Mirror                                    bool                                        `json:"mirror"`
+	MirrorUserID                              int64                                       `json:"mirror_user_id"`
+	MirrorTriggerBuilds                       bool                                        `json:"mirror_trigger_builds"`
+	OnlyMirrorProtectedBranches               bool                                        `json:"only_mirror_protected_branches"`
+	MirrorOverwritesDivergedBranches          bool                                        `json:"mirror_overwrites_diverged_branches"`
+	PackagesEnabled                           bool                                        `json:"packages_enabled"`
+	ServiceDeskEnabled                        bool                                        `json:"service_desk_enabled"`
+	ServiceDeskAddress                        string                                      `json:"service_desk_address"`
+	IssuesAccessLevel                         AccessControlValue                          `json:"issues_access_level"`
+	ReleasesAccessLevel                       AccessControlValue                          `json:"releases_access_level,omitempty"`
+	RepositoryAccessLevel                     AccessControlValue                          `json:"repository_access_level"`
+	MergeRequestsAccessLevel                  AccessControlValue                          `json:"merge_requests_access_level"`
+	ForkingAccessLevel                        AccessControlValue                          `json:"forking_access_level"`
+	WikiAccessLevel                           AccessControlValue                          `json:"wiki_access_level"`
+	BuildsAccessLevel                         AccessControlValue                          `json:"builds_access_level"`
+	SnippetsAccessLevel                       AccessControlValue                          `json:"snippets_access_level"`
+	PagesAccessLevel                          AccessControlValue                          `json:"pages_access_level"`
+	OperationsAccessLevel                     AccessControlValue                          `json:"operations_access_level"`
+	AnalyticsAccessLevel                      AccessControlValue                          `json:"analytics_access_level"`
+	EnvironmentsAccessLevel                   AccessControlValue                          `json:"environments_access_level"`
+	FeatureFlagsAccessLevel                   AccessControlValue                          `json:"feature_flags_access_level"`
+	InfrastructureAccessLevel                 AccessControlValue                          `json:"infrastructure_access_level"`
+	MonitorAccessLevel                        AccessControlValue                          `json:"monitor_access_level"`
+	AutocloseReferencedIssues                 bool                                        `json:"autoclose_referenced_issues"`
+	SuggestionCommitMessage                   string                                      `json:"suggestion_commit_message"`
+	SquashOption                              SquashOptionValue                           `json:"squash_option"`
+	EnforceAuthChecksOnUploads                bool                                        `json:"enforce_auth_checks_on_uploads,omitempty"`
+	SharedWithGroups                          []ProjectSharedWithGroup                    `json:"shared_with_groups"`
+	Statistics                                *Statistics                                 `json:"statistics"`
+	Links                                     *Links                                      `json:"_links,omitempty"`
+	ImportURL                                 string                                      `json:"import_url"`
+	ImportType                                string                                      `json:"import_type"`
+	ImportStatus                              string                                      `json:"import_status"`
+	ImportError                               string                                      `json:"import_error"`
+	CIDefaultGitDepth                         int64                                       `json:"ci_default_git_depth"`
+	CIDeletePipelinesInSeconds                int64                                       `json:"ci_delete_pipelines_in_seconds,omitempty"`
+	CIForwardDeploymentEnabled                bool                                        `json:"ci_forward_deployment_enabled"`
+	CIForwardDeploymentRollbackAllowed        bool                                        `json:"ci_forward_deployment_rollback_allowed"`
+	CIPushRepositoryForJobTokenAllowed        bool                                        `json:"ci_push_repository_for_job_token_allowed"`
+	CIIdTokenSubClaimComponents               []string                                    `json:"ci_id_token_sub_claim_components"`
+	CISeparatedCaches                         bool                                        `json:"ci_separated_caches"`
+	CIJobTokenScopeEnabled                    bool                                        `json:"ci_job_token_scope_enabled"`
+	CIOptInJWT                                bool                                        `json:"ci_opt_in_jwt"`
+	CIAllowForkPipelinesToRunInParentProject  bool                                        `json:"ci_allow_fork_pipelines_to_run_in_parent_project"`
+	CIRestrictPipelineCancellationRole        AccessControlValue                          `json:"ci_restrict_pipeline_cancellation_role"`
+	PublicJobs                                bool                                        `json:"public_jobs"`
+	BuildTimeout                              int64                                       `json:"build_timeout"`
+	AutoCancelPendingPipelines                string                                      `json:"auto_cancel_pending_pipelines"`
+	CIConfigPath                              string                                      `json:"ci_config_path"`
+	CustomAttributes                          []*CustomAttribute                          `json:"custom_attributes"`
+	ComplianceFrameworks                      []string                                    `json:"compliance_frameworks"`
+	BuildCoverageRegex                        string                                      `json:"build_coverage_regex"`
+	IssuesTemplate                            string                                      `json:"issues_template"`
+	MergeRequestsTemplate                     string                                      `json:"merge_requests_template"`
+	IssueBranchTemplate                       string                                      `json:"issue_branch_template"`
+	KeepLatestArtifact                        bool                                        `json:"keep_latest_artifact"`
+	MergePipelinesEnabled                     bool                                        `json:"merge_pipelines_enabled"`
+	MergeTrainsEnabled                        bool                                        `json:"merge_trains_enabled"`
+	MergeTrainsSkipTrainAllowed               bool                                        `json:"merge_trains_skip_train_allowed"`
+	CIPipelineVariablesMinimumOverrideRole    CIPipelineVariablesMinimumOverrideRoleValue `json:"ci_pipeline_variables_minimum_override_role"`
+	MergeCommitTemplate                       string                                      `json:"merge_commit_template"`
+	SquashCommitTemplate                      string                                      `json:"squash_commit_template"`
+	AutoDevopsDeployStrategy                  string                                      `json:"auto_devops_deploy_strategy"`
+	AutoDevopsEnabled                         bool                                        `json:"auto_devops_enabled"`
+	BuildGitStrategy                          string                                      `json:"build_git_strategy"`
+	EmailsEnabled                             bool                                        `json:"emails_enabled"`
+	ExternalAuthorizationClassificationLabel  string                                      `json:"external_authorization_classification_label"`
+	RequirementsEnabled                       bool                                        `json:"requirements_enabled"`
+	RequirementsAccessLevel                   AccessControlValue                          `json:"requirements_access_level"`
+	SecurityAndComplianceEnabled              bool                                        `json:"security_and_compliance_enabled"`
+	SecurityAndComplianceAccessLevel          AccessControlValue                          `json:"security_and_compliance_access_level"`
+	MergeRequestDefaultTargetSelf             bool                                        `json:"mr_default_target_self"`
+	ModelExperimentsAccessLevel               AccessControlValue                          `json:"model_experiments_access_level"`
+	ModelRegistryAccessLevel                  AccessControlValue                          `json:"model_registry_access_level"`
+	PreReceiveSecretDetectionEnabled          bool                                        `json:"pre_receive_secret_detection_enabled"`
+	AutoDuoCodeReviewEnabled                  bool                                        `json:"auto_duo_code_review_enabled"`
 
 	// Deprecated: use Topics instead
 	TagList []string `json:"tag_list"`
@@ -238,7 +240,7 @@ type Project struct {
 	// Deprecated: use MergeRequestsAccessLevel instead
 	MergeRequestsEnabled bool `json:"merge_requests_enabled"`
 	// Deprecated: use Merge Request Approvals API instead
-	ApprovalsBeforeMerge int `json:"approvals_before_merge"`
+	ApprovalsBeforeMerge int64 `json:"approvals_before_merge"`
 	// Deprecated: use BuildsAccessLevel instead
 	JobsEnabled bool `json:"jobs_enabled"`
 	// Deprecated: use WikiAccessLevel instead
@@ -257,9 +259,19 @@ type Project struct {
 	PublicBuilds bool `json:"public_builds"`
 }
 
+// ProjectSharedWithGroup represents a GitLab project shared group.
+//
+// GitLab API docs: https://docs.gitlab.com/api/projects/
+type ProjectSharedWithGroup struct {
+	GroupID          int64  `json:"group_id"`
+	GroupName        string `json:"group_name"`
+	GroupFullPath    string `json:"group_full_path"`
+	GroupAccessLevel int64  `json:"group_access_level"`
+}
+
 // BasicProject included in other service responses (such as todos).
 type BasicProject struct {
-	ID                int        `json:"id"`
+	ID                int64      `json:"id"`
 	Description       string     `json:"description"`
 	Name              string     `json:"name"`
 	NameWithNamespace string     `json:"name_with_namespace"`
@@ -271,7 +283,7 @@ type BasicProject struct {
 // ContainerExpirationPolicy represents the container expiration policy.
 type ContainerExpirationPolicy struct {
 	Cadence         string     `json:"cadence"`
-	KeepN           int        `json:"keep_n"`
+	KeepN           int64      `json:"keep_n"`
 	OlderThan       string     `json:"older_than"`
 	NameRegexDelete string     `json:"name_regex_delete"`
 	NameRegexKeep   string     `json:"name_regex_keep"`
@@ -284,7 +296,7 @@ type ContainerExpirationPolicy struct {
 
 // ForkParent represents the parent project when this is a fork.
 type ForkParent struct {
-	ID                int    `json:"id"`
+	ID                int64  `json:"id"`
 	Name              string `json:"name"`
 	NameWithNamespace string `json:"name_with_namespace"`
 	Path              string `json:"path"`
@@ -336,12 +348,12 @@ type ProjectLicense struct {
 
 // ProjectNamespace represents a project namespace.
 type ProjectNamespace struct {
-	ID        int    `json:"id"`
+	ID        int64  `json:"id"`
 	Name      string `json:"name"`
 	Path      string `json:"path"`
 	Kind      string `json:"kind"`
 	FullPath  string `json:"full_path"`
-	ParentID  int    `json:"parent_id"`
+	ParentID  int64  `json:"parent_id"`
 	AvatarURL string `json:"avatar_url"`
 	WebURL    string `json:"web_url"`
 }
@@ -388,12 +400,12 @@ func (s Project) String() string {
 // GitLab API docs:
 // https://docs.gitlab.com/api/merge_request_approvals/#get-all-approval-rules-for-project
 type ProjectApprovalRule struct {
-	ID                            int                `json:"id"`
+	ID                            int64              `json:"id"`
 	Name                          string             `json:"name"`
 	RuleType                      string             `json:"rule_type"`
 	ReportType                    string             `json:"report_type"`
 	EligibleApprovers             []*BasicUser       `json:"eligible_approvers"`
-	ApprovalsRequired             int                `json:"approvals_required"`
+	ApprovalsRequired             int64              `json:"approvals_required"`
 	Users                         []*BasicUser       `json:"users"`
 	Groups                        []*Group           `json:"groups"`
 	ContainsHiddenGroups          bool               `json:"contains_hidden_groups"`
@@ -410,9 +422,10 @@ func (s ProjectApprovalRule) String() string {
 // GitLab API docs: https://docs.gitlab.com/api/projects/#list-all-projects
 type ListProjectsOptions struct {
 	ListOptions
+	Active                   *bool             `url:"active,omitempty" json:"active,omitempty"`
 	Archived                 *bool             `url:"archived,omitempty" json:"archived,omitempty"`
-	IDAfter                  *int              `url:"id_after,omitempty" json:"id_after,omitempty"`
-	IDBefore                 *int              `url:"id_before,omitempty" json:"id_before,omitempty"`
+	IDAfter                  *int64            `url:"id_after,omitempty" json:"id_after,omitempty"`
+	IDBefore                 *int64            `url:"id_before,omitempty" json:"id_before,omitempty"`
 	Imported                 *bool             `url:"imported,omitempty" json:"imported,omitempty"`
 	IncludeHidden            *bool             `url:"include_hidden,omitempty" json:"include_hidden,omitempty"`
 	IncludePendingDelete     *bool             `url:"include_pending_delete,omitempty" json:"include_pending_delete,omitempty"`
@@ -461,7 +474,7 @@ func (s *ProjectsService) ListProjects(opt *ListProjectsOptions, options ...Requ
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/projects/#list-a-users-projects
-func (s *ProjectsService) ListUserProjects(uid interface{}, opt *ListProjectsOptions, options ...RequestOptionFunc) ([]*Project, *Response, error) {
+func (s *ProjectsService) ListUserProjects(uid any, opt *ListProjectsOptions, options ...RequestOptionFunc) ([]*Project, *Response, error) {
 	user, err := parseID(uid)
 	if err != nil {
 		return nil, nil, err
@@ -486,7 +499,7 @@ func (s *ProjectsService) ListUserProjects(uid interface{}, opt *ListProjectsOpt
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/projects/#list-projects-a-user-has-contributed-to
-func (s *ProjectsService) ListUserContributedProjects(uid interface{}, opt *ListProjectsOptions, options ...RequestOptionFunc) ([]*Project, *Response, error) {
+func (s *ProjectsService) ListUserContributedProjects(uid any, opt *ListProjectsOptions, options ...RequestOptionFunc) ([]*Project, *Response, error) {
 	user, err := parseID(uid)
 	if err != nil {
 		return nil, nil, err
@@ -511,7 +524,7 @@ func (s *ProjectsService) ListUserContributedProjects(uid interface{}, opt *List
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/project_starring/#list-projects-starred-by-a-user
-func (s *ProjectsService) ListUserStarredProjects(uid interface{}, opt *ListProjectsOptions, options ...RequestOptionFunc) ([]*Project, *Response, error) {
+func (s *ProjectsService) ListUserStarredProjects(uid any, opt *ListProjectsOptions, options ...RequestOptionFunc) ([]*Project, *Response, error) {
 	user, err := parseID(uid)
 	if err != nil {
 		return nil, nil, err
@@ -534,7 +547,7 @@ func (s *ProjectsService) ListUserStarredProjects(uid interface{}, opt *ListProj
 
 // ProjectUser represents a GitLab project user.
 type ProjectUser struct {
-	ID        int    `json:"id"`
+	ID        int64  `json:"id"`
 	Name      string `json:"name"`
 	Username  string `json:"username"`
 	State     string `json:"state"`
@@ -554,7 +567,7 @@ type ListProjectUserOptions struct {
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/projects/#list-users
-func (s *ProjectsService) ListProjectsUsers(pid interface{}, opt *ListProjectUserOptions, options ...RequestOptionFunc) ([]*ProjectUser, *Response, error) {
+func (s *ProjectsService) ListProjectsUsers(pid any, opt *ListProjectUserOptions, options ...RequestOptionFunc) ([]*ProjectUser, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err
@@ -578,7 +591,7 @@ func (s *ProjectsService) ListProjectsUsers(pid interface{}, opt *ListProjectUse
 // ProjectGroup represents a GitLab project group.
 // GitLab API docs: https://docs.gitlab.com/api/projects/#list-groups
 type ProjectGroup struct {
-	ID        int    `json:"id"`
+	ID        int64  `json:"id"`
 	Name      string `json:"name"`
 	AvatarURL string `json:"avatar_url"`
 	WebURL    string `json:"web_url"`
@@ -593,8 +606,8 @@ type ListProjectGroupOptions struct {
 	ListOptions
 	Search               *string           `url:"search,omitempty" json:"search,omitempty"`
 	SharedMinAccessLevel *AccessLevelValue `url:"shared_min_access_level,omitempty" json:"shared_min_access_level,omitempty"`
-	SharedVisiableOnly   *bool             `url:"shared_visible_only,omitempty" json:"shared_visible_only,omitempty"`
-	SkipGroups           *[]int            `url:"skip_groups,omitempty" json:"skip_groups,omitempty"`
+	SharedVisibleOnly    *bool             `url:"shared_visible_only,omitempty" json:"shared_visible_only,omitempty"`
+	SkipGroups           *[]int64          `url:"skip_groups,omitempty" json:"skip_groups,omitempty"`
 	WithShared           *bool             `url:"with_shared,omitempty" json:"with_shared,omitempty"`
 }
 
@@ -602,7 +615,7 @@ type ListProjectGroupOptions struct {
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/projects/#list-groups
-func (s *ProjectsService) ListProjectsGroups(pid interface{}, opt *ListProjectGroupOptions, options ...RequestOptionFunc) ([]*ProjectGroup, *Response, error) {
+func (s *ProjectsService) ListProjectsGroups(pid any, opt *ListProjectGroupOptions, options ...RequestOptionFunc) ([]*ProjectGroup, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err
@@ -625,7 +638,7 @@ func (s *ProjectsService) ListProjectsGroups(pid interface{}, opt *ListProjectGr
 
 // ProjectLanguages is a map of strings because the response is arbitrary
 //
-// Gitlab API docs:
+// GitLab API docs:
 // https://docs.gitlab.com/api/projects/#list-programming-languages-used
 type ProjectLanguages map[string]float32
 
@@ -633,7 +646,7 @@ type ProjectLanguages map[string]float32
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/projects/#list-programming-languages-used
-func (s *ProjectsService) GetProjectLanguages(pid interface{}, options ...RequestOptionFunc) (*ProjectLanguages, *Response, error) {
+func (s *ProjectsService) GetProjectLanguages(pid any, options ...RequestOptionFunc) (*ProjectLanguages, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err
@@ -668,7 +681,7 @@ type GetProjectOptions struct {
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/projects/#get-a-single-project
-func (s *ProjectsService) GetProject(pid interface{}, opt *GetProjectOptions, options ...RequestOptionFunc) (*Project, *Response, error) {
+func (s *ProjectsService) GetProject(pid any, opt *GetProjectOptions, options ...RequestOptionFunc) (*Project, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err
@@ -703,7 +716,7 @@ type CreateProjectOptions struct {
 	Avatar                                    *ProjectAvatar                       `url:"-" json:"-"`
 	BuildCoverageRegex                        *string                              `url:"build_coverage_regex,omitempty" json:"build_coverage_regex,omitempty"`
 	BuildGitStrategy                          *string                              `url:"build_git_strategy,omitempty" json:"build_git_strategy,omitempty"`
-	BuildTimeout                              *int                                 `url:"build_timeout,omitempty" json:"build_timeout,omitempty"`
+	BuildTimeout                              *int64                               `url:"build_timeout,omitempty" json:"build_timeout,omitempty"`
 	BuildsAccessLevel                         *AccessControlValue                  `url:"builds_access_level,omitempty" json:"builds_access_level,omitempty"`
 	CIConfigPath                              *string                              `url:"ci_config_path,omitempty" json:"ci_config_path,omitempty"`
 	ContainerExpirationPolicyAttributes       *ContainerExpirationPolicyAttributes `url:"container_expiration_policy_attributes,omitempty" json:"container_expiration_policy_attributes,omitempty"`
@@ -714,7 +727,7 @@ type CreateProjectOptions struct {
 	EnforceAuthChecksOnUploads                *bool                                `url:"enforce_auth_checks_on_uploads,omitempty" json:"enforce_auth_checks_on_uploads,omitempty"`
 	ExternalAuthorizationClassificationLabel  *string                              `url:"external_authorization_classification_label,omitempty" json:"external_authorization_classification_label,omitempty"`
 	ForkingAccessLevel                        *AccessControlValue                  `url:"forking_access_level,omitempty" json:"forking_access_level,omitempty"`
-	GroupWithProjectTemplatesID               *int                                 `url:"group_with_project_templates_id,omitempty" json:"group_with_project_templates_id,omitempty"`
+	GroupWithProjectTemplatesID               *int64                               `url:"group_with_project_templates_id,omitempty" json:"group_with_project_templates_id,omitempty"`
 	ImportURL                                 *string                              `url:"import_url,omitempty" json:"import_url,omitempty"`
 	InitializeWithReadme                      *bool                                `url:"initialize_with_readme,omitempty" json:"initialize_with_readme,omitempty"`
 	IssuesAccessLevel                         *AccessControlValue                  `url:"issues_access_level,omitempty" json:"issues_access_level,omitempty"`
@@ -725,12 +738,13 @@ type CreateProjectOptions struct {
 	MergePipelinesEnabled                     *bool                                `url:"merge_pipelines_enabled,omitempty" json:"merge_pipelines_enabled,omitempty"`
 	MergeRequestsAccessLevel                  *AccessControlValue                  `url:"merge_requests_access_level,omitempty" json:"merge_requests_access_level,omitempty"`
 	MergeTrainsEnabled                        *bool                                `url:"merge_trains_enabled,omitempty" json:"merge_trains_enabled,omitempty"`
+	MergeTrainsSkipTrainAllowed               *bool                                `url:"merge_trains_skip_train_allowed,omitempty" json:"merge_trains_skip_train_allowed,omitempty"`
 	Mirror                                    *bool                                `url:"mirror,omitempty" json:"mirror,omitempty"`
 	MirrorTriggerBuilds                       *bool                                `url:"mirror_trigger_builds,omitempty" json:"mirror_trigger_builds,omitempty"`
 	ModelExperimentsAccessLevel               *AccessControlValue                  `url:"model_experiments_access_level,omitempty" json:"model_experiments_access_level,omitempty"`
 	ModelRegistryAccessLevel                  *AccessControlValue                  `url:"model_registry_access_level,omitempty" json:"model_registry_access_level,omitempty"`
 	Name                                      *string                              `url:"name,omitempty" json:"name,omitempty"`
-	NamespaceID                               *int                                 `url:"namespace_id,omitempty" json:"namespace_id,omitempty"`
+	NamespaceID                               *int64                               `url:"namespace_id,omitempty" json:"namespace_id,omitempty"`
 	OnlyAllowMergeIfAllDiscussionsAreResolved *bool                                `url:"only_allow_merge_if_all_discussions_are_resolved,omitempty" json:"only_allow_merge_if_all_discussions_are_resolved,omitempty"`
 	OnlyAllowMergeIfPipelineSucceeds          *bool                                `url:"only_allow_merge_if_pipeline_succeeds,omitempty" json:"only_allow_merge_if_pipeline_succeeds,omitempty"`
 	OperationsAccessLevel                     *AccessControlValue                  `url:"operations_access_level,omitempty" json:"operations_access_level,omitempty"`
@@ -752,20 +766,21 @@ type CreateProjectOptions struct {
 	SecurityAndComplianceAccessLevel          *AccessControlValue                  `url:"security_and_compliance_access_level,omitempty" json:"security_and_compliance_access_level,omitempty"`
 	SharedRunnersEnabled                      *bool                                `url:"shared_runners_enabled,omitempty" json:"shared_runners_enabled,omitempty"`
 	GroupRunnersEnabled                       *bool                                `url:"group_runners_enabled,omitempty" json:"group_runners_enabled,omitempty"`
+	ResourceGroupDefaultProcessMode           *ResourceGroupProcessMode            `url:"resource_group_default_process_mode,omitempty" json:"resource_group_default_process_mode,omitempty"`
 	ShowDefaultAwardEmojis                    *bool                                `url:"show_default_award_emojis,omitempty" json:"show_default_award_emojis,omitempty"`
 	SnippetsAccessLevel                       *AccessControlValue                  `url:"snippets_access_level,omitempty" json:"snippets_access_level,omitempty"`
 	SquashCommitTemplate                      *string                              `url:"squash_commit_template,omitempty" json:"squash_commit_template,omitempty"`
 	SquashOption                              *SquashOptionValue                   `url:"squash_option,omitempty" json:"squash_option,omitempty"`
 	SuggestionCommitMessage                   *string                              `url:"suggestion_commit_message,omitempty" json:"suggestion_commit_message,omitempty"`
 	TemplateName                              *string                              `url:"template_name,omitempty" json:"template_name,omitempty"`
-	TemplateProjectID                         *int                                 `url:"template_project_id,omitempty" json:"template_project_id,omitempty"`
+	TemplateProjectID                         *int64                               `url:"template_project_id,omitempty" json:"template_project_id,omitempty"`
 	Topics                                    *[]string                            `url:"topics,omitempty" json:"topics,omitempty"`
 	UseCustomTemplate                         *bool                                `url:"use_custom_template,omitempty" json:"use_custom_template,omitempty"`
 	Visibility                                *VisibilityValue                     `url:"visibility,omitempty" json:"visibility,omitempty"`
 	WikiAccessLevel                           *AccessControlValue                  `url:"wiki_access_level,omitempty" json:"wiki_access_level,omitempty"`
 
 	// Deprecated: use Merge Request Approvals API instead
-	ApprovalsBeforeMerge *int `url:"approvals_before_merge,omitempty" json:"approvals_before_merge,omitempty"`
+	ApprovalsBeforeMerge *int64 `url:"approvals_before_merge,omitempty" json:"approvals_before_merge,omitempty"`
 	// Deprecated: use PublicJobs instead
 	PublicBuilds *bool `url:"public_builds,omitempty" json:"public_builds,omitempty"`
 	// Deprecated: No longer supported in recent versions.
@@ -800,7 +815,7 @@ type CreateProjectOptions struct {
 // GitLab API docs: https://docs.gitlab.com/api/projects/#create-a-project
 type ContainerExpirationPolicyAttributes struct {
 	Cadence         *string `url:"cadence,omitempty" json:"cadence,omitempty"`
-	KeepN           *int    `url:"keep_n,omitempty" json:"keep_n,omitempty"`
+	KeepN           *int64  `url:"keep_n,omitempty" json:"keep_n,omitempty"`
 	OlderThan       *string `url:"older_than,omitempty" json:"older_than,omitempty"`
 	NameRegexDelete *string `url:"name_regex_delete,omitempty" json:"name_regex_delete,omitempty"`
 	NameRegexKeep   *string `url:"name_regex_keep,omitempty" json:"name_regex_keep,omitempty"`
@@ -878,7 +893,7 @@ type CreateProjectForUserOptions CreateProjectOptions
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/projects/#create-a-project-for-a-user
-func (s *ProjectsService) CreateProjectForUser(user int, opt *CreateProjectForUserOptions, options ...RequestOptionFunc) (*Project, *Response, error) {
+func (s *ProjectsService) CreateProjectForUser(user int64, opt *CreateProjectForUserOptions, options ...RequestOptionFunc) (*Project, *Response, error) {
 	if opt.ContainerExpirationPolicyAttributes != nil {
 		// This is needed to satisfy the API. Should be deleted
 		// when NameRegex is removed (it's now deprecated).
@@ -926,19 +941,21 @@ type EditProjectOptions struct {
 	AutoCancelPendingPipelines                *string                                      `url:"auto_cancel_pending_pipelines,omitempty" json:"auto_cancel_pending_pipelines,omitempty"`
 	AutoDevopsDeployStrategy                  *string                                      `url:"auto_devops_deploy_strategy,omitempty" json:"auto_devops_deploy_strategy,omitempty"`
 	AutoDevopsEnabled                         *bool                                        `url:"auto_devops_enabled,omitempty" json:"auto_devops_enabled,omitempty"`
+	AutoDuoCodeReviewEnabled                  *bool                                        `url:"auto_duo_code_review_enabled,omitempty" json:"auto_duo_code_review_enabled,omitempty"`
 	AutocloseReferencedIssues                 *bool                                        `url:"autoclose_referenced_issues,omitempty" json:"autoclose_referenced_issues,omitempty"`
 	Avatar                                    *ProjectAvatar                               `url:"-" json:"avatar,omitempty"`
 	BuildCoverageRegex                        *string                                      `url:"build_coverage_regex,omitempty" json:"build_coverage_regex,omitempty"`
 	BuildGitStrategy                          *string                                      `url:"build_git_strategy,omitempty" json:"build_git_strategy,omitempty"`
-	BuildTimeout                              *int                                         `url:"build_timeout,omitempty" json:"build_timeout,omitempty"`
+	BuildTimeout                              *int64                                       `url:"build_timeout,omitempty" json:"build_timeout,omitempty"`
 	BuildsAccessLevel                         *AccessControlValue                          `url:"builds_access_level,omitempty" json:"builds_access_level,omitempty"`
 	CIConfigPath                              *string                                      `url:"ci_config_path,omitempty" json:"ci_config_path,omitempty"`
-	CIDefaultGitDepth                         *int                                         `url:"ci_default_git_depth,omitempty" json:"ci_default_git_depth,omitempty"`
-	CIDeletePipelinesInSeconds                *int                                         `url:"ci_delete_pipelines_in_seconds,omitempty" json:"ci_delete_pipelines_in_seconds,omitempty"`
+	CIDefaultGitDepth                         *int64                                       `url:"ci_default_git_depth,omitempty" json:"ci_default_git_depth,omitempty"`
+	CIDeletePipelinesInSeconds                *int64                                       `url:"ci_delete_pipelines_in_seconds,omitempty" json:"ci_delete_pipelines_in_seconds,omitempty"`
 	CIForwardDeploymentEnabled                *bool                                        `url:"ci_forward_deployment_enabled,omitempty" json:"ci_forward_deployment_enabled,omitempty"`
 	CIForwardDeploymentRollbackAllowed        *bool                                        `url:"ci_forward_deployment_rollback_allowed,omitempty" json:"ci_forward_deployment_rollback_allowed,omitempty"`
+	CIPushRepositoryForJobTokenAllowed        *bool                                        `url:"ci_push_repository_for_job_token_allowed,omitempty" json:"ci_push_repository_for_job_token_allowed,omitempty"`
 	CIIdTokenSubClaimComponents               *[]string                                    `url:"ci_id_token_sub_claim_components,omitempty" json:"ci_id_token_sub_claim_components,omitempty"`
-	CISeperateCache                           *bool                                        `url:"ci_separated_caches,omitempty" json:"ci_separated_caches,omitempty"`
+	CISeparatedCaches                         *bool                                        `url:"ci_separated_caches,omitempty" json:"ci_separated_caches,omitempty"`
 	CIRestrictPipelineCancellationRole        *AccessControlValue                          `url:"ci_restrict_pipeline_cancellation_role,omitempty" json:"ci_restrict_pipeline_cancellation_role,omitempty"`
 	CIPipelineVariablesMinimumOverrideRole    *CIPipelineVariablesMinimumOverrideRoleValue `url:"ci_pipeline_variables_minimum_override_role,omitempty" json:"ci_pipeline_variables_minimum_override_role,omitempty"`
 	ContainerExpirationPolicyAttributes       *ContainerExpirationPolicyAttributes         `url:"container_expiration_policy_attributes,omitempty" json:"container_expiration_policy_attributes,omitempty"`
@@ -955,6 +972,7 @@ type EditProjectOptions struct {
 	IssuesTemplate                            *string                                      `url:"issues_template,omitempty" json:"issues_template,omitempty"`
 	KeepLatestArtifact                        *bool                                        `url:"keep_latest_artifact,omitempty" json:"keep_latest_artifact,omitempty"`
 	LFSEnabled                                *bool                                        `url:"lfs_enabled,omitempty" json:"lfs_enabled,omitempty"`
+	MaxArtifactsSize                          *int64                                       `url:"max_artifacts_size,omitempty" json:"max_artifacts_size,omitempty"`
 	MergeCommitTemplate                       *string                                      `url:"merge_commit_template,omitempty" json:"merge_commit_template,omitempty"`
 	MergeRequestDefaultTargetSelf             *bool                                        `url:"mr_default_target_self,omitempty" json:"mr_default_target_self,omitempty"`
 	MergeMethod                               *MergeMethodValue                            `url:"merge_method,omitempty" json:"merge_method,omitempty"`
@@ -962,11 +980,12 @@ type EditProjectOptions struct {
 	MergeRequestsAccessLevel                  *AccessControlValue                          `url:"merge_requests_access_level,omitempty" json:"merge_requests_access_level,omitempty"`
 	MergeRequestsTemplate                     *string                                      `url:"merge_requests_template,omitempty" json:"merge_requests_template,omitempty"`
 	MergeTrainsEnabled                        *bool                                        `url:"merge_trains_enabled,omitempty" json:"merge_trains_enabled,omitempty"`
+	MergeTrainsSkipTrainAllowed               *bool                                        `url:"merge_trains_skip_train_allowed,omitempty" json:"merge_trains_skip_train_allowed,omitempty"`
 	Mirror                                    *bool                                        `url:"mirror,omitempty" json:"mirror,omitempty"`
 	MirrorBranchRegex                         *string                                      `url:"mirror_branch_regex,omitempty" json:"mirror_branch_regex,omitempty"`
 	MirrorOverwritesDivergedBranches          *bool                                        `url:"mirror_overwrites_diverged_branches,omitempty" json:"mirror_overwrites_diverged_branches,omitempty"`
 	MirrorTriggerBuilds                       *bool                                        `url:"mirror_trigger_builds,omitempty" json:"mirror_trigger_builds,omitempty"`
-	MirrorUserID                              *int                                         `url:"mirror_user_id,omitempty" json:"mirror_user_id,omitempty"`
+	MirrorUserID                              *int64                                       `url:"mirror_user_id,omitempty" json:"mirror_user_id,omitempty"`
 	ModelExperimentsAccessLevel               *AccessControlValue                          `url:"model_experiments_access_level,omitempty" json:"model_experiments_access_level,omitempty"`
 	ModelRegistryAccessLevel                  *AccessControlValue                          `url:"model_registry_access_level,omitempty" json:"model_registry_access_level,omitempty"`
 	Name                                      *string                                      `url:"name,omitempty" json:"name,omitempty"`
@@ -995,6 +1014,7 @@ type EditProjectOptions struct {
 	ServiceDeskEnabled                        *bool                                        `url:"service_desk_enabled,omitempty" json:"service_desk_enabled,omitempty"`
 	SharedRunnersEnabled                      *bool                                        `url:"shared_runners_enabled,omitempty" json:"shared_runners_enabled,omitempty"`
 	GroupRunnersEnabled                       *bool                                        `url:"group_runners_enabled,omitempty" json:"group_runners_enabled,omitempty"`
+	ResourceGroupDefaultProcessMode           *ResourceGroupProcessMode                    `url:"resource_group_default_process_mode,omitempty" json:"resource_group_default_process_mode,omitempty"`
 	ShowDefaultAwardEmojis                    *bool                                        `url:"show_default_award_emojis,omitempty" json:"show_default_award_emojis,omitempty"`
 	SnippetsAccessLevel                       *AccessControlValue                          `url:"snippets_access_level,omitempty" json:"snippets_access_level,omitempty"`
 	SquashCommitTemplate                      *string                                      `url:"squash_commit_template,omitempty" json:"squash_commit_template,omitempty"`
@@ -1005,7 +1025,7 @@ type EditProjectOptions struct {
 	WikiAccessLevel                           *AccessControlValue                          `url:"wiki_access_level,omitempty" json:"wiki_access_level,omitempty"`
 
 	// Deprecated: use Merge Request Approvals API instead
-	ApprovalsBeforeMerge *int `url:"approvals_before_merge,omitempty" json:"approvals_before_merge,omitempty"`
+	ApprovalsBeforeMerge *int64 `url:"approvals_before_merge,omitempty" json:"approvals_before_merge,omitempty"`
 	// Deprecated: use PublicJobs instead
 	PublicBuilds *bool `url:"public_builds,omitempty" json:"public_builds,omitempty"`
 	// Deprecated: use CIPipelineVariablesMinimumOverrideRole instead
@@ -1031,7 +1051,7 @@ type EditProjectOptions struct {
 // EditProject updates an existing project.
 //
 // GitLab API docs: https://docs.gitlab.com/api/projects/#edit-a-project
-func (s *ProjectsService) EditProject(pid interface{}, opt *EditProjectOptions, options ...RequestOptionFunc) (*Project, *Response, error) {
+func (s *ProjectsService) EditProject(pid any, opt *EditProjectOptions, options ...RequestOptionFunc) (*Project, *Response, error) {
 	if opt.ContainerExpirationPolicyAttributes != nil {
 		// This is needed to satisfy the API. Should be deleted
 		// when NameRegex is removed (it's now deprecated).
@@ -1074,12 +1094,14 @@ func (s *ProjectsService) EditProject(pid interface{}, opt *EditProjectOptions, 
 
 // ForkProjectOptions represents the available ForkProject() options.
 //
-// GitLab API docs: https://docs.gitlab.com/api/project_forks/#fork-a-project
+// GitLab API docs:
+// https://docs.gitlab.com/api/project_forks/#fork-a-project
 type ForkProjectOptions struct {
+	Branches                      *string          `url:"branches,omitempty" json:"branches,omitempty"`
 	Description                   *string          `url:"description,omitempty" json:"description,omitempty"`
 	MergeRequestDefaultTargetSelf *bool            `url:"mr_default_target_self,omitempty" json:"mr_default_target_self,omitempty"`
 	Name                          *string          `url:"name,omitempty" json:"name,omitempty"`
-	NamespaceID                   *int             `url:"namespace_id,omitempty" json:"namespace_id,omitempty"`
+	NamespaceID                   *int64           `url:"namespace_id,omitempty" json:"namespace_id,omitempty"`
 	NamespacePath                 *string          `url:"namespace_path,omitempty" json:"namespace_path,omitempty"`
 	Path                          *string          `url:"path,omitempty" json:"path,omitempty"`
 	Visibility                    *VisibilityValue `url:"visibility,omitempty" json:"visibility,omitempty"`
@@ -1091,8 +1113,9 @@ type ForkProjectOptions struct {
 // ForkProject forks a project into the user namespace of the authenticated
 // user.
 //
-// GitLab API docs: https://docs.gitlab.com/api/project_forks/#fork-a-project
-func (s *ProjectsService) ForkProject(pid interface{}, opt *ForkProjectOptions, options ...RequestOptionFunc) (*Project, *Response, error) {
+// GitLab API docs:
+// https://docs.gitlab.com/api/project_forks/#fork-a-project
+func (s *ProjectsService) ForkProject(pid any, opt *ForkProjectOptions, options ...RequestOptionFunc) (*Project, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err
@@ -1117,7 +1140,7 @@ func (s *ProjectsService) ForkProject(pid interface{}, opt *ForkProjectOptions, 
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/project_starring/#star-a-project
-func (s *ProjectsService) StarProject(pid interface{}, options ...RequestOptionFunc) (*Project, *Response, error) {
+func (s *ProjectsService) StarProject(pid any, options ...RequestOptionFunc) (*Project, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err
@@ -1138,12 +1161,12 @@ func (s *ProjectsService) StarProject(pid interface{}, options ...RequestOptionF
 	return p, resp, nil
 }
 
-// ListProjectInvidedGroupOptions represents the available
+// ListProjectInvitedGroupOptions represents the available
 // ListProjectsInvitedGroups() options.
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/projects/#list-a-projects-invited-groups
-type ListProjectInvidedGroupOptions struct {
+type ListProjectInvitedGroupOptions struct {
 	ListOptions
 	Search               *string           `url:"search,omitempty" json:"search,omitempty"`
 	MinAccessLevel       *AccessLevelValue `url:"min_access_level,omitempty" json:"min_access_level,omitempty"`
@@ -1155,7 +1178,7 @@ type ListProjectInvidedGroupOptions struct {
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/projects/#list-a-projects-invited-groups
-func (s *ProjectsService) ListProjectsInvitedGroups(pid interface{}, opt *ListProjectInvidedGroupOptions, options ...RequestOptionFunc) ([]*ProjectGroup, *Response, error) {
+func (s *ProjectsService) ListProjectsInvitedGroups(pid any, opt *ListProjectInvitedGroupOptions, options ...RequestOptionFunc) ([]*ProjectGroup, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err
@@ -1180,7 +1203,7 @@ func (s *ProjectsService) ListProjectsInvitedGroups(pid interface{}, opt *ListPr
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/project_starring/#unstar-a-project
-func (s *ProjectsService) UnstarProject(pid interface{}, options ...RequestOptionFunc) (*Project, *Response, error) {
+func (s *ProjectsService) UnstarProject(pid any, options ...RequestOptionFunc) (*Project, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err
@@ -1206,7 +1229,7 @@ func (s *ProjectsService) UnstarProject(pid interface{}, options ...RequestOptio
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/projects/#archive-a-project
-func (s *ProjectsService) ArchiveProject(pid interface{}, options ...RequestOptionFunc) (*Project, *Response, error) {
+func (s *ProjectsService) ArchiveProject(pid any, options ...RequestOptionFunc) (*Project, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err
@@ -1232,12 +1255,37 @@ func (s *ProjectsService) ArchiveProject(pid interface{}, options ...RequestOpti
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/projects/#unarchive-a-project
-func (s *ProjectsService) UnarchiveProject(pid interface{}, options ...RequestOptionFunc) (*Project, *Response, error) {
+func (s *ProjectsService) UnarchiveProject(pid any, options ...RequestOptionFunc) (*Project, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err
 	}
 	u := fmt.Sprintf("projects/%s/unarchive", PathEscape(project))
+
+	req, err := s.client.NewRequest(http.MethodPost, u, nil, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	p := new(Project)
+	resp, err := s.client.Do(req, p)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return p, resp, nil
+}
+
+// RestoreProject restores a project that is marked for deletion.
+//
+// GitLab API docs:
+// https://docs.gitlab.com/api/projects/#restore-a-project-marked-for-deletion
+func (s *ProjectsService) RestoreProject(pid any, options ...RequestOptionFunc) (*Project, *Response, error) {
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, nil, err
+	}
+	u := fmt.Sprintf("projects/%s/restore", PathEscape(project))
 
 	req, err := s.client.NewRequest(http.MethodPost, u, nil, options)
 	if err != nil {
@@ -1267,7 +1315,7 @@ type DeleteProjectOptions struct {
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/projects/#delete-a-project
-func (s *ProjectsService) DeleteProject(pid interface{}, opt *DeleteProjectOptions, options ...RequestOptionFunc) (*Response, error) {
+func (s *ProjectsService) DeleteProject(pid any, opt *DeleteProjectOptions, options ...RequestOptionFunc) (*Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, err
@@ -1288,13 +1336,13 @@ func (s *ProjectsService) DeleteProject(pid interface{}, opt *DeleteProjectOptio
 type ShareWithGroupOptions struct {
 	ExpiresAt   *string           `url:"expires_at" json:"expires_at"`
 	GroupAccess *AccessLevelValue `url:"group_access" json:"group_access"`
-	GroupID     *int              `url:"group_id" json:"group_id"`
+	GroupID     *int64            `url:"group_id" json:"group_id"`
 }
 
 // ShareProjectWithGroup allows to share a project with a group.
 //
 // GitLab API docs: https://docs.gitlab.com/api/projects/#share-a-project-with-a-group
-func (s *ProjectsService) ShareProjectWithGroup(pid interface{}, opt *ShareWithGroupOptions, options ...RequestOptionFunc) (*Response, error) {
+func (s *ProjectsService) ShareProjectWithGroup(pid any, opt *ShareWithGroupOptions, options ...RequestOptionFunc) (*Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, err
@@ -1313,7 +1361,7 @@ func (s *ProjectsService) ShareProjectWithGroup(pid interface{}, opt *ShareWithG
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/projects/#delete-a-shared-project-link-in-a-group
-func (s *ProjectsService) DeleteSharedProjectFromGroup(pid interface{}, groupID int, options ...RequestOptionFunc) (*Response, error) {
+func (s *ProjectsService) DeleteSharedProjectFromGroup(pid any, groupID int64, options ...RequestOptionFunc) (*Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, err
@@ -1337,17 +1385,22 @@ type HookCustomHeader struct {
 	Value string `json:"value"`
 }
 
+// HookURLVariable represents a project or group hook URL variable
+type HookURLVariable struct {
+	Key   string `json:"key"`
+	Value string `json:"value"`
+}
+
 // ProjectHook represents a project hook.
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/project_webhooks/#list-webhooks-for-a-project
 type ProjectHook struct {
-	ID                        int                 `json:"id"`
+	ID                        int64               `json:"id"`
 	URL                       string              `json:"url"`
 	Name                      string              `json:"name"`
 	Description               string              `json:"description"`
-	ConfidentialNoteEvents    bool                `json:"confidential_note_events"`
-	ProjectID                 int                 `json:"project_id"`
+	ProjectID                 int64               `json:"project_id"`
 	PushEvents                bool                `json:"push_events"`
 	PushEventsBranchFilter    string              `json:"push_events_branch_filter"`
 	IssuesEvents              bool                `json:"issues_events"`
@@ -1355,30 +1408,41 @@ type ProjectHook struct {
 	MergeRequestsEvents       bool                `json:"merge_requests_events"`
 	TagPushEvents             bool                `json:"tag_push_events"`
 	NoteEvents                bool                `json:"note_events"`
+	ConfidentialNoteEvents    bool                `json:"confidential_note_events"`
 	JobEvents                 bool                `json:"job_events"`
 	PipelineEvents            bool                `json:"pipeline_events"`
 	WikiPageEvents            bool                `json:"wiki_page_events"`
 	DeploymentEvents          bool                `json:"deployment_events"`
 	ReleasesEvents            bool                `json:"releases_events"`
+	MilestoneEvents           bool                `json:"milestone_events"`
+	FeatureFlagEvents         bool                `json:"feature_flag_events"`
+	EmojiEvents               bool                `json:"emoji_events"`
 	EnableSSLVerification     bool                `json:"enable_ssl_verification"`
+	RepositoryUpdateEvents    bool                `json:"repository_update_events"`
 	AlertStatus               string              `json:"alert_status"`
+	DisabledUntil             *time.Time          `json:"disabled_until"`
+	URLVariables              []HookURLVariable   `json:"url_variables"`
 	CreatedAt                 *time.Time          `json:"created_at"`
 	ResourceAccessTokenEvents bool                `json:"resource_access_token_events"`
 	CustomWebhookTemplate     string              `json:"custom_webhook_template"`
 	CustomHeaders             []*HookCustomHeader `json:"custom_headers"`
+	VulnerabilityEvents       bool                `json:"vulnerability_events"`
+	BranchFilterStrategy      string              `json:"branch_filter_strategy"`
 }
 
 // ListProjectHooksOptions represents the available ListProjectHooks() options.
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/project_webhooks/#list-webhooks-for-a-project
-type ListProjectHooksOptions ListOptions
+type ListProjectHooksOptions struct {
+	ListOptions
+}
 
 // ListProjectHooks gets a list of project hooks.
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/project_webhooks/#list-webhooks-for-a-project
-func (s *ProjectsService) ListProjectHooks(pid interface{}, opt *ListProjectHooksOptions, options ...RequestOptionFunc) ([]*ProjectHook, *Response, error) {
+func (s *ProjectsService) ListProjectHooks(pid any, opt *ListProjectHooksOptions, options ...RequestOptionFunc) ([]*ProjectHook, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err
@@ -1403,7 +1467,7 @@ func (s *ProjectsService) ListProjectHooks(pid interface{}, opt *ListProjectHook
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/project_webhooks/#get-a-project-webhook
-func (s *ProjectsService) GetProjectHook(pid interface{}, hook int, options ...RequestOptionFunc) (*ProjectHook, *Response, error) {
+func (s *ProjectsService) GetProjectHook(pid any, hook int64, options ...RequestOptionFunc) (*ProjectHook, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err
@@ -1443,6 +1507,7 @@ type AddProjectHookOptions struct {
 	PushEvents                *bool                `url:"push_events,omitempty" json:"push_events,omitempty"`
 	PushEventsBranchFilter    *string              `url:"push_events_branch_filter,omitempty" json:"push_events_branch_filter,omitempty"`
 	ReleasesEvents            *bool                `url:"releases_events,omitempty" json:"releases_events,omitempty"`
+	EmojiEvents               *bool                `url:"emoji_events,omitempty" json:"emoji_events,omitempty"`
 	TagPushEvents             *bool                `url:"tag_push_events,omitempty" json:"tag_push_events,omitempty"`
 	Token                     *string              `url:"token,omitempty" json:"token,omitempty"`
 	URL                       *string              `url:"url,omitempty" json:"url,omitempty"`
@@ -1450,13 +1515,15 @@ type AddProjectHookOptions struct {
 	ResourceAccessTokenEvents *bool                `url:"resource_access_token_events,omitempty" json:"resource_access_token_events,omitempty"`
 	CustomWebhookTemplate     *string              `url:"custom_webhook_template,omitempty" json:"custom_webhook_template,omitempty"`
 	CustomHeaders             *[]*HookCustomHeader `url:"custom_headers,omitempty" json:"custom_headers,omitempty"`
+	VulnerabilityEvents       *bool                `url:"vulnerability_events,omitempty" json:"vulnerability_events,omitempty"`
+	BranchFilterStrategy      *string              `url:"branch_filter_strategy,omitempty" json:"branch_filter_strategy,omitempty"`
 }
 
 // AddProjectHook adds a hook to a specified project.
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/project_webhooks/#add-a-webhook-to-a-project
-func (s *ProjectsService) AddProjectHook(pid interface{}, opt *AddProjectHookOptions, options ...RequestOptionFunc) (*ProjectHook, *Response, error) {
+func (s *ProjectsService) AddProjectHook(pid any, opt *AddProjectHookOptions, options ...RequestOptionFunc) (*ProjectHook, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err
@@ -1496,6 +1563,7 @@ type EditProjectHookOptions struct {
 	PushEvents                *bool                `url:"push_events,omitempty" json:"push_events,omitempty"`
 	PushEventsBranchFilter    *string              `url:"push_events_branch_filter,omitempty" json:"push_events_branch_filter,omitempty"`
 	ReleasesEvents            *bool                `url:"releases_events,omitempty" json:"releases_events,omitempty"`
+	EmojiEvents               *bool                `url:"emoji_events,omitempty" json:"emoji_events,omitempty"`
 	TagPushEvents             *bool                `url:"tag_push_events,omitempty" json:"tag_push_events,omitempty"`
 	Token                     *string              `url:"token,omitempty" json:"token,omitempty"`
 	URL                       *string              `url:"url,omitempty" json:"url,omitempty"`
@@ -1503,13 +1571,15 @@ type EditProjectHookOptions struct {
 	ResourceAccessTokenEvents *bool                `url:"resource_access_token_events,omitempty" json:"resource_access_token_events,omitempty"`
 	CustomWebhookTemplate     *string              `url:"custom_webhook_template,omitempty" json:"custom_webhook_template,omitempty"`
 	CustomHeaders             *[]*HookCustomHeader `url:"custom_headers,omitempty" json:"custom_headers,omitempty"`
+	VulnerabilityEvents       *bool                `url:"vulnerability_events,omitempty" json:"vulnerability_events,omitempty"`
+	BranchFilterStrategy      *string              `url:"branch_filter_strategy,omitempty" json:"branch_filter_strategy,omitempty"`
 }
 
 // EditProjectHook edits a hook for a specified project.
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/project_webhooks/#edit-a-project-webhook
-func (s *ProjectsService) EditProjectHook(pid interface{}, hook int, opt *EditProjectHookOptions, options ...RequestOptionFunc) (*ProjectHook, *Response, error) {
+func (s *ProjectsService) EditProjectHook(pid any, hook int64, opt *EditProjectHookOptions, options ...RequestOptionFunc) (*ProjectHook, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err
@@ -1535,7 +1605,7 @@ func (s *ProjectsService) EditProjectHook(pid interface{}, hook int, opt *EditPr
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/project_webhooks/#delete-project-webhook
-func (s *ProjectsService) DeleteProjectHook(pid interface{}, hook int, options ...RequestOptionFunc) (*Response, error) {
+func (s *ProjectsService) DeleteProjectHook(pid any, hook int64, options ...RequestOptionFunc) (*Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, err
@@ -1562,7 +1632,7 @@ func (s *ProjectsService) DeleteProjectHook(pid interface{}, hook int, options .
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/project_webhooks/#trigger-a-test-project-webhook
-func (s *ProjectsService) TriggerTestProjectHook(pid interface{}, hook int, event ProjectHookEvent, options ...RequestOptionFunc) (*Response, error) {
+func (s *ProjectsService) TriggerTestProjectHook(pid any, hook int64, event ProjectHookEvent, options ...RequestOptionFunc) (*Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, err
@@ -1590,7 +1660,7 @@ type SetHookCustomHeaderOptions struct {
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/project_webhooks/#set-a-custom-header
-func (s *ProjectsService) SetProjectCustomHeader(pid interface{}, hook int, key string, opt *SetHookCustomHeaderOptions, options ...RequestOptionFunc) (*Response, error) {
+func (s *ProjectsService) SetProjectCustomHeader(pid any, hook int64, key string, opt *SetHookCustomHeaderOptions, options ...RequestOptionFunc) (*Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, err
@@ -1609,7 +1679,7 @@ func (s *ProjectsService) SetProjectCustomHeader(pid interface{}, hook int, key 
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/project_webhooks/#delete-a-custom-header
-func (s *ProjectsService) DeleteProjectCustomHeader(pid interface{}, hook int, key string, options ...RequestOptionFunc) (*Response, error) {
+func (s *ProjectsService) DeleteProjectCustomHeader(pid any, hook int64, key string, options ...RequestOptionFunc) (*Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, err
@@ -1624,14 +1694,61 @@ func (s *ProjectsService) DeleteProjectCustomHeader(pid interface{}, hook int, k
 	return s.client.Do(req, nil)
 }
 
+// SetProjectWebhookURLVariableOptions represents the available
+// SetProjectWebhookURLVariable() options.
+//
+// GitLab API docs:
+// https://docs.gitlab.com/api/project_webhooks/#set-a-url-variable
+type SetProjectWebhookURLVariableOptions struct {
+	Value *string `json:"value,omitempty"`
+}
+
+// SetProjectWebhookURLVariable creates or updates a project webhook URL variable.
+//
+// GitLab API docs:
+// https://docs.gitlab.com/api/project_webhooks/#set-a-url-variable
+func (s *ProjectsService) SetProjectWebhookURLVariable(pid any, hook int64, key string, opt *SetProjectWebhookURLVariableOptions, options ...RequestOptionFunc) (*Response, error) {
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, err
+	}
+	u := fmt.Sprintf("projects/%s/hooks/%d/url_variables/%s", PathEscape(project), hook, PathEscape(key))
+
+	req, err := s.client.NewRequest(http.MethodPut, u, opt, options)
+	if err != nil {
+		return nil, err
+	}
+
+	return s.client.Do(req, nil)
+}
+
+// DeleteProjectWebhookURLVariable deletes a project webhook URL variable.
+//
+// GitLab API docs:
+// https://docs.gitlab.com/api/project_webhooks/#delete-a-url-variable
+func (s *ProjectsService) DeleteProjectWebhookURLVariable(pid any, hook int64, key string, options ...RequestOptionFunc) (*Response, error) {
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, err
+	}
+	u := fmt.Sprintf("projects/%s/hooks/%d/url_variables/%s", PathEscape(project), hook, PathEscape(key))
+
+	req, err := s.client.NewRequest(http.MethodDelete, u, nil, options)
+	if err != nil {
+		return nil, err
+	}
+
+	return s.client.Do(req, nil)
+}
+
 // ProjectForkRelation represents a project fork relationship.
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/project_forks/#create-a-fork-relationship-between-projects
 type ProjectForkRelation struct {
-	ID                  int        `json:"id"`
-	ForkedToProjectID   int        `json:"forked_to_project_id"`
-	ForkedFromProjectID int        `json:"forked_from_project_id"`
+	ID                  int64      `json:"id"`
+	ForkedToProjectID   int64      `json:"forked_to_project_id"`
+	ForkedFromProjectID int64      `json:"forked_from_project_id"`
 	CreatedAt           *time.Time `json:"created_at"`
 	UpdatedAt           *time.Time `json:"updated_at"`
 }
@@ -1641,7 +1758,7 @@ type ProjectForkRelation struct {
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/project_forks/#create-a-fork-relationship-between-projects
-func (s *ProjectsService) CreateProjectForkRelation(pid interface{}, fork int, options ...RequestOptionFunc) (*ProjectForkRelation, *Response, error) {
+func (s *ProjectsService) CreateProjectForkRelation(pid any, fork int64, options ...RequestOptionFunc) (*ProjectForkRelation, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err
@@ -1666,7 +1783,7 @@ func (s *ProjectsService) CreateProjectForkRelation(pid interface{}, fork int, o
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/project_forks/#delete-a-fork-relationship-between-projects
-func (s *ProjectsService) DeleteProjectForkRelation(pid interface{}, options ...RequestOptionFunc) (*Response, error) {
+func (s *ProjectsService) DeleteProjectForkRelation(pid any, options ...RequestOptionFunc) (*Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, err
@@ -1681,57 +1798,11 @@ func (s *ProjectsService) DeleteProjectForkRelation(pid interface{}, options ...
 	return s.client.Do(req, nil)
 }
 
-// ProjectFile represents an uploaded project file.
-//
-// GitLab API docs: https://docs.gitlab.com/api/project_markdown_uploads/#upload-a-file
-type ProjectFile struct {
-	Alt      string `json:"alt"`
-	URL      string `json:"url"`
-	FullPath string `json:"full_path"`
-	Markdown string `json:"markdown"`
-}
-
-// UploadFile uploads a file.
-//
-// Deprecated: UploadFile is deprecated and will be removed in a future release.
-// Use [ProjectMarkdownUploadsService.UploadProjectMarkdown] instead for uploading
-// markdown files to a project.
-//
-// GitLab API docs: https://docs.gitlab.com/api/project_markdown_uploads/#upload-a-file
-func (s *ProjectsService) UploadFile(pid interface{}, content io.Reader, filename string, options ...RequestOptionFunc) (*ProjectFile, *Response, error) {
-	project, err := parseID(pid)
-	if err != nil {
-		return nil, nil, err
-	}
-	u := fmt.Sprintf("projects/%s/uploads", PathEscape(project))
-
-	req, err := s.client.UploadRequest(
-		http.MethodPost,
-		u,
-		content,
-		filename,
-		UploadFile,
-		nil,
-		options,
-	)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	pf := new(ProjectFile)
-	resp, err := s.client.Do(req, pf)
-	if err != nil {
-		return nil, resp, err
-	}
-
-	return pf, resp, nil
-}
-
 // UploadAvatar uploads an avatar.
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/projects/#upload-a-project-avatar
-func (s *ProjectsService) UploadAvatar(pid interface{}, avatar io.Reader, filename string, options ...RequestOptionFunc) (*Project, *Response, error) {
+func (s *ProjectsService) UploadAvatar(pid any, avatar io.Reader, filename string, options ...RequestOptionFunc) (*Project, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err
@@ -1764,7 +1835,7 @@ func (s *ProjectsService) UploadAvatar(pid interface{}, avatar io.Reader, filena
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/projects/#download-a-project-avatar
-func (s *ProjectsService) DownloadAvatar(pid interface{}, options ...RequestOptionFunc) (*bytes.Reader, *Response, error) {
+func (s *ProjectsService) DownloadAvatar(pid any, options ...RequestOptionFunc) (*bytes.Reader, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err
@@ -1789,7 +1860,7 @@ func (s *ProjectsService) DownloadAvatar(pid interface{}, options ...RequestOpti
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/project_forks/#list-forks-of-a-project
-func (s *ProjectsService) ListProjectForks(pid interface{}, opt *ListProjectsOptions, options ...RequestOptionFunc) ([]*Project, *Response, error) {
+func (s *ProjectsService) ListProjectForks(pid any, opt *ListProjectsOptions, options ...RequestOptionFunc) ([]*Project, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err
@@ -1815,8 +1886,8 @@ func (s *ProjectsService) ListProjectForks(pid interface{}, opt *ListProjectsOpt
 // GitLab API docs:
 // https://docs.gitlab.com/api/project_push_rules/
 type ProjectPushRules struct {
-	ID                         int        `json:"id"`
-	ProjectID                  int        `json:"project_id"`
+	ID                         int64      `json:"id"`
+	ProjectID                  int64      `json:"project_id"`
 	CommitMessageRegex         string     `json:"commit_message_regex"`
 	CommitMessageNegativeRegex string     `json:"commit_message_negative_regex"`
 	BranchNameRegex            string     `json:"branch_name_regex"`
@@ -1826,7 +1897,7 @@ type ProjectPushRules struct {
 	PreventSecrets             bool       `json:"prevent_secrets"`
 	AuthorEmailRegex           string     `json:"author_email_regex"`
 	FileNameRegex              string     `json:"file_name_regex"`
-	MaxFileSize                int        `json:"max_file_size"`
+	MaxFileSize                int64      `json:"max_file_size"`
 	CommitCommitterCheck       bool       `json:"commit_committer_check"`
 	CommitCommitterNameCheck   bool       `json:"commit_committer_name_check"`
 	RejectUnsignedCommits      bool       `json:"reject_unsigned_commits"`
@@ -1837,7 +1908,7 @@ type ProjectPushRules struct {
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/project_push_rules/#get-project-push-rules
-func (s *ProjectsService) GetProjectPushRules(pid interface{}, options ...RequestOptionFunc) (*ProjectPushRules, *Response, error) {
+func (s *ProjectsService) GetProjectPushRules(pid any, options ...RequestOptionFunc) (*ProjectPushRules, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err
@@ -1872,7 +1943,7 @@ type AddProjectPushRuleOptions struct {
 	CommitMessageRegex         *string `url:"commit_message_regex,omitempty" json:"commit_message_regex,omitempty"`
 	DenyDeleteTag              *bool   `url:"deny_delete_tag,omitempty" json:"deny_delete_tag,omitempty"`
 	FileNameRegex              *string `url:"file_name_regex,omitempty" json:"file_name_regex,omitempty"`
-	MaxFileSize                *int    `url:"max_file_size,omitempty" json:"max_file_size,omitempty"`
+	MaxFileSize                *int64  `url:"max_file_size,omitempty" json:"max_file_size,omitempty"`
 	MemberCheck                *bool   `url:"member_check,omitempty" json:"member_check,omitempty"`
 	PreventSecrets             *bool   `url:"prevent_secrets,omitempty" json:"prevent_secrets,omitempty"`
 	RejectUnsignedCommits      *bool   `url:"reject_unsigned_commits,omitempty" json:"reject_unsigned_commits,omitempty"`
@@ -1883,7 +1954,7 @@ type AddProjectPushRuleOptions struct {
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/project_push_rules/#add-a-project-push-rule
-func (s *ProjectsService) AddProjectPushRule(pid interface{}, opt *AddProjectPushRuleOptions, options ...RequestOptionFunc) (*ProjectPushRules, *Response, error) {
+func (s *ProjectsService) AddProjectPushRule(pid any, opt *AddProjectPushRuleOptions, options ...RequestOptionFunc) (*ProjectPushRules, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err
@@ -1918,7 +1989,7 @@ type EditProjectPushRuleOptions struct {
 	CommitMessageRegex         *string `url:"commit_message_regex,omitempty" json:"commit_message_regex,omitempty"`
 	DenyDeleteTag              *bool   `url:"deny_delete_tag,omitempty" json:"deny_delete_tag,omitempty"`
 	FileNameRegex              *string `url:"file_name_regex,omitempty" json:"file_name_regex,omitempty"`
-	MaxFileSize                *int    `url:"max_file_size,omitempty" json:"max_file_size,omitempty"`
+	MaxFileSize                *int64  `url:"max_file_size,omitempty" json:"max_file_size,omitempty"`
 	MemberCheck                *bool   `url:"member_check,omitempty" json:"member_check,omitempty"`
 	PreventSecrets             *bool   `url:"prevent_secrets,omitempty" json:"prevent_secrets,omitempty"`
 	RejectUnsignedCommits      *bool   `url:"reject_unsigned_commits,omitempty" json:"reject_unsigned_commits,omitempty"`
@@ -1929,7 +2000,7 @@ type EditProjectPushRuleOptions struct {
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/project_push_rules/#edit-project-push-rule
-func (s *ProjectsService) EditProjectPushRule(pid interface{}, opt *EditProjectPushRuleOptions, options ...RequestOptionFunc) (*ProjectPushRules, *Response, error) {
+func (s *ProjectsService) EditProjectPushRule(pid any, opt *EditProjectPushRuleOptions, options ...RequestOptionFunc) (*ProjectPushRules, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err
@@ -1956,7 +2027,7 @@ func (s *ProjectsService) EditProjectPushRule(pid interface{}, opt *EditProjectP
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/project_push_rules/#delete-project-push-rule
-func (s *ProjectsService) DeleteProjectPushRule(pid interface{}, options ...RequestOptionFunc) (*Response, error) {
+func (s *ProjectsService) DeleteProjectPushRule(pid any, options ...RequestOptionFunc) (*Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, err
@@ -1986,14 +2057,14 @@ type ProjectApprovals struct {
 	SelectiveCodeOwnerRemovals                bool                         `json:"selective_code_owner_removals,omitempty"`
 
 	// Deprecated: use Merge Request Approvals API instead
-	ApprovalsBeforeMerge int `json:"approvals_before_merge"`
+	ApprovalsBeforeMerge int64 `json:"approvals_before_merge"`
 }
 
 // GetApprovalConfiguration get the approval configuration for a project.
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/merge_request_approvals/#project-approval-rules
-func (s *ProjectsService) GetApprovalConfiguration(pid interface{}, options ...RequestOptionFunc) (*ProjectApprovals, *Response, error) {
+func (s *ProjectsService) GetApprovalConfiguration(pid any, options ...RequestOptionFunc) (*ProjectApprovals, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err
@@ -2028,14 +2099,14 @@ type ChangeApprovalConfigurationOptions struct {
 	SelectiveCodeOwnerRemovals                *bool `url:"selective_code_owner_removals,omitempty" json:"selective_code_owner_removals,omitempty"`
 
 	// Deprecated: use Merge Request Approvals API instead
-	ApprovalsBeforeMerge *int `url:"approvals_before_merge,omitempty" json:"approvals_before_merge,omitempty"`
+	ApprovalsBeforeMerge *int64 `url:"approvals_before_merge,omitempty" json:"approvals_before_merge,omitempty"`
 }
 
 // ChangeApprovalConfiguration updates the approval configuration for a project.
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/merge_request_approvals/#change-configuration
-func (s *ProjectsService) ChangeApprovalConfiguration(pid interface{}, opt *ChangeApprovalConfigurationOptions, options ...RequestOptionFunc) (*ProjectApprovals, *Response, error) {
+func (s *ProjectsService) ChangeApprovalConfiguration(pid any, opt *ChangeApprovalConfigurationOptions, options ...RequestOptionFunc) (*ProjectApprovals, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err
@@ -2061,13 +2132,15 @@ func (s *ProjectsService) ChangeApprovalConfiguration(pid interface{}, opt *Chan
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/merge_request_approvals/#get-all-approval-rules-for-project
-type GetProjectApprovalRulesListsOptions ListOptions
+type GetProjectApprovalRulesListsOptions struct {
+	ListOptions
+}
 
 // GetProjectApprovalRules looks up the list of project level approver rules.
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/merge_request_approvals/#get-all-approval-rules-for-project
-func (s *ProjectsService) GetProjectApprovalRules(pid interface{}, opt *GetProjectApprovalRulesListsOptions, options ...RequestOptionFunc) ([]*ProjectApprovalRule, *Response, error) {
+func (s *ProjectsService) GetProjectApprovalRules(pid any, opt *GetProjectApprovalRulesListsOptions, options ...RequestOptionFunc) ([]*ProjectApprovalRule, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err
@@ -2092,7 +2165,7 @@ func (s *ProjectsService) GetProjectApprovalRules(pid interface{}, opt *GetProje
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/merge_request_approvals/#get-single-approval-rule-for-project
-func (s *ProjectsService) GetProjectApprovalRule(pid interface{}, ruleID int, options ...RequestOptionFunc) (*ProjectApprovalRule, *Response, error) {
+func (s *ProjectsService) GetProjectApprovalRule(pid any, ruleID int64, options ...RequestOptionFunc) (*ProjectApprovalRule, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err
@@ -2120,12 +2193,12 @@ func (s *ProjectsService) GetProjectApprovalRule(pid interface{}, ruleID int, op
 // https://docs.gitlab.com/api/merge_request_approvals/#create-project-approval-rule
 type CreateProjectLevelRuleOptions struct {
 	Name                          *string   `url:"name,omitempty" json:"name,omitempty"`
-	ApprovalsRequired             *int      `url:"approvals_required,omitempty" json:"approvals_required,omitempty"`
+	ApprovalsRequired             *int64    `url:"approvals_required,omitempty" json:"approvals_required,omitempty"`
 	ReportType                    *string   `url:"report_type,omitempty" json:"report_type,omitempty"`
 	RuleType                      *string   `url:"rule_type,omitempty" json:"rule_type,omitempty"`
-	UserIDs                       *[]int    `url:"user_ids,omitempty" json:"user_ids,omitempty"`
-	GroupIDs                      *[]int    `url:"group_ids,omitempty" json:"group_ids,omitempty"`
-	ProtectedBranchIDs            *[]int    `url:"protected_branch_ids,omitempty" json:"protected_branch_ids,omitempty"`
+	UserIDs                       *[]int64  `url:"user_ids,omitempty" json:"user_ids,omitempty"`
+	GroupIDs                      *[]int64  `url:"group_ids,omitempty" json:"group_ids,omitempty"`
+	ProtectedBranchIDs            *[]int64  `url:"protected_branch_ids,omitempty" json:"protected_branch_ids,omitempty"`
 	AppliesToAllProtectedBranches *bool     `url:"applies_to_all_protected_branches,omitempty" json:"applies_to_all_protected_branches,omitempty"`
 	Usernames                     *[]string `url:"usernames,omitempty" json:"usernames,omitempty"`
 }
@@ -2134,7 +2207,7 @@ type CreateProjectLevelRuleOptions struct {
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/merge_request_approvals/#create-project-approval-rule
-func (s *ProjectsService) CreateProjectApprovalRule(pid interface{}, opt *CreateProjectLevelRuleOptions, options ...RequestOptionFunc) (*ProjectApprovalRule, *Response, error) {
+func (s *ProjectsService) CreateProjectApprovalRule(pid any, opt *CreateProjectLevelRuleOptions, options ...RequestOptionFunc) (*ProjectApprovalRule, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err
@@ -2162,10 +2235,10 @@ func (s *ProjectsService) CreateProjectApprovalRule(pid interface{}, opt *Create
 // https://docs.gitlab.com/api/merge_request_approvals/#update-project-approval-rule
 type UpdateProjectLevelRuleOptions struct {
 	Name                          *string   `url:"name,omitempty" json:"name,omitempty"`
-	ApprovalsRequired             *int      `url:"approvals_required,omitempty" json:"approvals_required,omitempty"`
-	UserIDs                       *[]int    `url:"user_ids,omitempty" json:"user_ids,omitempty"`
-	GroupIDs                      *[]int    `url:"group_ids,omitempty" json:"group_ids,omitempty"`
-	ProtectedBranchIDs            *[]int    `url:"protected_branch_ids,omitempty" json:"protected_branch_ids,omitempty"`
+	ApprovalsRequired             *int64    `url:"approvals_required,omitempty" json:"approvals_required,omitempty"`
+	UserIDs                       *[]int64  `url:"user_ids,omitempty" json:"user_ids,omitempty"`
+	GroupIDs                      *[]int64  `url:"group_ids,omitempty" json:"group_ids,omitempty"`
+	ProtectedBranchIDs            *[]int64  `url:"protected_branch_ids,omitempty" json:"protected_branch_ids,omitempty"`
 	AppliesToAllProtectedBranches *bool     `url:"applies_to_all_protected_branches,omitempty" json:"applies_to_all_protected_branches,omitempty"`
 	Usernames                     *[]string `url:"usernames,omitempty" json:"usernames,omitempty"`
 }
@@ -2174,7 +2247,7 @@ type UpdateProjectLevelRuleOptions struct {
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/merge_request_approvals/#update-project-approval-rule
-func (s *ProjectsService) UpdateProjectApprovalRule(pid interface{}, approvalRule int, opt *UpdateProjectLevelRuleOptions, options ...RequestOptionFunc) (*ProjectApprovalRule, *Response, error) {
+func (s *ProjectsService) UpdateProjectApprovalRule(pid any, approvalRule int64, opt *UpdateProjectLevelRuleOptions, options ...RequestOptionFunc) (*ProjectApprovalRule, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err
@@ -2199,7 +2272,7 @@ func (s *ProjectsService) UpdateProjectApprovalRule(pid interface{}, approvalRul
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/merge_request_approvals/#delete-project-approval-rule
-func (s *ProjectsService) DeleteProjectApprovalRule(pid interface{}, approvalRule int, options ...RequestOptionFunc) (*Response, error) {
+func (s *ProjectsService) DeleteProjectApprovalRule(pid any, approvalRule int64, options ...RequestOptionFunc) (*Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, err
@@ -2214,59 +2287,31 @@ func (s *ProjectsService) DeleteProjectApprovalRule(pid interface{}, approvalRul
 	return s.client.Do(req, nil)
 }
 
-// ChangeAllowedApproversOptions represents the available ChangeAllowedApprovers()
-// options.
-//
-// Deprecated: Removed in GitLab 13.11
-type ChangeAllowedApproversOptions struct {
-	ApproverGroupIDs *[]int `url:"approver_group_ids,omitempty" json:"approver_group_ids,omitempty"`
-	ApproverIDs      *[]int `url:"approver_ids,omitempty" json:"approver_ids,omitempty"`
-}
-
-// ChangeAllowedApprovers updates the list of approvers and approver groups.
-//
-// Deprecated: Removed in GitLab 13.11 maybe
-func (s *ProjectsService) ChangeAllowedApprovers(pid interface{}, opt *ChangeAllowedApproversOptions, options ...RequestOptionFunc) (*ProjectApprovals, *Response, error) {
-	project, err := parseID(pid)
-	if err != nil {
-		return nil, nil, err
-	}
-	u := fmt.Sprintf("projects/%s/approvers", PathEscape(project))
-
-	req, err := s.client.NewRequest(http.MethodPut, u, opt, options)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	pa := new(ProjectApprovals)
-	resp, err := s.client.Do(req, pa)
-	if err != nil {
-		return nil, resp, err
-	}
-
-	return pa, resp, nil
-}
-
 // ProjectPullMirrorDetails represent the details of the configuration pull
 // mirror and its update status.
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/project_pull_mirroring/
 type ProjectPullMirrorDetails struct {
-	ID                     int        `json:"id"`
-	LastError              string     `json:"last_error"`
-	LastSuccessfulUpdateAt *time.Time `json:"last_successful_update_at"`
-	LastUpdateAt           *time.Time `json:"last_update_at"`
-	LastUpdateStartedAt    *time.Time `json:"last_update_started_at"`
-	UpdateStatus           string     `json:"update_status"`
-	URL                    string     `json:"url"`
+	ID                               int64      `json:"id"`
+	LastError                        string     `json:"last_error"`
+	LastSuccessfulUpdateAt           *time.Time `json:"last_successful_update_at"`
+	LastUpdateAt                     *time.Time `json:"last_update_at"`
+	LastUpdateStartedAt              *time.Time `json:"last_update_started_at"`
+	UpdateStatus                     string     `json:"update_status"`
+	URL                              string     `json:"url"`
+	Enabled                          bool       `json:"enabled"`
+	MirrorTriggerBuilds              bool       `json:"mirror_trigger_builds"`
+	OnlyMirrorProtectedBranches      bool       `json:"only_mirror_protected_branches"`
+	MirrorOverwritesDivergedBranches bool       `json:"mirror_overwrites_diverged_branches"`
+	MirrorBranchRegex                string     `json:"mirror_branch_regex"`
 }
 
 // GetProjectPullMirrorDetails returns the pull mirror details.
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/project_pull_mirroring/#get-a-projects-pull-mirror-details
-func (s *ProjectsService) GetProjectPullMirrorDetails(pid interface{}, options ...RequestOptionFunc) (*ProjectPullMirrorDetails, *Response, error) {
+func (s *ProjectsService) GetProjectPullMirrorDetails(pid any, options ...RequestOptionFunc) (*ProjectPullMirrorDetails, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err
@@ -2306,7 +2351,7 @@ type ConfigureProjectPullMirrorOptions struct {
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/project_pull_mirroring/#configure-pull-mirroring-for-a-project
-func (s *ProjectsService) ConfigureProjectPullMirror(pid interface{}, opt *ConfigureProjectPullMirrorOptions, options ...RequestOptionFunc) (*ProjectPullMirrorDetails, *Response, error) {
+func (s *ProjectsService) ConfigureProjectPullMirror(pid any, opt *ConfigureProjectPullMirrorOptions, options ...RequestOptionFunc) (*ProjectPullMirrorDetails, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err
@@ -2331,7 +2376,7 @@ func (s *ProjectsService) ConfigureProjectPullMirror(pid interface{}, opt *Confi
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/project_pull_mirroring/#start-the-pull-mirroring-process-for-a-project
-func (s *ProjectsService) StartMirroringProject(pid interface{}, options ...RequestOptionFunc) (*Response, error) {
+func (s *ProjectsService) StartMirroringProject(pid any, options ...RequestOptionFunc) (*Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, err
@@ -2343,12 +2388,7 @@ func (s *ProjectsService) StartMirroringProject(pid interface{}, options ...Requ
 		return nil, err
 	}
 
-	resp, err := s.client.Do(req, nil)
-	if err != nil {
-		return resp, err
-	}
-
-	return resp, nil
+	return s.client.Do(req, nil)
 }
 
 // TransferProjectOptions represents the available TransferProject() options.
@@ -2356,13 +2396,13 @@ func (s *ProjectsService) StartMirroringProject(pid interface{}, options ...Requ
 // GitLab API docs:
 // https://docs.gitlab.com/api/projects/#transfer-a-project-to-a-new-namespace
 type TransferProjectOptions struct {
-	Namespace interface{} `url:"namespace,omitempty" json:"namespace,omitempty"`
+	Namespace any `url:"namespace,omitempty" json:"namespace,omitempty"`
 }
 
 // TransferProject transfer a project into the specified namespace
 //
 // GitLab API docs: https://docs.gitlab.com/api/projects/#transfer-a-project-to-a-new-namespace
-func (s *ProjectsService) TransferProject(pid interface{}, opt *TransferProjectOptions, options ...RequestOptionFunc) (*Project, *Response, error) {
+func (s *ProjectsService) TransferProject(pid any, opt *TransferProjectOptions, options ...RequestOptionFunc) (*Project, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err
@@ -2387,7 +2427,7 @@ func (s *ProjectsService) TransferProject(pid interface{}, opt *TransferProjectO
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/projects/#start-the-housekeeping-task-for-a-project
-func (s *ProjectsService) StartHousekeepingProject(pid interface{}, options ...RequestOptionFunc) (*Response, error) {
+func (s *ProjectsService) StartHousekeepingProject(pid any, options ...RequestOptionFunc) (*Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, err
@@ -2402,12 +2442,12 @@ func (s *ProjectsService) StartHousekeepingProject(pid interface{}, options ...R
 	return s.client.Do(req, nil)
 }
 
-// GetRepositoryStorage Get the path to repository storage.
+// ProjectRepositoryStorage represents the repository storage information for a project.
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/projects/#get-the-path-to-repository-storage
-type ProjectReposityStorage struct {
-	ProjectID         int        `json:"project_id"`
+type ProjectRepositoryStorage struct {
+	ProjectID         int64      `json:"project_id"`
 	DiskPath          string     `json:"disk_path"`
 	CreatedAt         *time.Time `json:"created_at"`
 	RepositoryStorage string     `json:"repository_storage"`
@@ -2417,7 +2457,7 @@ type ProjectReposityStorage struct {
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/projects/#get-the-path-to-repository-storage
-func (s *ProjectsService) GetRepositoryStorage(pid interface{}, options ...RequestOptionFunc) (*ProjectReposityStorage, *Response, error) {
+func (s *ProjectsService) GetRepositoryStorage(pid any, options ...RequestOptionFunc) (*ProjectRepositoryStorage, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err
@@ -2429,11 +2469,55 @@ func (s *ProjectsService) GetRepositoryStorage(pid interface{}, options ...Reque
 		return nil, nil, err
 	}
 
-	prs := new(ProjectReposityStorage)
+	prs := new(ProjectRepositoryStorage)
 	resp, err := s.client.Do(req, prs)
 	if err != nil {
 		return nil, resp, err
 	}
 
 	return prs, resp, nil
+}
+
+// ProjectStarrer represents a user who starred a project.
+//
+// GitLab API docs:
+// https://docs.gitlab.com/api/project_starring/#list-users-who-starred-a-project
+type ProjectStarrer struct {
+	StarredSince time.Time   `json:"starred_since"`
+	User         ProjectUser `json:"user"`
+}
+
+// ListProjectStarrersOptions represents the available ListProjectStarrers() options.
+//
+// GitLab API docs:
+// https://docs.gitlab.com/api/project_starring/#list-users-who-starred-a-project
+type ListProjectStarrersOptions struct {
+	ListOptions
+	Search *string `url:"search,omitempty" json:"search,omitempty"`
+}
+
+// ListProjectStarrers gets users who starred a project.
+//
+// GitLab API docs:
+// https://docs.gitlab.com/api/project_starring/#list-users-who-starred-a-project
+func (s *ProjectsService) ListProjectStarrers(pid any, opts *ListProjectStarrersOptions, options ...RequestOptionFunc) ([]*ProjectStarrer, *Response, error) {
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	u := fmt.Sprintf("projects/%s/starrers", PathEscape(project))
+
+	req, err := s.client.NewRequest(http.MethodGet, u, opts, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var starrers []*ProjectStarrer
+	resp, err := s.client.Do(req, &starrers)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return starrers, resp, nil
 }

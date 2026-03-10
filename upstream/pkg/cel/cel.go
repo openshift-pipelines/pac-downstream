@@ -1,6 +1,7 @@
 package cel
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 
@@ -38,14 +39,29 @@ func evaluate(expr string, env *cel.Env, data map[string]any) (ref.Val, error) {
 // / pacParams, it will output a Cel value or an error if selectedjm.
 func Value(query string, body any, headers, pacParams map[string]string, changedFiles map[string]any) (ref.Val, error) {
 	// Marshal/Unmarshal the body to a map[string]any so we can access it from the CEL
-	nbody, err := json.Marshal(body)
-	if err != nil {
-		return nil, err
-	}
 	var jsonMap map[string]any
-	err = json.Unmarshal(nbody, &jsonMap)
-	if err != nil {
-		return nil, err
+	switch b := body.(type) {
+	case nil:
+		jsonMap = map[string]any{}
+	case map[string]any:
+		jsonMap = b
+	default:
+		nbody, err := json.Marshal(body)
+		if err != nil {
+			return nil, err
+		}
+		trimmed := bytes.TrimSpace(nbody)
+		if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+			jsonMap = map[string]any{}
+		} else {
+			err = json.Unmarshal(nbody, &jsonMap)
+			if err != nil {
+				return nil, err
+			}
+			if jsonMap == nil {
+				jsonMap = map[string]any{}
+			}
+		}
 	}
 
 	mapStrDyn := types.NewMapType(types.StringType, types.DynType)
@@ -55,12 +71,50 @@ func Value(query string, body any, headers, pacParams map[string]string, changed
 			decls.NewVariable("headers", mapStrDyn),
 			decls.NewVariable("pac", mapStrDyn),
 			decls.NewVariable("files", mapStrDyn),
+			// Direct variables as per documentation
+			decls.NewVariable("event", types.StringType),
+			decls.NewVariable("event_type", types.StringType),
+			decls.NewVariable("target_branch", types.StringType),
+			decls.NewVariable("source_branch", types.StringType),
+			decls.NewVariable("target_url", types.StringType),
+			decls.NewVariable("source_url", types.StringType),
+			decls.NewVariable("event_title", types.StringType),
+			decls.NewVariable("revision", types.StringType),
+			decls.NewVariable("repo_owner", types.StringType),
+			decls.NewVariable("repo_name", types.StringType),
+			decls.NewVariable("sender", types.StringType),
+			decls.NewVariable("repo_url", types.StringType),
+			decls.NewVariable("git_tag", types.StringType),
+			decls.NewVariable("target_namespace", types.StringType),
+			decls.NewVariable("trigger_comment", types.StringType),
+			decls.NewVariable("pull_request_labels", types.StringType),
+			decls.NewVariable("pull_request_number", types.StringType),
+			decls.NewVariable("git_auth_secret", types.StringType),
 		))
 	val, err := evaluate(query, celDec, map[string]any{
 		"body":    jsonMap,
 		"pac":     pacParams,
 		"headers": headers,
 		"files":   changedFiles,
+		// Direct variables - all from pacParams
+		"event":               pacParams["event"],
+		"event_type":          pacParams["event_type"],
+		"target_branch":       pacParams["target_branch"],
+		"source_branch":       pacParams["source_branch"],
+		"target_url":          pacParams["target_url"],
+		"source_url":          pacParams["source_url"],
+		"event_title":         pacParams["event_title"],
+		"revision":            pacParams["revision"],
+		"repo_owner":          pacParams["repo_owner"],
+		"repo_name":           pacParams["repo_name"],
+		"sender":              pacParams["sender"],
+		"repo_url":            pacParams["repo_url"],
+		"git_tag":             pacParams["git_tag"],
+		"target_namespace":    pacParams["target_namespace"],
+		"trigger_comment":     pacParams["trigger_comment"],
+		"pull_request_labels": pacParams["pull_request_labels"],
+		"pull_request_number": pacParams["pull_request_number"],
+		"git_auth_secret":     pacParams["git_auth_secret"],
 	})
 	if err != nil {
 		return nil, err

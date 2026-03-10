@@ -23,8 +23,8 @@ import (
 
 type (
 	ProjectTemplatesServiceInterface interface {
-		ListTemplates(pid interface{}, templateType string, opt *ListProjectTemplatesOptions, options ...RequestOptionFunc) ([]*ProjectTemplate, *Response, error)
-		GetProjectTemplate(pid interface{}, templateType string, templateName string, options ...RequestOptionFunc) (*ProjectTemplate, *Response, error)
+		ListTemplates(pid any, templateType string, opt *ListProjectTemplatesOptions, options ...RequestOptionFunc) ([]*ProjectTemplate, *Response, error)
+		GetProjectTemplate(pid any, templateType string, templateName string, options ...RequestOptionFunc) (*ProjectTemplate, *Response, error)
 	}
 
 	// ProjectTemplatesService handles communication with the project templates
@@ -65,14 +65,14 @@ func (s ProjectTemplate) String() string {
 // https://docs.gitlab.com/api/project_templates/#get-all-templates-of-a-particular-type
 type ListProjectTemplatesOptions struct {
 	ListOptions
-	ID   *int    `url:"id,omitempty" json:"id,omitempty"`
+	ID   *int64  `url:"id,omitempty" json:"id,omitempty"`
 	Type *string `url:"type,omitempty" json:"type,omitempty"`
 }
 
 // ListTemplates gets a list of project templates.
 //
 // GitLab API docs: https://docs.gitlab.com/api/project_templates/#get-all-templates-of-a-particular-type
-func (s *ProjectTemplatesService) ListTemplates(pid interface{}, templateType string, opt *ListProjectTemplatesOptions, options ...RequestOptionFunc) ([]*ProjectTemplate, *Response, error) {
+func (s *ProjectTemplatesService) ListTemplates(pid any, templateType string, opt *ListProjectTemplatesOptions, options ...RequestOptionFunc) ([]*ProjectTemplate, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err
@@ -97,7 +97,7 @@ func (s *ProjectTemplatesService) ListTemplates(pid interface{}, templateType st
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/project_templates/#get-one-template-of-a-particular-type
-func (s *ProjectTemplatesService) GetProjectTemplate(pid interface{}, templateType string, templateName string, options ...RequestOptionFunc) (*ProjectTemplate, *Response, error) {
+func (s *ProjectTemplatesService) GetProjectTemplate(pid any, templateType string, templateName string, options ...RequestOptionFunc) (*ProjectTemplate, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err

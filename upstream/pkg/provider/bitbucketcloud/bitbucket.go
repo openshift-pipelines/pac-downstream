@@ -16,7 +16,7 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/bitbucketcloud/types"
-	providerMetrics "github.com/openshift-pipelines/pipelines-as-code/pkg/provider/metrics"
+	providerMetrics "github.com/openshift-pipelines/pipelines-as-code/pkg/provider/providermetrics"
 	"go.uber.org/zap"
 )
 
@@ -109,7 +109,7 @@ func (v *Provider) CreateStatus(_ context.Context, event *info.Event, statusopts
 	}
 
 	cso := &bitbucket.CommitStatusOptions{
-		Key:         v.pacInfo.ApplicationName,
+		Key:         provider.GetCheckName(statusopts, v.pacInfo),
 		Url:         detailsURL,
 		State:       statusopts.Conclusion,
 		Description: statusopts.Title,
@@ -202,7 +202,11 @@ func (v *Provider) SetClient(_ context.Context, run *params.Run, event *info.Eve
 	if event.Provider.User == "" {
 		return fmt.Errorf("no git_provider.user has been in repo crd")
 	}
-	v.bbClient = bitbucket.NewBasicAuth(event.Provider.User, event.Provider.Token)
+	bbClient, err := bitbucket.NewBasicAuth(event.Provider.User, event.Provider.Token)
+	if err != nil {
+		return fmt.Errorf("failed to create bitbucket client: %w", err)
+	}
+	v.bbClient = bbClient
 
 	// Added log for security audit purposes to log client access when a token is used
 	run.Clients.Log.Infof("bitbucket-cloud: initialized client with provided token for user=%s", event.Provider.User)
@@ -264,6 +268,18 @@ func (v *Provider) GetCommitInfo(_ context.Context, event *info.Event) error {
 	event.SHAURL = commitinfo.Links.HTML.HRef
 	event.SHA = commitinfo.Hash
 
+	// Populate full commit information for LLM context
+	event.SHAMessage = commitinfo.Message
+	// Bitbucket Cloud API has limited commit author information
+	// Use display name or nickname if available
+	if commitinfo.Author.User.DisplayName != "" {
+		event.SHAAuthorName = commitinfo.Author.User.DisplayName
+	} else if commitinfo.Author.Nickname != "" {
+		event.SHAAuthorName = commitinfo.Author.Nickname
+	}
+	// Note: Bitbucket Cloud API doesn't provide author email or timestamps in the basic commit response
+
+	event.HasSkipCommand = provider.SkipCI(commitinfo.Message)
 	// now to get the default branch from repository.Get
 	repo, err := v.Client().Repositories.Repository.Get(&bitbucket.RepositoryOptions{
 		Owner:    event.Organization,

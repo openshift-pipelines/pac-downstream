@@ -24,14 +24,14 @@ import (
 
 type (
 	LabelsServiceInterface interface {
-		ListLabels(pid interface{}, opt *ListLabelsOptions, options ...RequestOptionFunc) ([]*Label, *Response, error)
-		GetLabel(pid interface{}, lid interface{}, options ...RequestOptionFunc) (*Label, *Response, error)
-		CreateLabel(pid interface{}, opt *CreateLabelOptions, options ...RequestOptionFunc) (*Label, *Response, error)
-		DeleteLabel(pid interface{}, lid interface{}, opt *DeleteLabelOptions, options ...RequestOptionFunc) (*Response, error)
-		UpdateLabel(pid interface{}, lid interface{}, opt *UpdateLabelOptions, options ...RequestOptionFunc) (*Label, *Response, error)
-		SubscribeToLabel(pid interface{}, lid interface{}, options ...RequestOptionFunc) (*Label, *Response, error)
-		UnsubscribeFromLabel(pid interface{}, lid interface{}, options ...RequestOptionFunc) (*Response, error)
-		PromoteLabel(pid interface{}, lid interface{}, options ...RequestOptionFunc) (*Response, error)
+		ListLabels(pid any, opt *ListLabelsOptions, options ...RequestOptionFunc) ([]*Label, *Response, error)
+		GetLabel(pid any, lid any, options ...RequestOptionFunc) (*Label, *Response, error)
+		CreateLabel(pid any, opt *CreateLabelOptions, options ...RequestOptionFunc) (*Label, *Response, error)
+		DeleteLabel(pid any, lid any, opt *DeleteLabelOptions, options ...RequestOptionFunc) (*Response, error)
+		UpdateLabel(pid any, lid any, opt *UpdateLabelOptions, options ...RequestOptionFunc) (*Label, *Response, error)
+		SubscribeToLabel(pid any, lid any, options ...RequestOptionFunc) (*Label, *Response, error)
+		UnsubscribeFromLabel(pid any, lid any, options ...RequestOptionFunc) (*Response, error)
+		PromoteLabel(pid any, lid any, options ...RequestOptionFunc) (*Response, error)
 	}
 
 	// LabelsService handles communication with the label related methods of the
@@ -49,16 +49,16 @@ var _ LabelsServiceInterface = (*LabelsService)(nil)
 //
 // GitLab API docs: https://docs.gitlab.com/api/labels/
 type Label struct {
-	ID                     int    `json:"id"`
+	ID                     int64  `json:"id"`
 	Name                   string `json:"name"`
 	Color                  string `json:"color"`
 	TextColor              string `json:"text_color"`
 	Description            string `json:"description"`
-	OpenIssuesCount        int    `json:"open_issues_count"`
-	ClosedIssuesCount      int    `json:"closed_issues_count"`
-	OpenMergeRequestsCount int    `json:"open_merge_requests_count"`
+	OpenIssuesCount        int64  `json:"open_issues_count"`
+	ClosedIssuesCount      int64  `json:"closed_issues_count"`
+	OpenMergeRequestsCount int64  `json:"open_merge_requests_count"`
 	Subscribed             bool   `json:"subscribed"`
-	Priority               int    `json:"priority"`
+	Priority               int64  `json:"priority"`
 	IsProjectLabel         bool   `json:"is_project_label"`
 }
 
@@ -70,7 +70,7 @@ func (l *Label) UnmarshalJSON(data []byte) error {
 	}
 
 	if l.Name == "" {
-		var raw map[string]interface{}
+		var raw map[string]any
 		if err := json.Unmarshal(data, &raw); err != nil {
 			return err
 		}
@@ -99,7 +99,7 @@ type ListLabelsOptions struct {
 // ListLabels gets all labels for given project.
 //
 // GitLab API docs: https://docs.gitlab.com/api/labels/#list-labels
-func (s *LabelsService) ListLabels(pid interface{}, opt *ListLabelsOptions, options ...RequestOptionFunc) ([]*Label, *Response, error) {
+func (s *LabelsService) ListLabels(pid any, opt *ListLabelsOptions, options ...RequestOptionFunc) ([]*Label, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err
@@ -123,7 +123,7 @@ func (s *LabelsService) ListLabels(pid interface{}, opt *ListLabelsOptions, opti
 // GetLabel get a single label for a given project.
 //
 // GitLab API docs: https://docs.gitlab.com/api/labels/#get-a-single-project-label
-func (s *LabelsService) GetLabel(pid interface{}, lid interface{}, options ...RequestOptionFunc) (*Label, *Response, error) {
+func (s *LabelsService) GetLabel(pid any, lid any, options ...RequestOptionFunc) (*Label, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err
@@ -155,14 +155,14 @@ type CreateLabelOptions struct {
 	Name        *string `url:"name,omitempty" json:"name,omitempty"`
 	Color       *string `url:"color,omitempty" json:"color,omitempty"`
 	Description *string `url:"description,omitempty" json:"description,omitempty"`
-	Priority    *int    `url:"priority,omitempty" json:"priority,omitempty"`
+	Priority    *int64  `url:"priority,omitempty" json:"priority,omitempty"`
 }
 
 // CreateLabel creates a new label for given repository with given name and
 // color.
 //
 // GitLab API docs: https://docs.gitlab.com/api/labels/#create-a-new-label
-func (s *LabelsService) CreateLabel(pid interface{}, opt *CreateLabelOptions, options ...RequestOptionFunc) (*Label, *Response, error) {
+func (s *LabelsService) CreateLabel(pid any, opt *CreateLabelOptions, options ...RequestOptionFunc) (*Label, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err
@@ -193,7 +193,7 @@ type DeleteLabelOptions struct {
 // DeleteLabel deletes a label given by its name or ID.
 //
 // GitLab API docs: https://docs.gitlab.com/api/labels/#delete-a-label
-func (s *LabelsService) DeleteLabel(pid interface{}, lid interface{}, opt *DeleteLabelOptions, options ...RequestOptionFunc) (*Response, error) {
+func (s *LabelsService) DeleteLabel(pid any, lid any, opt *DeleteLabelOptions, options ...RequestOptionFunc) (*Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, err
@@ -224,14 +224,14 @@ type UpdateLabelOptions struct {
 	NewName     *string `url:"new_name,omitempty" json:"new_name,omitempty"`
 	Color       *string `url:"color,omitempty" json:"color,omitempty"`
 	Description *string `url:"description,omitempty" json:"description,omitempty"`
-	Priority    *int    `url:"priority,omitempty" json:"priority,omitempty"`
+	Priority    *int64  `url:"priority,omitempty" json:"priority,omitempty"`
 }
 
 // UpdateLabel updates an existing label with new name or now color. At least
 // one parameter is required, to update the label.
 //
 // GitLab API docs: https://docs.gitlab.com/api/labels/#edit-an-existing-label
-func (s *LabelsService) UpdateLabel(pid interface{}, lid interface{}, opt *UpdateLabelOptions, options ...RequestOptionFunc) (*Label, *Response, error) {
+func (s *LabelsService) UpdateLabel(pid any, lid any, opt *UpdateLabelOptions, options ...RequestOptionFunc) (*Label, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err
@@ -266,7 +266,7 @@ func (s *LabelsService) UpdateLabel(pid interface{}, lid interface{}, opt *Updat
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/labels/#subscribe-to-a-label
-func (s *LabelsService) SubscribeToLabel(pid interface{}, lid interface{}, options ...RequestOptionFunc) (*Label, *Response, error) {
+func (s *LabelsService) SubscribeToLabel(pid any, lid any, options ...RequestOptionFunc) (*Label, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err
@@ -297,7 +297,7 @@ func (s *LabelsService) SubscribeToLabel(pid interface{}, lid interface{}, optio
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/labels/#unsubscribe-from-a-label
-func (s *LabelsService) UnsubscribeFromLabel(pid interface{}, lid interface{}, options ...RequestOptionFunc) (*Response, error) {
+func (s *LabelsService) UnsubscribeFromLabel(pid any, lid any, options ...RequestOptionFunc) (*Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, err
@@ -320,7 +320,7 @@ func (s *LabelsService) UnsubscribeFromLabel(pid interface{}, lid interface{}, o
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/labels/#promote-a-project-label-to-a-group-label
-func (s *LabelsService) PromoteLabel(pid interface{}, lid interface{}, options ...RequestOptionFunc) (*Response, error) {
+func (s *LabelsService) PromoteLabel(pid any, lid any, options ...RequestOptionFunc) (*Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, err

@@ -25,10 +25,9 @@ export TARGET=kubernetes
 export DOMAIN_NAME=paac-127-0-0-1.nip.io
 
 if [ -z "${TEST_GITEA_SMEEURL:-}" ]; then
-  echo "You should forward the URL via smee, create a URL in there by going to https://hook.pipelinesascode.com"
-  echo "set it up as environement variable in the \`TEST_GITEA_SMEEURL=https://hook.pipelinesascode.com/XXXXXXXX\` variable"
-  echo "Alternatively, use command: \`TEST_GITEA_SMEEURL=\$(curl https://hook.pipelinesascode.com -o=/dev/null -sw '%{redirect_url}')\`"
-  exit 1
+  echo "TEST_GITEA_SMEEURL is not set, skipping Gitea installation"
+  echo "To enable Gitea, set TEST_GITEA_SMEEURL=https://hook.pipelinesascode.com/XXXXXXXX"
+  DISABLE_GITEA=yes
 fi
 if ! builtin type -p kind &>/dev/null; then
   echo "Install kind. https://kind.sigs.k8s.io/docs/user/quick-start/#installation"
@@ -84,13 +83,22 @@ function reinstall_kind() {
   cat <<EOF >>${TMPD}/kconfig.yaml
 containerdConfigPatches:
 - |-
-  [plugins."io.containerd.grpc.v1.cri".registry.mirrors."localhost:${REG_PORT}"]
-    endpoint = ["http://${REG_NAME}:5000"]
+  [plugins."io.containerd.grpc.v1.cri".registry]
+    config_path = "/etc/containerd/certs.d"
 EOF
 
   ${SUDO} ${kind} create cluster --name ${KIND_CLUSTER_NAME} --config ${TMPD}/kconfig.yaml
   mkdir -p $(dirname ${KUBECONFIG})
   ${SUDO} ${kind} --name ${KIND_CLUSTER_NAME} get kubeconfig >${KUBECONFIG}
+
+  # Configure registry on each node
+  REGISTRY_DIR="/etc/containerd/certs.d/localhost:${REG_PORT}"
+  for node in $(${SUDO} ${kind} get nodes --name ${KIND_CLUSTER_NAME}); do
+    docker exec "${node}" mkdir -p "${REGISTRY_DIR}"
+    cat <<EOF | docker exec -i "${node}" cp /dev/stdin "${REGISTRY_DIR}/hosts.toml"
+[host."http://${REG_NAME}:5000"]
+EOF
+  done
 
   docker network connect "kind" "${REG_NAME}" 2>/dev/null || true
   cat <<EOF | kubectl apply -f -
@@ -174,6 +182,8 @@ function install_pac() {
       ${PAC_DEPLOY_SCRIPT}
     else
       env KO_DOCKER_REPO=localhost:${REG_PORT} $ko apply -f config --sbom=none -B >/dev/null
+      # Install nonoai for e2e test integration for LLM
+      env KO_DOCKER_REPO=localhost:${REG_PORT} $ko apply -f pkg/test/nonoai/deployment.yaml --sbom=none -B >/dev/null
     fi
     cd ${oldPwd}
   fi
@@ -233,7 +243,9 @@ EOF
 
   echo "Set Active Namespace to pipelines-as-code"
   kubectl config set-context --current --namespace=pipelines-as-code >/dev/null
-  echo "Run: gosmee client --saveDir /tmp/replays ${TEST_GITEA_SMEEURL} http://controller.${DOMAIN_NAME}"
+  if [[ -n "${TEST_GITEA_SMEEURL:-}" ]]; then
+    echo "Run: gosmee client --saveDir /tmp/replays ${TEST_GITEA_SMEEURL} http://controller.${DOMAIN_NAME}"
+  fi
 }
 
 function install_gitea() {

@@ -2,6 +2,7 @@
 title: GitOps Commands
 weight: 5.1
 ---
+
 # GitOps Commands
 
 Pipelines-as-Code supports the concept of `GitOps commands`, which allow users to issue special commands in a comment on a Pull Request or a pushed commit to control `Pipelines-as-Code`.
@@ -10,21 +11,73 @@ The advantage of using a `GitOps command` is that it provides a journal of all t
 
 ## GitOps Commands on Pull Requests
 
-For example, when you are on a Pull Request, you may want to restart all your PipelineRuns. To do so, you can add a comment on your Pull Request starting with `/retest`, and all PipelineRuns attached to that Pull Request will be restarted.
+For example, when you are on a Pull Request, you may want to restart failed PipelineRuns. To do so, you can add a comment on your Pull Request starting with `/retest`, and all **failed** PipelineRuns attached to that Pull Request will be restarted. If all previous PipelineRuns for the same commit were successful, no new PipelineRuns will be created to avoid unnecessary duplication.
 
 Example:
 
 ```text
-Thanks for contributing. This is a much-needed bugfix, and we love it ❤️ The
+Thanks for contributing. This is a much-needed bugfix, and we appreciate it ❤️ The
 failure is not with your PR but seems to be an infrastructure issue.
 
 /retest
 ```
 
+The `/retest` command will only create new PipelineRuns if:
+
+- Previously **failed** PipelineRuns for the same commit, OR
+- No PipelineRun has been run for the same commit yet
+
+If a successful PipelineRun already exists for the same commit, `/retest` will **skip** triggering a new PipelineRun to avoid unnecessary duplication.
+
+**To force a rerun regardless of previous status**, use:
+
+```text
+/retest <pipelinerun-name>
+```
+
+This will always trigger a new PipelineRun, even if previous runs were successful.
+
+Similar to `/retest`, the `/ok-to-test` command will only trigger new PipelineRuns if no successful PipelineRun already exists for the same commit. This prevents duplicate runs when repository owners repeatedly test the same commit by `/test` and `/retest` command.
+
+### Requiring a SHA with `/ok-to-test`
+
+{{< tech_preview "Requiring a SHA argument to `/ok-to-test`" >}}
+{{< support_matrix github_app="true" github_webhook="false" forgejo="false" gitlab="false" bitbucket_cloud="false" bitbucket_datacenter="false" >}}
+
+Cluster administrators can enforce SHA validation on `/ok-to-test` by setting
+`require-ok-to-test-sha: "true"` in the Pipelines-as-Code ConfigMap. This
+feature currently applies only to GitHub, as its `issue_comment` event does not
+include the pull request’s HEAD SHA (unlike other providers that do).
+
+Without this SHA, a small timing window exists where an attacker could push a
+new commit immediately after an owner comments `/ok-to-test`, causing CI to run
+on unintended code. Requiring the reviewer to include the commit ID eliminates
+this risk until GitHub includes the SHA in its webhook payload.
+
+When enabled, repository owners and collaborators must append a 7–40 character
+Git SHA (in lowercase or uppercase hexadecimal) to the command, for example:
+
+```text
+/ok-to-test 1A2B3C4
+```
+
+Pipelines-as-Code verifies the provided SHA against the pull request’s current HEAD:
+
+- Short SHAs must match the HEAD commit’s prefix.
+- Full SHAs must match exactly.
+
+If the SHA is missing or invalid, the comment is rejected, and the bot replies
+with instructions to retry using the correct value. This mechanism protects
+GitHub repositories from the time-of-check/time-of-use vulnerability,
+a risk that other providers avoid by including the commit SHA directly in the
+webhook payload.
+
+### Targeting Specific PipelineRuns
+
 If you have multiple `PipelineRun` and you want to target a specific `PipelineRun`, you can use the `/test` command followed by the specific PipelineRun name to restart it. Example:
 
 ```text
-Roses are red, violets are blue. Pipelines are bound to flake by design.
+Pipeline execution appears to be unstable due to external factors. Retesting this specific pipeline.
 
 /test <pipelinerun-name>
 ```
@@ -37,7 +90,7 @@ Please be aware that GitOps commands such as `/test` and others will not functio
 
 ## GitOps Commands on Pushed Commits
 
-{{< support_matrix github_app="true" github_webhook="true" gitea="false" gitlab="true" bitbucket_cloud="false" bitbucket_server="false" >}}
+{{< support_matrix github_app="true" github_webhook="true" forgejo="false" gitlab="true" bitbucket_cloud="false" bitbucket_server="false" >}}
 
 If you want to trigger a GitOps command on a pushed commit, you can include the `GitOps` comments within your commit messages. These comments can be used to restart either all pipelines or specific ones. Here's how it works:
 
@@ -59,6 +112,7 @@ This means:
 1. When a user comments with commands like `/retest` or `/test` on a branch without specifying a branch name, the test will automatically run on the **default branch** (e.g. main, master) of the repository.
 
    Examples:
+
    1. `/retest`
    2. `/test`
    3. `/retest <pipelinerun-name>`
@@ -67,6 +121,7 @@ This means:
 2. If the user includes a branch specification such as `/retest branch:test` or `/test branch:test`, the test will be executed on the commit where the comment is located, with the context of the **test** branch.
 
    Examples:
+
    1. `/retest branch:test`
    2. `/test branch:test`
    3. `/retest <pipelinerun-name> branch:test`
@@ -89,6 +144,8 @@ spec:
 
 To issue a `GitOps` comment on a pushed commit, you can follow these steps:
 
+### For GitHub
+
 1. Go to your repository.
 2. Click on the **Commits** section.
 3. Choose one of the individual **Commit**.
@@ -96,11 +153,93 @@ To issue a `GitOps` comment on a pushed commit, you can follow these steps:
 
 ![GitOps Commits For Comments](/images/gitops-comments-on-commit.png)
 
-Please note that this feature is supported for the GitHub provider only.
+### For GitLab
+
+1. Go to your repository.
+2. Click on the **History**.
+3. Choose one of the individual **Commit**.
+4. Click on the line number where you want to add a `GitOps` comment, as shown in the image below:
+
+![GitOps Commits For Comments](/images/gitlab-gitops-comment-on-commit.png)
 
 ## GitOps Commands on Non-Matching PipelineRun
 
 The PipelineRun will be restarted regardless of the annotations if the comment `/test <pipelinerun-name>` or `/retest <pipelinerun-name>` is used. This allows you to have control of PipelineRuns that get only triggered by a comment on the Pull Request.
+
+### Triggering PipelineRun on Git tags
+
+{{< support_matrix github_app="true" github_webhook="true" forgejo="false" gitlab="true" bitbucket_cloud="false" bitbucket_server="false" >}}
+
+You can retrigger a PipelineRun against a specific Git tag by commenting on
+the tagged commit using a GitOps command. Pipelines-as-Code will resolve the
+tag to its commit SHA and run the matching PipelineRun against that commit.
+
+Supported commands:
+
+- `/test tag:<tag>`: retrigger all matching PipelineRuns for the tag commit
+- `/test <pipelinerun-name> tag:<tag>`: retrigger only the named PipelineRun
+- `/retest tag:<tag>`: retrigger all matching PipelineRuns for the tag commit
+- `/retest <pipelinerun-name> tag:<tag>`: retrigger only the named PipelineRun
+- `/cancel tag:<tag>`: cancel all running PipelineRuns for the tag commit
+- `/cancel <pipelinerun-name> tag:<tag>`: cancel only the named PipelineRun
+
+Examples:
+
+```text
+/test tag:v1.0.0
+```
+
+or
+
+```text
+/retest tag:v1.0.0
+```
+
+```text
+/cancel tag:v1.0.0
+```
+
+```text
+/cancel pipelinerun-on-tag tag:v1.0.0
+```
+
+```text
+/test pipelinerun-on-tag tag:v1.0.0
+```
+
+Notes:
+
+- The event type is treated as `push`; configure your PipelineRun with
+  `pipelinesascode.tekton.dev/on-event: "[push]"`.
+- This is currently supported on GitHub (App and Webhook) only.
+
+Minimal PipelineRun example:
+
+```yaml
+apiVersion: tekton.dev/v1beta1
+kind: PipelineRun
+metadata:
+  name: pipelinerun-on-tag
+  annotations:
+    pipelinesascode.tekton.dev/on-target-branch: "[refs/tags/*]"
+    pipelinesascode.tekton.dev/on-event: "[push]"
+spec:
+  pipelineSpec:
+    tasks:
+      - name: tag-task
+        taskSpec:
+          steps:
+            - name: echo
+              image: registry.access.redhat.com/ubi10/ubi-micro
+              script: |
+                echo "tag: {{ git_tag }}"
+```
+
+How to comment on a tag commit (GitHub):
+
+1. Go to your repository and open the Tags view (or Releases).
+2. Click the tag (for example, `v1.0.0`) to navigate to its commit.
+3. Add a comment on the commit with one of the commands above.
 
 ## Accessing the Comment Triggering the PipelineRun
 
@@ -167,7 +306,7 @@ For example, if you want to cancel all your PipelineRuns, you can add a comment 
 Example:
 
 ```text
-It seems the infrastructure is down, so cancelling the PipelineRuns.
+The infrastructure appears to be experiencing issues. Cancelling the current PipelineRuns.
 
 /cancel
 ```
@@ -177,7 +316,7 @@ If you have multiple `PipelineRun` and you want to target a specific `PipelineRu
 Example:
 
 ```text
-Roses are red, violets are blue. Why run the pipeline when the infrastructure is down.
+The infrastructure appears to be experiencing issues, cancelling this specific pipeline.
 
 /cancel <pipelinerun-name>
 ```
@@ -204,12 +343,14 @@ This means:
 1. If a user specifies commands like `/cancel` without any argument in a comment on a branch, it will automatically target the **main** branch.
 
    Examples:
+
    1. `/cancel`
    2. `/cancel <pipelinerun-name>`
 
 2. If the user issues a command like `/cancel branch:test`, it will target the commit where the comment was made but use the **test** branch.
 
    Examples:
+
    1. `/cancel branch:test`
    2. `/cancel <pipelinerun-name> branch:test`
 
@@ -241,10 +382,10 @@ You can pass those `key=value` pairs anywhere in your comment, and they will be 
 
 There are different formats that can be accepted, allowing you to pass values with spaces or newlines:
 
-* key=value
-* key="a value"
-* key="another \"value\" defined"
-* key="another
+- key=value
+- key="a value"
+- key="another \"value\" defined"
+- key="another
   value with newline"
 
 ## Event Type Annotation and Dynamic Variables
@@ -253,14 +394,14 @@ The `pipeline.tekton.dev/event-type` annotation indicates the type of GitOps com
 
 Here are the possible event types:
 
-* `test-all-comment`: The event is a single `/test` that would test every matched PipelineRun.
-* `test-comment`: The event is a `/test <PipelineRun>` comment that would test a specific PipelineRun.
-* `retest-all-comment`: The event is a single `/retest` that would retest every matched PipelineRun.
-* `retest-comment`: The event is a `/retest <PipelineRun>` that would retest a specific PipelineRun.
-* `on-comment`: The event is coming from a custom comment that would trigger a PipelineRun.
-* `cancel-all-comment`: The event is a single `/cancel` that would cancel every matched PipelineRun.
-* `cancel-comment`: The event is a `/cancel <PipelineRun>` that would cancel a specific PipelineRun.
-* `ok-to-test-comment`: The event is a `/ok-to-test` that would allow running the CI for an unauthorized user.
+- `test-all-comment`: The event is a single `/test` that would test every matched PipelineRun.
+- `test-comment`: The event is a `/test <PipelineRun>` comment that would test a specific PipelineRun.
+- `retest-all-comment`: The event is a single `/retest` that would retest every matched **failed** PipelineRun. If a successful PipelineRun already exists for the same commit, no new PipelineRun will be created.
+- `retest-comment`: The event is a `/retest <PipelineRun>` that would retest a specific PipelineRun.
+- `on-comment`: The event is coming from a custom comment that would trigger a PipelineRun.
+- `cancel-all-comment`: The event is a single `/cancel` that would cancel every matched PipelineRun.
+- `cancel-comment`: The event is a `/cancel <PipelineRun>` that would cancel a specific PipelineRun.
+- `ok-to-test-comment`: The event is a `/ok-to-test` that would allow running the CI for an unauthorized user. If a successful PipelineRun already exists for the same commit, no new PipelineRun will be created.
 
 If a repository owner comments `/ok-to-test` on a pull request from an external contributor but no PipelineRun **matches** the `pull_request` event (or the repository has no `.tekton` directory), Pipelines-as-Code sets a **neutral** commit status. This indicates that no PipelineRun was matched, allowing other workflows—such as auto-merge—to proceed without being blocked.
 
@@ -272,12 +413,12 @@ Note: This neutral check-run status functionality is only supported on GitHub.
 
 When using the `{{ event_type }}` [dynamic variable]({{< relref "/docs/guide/authoringprs.md#dynamic-variables" >}}) for the following event types:
 
-* `test-all-comment`
-* `test-comment`
-* `retest-all-comment`
-* `retest-comment`
-* `cancel-all-comment`
-* `ok-to-test-comment`
+- `test-all-comment`
+- `test-comment`
+- `retest-all-comment`
+- `retest-comment`
+- `cancel-all-comment`
+- `ok-to-test-comment`
 
 The dynamic variable will return `pull_request` as the event type instead of the specific categorized GitOps command type. This is to handle backward compatibility with previous releases for users relying on this dynamic variable.
 

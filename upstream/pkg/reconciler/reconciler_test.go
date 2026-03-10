@@ -8,22 +8,23 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/google/go-github/v71/github"
+	"github.com/google/go-github/v81/github"
 	"github.com/jonboulle/clockwork"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/consoleui"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/kubeinteraction"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/metrics"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/clients"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/settings"
+	prmetrics "github.com/openshift-pipelines/pipelines-as-code/pkg/pipelinerunmetrics"
 	ghprovider "github.com/openshift-pipelines/pipelines-as-code/pkg/provider/github"
+	queuepkg "github.com/openshift-pipelines/pipelines-as-code/pkg/queue"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/secrets"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/sync"
 	testclient "github.com/openshift-pipelines/pipelines-as-code/pkg/test/clients"
 	ghtesthelper "github.com/openshift-pipelines/pipelines-as-code/pkg/test/github"
+	testkubernetestint "github.com/openshift-pipelines/pipelines-as-code/pkg/test/kubernetestint"
 	tektontest "github.com/openshift-pipelines/pipelines-as-code/pkg/test/tekton"
 	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 	"go.uber.org/zap"
@@ -183,12 +184,12 @@ func TestReconciler_ReconcileKind(t *testing.T) {
 			}
 			stdata, informers := testclient.SeedTestData(t, ctx, testData)
 
-			metrics, err := metrics.NewRecorder()
+			metrics, err := prmetrics.NewRecorder()
 			assert.NilError(t, err)
 
 			r := Reconciler{
 				repoLister: informers.Repository.Lister(),
-				qm:         sync.NewQueueManager(fakelogger),
+				qm:         queuepkg.NewManager(fakelogger),
 				run: &params.Run{
 					Clients: clients.Clients{
 						PipelineAsCode: stdata.PipelineAsCode,
@@ -315,7 +316,15 @@ func TestUpdatePipelineRunState(t *testing.T) {
 
 func TestReconcileKind_SCMReportingLogic(t *testing.T) {
 	observer, _ := zapobserver.New(zap.InfoLevel)
-	_ = zap.New(observer).Sugar()
+	logger := zap.New(observer).Sugar()
+
+	_, mux, ghTestServerURL, teardown := ghtesthelper.SetupGH()
+	defer teardown()
+
+	// Mock status endpoint
+	mux.HandleFunc("/repos/random/app/statuses/123afc", func(rw http.ResponseWriter, _ *http.Request) {
+		fmt.Fprint(rw, `{"state":"pending"}`)
+	})
 
 	tests := []struct {
 		name                         string
@@ -330,8 +339,12 @@ func TestReconcileKind_SCMReportingLogic(t *testing.T) {
 					Namespace: "test",
 					Name:      "test-pr",
 					Annotations: map[string]string{
-						keys.State:      kubeinteraction.StateQueued,
-						keys.Repository: "test-repo",
+						keys.State:         kubeinteraction.StateQueued,
+						keys.Repository:    "test-repo",
+						keys.GitProvider:   "github",
+						keys.SHA:           "123afc",
+						keys.URLOrg:        "random",
+						keys.URLRepository: "app",
 					},
 				},
 				Spec: tektonv1.PipelineRunSpec{},
@@ -360,6 +373,10 @@ func TestReconcileKind_SCMReportingLogic(t *testing.T) {
 						keys.State:                  kubeinteraction.StateStarted,
 						keys.Repository:             "test-repo",
 						keys.SCMReportingPLRStarted: "true",
+						keys.GitProvider:            "github",
+						keys.SHA:                    "123afc",
+						keys.URLOrg:                 "random",
+						keys.URLRepository:          "app",
 					},
 				},
 				Spec: tektonv1.PipelineRunSpec{},
@@ -385,8 +402,12 @@ func TestReconcileKind_SCMReportingLogic(t *testing.T) {
 					Namespace: "test",
 					Name:      "test-pr",
 					Annotations: map[string]string{
-						keys.State:      kubeinteraction.StateQueued,
-						keys.Repository: "test-repo",
+						keys.State:         kubeinteraction.StateQueued,
+						keys.Repository:    "test-repo",
+						keys.GitProvider:   "github",
+						keys.SHA:           "123afc",
+						keys.URLOrg:        "random",
+						keys.URLRepository: "app",
 					},
 				},
 				Spec: tektonv1.PipelineRunSpec{
@@ -420,6 +441,12 @@ func TestReconcileKind_SCMReportingLogic(t *testing.T) {
 				},
 				Spec: v1alpha1.RepositorySpec{
 					URL: randomURL,
+					GitProvider: &v1alpha1.GitProvider{
+						URL: ghTestServerURL,
+						Secret: &v1alpha1.Secret{
+							Name: "pac-git-basic-auth-owner-repo",
+						},
+					},
 				},
 			}
 
@@ -432,18 +459,29 @@ func TestReconcileKind_SCMReportingLogic(t *testing.T) {
 			// Track if updatePipelineRunToInProgress was called by checking state changes
 			originalState := tt.pipelineRun.GetAnnotations()[keys.State]
 
-			r := &Reconciler{
-				repoLister: informers.Repository.Lister(),
-				run: &params.Run{
-					Clients: clients.Clients{
-						Tekton: stdata.Pipeline,
-					},
-					Info: info.Info{
-						Pac: &info.PacOpts{
-							Settings: settings.Settings{},
-						},
+			kinterfaceTest := &testkubernetestint.KinterfaceTest{
+				GetSecretResult: map[string]string{
+					"pac-git-basic-auth-owner-repo": "https://whateveryousayboss",
+				},
+			}
+
+			cs := &params.Run{
+				Clients: clients.Clients{
+					Tekton: stdata.Pipeline,
+					Log:    logger,
+				},
+				Info: info.Info{
+					Pac: &info.PacOpts{
+						Settings: settings.Settings{},
 					},
 				},
+			}
+			cs.Clients.SetConsoleUI(consoleui.FallBackConsole{})
+
+			r := &Reconciler{
+				repoLister: informers.Repository.Lister(),
+				run:        cs,
+				kinteract:  kinterfaceTest,
 			}
 
 			err := r.ReconcileKind(ctx, tt.pipelineRun)
