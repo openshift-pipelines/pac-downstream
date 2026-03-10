@@ -3,6 +3,8 @@ package provider
 import (
 	"testing"
 
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/settings"
 	"gotest.tools/v3/assert"
 )
 
@@ -324,6 +326,13 @@ func TestGetPipelineRunAndBranchNameFromTestComment(t *testing.T) {
 			wantError:  false,
 		},
 		{
+			name:       "branch name contains /test",
+			comment:    "/test abc-01-pr abc \n branch:chore/test",
+			prName:     "abc-01-pr",
+			branchName: "chore/test",
+			wantError:  false,
+		},
+		{
 			name:      "different word other than branch for retest command",
 			comment:   "/retest invalidname:nightly",
 			wantError: true,
@@ -338,6 +347,13 @@ func TestGetPipelineRunAndBranchNameFromTestComment(t *testing.T) {
 			comment:   "/test abc-01-pr",
 			prName:    "abc-01-pr",
 			wantError: false,
+		},
+		{
+			name:       "test a pipeline with key value",
+			comment:    "/test abc-01-pr key=value",
+			prName:     "abc-01-pr",
+			branchName: "",
+			wantError:  false,
 		},
 		{
 			name:      "string before retest command",
@@ -361,7 +377,7 @@ func TestGetPipelineRunAndBranchNameFromTestComment(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			prName, branchName, err := GetPipelineRunAndBranchNameFromTestComment(tt.comment)
+			prName, branchName, _, err := GetPipelineRunAndBranchOrTagNameFromTestComment(tt.comment)
 			assert.Equal(t, tt.wantError, err != nil)
 			assert.Equal(t, tt.branchName, branchName)
 			assert.Equal(t, tt.prName, prName)
@@ -449,7 +465,7 @@ func TestGetPipelineRunAndBranchNameFromCancelComment(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			prName, branchName, err := GetPipelineRunAndBranchNameFromCancelComment(tt.comment)
+			prName, branchName, _, err := GetPipelineRunAndBranchOrTagNameFromCancelComment(tt.comment)
 			assert.Equal(t, tt.wantError, err != nil)
 			assert.Equal(t, tt.branchName, branchName)
 			assert.Equal(t, tt.prName, prName)
@@ -490,6 +506,152 @@ func TestCompareHostOfURLS(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := CompareHostOfURLS(tt.url1, tt.url2)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestGetCheckName(t *testing.T) {
+	type args struct {
+		status  StatusOpts
+		pacopts *info.PacOpts
+	}
+	tests := []struct {
+		name string
+		args args
+		want string
+	}{
+		{
+			name: "no application name",
+			args: args{
+				status: StatusOpts{
+					OriginalPipelineRunName: "HELLO",
+				},
+				pacopts: &info.PacOpts{Settings: settings.Settings{ApplicationName: ""}},
+			},
+			want: "HELLO",
+		},
+		{
+			name: "application and pipelinerun name",
+			args: args{
+				status: StatusOpts{
+					OriginalPipelineRunName: "MOTO",
+				},
+				pacopts: &info.PacOpts{Settings: settings.Settings{ApplicationName: "HELLO"}},
+			},
+			want: "HELLO / MOTO",
+		},
+		{
+			name: "application no pipelinerun name",
+			args: args{
+				status: StatusOpts{
+					OriginalPipelineRunName: "",
+				},
+				pacopts: &info.PacOpts{Settings: settings.Settings{ApplicationName: "PAC"}},
+			},
+			want: "PAC",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := GetCheckName(tt.args.status, tt.args.pacopts); got != tt.want {
+				t.Errorf("GetCheckName() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSkipCI(t *testing.T) {
+	tests := []struct {
+		name          string
+		commitMessage string
+		want          bool
+	}{
+		{
+			name:          "skip ci lowercase",
+			commitMessage: "fix: some bug [skip ci]",
+			want:          true,
+		},
+		{
+			name:          "ci skip lowercase",
+			commitMessage: "feat: new feature [ci skip]",
+			want:          true,
+		},
+		{
+			name:          "skip tkn lowercase",
+			commitMessage: "docs: update readme [skip tkn]",
+			want:          true,
+		},
+		{
+			name:          "tkn skip lowercase",
+			commitMessage: "chore: update deps [tkn skip]",
+			want:          true,
+		},
+		{
+			name:          "skip ci at beginning",
+			commitMessage: "[skip ci] WIP: work in progress",
+			want:          true,
+		},
+		{
+			name:          "ci skip in middle",
+			commitMessage: "fix: bug\n\n[ci skip]\n\nmore details",
+			want:          true,
+		},
+		{
+			name:          "skip tkn at end",
+			commitMessage: "feat: new feature\n\nSome description [skip tkn]",
+			want:          true,
+		},
+		{
+			name:          "multiple skip commands",
+			commitMessage: "fix: bug [skip ci] [skip tkn]",
+			want:          true,
+		},
+		{
+			name:          "no skip command",
+			commitMessage: "feat: normal commit without skip",
+			want:          false,
+		},
+		{
+			name:          "skip ci with typo",
+			commitMessage: "fix: bug [skip-ci]",
+			want:          false,
+		},
+		{
+			name:          "skip without brackets",
+			commitMessage: "fix: bug skip ci",
+			want:          false,
+		},
+		{
+			name:          "empty commit message",
+			commitMessage: "",
+			want:          false,
+		},
+		{
+			name:          "skip ci with uppercase",
+			commitMessage: "fix: bug [SKIP CI]",
+			want:          false,
+		},
+		{
+			name:          "skip ci with extra spaces",
+			commitMessage: "fix: bug [ skip ci ]",
+			want:          false,
+		},
+		{
+			name:          "multiline with skip ci",
+			commitMessage: "fix: important bug fix\n\nThis commit fixes a critical issue.\n\n[skip ci]",
+			want:          true,
+		},
+		{
+			name:          "skip ci in commit body",
+			commitMessage: "feat: add new feature\n\nTesting [skip ci] in body",
+			want:          true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := SkipCI(tt.commitMessage)
 			assert.Equal(t, tt.want, got)
 		})
 	}

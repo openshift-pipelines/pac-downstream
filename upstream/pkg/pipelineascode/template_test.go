@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/google/go-github/v61/github"
+	"github.com/google/go-github/v81/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/events"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
@@ -85,6 +85,14 @@ func TestProcessTemplates(t *testing.T) {
 			},
 			template: `{{ repo_url }}`,
 			expected: "https://cloneurl",
+		},
+		{
+			name: "test git_tag variable",
+			event: &info.Event{
+				BaseBranch: "refs/tags/v1.0",
+			},
+			template: `{{ git_tag }}`,
+			expected: "v1.0",
 		},
 		{
 			name:     "replace target_namespace",
@@ -232,7 +240,7 @@ func TestProcessTemplates(t *testing.T) {
 			name:     "params/filter on body",
 			template: `I am {{ params }}`,
 			expected: "I am batman",
-			event:    &info.Event{EventType: "pull_request", Event: github.PullRequestEvent{Number: github.Int(42)}},
+			event:    &info.Event{EventType: "pull_request", Event: github.PullRequestEvent{Number: github.Ptr(42)}},
 			repository: &v1alpha1.Repository{
 				Spec: v1alpha1.RepositorySpec{
 					Params: &[]v1alpha1.Params{
@@ -249,7 +257,7 @@ func TestProcessTemplates(t *testing.T) {
 			name:     "params/filter on body with bad filter",
 			template: `I am {{ params }}`,
 			expected: "I am {{ params }}",
-			event:    &info.Event{EventType: "pull_request", Event: github.PullRequestEvent{Number: github.Int(42)}},
+			event:    &info.Event{EventType: "pull_request", Event: github.PullRequestEvent{Number: github.Ptr(42)}},
 			repository: &v1alpha1.Repository{
 				Spec: v1alpha1.RepositorySpec{
 					Params: &[]v1alpha1.Params{

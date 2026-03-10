@@ -1,7 +1,13 @@
 package opscomments
 
 import (
+	"strings"
 	"testing"
+
+	"go.uber.org/zap"
+	zapobserver "go.uber.org/zap/zaptest/observer"
+	"gotest.tools/v3/assert"
+	rtesting "knative.dev/pkg/reconciler/testing"
 
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/events"
@@ -9,10 +15,6 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
 	testclient "github.com/openshift-pipelines/pipelines-as-code/pkg/test/clients"
 	testnewrepo "github.com/openshift-pipelines/pipelines-as-code/pkg/test/repository"
-	"go.uber.org/zap"
-	zapobserver "go.uber.org/zap/zaptest/observer"
-	"gotest.tools/v3/assert"
-	rtesting "knative.dev/pkg/reconciler/testing"
 )
 
 func TestLabelsBackwardCompat(t *testing.T) {
@@ -304,66 +306,15 @@ func TestIsOkToTestComment(t *testing.T) {
 			want:    false,
 		},
 		{
-			name:    "invalid comment",
-			comment: "/ok-to-test abc",
-			want:    false,
+			name:    "valid comment with sha",
+			comment: "/ok-to-test 1234567",
+			want:    true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := IsOkToTestComment(tt.comment)
-			assert.Equal(t, tt.want, got)
-		})
-	}
-}
-
-func TestCancelComment(t *testing.T) {
-	tests := []struct {
-		name    string
-		comment string
-		want    bool
-	}{
-		{
-			name:    "valid",
-			comment: "/cancel",
-			want:    true,
-		},
-		{
-			name:    "valid with some string before",
-			comment: "/lgtm \n/cancel",
-			want:    true,
-		},
-		{
-			name:    "valid with some string before and after",
-			comment: "hi, trigger the ci \n/cancel \n then report the status back",
-			want:    true,
-		},
-		{
-			name:    "valid comments",
-			comment: "/lgtm \n/cancel \n/approve",
-			want:    true,
-		},
-		{
-			name:    "invalid",
-			comment: "/ok",
-			want:    false,
-		},
-		{
-			name:    "invalid comment",
-			comment: "/ok-to-test abc",
-			want:    false,
-		},
-		{
-			name:    "cancel single pr",
-			comment: "/cancel abc",
-			want:    true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := IsCancelComment(tt.comment)
 			assert.Equal(t, tt.want, got)
 		})
 	}
@@ -726,4 +677,43 @@ func TestGetPipelineRunAndBranchNameFromCancelComment(t *testing.T) {
 			assert.Equal(t, tt.prName, prName)
 		})
 	}
+}
+
+func TestGetSHAFromOkToTestComment(t *testing.T) {
+	tests := []struct {
+		name    string
+		comment string
+		want    string
+	}{
+		{
+			name:    "no sha",
+			comment: "/ok-to-test",
+			want:    "",
+		},
+		{
+			name:    "short sha",
+			comment: "/ok-to-test 1234567",
+			want:    "1234567",
+		},
+		{
+			name:    "full sha",
+			comment: "/ok-to-test 1234567890123456789012345678901234567890",
+			want:    "1234567890123456789012345678901234567890",
+		},
+		{
+			name:    "sha with surrounding text",
+			comment: "lgtm\n/ok-to-test 1234567\napproved",
+			want:    "1234567",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := GetSHAFromOkToTestComment(tt.comment)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestAnyOpsKubeLabelInSelector(t *testing.T) {
+	assert.Assert(t, strings.Contains(AnyOpsKubeLabelInSelector(), RetestSingleCommentEventType.String()))
 }

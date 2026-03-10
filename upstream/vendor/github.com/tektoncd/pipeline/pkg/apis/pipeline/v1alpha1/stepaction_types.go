@@ -74,6 +74,10 @@ type StepActionList struct {
 
 // StepActionSpec contains the actionable components of a step.
 type StepActionSpec struct {
+	// Description is a user-facing description of the stepaction that may be
+	// used to populate a UI.
+	// +optional
+	Description string `json:"description,omitempty"`
 	// Image reference name to run for this StepAction.
 	// More info: https://kubernetes.io/docs/concepts/containers/images
 	// +optional
@@ -106,7 +110,7 @@ type StepActionSpec struct {
 	// +patchMergeKey=name
 	// +patchStrategy=merge
 	// +listType=atomic
-	Env []corev1.EnvVar `json:"env,omitempty" patchStrategy:"merge" patchMergeKey:"name" protobuf:"bytes,7,rep,name=env"`
+	Env []corev1.EnvVar `json:"env,omitempty" patchMergeKey:"name" patchStrategy:"merge" protobuf:"bytes,7,rep,name=env"`
 	// Script is the contents of an executable file to execute.
 	//
 	// If Script is not empty, the Step cannot have an Command and the Args will be passed to the Script.
@@ -121,7 +125,6 @@ type StepActionSpec struct {
 	// Params is a list of input parameters required to run the stepAction.
 	// Params must be supplied as inputs in Steps unless they declare a defaultvalue.
 	// +optional
-	// +listType=atomic
 	Params v1.ParamSpecs `json:"params,omitempty"`
 	// Results are values that this StepAction can output
 	// +optional
@@ -139,7 +142,22 @@ type StepActionSpec struct {
 	// +patchMergeKey=mountPath
 	// +patchStrategy=merge
 	// +listType=atomic
-	VolumeMounts []corev1.VolumeMount `json:"volumeMounts,omitempty" patchStrategy:"merge" patchMergeKey:"mountPath" protobuf:"bytes,9,rep,name=volumeMounts"`
+	VolumeMounts []corev1.VolumeMount `json:"volumeMounts,omitempty" patchMergeKey:"mountPath" patchStrategy:"merge" protobuf:"bytes,9,rep,name=volumeMounts"`
+}
+
+// ToStep converts the StepActionSpec to a Step struct
+func (ss *StepActionSpec) ToStep() *v1.Step {
+	return &v1.Step{
+		Image:           ss.Image,
+		Command:         ss.Command,
+		Args:            ss.Args,
+		WorkingDir:      ss.WorkingDir,
+		Script:          ss.Script,
+		Env:             ss.Env,
+		VolumeMounts:    ss.VolumeMounts,
+		SecurityContext: ss.SecurityContext,
+		Results:         ss.Results,
+	}
 }
 
 // StepActionObject is implemented by StepAction

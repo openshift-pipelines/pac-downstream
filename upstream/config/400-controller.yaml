@@ -49,11 +49,12 @@ spec:
           imagePullPolicy: Always
           ports:
             - name: api
-              containerPort: 8080
+              containerPort: 8082
             - name: metrics
               containerPort: 9090
           securityContext:
             allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
             capabilities:
               drop:
                 - ALL
@@ -100,12 +101,14 @@ spec:
               value: "pipelines-as-code-secret"
             - name: PAC_CONTROLLER_CONFIGMAP
               value: "pipelines-as-code"
+            - name: KUBERNETES_MIN_VERSION
+              value: "v1.28.0"
           volumeMounts:
             - mountPath: "/etc/pipelines-as-code/tls"
               readOnly: true
               name: tls
       volumes:
-      - name: tls
-        secret:
-          secretName: pipelines-as-code-tls-secret
-          optional: true
+        - name: tls
+          secret:
+            secretName: pipelines-as-code-tls-secret
+            optional: true

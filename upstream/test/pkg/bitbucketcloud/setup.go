@@ -13,6 +13,7 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/bitbucketcloud"
 	"github.com/openshift-pipelines/pipelines-as-code/test/pkg/options"
 	"github.com/openshift-pipelines/pipelines-as-code/test/pkg/repository"
+	"github.com/openshift-pipelines/pipelines-as-code/test/pkg/setup"
 	"gotest.tools/v3/assert"
 )
 
@@ -22,12 +23,13 @@ func Setup(ctx context.Context) (*params.Run, options.E2E, bitbucketcloud.Provid
 	bitbucketWSOwner := os.Getenv("TEST_BITBUCKET_CLOUD_E2E_REPOSITORY")
 	bitbucketCloudAPIURL := os.Getenv("TEST_BITBUCKET_CLOUD_API_URL")
 
-	for _, value := range []string{
-		"BITBUCKET_CLOUD_TOKEN", "BITBUCKET_CLOUD_E2E_REPOSITORY", "BITBUCKET_CLOUD_API_URL",
-	} {
-		if env := os.Getenv("TEST_" + value); env == "" {
-			return nil, options.E2E{}, bitbucketcloud.Provider{}, fmt.Errorf("\"TEST_%s\" env variable is required, skipping", value)
-		}
+	if err := setup.RequireEnvs(
+		"TEST_BITBUCKET_CLOUD_USER",
+		"TEST_BITBUCKET_CLOUD_TOKEN",
+		"TEST_BITBUCKET_CLOUD_E2E_REPOSITORY",
+		"TEST_BITBUCKET_CLOUD_API_URL",
+	); err != nil {
+		return nil, options.E2E{}, bitbucketcloud.Provider{}, err
 	}
 
 	split := strings.Split(bitbucketWSOwner, "/")
@@ -47,33 +49,41 @@ func Setup(ctx context.Context) (*params.Run, options.E2E, bitbucketcloud.Provid
 		URL:   bitbucketCloudAPIURL,
 		User:  bitbucketCloudUser,
 	}
-	if err := bbc.SetClient(ctx, nil, event, nil, nil); err != nil {
+	if err := bbc.SetClient(ctx, run, event, nil, nil); err != nil {
 		return nil, options.E2E{}, bitbucketcloud.Provider{}, err
 	}
 	return run, e2eoptions, bbc, nil
 }
 
-func TearDown(ctx context.Context, t *testing.T, runcnx *params.Run, bprovider bitbucketcloud.Provider, opts options.E2E, prNumber int, ref, targetNS string) {
+func TearDown(ctx context.Context, t *testing.T, runcnx *params.Run, bprovider bitbucketcloud.Provider, opts options.E2E, prNumber int, ref, targetNS string, noerror bool) {
 	if os.Getenv("TEST_NOCLEANUP") == "true" {
 		runcnx.Clients.Log.Infof("Not cleaning up and closing PR since TEST_NOCLEANUP is set")
 		return
 	}
 	runcnx.Clients.Log.Infof("Closing PR #%d", prNumber)
-	_, err := bprovider.Client.Repositories.PullRequests.Decline(&bitbucket.PullRequestsOptions{
+	_, err := bprovider.Client().Repositories.PullRequests.Decline(&bitbucket.PullRequestsOptions{
 		ID:       fmt.Sprintf("%d", prNumber),
 		Owner:    opts.Organization,
 		RepoSlug: opts.Repo,
 	})
-	assert.NilError(t, err)
+	if noerror {
+		runcnx.Clients.Log.Infof("Error closing PR #%d: %v", prNumber, err)
+	} else {
+		assert.NilError(t, err)
+	}
 	runcnx.Clients.Log.Infof("Deleting ref %s", ref)
-	err = bprovider.Client.Repositories.Repository.DeleteBranch(
+	err = bprovider.Client().Repositories.Repository.DeleteBranch(
 		&bitbucket.RepositoryBranchDeleteOptions{
 			Owner:    opts.Organization,
 			RepoSlug: opts.Repo,
 			RefName:  ref,
 		},
 	)
-	assert.NilError(t, err)
+	if noerror {
+		runcnx.Clients.Log.Infof("Error closing PR #%d: %v", prNumber, err)
+	} else {
+		assert.NilError(t, err)
+	}
 
 	repository.NSTearDown(ctx, t, runcnx, targetNS)
 }

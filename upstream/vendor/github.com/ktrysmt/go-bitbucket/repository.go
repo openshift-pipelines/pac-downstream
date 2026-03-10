@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"net/url"
 	"path"
@@ -200,7 +201,6 @@ type DefaultReviewer struct {
 	Links       map[string]map[string]string
 }
 
-
 type DefaultReviewers struct {
 	Page             int
 	Pagelen          int
@@ -216,11 +216,11 @@ type EffectiveDefaultReviewer struct {
 }
 
 type EffectiveDefaultReviewers struct {
-	Page             int
-	Pagelen          int
-	MaxDepth         int
-	Size             int
-	Next             string
+	Page                      int
+	Pagelen                   int
+	MaxDepth                  int
+	Size                      int
+	Next                      string
 	EffectiveDefaultReviewers []EffectiveDefaultReviewer
 }
 
@@ -277,7 +277,7 @@ func (r *Repository) Create(ro *RepositoryOptions) (*Repository, error) {
 		return nil, err
 	}
 	urlStr := r.c.requestUrl("/repositories/%s/%s", ro.Owner, ro.RepoSlug)
-	response, err := r.c.execute("POST", urlStr, data)
+	response, err := r.c.executeWithContext("POST", urlStr, data, ro.ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -291,7 +291,7 @@ func (r *Repository) Fork(fo *RepositoryForkOptions) (*Repository, error) {
 		return nil, err
 	}
 	urlStr := r.c.requestUrl("/repositories/%s/%s/forks", fo.FromOwner, fo.FromSlug)
-	response, err := r.c.execute("POST", urlStr, data)
+	response, err := r.c.executeWithContext("POST", urlStr, data, fo.ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -399,7 +399,7 @@ func (r *Repository) WriteFileBlob(ro *RepositoryBlobWriteOptions) error {
 
 	urlStr := r.c.requestUrl("/repositories/%s/%s/src", ro.Owner, ro.RepoSlug)
 
-	_, err := r.c.executeFileUpload("POST", urlStr, ro.Files, ro.FilesToDelete, m)
+	_, err := r.c.executeFileUpload("POST", urlStr, ro.Files, ro.FilesToDelete, m, ro.ctx)
 	return err
 }
 
@@ -441,11 +441,17 @@ func (r *Repository) ListRefs(rbo *RepositoryRefOptions) (*RepositoryRefs, error
 	return decodeRepositoryRefs(bodyString)
 }
 
+// ListBranches gets all branches in the Bitbucket repository and returns them as a RepositoryBranches.
+// You can pass query parameter to filter branches by name.
+//
+// Bitbucket API docs: https://developer.atlassian.com/cloud/bitbucket/rest/api-group-refs/#api-repositories-workspace-repo-slug-refs-get
 func (r *Repository) ListBranches(rbo *RepositoryBranchOptions) (*RepositoryBranches, error) {
-
 	params := url.Values{}
+
 	if rbo.Query != "" {
-		params.Add("q", rbo.Query)
+		// https://developer.atlassian.com/cloud/bitbucket/rest/intro/#operators
+		query := fmt.Sprintf("name ~ \"%s\"", rbo.Query)
+		params.Set("q", query)
 	}
 
 	if rbo.Sort != "" {
@@ -469,12 +475,12 @@ func (r *Repository) ListBranches(rbo *RepositoryBranchOptions) (*RepositoryBran
 	if err != nil {
 		return nil, err
 	}
-	bodyBytes, err := ioutil.ReadAll(response)
+	bodyBytes, err := io.ReadAll(response)
 	if err != nil {
 		return nil, err
 	}
-	bodyString := string(bodyBytes)
-	return decodeRepositoryBranches(bodyString)
+
+	return decodeRepositoryBranches(string(bodyBytes))
 }
 
 func (r *Repository) GetBranch(rbo *RepositoryBranchOptions) (*RepositoryBranch, error) {
@@ -727,7 +733,7 @@ func (r *Repository) AddPipelineVariable(rpvo *RepositoryPipelineVariableOptions
 	}
 	urlStr := r.c.requestUrl("/repositories/%s/%s/pipelines_config/variables/", rpvo.Owner, rpvo.RepoSlug)
 
-	response, err := r.c.execute("POST", urlStr, data)
+	response, err := r.c.executeWithContext("POST", urlStr, data, rpvo.ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -839,7 +845,7 @@ func (r *Repository) AddEnvironment(opt *RepositoryEnvironmentOptions) (*Environ
 		return nil, err
 	}
 	urlStr := r.c.requestUrl("/repositories/%s/%s/environments/", opt.Owner, opt.RepoSlug)
-	res, err := r.c.execute("POST", urlStr, body)
+	res, err := r.c.executeWithContext("POST", urlStr, body, opt.ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -904,7 +910,7 @@ func (r *Repository) AddDeploymentVariable(opt *RepositoryDeploymentVariableOpti
 	}
 	urlStr := r.c.requestUrl("/repositories/%s/%s/deployments_config/environments/%s/variables", opt.Owner, opt.RepoSlug, opt.Environment.Uuid)
 
-	response, err := r.c.execute("POST", urlStr, body)
+	response, err := r.c.executeWithContext("POST", urlStr, body, opt.ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -1796,7 +1802,6 @@ func decodeDefaultReviewers(response interface{}) (*DefaultReviewers, error) {
 	return &defaultReviewerVariables, nil
 }
 
-
 func decodeEffectiveDefaultReviewers(response interface{}) (*EffectiveDefaultReviewers, error) {
 	responseMap := response.(map[string]interface{})
 	values := responseMap["values"].([]interface{})
@@ -1833,11 +1838,11 @@ func decodeEffectiveDefaultReviewers(response interface{}) (*EffectiveDefaultRev
 	}
 
 	defaultReviewerVariables := EffectiveDefaultReviewers{
-		Page:             int(page),
-		Pagelen:          int(pagelen),
-		MaxDepth:         int(max_depth),
-		Size:             int(size),
-		Next:             next,
+		Page:                      int(page),
+		Pagelen:                   int(pagelen),
+		MaxDepth:                  int(max_depth),
+		Size:                      int(size),
+		Next:                      next,
 		EffectiveDefaultReviewers: variables,
 	}
 	return &defaultReviewerVariables, nil

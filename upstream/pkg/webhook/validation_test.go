@@ -8,12 +8,16 @@ import (
 	testclient "github.com/openshift-pipelines/pipelines-as-code/pkg/test/clients"
 	testnewrepo "github.com/openshift-pipelines/pipelines-as-code/pkg/test/repository"
 	"gotest.tools/v3/assert"
+	"gotest.tools/v3/env"
 	v1 "k8s.io/api/admission/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	rtesting "knative.dev/pkg/reconciler/testing"
 )
 
 func TestReconciler_Admit(t *testing.T) {
+	globalNamespace := "globalNamespace"
+	envRemove := env.PatchAll(t, map[string]string{"SYSTEM_NAMESPACE": globalNamespace})
+	defer envRemove()
 	tests := []struct {
 		name    string
 		repo    *v1alpha1.Repository
@@ -31,6 +35,46 @@ func TestReconciler_Admit(t *testing.T) {
 			result:  "",
 		},
 		{
+			name: "no http or https",
+			repo: testnewrepo.NewRepo(testnewrepo.RepoTestcreationOpts{
+				Name:             "test-run",
+				InstallNamespace: "namespace",
+				URL:              "foobar",
+			}),
+			allowed: false,
+			result:  "URL scheme must be http or https",
+		},
+		{
+			name: "no http or https for global namespace allowed",
+			repo: testnewrepo.NewRepo(testnewrepo.RepoTestcreationOpts{
+				Name:             "test-run",
+				InstallNamespace: globalNamespace,
+				URL:              "foobar",
+			}),
+			allowed: true,
+			result:  "URL scheme must be http or https",
+		},
+		{
+			name: "bad url",
+			repo: testnewrepo.NewRepo(testnewrepo.RepoTestcreationOpts{
+				Name:             "test-run",
+				InstallNamespace: "namespace",
+				URL:              "h t t p s://github.com/openshift-pipelines/pipelines-as-code", // nolint: dupword
+			}),
+			allowed: false,
+			result:  `invalid URL format: parse "h t t p s://github.com/openshift-pipelines/pipelines-as-code": first path segment in URL cannot contain colon`, // nolint: dupword
+		},
+		{
+			name: "bad url for global namespace allowed",
+			repo: testnewrepo.NewRepo(testnewrepo.RepoTestcreationOpts{
+				Name:             "test-run",
+				InstallNamespace: globalNamespace,
+				URL:              "h t t p s://github.com/openshift-pipelines/pipelines-as-code", // nolint: dupword
+			}),
+			allowed: true,
+			result:  `invalid URL format: parse "h t t p s://github.com/openshift-pipelines/pipelines-as-code": first path segment in URL cannot contain colon`, // nolint: dupword
+		},
+		{
 			name: "reject",
 			repo: testnewrepo.NewRepo(testnewrepo.RepoTestcreationOpts{
 				Name:             "test-run",
@@ -38,7 +82,7 @@ func TestReconciler_Admit(t *testing.T) {
 				URL:              "https://pac.test/already/installed",
 			}),
 			allowed: false,
-			result:  "repository already exist with url: https://pac.test/already/installed",
+			result:  "repository already exists with URL: https://pac.test/already/installed",
 		},
 		{
 			name: "allow as it is be update to existing repo",
@@ -57,7 +101,7 @@ func TestReconciler_Admit(t *testing.T) {
 				URL:              "https://pac.test/already/installed",
 			}),
 			allowed: false,
-			result:  "repository already exist with url: https://pac.test/already/installed",
+			result:  "repository already exists with URL: https://pac.test/already/installed",
 		},
 	}
 	for _, tt := range tests {

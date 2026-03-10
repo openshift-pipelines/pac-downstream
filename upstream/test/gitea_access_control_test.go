@@ -64,7 +64,7 @@ func TestGiteaPolicyPullRequest(t *testing.T) {
 	normalUserNamePasswd := fmt.Sprintf("normal-%s", topts.TargetRefName)
 	normalUserCnx, normalUser, err := tgitea.CreateGiteaUserSecondCnx(topts, normalUserNamePasswd, normalUserNamePasswd)
 	assert.NilError(t, err)
-	_, err = topts.GiteaCNX.Client.AddTeamMember(normalTeam.ID, normalUser.UserName)
+	_, err = topts.GiteaCNX.Client().AddTeamMember(normalTeam.ID, normalUser.UserName)
 	assert.NilError(t, err)
 	topts.ParamsRun.Clients.Log.Infof("User %s has been added to team %s", normalUser.UserName, normalTeam.Name)
 	tgitea.CreateForkPullRequest(t, topts, normalUserCnx, "")
@@ -79,7 +79,7 @@ func TestGiteaPolicyPullRequest(t *testing.T) {
 	pullRequesterUserNamePasswd := fmt.Sprintf("pullRequester-%s", topts.TargetRefName)
 	pullRequesterUserCnx, pullRequesterUser, err := tgitea.CreateGiteaUserSecondCnx(topts, pullRequesterUserNamePasswd, pullRequesterUserNamePasswd)
 	assert.NilError(t, err)
-	_, err = topts.GiteaCNX.Client.AddTeamMember(pullRequesterTeam.ID, pullRequesterUser.UserName)
+	_, err = topts.GiteaCNX.Client().AddTeamMember(pullRequesterTeam.ID, pullRequesterUser.UserName)
 	assert.NilError(t, err)
 	topts.ParamsRun.Clients.Log.Infof("User %s has been added to team %s", pullRequesterUser.UserName, pullRequesterTeam.Name)
 	tgitea.CreateForkPullRequest(t, topts, pullRequesterUserCnx, "")
@@ -124,7 +124,7 @@ func TestGiteaPolicyOkToTestRetest(t *testing.T) {
 	okToTestUserNamePasswd := fmt.Sprintf("ok-to-test-%s", topts.TargetRefName)
 	okToTestUserCnx, okToTestUser, err := tgitea.CreateGiteaUserSecondCnx(topts, okToTestUserNamePasswd, okToTestUserNamePasswd)
 	assert.NilError(t, err)
-	_, err = topts.GiteaCNX.Client.AddTeamMember(oktotestTeam.ID, okToTestUser.UserName)
+	_, err = topts.GiteaCNX.Client().AddTeamMember(oktotestTeam.ID, okToTestUser.UserName)
 	assert.NilError(t, err)
 	topts.ParamsRun.Clients.Log.Infof("User %s has been added to team %s", okToTestUser.UserName, oktotestTeam.Name)
 
@@ -134,7 +134,7 @@ func TestGiteaPolicyOkToTestRetest(t *testing.T) {
 	normalUserNamePasswd := fmt.Sprintf("normal-%s", topts.TargetRefName)
 	normalUserCnx, normalUser, err := tgitea.CreateGiteaUserSecondCnx(topts, normalUserNamePasswd, normalUserNamePasswd)
 	assert.NilError(t, err)
-	_, err = topts.GiteaCNX.Client.AddTeamMember(normalTeam.ID, normalUser.UserName)
+	_, err = topts.GiteaCNX.Client().AddTeamMember(normalTeam.ID, normalUser.UserName)
 	assert.NilError(t, err)
 	topts.ParamsRun.Clients.Log.Infof("User %s has been added to team %s", normalUser.UserName, normalTeam.Name)
 
@@ -142,7 +142,7 @@ func TestGiteaPolicyOkToTestRetest(t *testing.T) {
 	topts.GiteaCNX = normalUserCnx
 	tgitea.PostCommentOnPullRequest(t, topts, okToTestComment)
 	topts.CheckForStatus = "Skipped"
-	topts.Regexp = regexp.MustCompile(fmt.Sprintf(".*User %s is not allowed to trigger CI via pull_request on this repo.", normalUser.UserName))
+	topts.Regexp = regexp.MustCompile(fmt.Sprintf(".*User %s is not allowed to trigger CI via pull_request in this repo.", normalUser.UserName))
 	tgitea.WaitForPullRequestCommentMatch(t, topts)
 
 	topts.ParamsRun.Clients.Log.Infof("Sending a /retest comment as a user not belonging to an allowed team in Repo CR policy but part of the organization")
@@ -315,7 +315,7 @@ func TestGiteaACLCommentsAllowingRememberOkToTestFalse(t *testing.T) {
 	tgitea.PushToPullRequest(t, topts, secondcnx, "echo Hello from user "+topts.TargetRefName)
 
 	// get the latest PR for the new sha
-	pr, _, err := topts.GiteaCNX.Client.GetPullRequest("pac", topts.PullRequest.Head.Name, topts.PullRequest.Index)
+	pr, _, err := topts.GiteaCNX.Client().GetPullRequest("pac", topts.PullRequest.Head.Name, topts.PullRequest.Index)
 	assert.NilError(t, err)
 
 	// status of CI is pending because pushed to PR and remember-ok-to-test is false
@@ -398,7 +398,7 @@ func TestGiteaPolicyAllowedOwnerFiles(t *testing.T) {
 	normalUserNamePasswd := fmt.Sprintf("normal-%s", topts.TargetRefName)
 	_, normalUser, err := tgitea.CreateGiteaUserSecondCnx(topts, normalUserNamePasswd, normalUserNamePasswd)
 	assert.NilError(t, err)
-	_, err = topts.GiteaCNX.Client.AddTeamMember(normalTeam.ID, normalUser.UserName)
+	_, err = topts.GiteaCNX.Client().AddTeamMember(normalTeam.ID, normalUser.UserName)
 	assert.NilError(t, err)
 
 	// create an allowed user w
@@ -423,13 +423,13 @@ func TestGiteaPolicyAllowedOwnerFiles(t *testing.T) {
 		BaseRefName:   topts.DefaultBranch,
 	}
 	// push OWNERS file to main
-	scm.PushFilesToRefGit(t, scmOpts, entries)
+	_ = scm.PushFilesToRefGit(t, scmOpts, entries)
 	scmOpts.TargetRefName = targetRef
 
 	newyamlFiles := map[string]string{".tekton/pr.yaml": "testdata/pipelinerun.yaml"}
 	newEntries, err := payload.GetEntries(newyamlFiles, topts.TargetNS, topts.DefaultBranch, topts.TargetEvent, map[string]string{})
 	assert.NilError(t, err)
-	scm.PushFilesToRefGit(t, scmOpts, newEntries)
+	_ = scm.PushFilesToRefGit(t, scmOpts, newEntries)
 
 	npr := tgitea.CreateForkPullRequest(t, topts, allowedCnx, "")
 	waitOpts := twait.Opts{
@@ -481,7 +481,7 @@ func TestGiteaPolicyOnComment(t *testing.T) {
 	normalUserNamePasswd := fmt.Sprintf("normal-%s", topts.TargetRefName)
 	normalUserCnx, normalUser, err := tgitea.CreateGiteaUserSecondCnx(topts, normalUserNamePasswd, normalUserNamePasswd)
 	assert.NilError(t, err)
-	_, err = topts.GiteaCNX.Client.AddTeamMember(normalTeam.ID, normalUser.UserName)
+	_, err = topts.GiteaCNX.Client().AddTeamMember(normalTeam.ID, normalUser.UserName)
 	assert.NilError(t, err)
 	topts.ParamsRun.Clients.Log.Infof("User %s has been added to team %s", normalUser.UserName, normalTeam.Name)
 	tgitea.CreateForkPullRequest(t, topts, normalUserCnx, "")
@@ -500,7 +500,7 @@ func TestGiteaPolicyOnComment(t *testing.T) {
 	pullRequesterUserNamePasswd := fmt.Sprintf("pullRequester-%s", topts.TargetRefName)
 	pullRequesterUserCnx, pullRequesterUser, err := tgitea.CreateGiteaUserSecondCnx(topts, pullRequesterUserNamePasswd, pullRequesterUserNamePasswd)
 	assert.NilError(t, err)
-	_, err = topts.GiteaCNX.Client.AddTeamMember(pullRequesterTeam.ID, pullRequesterUser.UserName)
+	_, err = topts.GiteaCNX.Client().AddTeamMember(pullRequesterTeam.ID, pullRequesterUser.UserName)
 	assert.NilError(t, err)
 	topts.ParamsRun.Clients.Log.Infof("User %s has been added to team %s", pullRequesterUser.UserName, pullRequesterTeam.Name)
 	topts.GiteaCNX = pullRequesterUserCnx

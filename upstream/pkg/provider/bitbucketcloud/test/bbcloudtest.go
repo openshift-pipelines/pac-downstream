@@ -13,6 +13,7 @@ import (
 
 	"github.com/ktrysmt/go-bitbucket"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/settings"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/bitbucketcloud/types"
 	"gotest.tools/v3/assert"
@@ -47,7 +48,7 @@ func SetupBBCloudClient(t *testing.T) (*bitbucket.Client, *http.ServeMux, func()
 		restoreEnv()
 	}
 
-	client := bitbucket.NewBasicAuth("", "")
+	client, _ := bitbucket.NewBasicAuth("", "")
 	client.HttpClient = server.Client()
 	return client, mux, tearDown
 }
@@ -121,15 +122,48 @@ func MuxListDirFiles(t *testing.T, mux *http.ServeMux, event *info.Event, dirs m
 	}
 }
 
-func MuxCommits(t *testing.T, mux *http.ServeMux, event *info.Event, commits []types.Commit) {
+// MuxCommit mocks the GetCommit API (single commit, not paginated).
+func MuxCommit(t *testing.T, mux *http.ServeMux, event *info.Event, commit types.Commit) {
 	t.Helper()
 
-	path := fmt.Sprintf("/repositories/%s/%s/commits/%s", event.Organization, event.Repository, event.SHA)
+	shas := []string{}
+	if event.SHA != "" {
+		shas = append(shas, event.SHA)
+	}
+	if commit.Hash != "" && commit.Hash != event.SHA {
+		shas = append(shas, commit.Hash)
+	}
+	if len(shas) == 0 {
+		shas = append(shas, "HEAD")
+	}
+
+	for _, sha := range shas {
+		path := fmt.Sprintf("/repositories/%s/%s/commit/%s", event.Organization, event.Repository, sha)
+		mux.HandleFunc(path, func(rw http.ResponseWriter, _ *http.Request) {
+			// GetCommit returns a single commit object, not {values: [...]}
+			b, _ := json.Marshal(commit)
+			fmt.Fprint(rw, string(b))
+		})
+	}
+}
+
+func MuxBranch(t *testing.T, mux *http.ServeMux, event *info.Event, commit types.Commit) {
+	t.Helper()
+
+	if event.HeadBranch == "" {
+		return
+	}
+
+	path := fmt.Sprintf("/repositories/%s/%s/refs/branches/%s", event.Organization, event.Repository, event.HeadBranch)
 	mux.HandleFunc(path, func(rw http.ResponseWriter, _ *http.Request) {
-		dircontents := map[string][]types.Commit{
-			"values": commits,
+		// Return the commit hash that this branch points to
+		branch := map[string]interface{}{
+			"name": event.HeadBranch,
+			"target": map[string]interface{}{
+				"hash": commit.Hash,
+			},
 		}
-		b, _ := json.Marshal(dircontents)
+		b, _ := json.Marshal(branch)
 		fmt.Fprint(rw, string(b))
 	})
 }
@@ -144,7 +178,7 @@ func MuxRepoInfo(t *testing.T, mux *http.ServeMux, event *info.Event, repo *bitb
 	})
 }
 
-func MuxCreateCommitstatus(t *testing.T, mux *http.ServeMux, event *info.Event, expectedDescSubstr string, expStatus provider.StatusOpts) {
+func MuxCreateCommitstatus(t *testing.T, mux *http.ServeMux, event *info.Event, expectedDescSubstr, applicationName string, expStatus provider.StatusOpts) {
 	t.Helper()
 
 	path := fmt.Sprintf("/repositories/%s/%s/commit/%s/statuses/build", event.Organization, event.Repository, event.SHA)
@@ -153,6 +187,8 @@ func MuxCreateCommitstatus(t *testing.T, mux *http.ServeMux, event *info.Event, 
 		bit, _ := io.ReadAll(r.Body)
 		err := json.Unmarshal(bit, cso)
 		assert.NilError(t, err)
+		pacOpts := &info.PacOpts{Settings: settings.Settings{ApplicationName: applicationName}}
+		assert.Equal(t, provider.GetCheckName(expStatus, pacOpts), cso.Key)
 
 		if expStatus.DetailsURL != "" {
 			assert.Equal(t, expStatus.DetailsURL, cso.Url)
@@ -240,7 +276,8 @@ func MakePREvent(accountid, nickname, sha, comment string) types.PullRequestEven
 			Workspace: types.Workspace{
 				Slug: "organization",
 			},
-			Name: "repo",
+			Name:     "repo",
+			FullName: "organization/repo",
 			Links: types.Links{
 				HTML: types.HTMLLink{
 					HRef: "https://notgh.org/organization/repo",
@@ -280,7 +317,7 @@ func MakePREvent(accountid, nickname, sha, comment string) types.PullRequestEven
 	return pr
 }
 
-func MakePushEvent(accountid, nickname, sha string) types.PushRequestEvent {
+func MakePushEvent(accountid, nickname, sha, changeType string) types.PushRequestEvent {
 	if accountid == "" {
 		accountid = "countlady"
 	}
@@ -299,9 +336,11 @@ func MakePushEvent(accountid, nickname, sha string) types.PushRequestEvent {
 			Changes: []types.Change{
 				{
 					New: types.ChangeType{
+						Name: "mychange",
 						Target: types.Commit{
 							Hash: sha,
 						},
+						Type: changeType,
 					},
 					Old: types.ChangeType{
 						Target: types.Commit{
@@ -315,7 +354,8 @@ func MakePushEvent(accountid, nickname, sha string) types.PushRequestEvent {
 			Workspace: types.Workspace{
 				Slug: "org",
 			},
-			Name: "repo",
+			Name:     "repo",
+			FullName: "org/repo",
 			Links: types.Links{
 				HTML: types.HTMLLink{
 					HRef: "https://vavar/repo/org",

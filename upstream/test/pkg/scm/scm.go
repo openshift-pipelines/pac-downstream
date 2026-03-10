@@ -17,13 +17,14 @@ import (
 )
 
 type Opts struct {
-	GitURL        string
-	TargetRefName string
-	BaseRefName   string
-	WebURL        string
-	Log           *zap.SugaredLogger
-	CommitTitle   string
-	PushForce     bool
+	GitURL             string
+	TargetRefName      string
+	BaseRefName        string
+	WebURL             string
+	Log                *zap.SugaredLogger
+	CommitTitle        string
+	PushForce          bool
+	NoCheckOutFromBase bool
 }
 
 type FileChange struct {
@@ -67,7 +68,7 @@ func gitPushPullRetry(t *testing.T, opts *Opts, path string) {
 	}
 }
 
-func PushFilesToRefGit(t *testing.T, opts *Opts, entries map[string]string) {
+func PushFilesToRefGit(t *testing.T, opts *Opts, entries map[string]string) string {
 	tmpdir := fs.NewDir(t, t.Name())
 	defer (func() {
 		if os.Getenv("TEST_NOCLEANUP") == "" {
@@ -93,12 +94,19 @@ func PushFilesToRefGit(t *testing.T, opts *Opts, entries map[string]string) {
 	if strings.HasPrefix(opts.TargetRefName, "refs/tags") {
 		_, err = git.RunGit(path, "reset", "--hard", "origin/"+opts.BaseRefName)
 	} else {
-		_, err = git.RunGit(path, "checkout", "-B", opts.TargetRefName, "origin/"+opts.BaseRefName)
+		if opts.NoCheckOutFromBase {
+			// Create a new branch without the base reference,
+			// which can be helpful for testing when you only want to add specific requested files
+			_, err = git.RunGit(path, "checkout", "-B", opts.TargetRefName)
+		} else {
+			// checkout new branch from base branch
+			_, err = git.RunGit(path, "checkout", "-B", opts.TargetRefName, "origin/"+opts.BaseRefName)
+		}
 	}
 	assert.NilError(t, err)
 
 	for filename, content := range entries {
-		assert.NilError(t, os.MkdirAll(filepath.Dir(filename), 0o755))
+		assert.NilError(t, os.MkdirAll(filepath.Dir(filename), 0o750))
 		// write content to filename
 		assert.NilError(t, os.WriteFile(filename, []byte(content), 0o600))
 	}
@@ -117,7 +125,12 @@ func PushFilesToRefGit(t *testing.T, opts *Opts, entries map[string]string) {
 		assert.NilError(t, err)
 	}
 
+	// get sha
+	sha, err := git.RunGit(path, "rev-parse", "HEAD")
+	assert.NilError(t, err)
+
 	gitPushPullRetry(t, opts, path)
+	return strings.TrimSpace(sha)
 }
 
 func ChangeFilesRefGit(t *testing.T, opts *Opts, fileChanges []FileChange) {

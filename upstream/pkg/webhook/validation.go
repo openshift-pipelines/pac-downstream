@@ -2,18 +2,23 @@ package webhook
 
 import (
 	"context"
-	"fmt"
+	"net/url"
+	"os"
 
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	pac "github.com/openshift-pipelines/pipelines-as-code/pkg/generated/listers/pipelinesascode/v1alpha1"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
 	v1 "k8s.io/api/admission/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"knative.dev/pkg/webhook"
 )
 
 var universalDeserializer = serializer.NewCodecFactory(runtime.NewScheme()).UniversalDeserializer()
+
+var allowedGitlabDisableCommentStrategyOnMr = sets.NewString("", provider.DisableAllCommentStrategy, provider.UpdateCommentStrategy)
 
 // Path implements AdmissionController.
 func (ac *reconciler) Path() string {
@@ -28,17 +33,39 @@ func (ac *reconciler) Admit(_ context.Context, request *v1.AdmissionRequest) *v1
 		return webhook.MakeErrorStatus("validation failed: %v", err)
 	}
 
+	// Check that if we have a URL set only for non global repository which can be set as empty.
+	if repo.GetNamespace() != os.Getenv("SYSTEM_NAMESPACE") {
+		if repo.Spec.URL == "" {
+			return webhook.MakeErrorStatus("URL must be set")
+		}
+
+		parsed, err := url.Parse(repo.Spec.URL)
+		if err != nil {
+			return webhook.MakeErrorStatus("invalid URL format: %v", err)
+		}
+
+		if parsed.Scheme != "http" && parsed.Scheme != "https" {
+			return webhook.MakeErrorStatus("URL scheme must be http or https")
+		}
+	}
+
 	exist, err := checkIfRepoExist(ac.pacLister, &repo, "")
 	if err != nil {
 		return webhook.MakeErrorStatus("validation failed: %v", err)
 	}
 
 	if exist {
-		return webhook.MakeErrorStatus(fmt.Sprintf("repository already exist with url: %s", repo.Spec.URL))
+		return webhook.MakeErrorStatus("repository already exists with URL: %s", repo.Spec.URL)
 	}
 
 	if repo.Spec.ConcurrencyLimit != nil && *repo.Spec.ConcurrencyLimit == 0 {
 		return webhook.MakeErrorStatus("concurrency limit must be greater than 0")
+	}
+
+	if repo.Spec.Settings != nil && repo.Spec.Settings.Gitlab != nil {
+		if !allowedGitlabDisableCommentStrategyOnMr.Has(repo.Spec.Settings.Gitlab.CommentStrategy) {
+			return webhook.MakeErrorStatus("comment strategy '%s' is not supported for Gitlab MRs", repo.Spec.Settings.Gitlab.CommentStrategy)
+		}
 	}
 
 	return &v1.AdmissionResponse{Allowed: true}

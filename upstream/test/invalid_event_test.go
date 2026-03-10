@@ -1,5 +1,4 @@
 //go:build e2e
-// +build e2e
 
 package test
 
@@ -11,11 +10,11 @@ import (
 	"os"
 	"testing"
 
-	"github.com/google/go-github/v61/github"
+	"github.com/google/go-github/v81/github"
 	"gotest.tools/v3/assert"
 )
 
-func TestUnsupportedEvent(t *testing.T) {
+func TestOthersUnsupportedEvent(t *testing.T) {
 	ctx := context.TODO()
 
 	event := github.ReleaseEvent{}
@@ -49,11 +48,11 @@ func TestUnsupportedEvent(t *testing.T) {
 	assert.Equal(t, resp.StatusCode, http.StatusOK, "%s reply expected 200 OK", elURL)
 }
 
-func TestSkippedEvent(t *testing.T) {
+func TestOthersSkippedEvent(t *testing.T) {
 	ctx := context.TODO()
 
 	event := github.PullRequestEvent{
-		Action: github.String("closed"),
+		Action: github.Ptr("closed"),
 	}
 	eventType := "pull_request"
 
@@ -82,10 +81,10 @@ func TestSkippedEvent(t *testing.T) {
 	assert.NilError(t, err)
 	defer resp.Body.Close()
 
-	assert.Equal(t, resp.StatusCode, http.StatusOK, "%s reply expected 200 OK", elURL)
+	assert.Assert(t, resp.StatusCode >= 200 && resp.StatusCode < 300, "%s reply expected 2xx OK: %d", elURL, resp.StatusCode)
 }
 
-func TestGETCall(t *testing.T) {
+func TestOthersGETCall(t *testing.T) {
 	ctx := context.TODO()
 
 	elURL := os.Getenv("TEST_EL_URL")

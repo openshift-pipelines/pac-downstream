@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	giteaStructs "code.gitea.io/gitea/modules/structs"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/gitea/forgejostructs"
 )
 
 // whEventType represents a Gitea webhook event.
@@ -27,32 +27,33 @@ const (
 	EventTypePullRequest         whEventType = "pull_request"
 	EventTypePullRequestApproved whEventType = "pull_request_approved"
 	EventTypePullRequestRejected whEventType = "pull_request_rejected"
+	EventTypePullRequestLabel    whEventType = "pull_request_label"
 	EventTypePullRequestComment  whEventType = "pull_request_comment"
 	EventTypePullRequestSync     whEventType = "pull_request_sync"
 )
 
-func parseWebhook(eventType whEventType, payload []byte) (event interface{}, err error) {
+func parseWebhook(eventType whEventType, payload []byte) (event any, err error) {
 	switch eventType {
 	case EventTypePush:
-		event = &giteaStructs.PushPayload{}
+		event = &forgejostructs.PushPayload{}
 	case EventTypeCreate:
-		event = &giteaStructs.CreatePayload{}
+		event = &forgejostructs.CreatePayload{}
 	case EventTypeDelete:
-		event = &giteaStructs.DeletePayload{}
+		event = &forgejostructs.DeletePayload{}
 	case EventTypeFork:
-		event = &giteaStructs.ForkPayload{}
+		event = &forgejostructs.ForkPayload{}
 	case EventTypeIssues:
-		event = &giteaStructs.IssuePayload{}
+		event = &forgejostructs.IssuePayload{}
 	case EventTypeIssueComment:
-		event = &giteaStructs.IssueCommentPayload{}
+		event = &forgejostructs.IssueCommentPayload{}
 	case EventTypeRepository:
-		event = &giteaStructs.RepositoryPayload{}
+		event = &forgejostructs.RepositoryPayload{}
 	case EventTypeRelease:
-		event = &giteaStructs.ReleasePayload{}
+		event = &forgejostructs.ReleasePayload{}
 	case EventTypePullRequestComment:
-		event = &giteaStructs.IssueCommentPayload{}
-	case EventTypePullRequest, EventTypePullRequestApproved, EventTypePullRequestSync, EventTypePullRequestRejected:
-		event = &giteaStructs.PullRequestPayload{}
+		event = &forgejostructs.IssueCommentPayload{}
+	case EventTypePullRequest, EventTypePullRequestApproved, EventTypePullRequestSync, EventTypePullRequestRejected, EventTypePullRequestLabel:
+		event = &forgejostructs.PullRequestPayload{}
 	default:
 		return nil, fmt.Errorf("unexpected event type: %s", eventType)
 	}
