@@ -8,7 +8,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/google/go-github/v61/github"
+	"github.com/google/go-github/v81/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/clients"
@@ -48,10 +48,10 @@ func TestHandleEvent(t *testing.T) {
 	ctx = info.StoreNS(ctx, "default")
 
 	emptys := &unstructured.Unstructured{}
-	emptys.SetUnstructuredContent(map[string]interface{}{
+	emptys.SetUnstructuredContent(map[string]any{
 		"apiVersion": "route.openshift.io/v1",
 		"kind":       "Route",
-		"metadata": map[string]interface{}{
+		"metadata": map[string]any{
 			"name":      "not",
 			"namespace": "console",
 		},
@@ -116,7 +116,7 @@ func TestHandleEvent(t *testing.T) {
 	l.run.Info.InitInfo()
 
 	// valid push event
-	testEvent := github.PushEvent{Pusher: &github.CommitAuthor{Name: github.String("user")}}
+	testEvent := github.PushEvent{Pusher: &github.CommitAuthor{Name: github.Ptr("user")}}
 	event, err := json.Marshal(testEvent)
 	assert.NilError(t, err)
 
@@ -218,7 +218,7 @@ func TestWhichProvider(t *testing.T) {
 	}
 	tests := []struct {
 		name          string
-		event         interface{}
+		event         any
 		header        http.Header
 		wantErrString string
 	}{
@@ -229,7 +229,7 @@ func TestWhichProvider(t *testing.T) {
 				"X-GitHub-Delivery": {"abcd"},
 			},
 			event: github.PushEvent{
-				Pusher: &github.CommitAuthor{Name: github.String("user")},
+				Pusher: &github.CommitAuthor{Name: github.Ptr("user")},
 			},
 		},
 		{

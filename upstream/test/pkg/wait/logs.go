@@ -8,32 +8,40 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/go-github/v61/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
-	tlogs "github.com/openshift-pipelines/pipelines-as-code/test/pkg/logs"
+	tlogs "github.com/openshift-pipelines/pipelines-as-code/test/pkg/podlogs"
 	"gotest.tools/v3/assert"
 	"gotest.tools/v3/golden"
 )
 
 func RegexpMatchingInControllerLog(ctx context.Context, clients *params.Run, reg regexp.Regexp, maxNumberOfLoop int, controllerName string, lines *int64) error {
-	labelselector := fmt.Sprintf("app.kubernetes.io/name=%s", controllerName)
-	containerName := "pac-controller"
 	ns := info.GetNS(ctx)
-	clients.Clients.Log.Infof("looking for regexp %s in %s for label %s container %s", reg.String(), ns, labelselector, containerName)
+	clients.Clients.Log.Infof(
+		`looking for regexp "%s" in %s for controller "%s" namespace "%s"`,
+		reg.String(), ns, controllerName, ns,
+	)
 	for i := 0; i <= maxNumberOfLoop; i++ {
-		output, err := tlogs.GetPodLog(ctx, clients.Clients.Kube.CoreV1(), ns, labelselector, containerName, lines)
+		output, source, err := tlogs.GetControllerLogByName(
+			ctx, clients.Clients.Kube.CoreV1(), ns, controllerName, lines,
+		)
 		if err != nil {
 			return err
 		}
 
 		if reg.MatchString(output) {
-			clients.Clients.Log.Infof("matched regexp %s in %s:%s labelSelector/pod", reg.String(), labelselector, containerName)
+			clients.Clients.Log.Infof(
+				"matched regexp %s in %s:%s labelSelector/container",
+				reg.String(), source.LabelSelector, source.ContainerName,
+			)
 			return nil
 		}
 		time.Sleep(5 * time.Second)
 	}
-	return fmt.Errorf("could not find a match using the labelSelector: %s in container %s for regexp: %s", labelselector, containerName, reg.String())
+	return fmt.Errorf(
+		"could not find a match in controller %s for regexp: %s",
+		controllerName, reg.String(),
+	)
 }
 
 func RegexpMatchingInPodLog(ctx context.Context, clients *params.Run, ns, labelselector, containerName string, reg regexp.Regexp, goldenFile string, maxNumberOfLoop int) error {
@@ -47,9 +55,9 @@ func RegexpMatchingInPodLog(ctx context.Context, clients *params.Run, ns, labels
 	} else {
 		clients.Clients.Log.Infof("looking for matching content of file %s in namespace: %s for label %s and container %s", goldenFile, ns, labelselector, containerName)
 	}
-
+	numLines := int64(10)
 	for i := 0; i <= maxNumberOfLoop; i++ {
-		output, err = tlogs.GetPodLog(ctx, clients.Clients.Kube.CoreV1(), ns, labelselector, containerName, github.Int64(10))
+		output, err = tlogs.GetPodLog(ctx, clients.Clients.Kube.CoreV1(), ns, labelselector, containerName, &numLines)
 		if err != nil {
 			return err
 		}
@@ -72,9 +80,10 @@ func RegexpMatchingInPodLog(ctx context.Context, clients *params.Run, ns, labels
 // GoldenPodLog is a helper function to get the logs of a pod and compare it to a golden file.
 func GoldenPodLog(ctx context.Context, t *testing.T, clients *params.Run, ns, labelselector, containerName, goldenFile string, maxNumberOfLoop int) {
 	var err error
+	numLines := int64(10)
 	for i := 0; i <= maxNumberOfLoop; i++ {
 		var output string
-		output, err = tlogs.GetPodLog(ctx, clients.Clients.Kube.CoreV1(), ns, labelselector, containerName, github.Int64(10))
+		output, err = tlogs.GetPodLog(ctx, clients.Clients.Kube.CoreV1(), ns, labelselector, containerName, &numLines)
 		if err != nil {
 			time.Sleep(5 * time.Second)
 			continue

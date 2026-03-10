@@ -1,5 +1,4 @@
 //go:build e2e
-// +build e2e
 
 package test
 
@@ -10,7 +9,7 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/google/go-github/v61/github"
+	"github.com/google/go-github/v81/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	tgithub "github.com/openshift-pipelines/pipelines-as-code/test/pkg/github"
 	"github.com/openshift-pipelines/pipelines-as-code/test/pkg/payload"
@@ -34,7 +33,7 @@ func TestGithubPullRerequest(t *testing.T) {
 	g.RunPullRequest(ctx, t)
 	defer g.TearDown(ctx, t)
 
-	repoinfo, resp, err := g.Provider.Client.Repositories.Get(ctx, g.Options.Organization, g.Options.Repo)
+	repoinfo, resp, err := g.Provider.Client().Repositories.Get(ctx, g.Options.Organization, g.Options.Repo)
 	assert.NilError(t, err)
 	if resp != nil && resp.StatusCode == http.StatusNotFound {
 		t.Errorf("Repository %s not found in %s", g.Options.Organization, g.Options.Repo)
@@ -53,7 +52,7 @@ func TestGithubPullRerequest(t *testing.T) {
 	installID, err := strconv.ParseInt(os.Getenv("TEST_GITHUB_REPO_INSTALLATION_ID"), 10, 64)
 	assert.NilError(t, err)
 	event := github.CheckRunEvent{
-		Action: github.String("rerequested"),
+		Action: github.Ptr("rerequested"),
 		Installation: &github.Installation{
 			ID: &installID,
 		},
@@ -63,7 +62,7 @@ func TestGithubPullRerequest(t *testing.T) {
 				HeadSHA:    &runinfo.SHA,
 				PullRequests: []*github.PullRequest{
 					{
-						Number: github.Int(g.PRNumber),
+						Number: github.Ptr(g.PRNumber),
 					},
 				},
 			},
@@ -105,7 +104,7 @@ func TestGithubPullRerequest(t *testing.T) {
 	assert.NilError(t, err)
 	assert.Assert(t, repo.Status[len(repo.Status)-1].Conditions[0].Status == corev1.ConditionTrue)
 	csEvent := github.CheckSuiteEvent{
-		Action: github.String("rerequested"),
+		Action: github.Ptr("rerequested"),
 		Installation: &github.Installation{
 			ID: &installID,
 		},
@@ -114,7 +113,7 @@ func TestGithubPullRerequest(t *testing.T) {
 			HeadSHA:    &runinfo.SHA,
 			PullRequests: []*github.PullRequest{
 				{
-					Number: github.Int(g.PRNumber),
+					Number: github.Ptr(g.PRNumber),
 				},
 			},
 		},

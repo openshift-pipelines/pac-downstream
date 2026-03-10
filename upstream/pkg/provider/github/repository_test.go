@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/google/go-github/v61/github"
+	"github.com/google/go-github/v81/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/clients"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
@@ -26,7 +26,7 @@ func TestConfigureRepository(t *testing.T) {
 	observer, _ := zapobserver.New(zap.InfoLevel)
 	logger := zap.New(observer).Sugar()
 
-	testEvent := github.RepositoryEvent{Action: github.String("updated")}
+	testEvent := github.RepositoryEvent{Action: github.Ptr("updated")}
 	repoUpdatedEvent, err := json.Marshal(testEvent)
 	assert.NilError(t, err)
 
@@ -34,21 +34,23 @@ func TestConfigureRepository(t *testing.T) {
 	testRepoOwner := "pac"
 	testURL := fmt.Sprintf("https://github.com/%v/%v", testRepoOwner, testRepoName)
 
-	testCreateEvent := github.RepositoryEvent{Action: github.String("created"), Repo: &github.Repository{HTMLURL: github.String(testURL)}}
+	testCreateEvent := github.RepositoryEvent{Action: github.Ptr("created"), Repo: &github.Repository{HTMLURL: github.Ptr(testURL)}}
 	repoCreateEvent, err := json.Marshal(testCreateEvent)
 	assert.NilError(t, err)
 
 	tests := []struct {
-		name        string
-		request     *http.Request
-		eventType   string
-		event       []byte
-		detected    bool
-		configuring bool
-		wantErr     string
-		expectedNs  string
-		nsTemplate  string
-		testData    testclient.Data
+		name         string
+		request      *http.Request
+		eventType    string
+		event        []byte
+		detected     bool
+		configuring  bool
+		wantErr      string
+		expectedNs   string
+		expectedRepo string
+		nsTemplate   string
+		repoTemplate string
+		testData     testclient.Data
 	}{
 		{
 			name:        "non supported event",
@@ -70,34 +72,49 @@ func TestConfigureRepository(t *testing.T) {
 			testData:    testclient.Data{},
 		},
 		{
-			name:        "repo create event with no ns template",
-			event:       repoCreateEvent,
-			eventType:   "repository",
-			detected:    true,
-			configuring: true,
-			wantErr:     "",
-			expectedNs:  "test-repo-pipelines",
-			testData:    testclient.Data{},
+			name:         "repo create event with no ns template",
+			event:        repoCreateEvent,
+			eventType:    "repository",
+			detected:     true,
+			configuring:  true,
+			wantErr:      "",
+			expectedNs:   "test-repo-pipelines",
+			expectedRepo: "test-repo-repo-cr",
+			testData:     testclient.Data{},
 		},
 		{
-			name:        "repo create event with ns template",
-			event:       repoCreateEvent,
-			eventType:   "repository",
-			detected:    true,
-			configuring: true,
-			wantErr:     "",
-			expectedNs:  "pac-test-repo-ci",
-			nsTemplate:  "{{repo_owner}}-{{repo_name}}-ci",
-			testData:    testclient.Data{},
+			name:         "repo create event with ns template",
+			event:        repoCreateEvent,
+			eventType:    "repository",
+			detected:     true,
+			configuring:  true,
+			wantErr:      "",
+			expectedNs:   "pac-test-repo-ci",
+			expectedRepo: "test-repo-repo-cr",
+			nsTemplate:   "{{repo_owner}}-{{repo_name}}-ci",
+			testData:     testclient.Data{},
 		},
 		{
-			name:        "repo create event with ns already exist",
-			event:       repoCreateEvent,
-			eventType:   "repository",
-			detected:    true,
-			configuring: true,
-			wantErr:     "",
-			expectedNs:  "test-repo-pipelines",
+			name:         "repo create event with repo template",
+			event:        repoCreateEvent,
+			eventType:    "repository",
+			detected:     true,
+			configuring:  true,
+			wantErr:      "",
+			expectedNs:   "test-repo-pipelines",
+			expectedRepo: "pac-test-repo-cr",
+			repoTemplate: "{{repo_owner}}-{{repo_name}}-cr",
+			testData:     testclient.Data{},
+		},
+		{
+			name:         "repo create event with ns already exist",
+			event:        repoCreateEvent,
+			eventType:    "repository",
+			detected:     true,
+			configuring:  true,
+			wantErr:      "",
+			expectedNs:   "test-repo-pipelines",
+			expectedRepo: "test-repo-repo-cr",
 			testData: testclient.Data{
 				Namespaces: []*v12.Namespace{
 					{
@@ -127,8 +144,9 @@ func TestConfigureRepository(t *testing.T) {
 
 			infoPac := &info.PacOpts{
 				Settings: settings.Settings{
-					AutoConfigureNewGitHubRepo:         true,
-					AutoConfigureRepoNamespaceTemplate: tt.nsTemplate,
+					AutoConfigureNewGitHubRepo:          true,
+					AutoConfigureRepoNamespaceTemplate:  tt.nsTemplate,
+					AutoConfigureRepoRepositoryTemplate: tt.repoTemplate,
 				},
 			}
 			detected, configuring, err := ConfigureRepository(ctx, run, req, string(tt.event), infoPac, logger)
@@ -146,47 +164,76 @@ func TestConfigureRepository(t *testing.T) {
 				assert.NilError(t, err)
 				assert.Equal(t, ns.Name, tt.expectedNs)
 
-				repo, err := run.Clients.PipelineAsCode.PipelinesascodeV1alpha1().Repositories(tt.expectedNs).Get(ctx, tt.expectedNs, v1.GetOptions{})
+				repo, err := run.Clients.PipelineAsCode.PipelinesascodeV1alpha1().Repositories(tt.expectedNs).Get(ctx, tt.expectedRepo, v1.GetOptions{})
 				assert.NilError(t, err)
-				assert.Equal(t, repo.Name, tt.expectedNs)
+				assert.Equal(t, repo.Name, tt.expectedRepo)
 			}
 		})
 	}
 }
 
-func TestGetNamespace(t *testing.T) {
+func TestGenerateNamespaceAndRepositoryName(t *testing.T) {
 	tests := []struct {
-		name       string
-		nsTemplate string
-		gitEvent   *github.RepositoryEvent
-		want       string
+		name         string
+		nsTemplate   string
+		repoTemplate string
+		gitEvent     *github.RepositoryEvent
+		want         string
+		wantRepo     string
 	}{
 		{
-			name:       "no template",
-			nsTemplate: "",
+			name:         "no template",
+			nsTemplate:   "",
+			repoTemplate: "",
 			gitEvent: &github.RepositoryEvent{
 				Repo: &github.Repository{
-					HTMLURL: github.String("https://github.com/user/pac"),
+					HTMLURL: github.Ptr("https://github.com/user/pac"),
 				},
 			},
-			want: "pac-pipelines",
+			want:     "pac-pipelines",
+			wantRepo: "pac-repo-cr",
 		},
 		{
-			name:       "template",
+			name:         "template",
+			nsTemplate:   "{{repo_owner}}-{{repo_name}}-ci",
+			repoTemplate: "{{repo_owner}}-{{repo_name}}-repo-cr",
+			gitEvent: &github.RepositoryEvent{
+				Repo: &github.Repository{
+					HTMLURL: github.Ptr("https://github.com/user/pac"),
+				},
+			},
+			want:     "user-pac-ci",
+			wantRepo: "user-pac-repo-cr",
+		},
+		{
+			name:       "empty repo template",
 			nsTemplate: "{{repo_owner}}-{{repo_name}}-ci",
 			gitEvent: &github.RepositoryEvent{
 				Repo: &github.Repository{
-					HTMLURL: github.String("https://github.com/user/pac"),
+					HTMLURL: github.Ptr("https://github.com/user/pac"),
 				},
 			},
-			want: "user-pac-ci",
+			want:     "user-pac-ci",
+			wantRepo: "pac-repo-cr",
+		},
+		{
+			name:         "empty ns template",
+			repoTemplate: "{{repo_owner}}-{{repo_name}}-repo-cr",
+			gitEvent: &github.RepositoryEvent{
+				Repo: &github.Repository{
+					HTMLURL: github.Ptr("https://github.com/user/pac"),
+				},
+			},
+			want:     "pac-pipelines",
+			wantRepo: "user-pac-repo-cr",
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := generateNamespaceName(tt.nsTemplate, tt.gitEvent)
+			got, gotRepo, err := generateNamespaceAndRepositoryName(tt.nsTemplate, tt.repoTemplate, tt.gitEvent)
 			assert.NilError(t, err)
 			assert.Equal(t, got, tt.want)
+			assert.Equal(t, gotRepo, tt.wantRepo)
 		})
 	}
 }

@@ -1,5 +1,4 @@
 //go:build e2e
-// +build e2e
 
 package test
 
@@ -12,7 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/go-github/v61/github"
+	"github.com/google/go-github/v81/github"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/random"
 	tgithub "github.com/openshift-pipelines/pipelines-as-code/test/pkg/github"
@@ -25,9 +25,9 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// TestGithubSecondPullRequestConcurrencyMultiplePR concurrency for the same Repository over multiples PR including a /retest
+// TestGithubGHEPullRequestConcurrencyMultiplePR concurrency for the same Repository over multiples PR including a /retest
 // and a max-keep-run, may be a bit slow (180s at least) but it's worth it.
-func TestGithubSecondPullRequestConcurrencyMultiplePR(t *testing.T) {
+func TestGithubGHEPullRequestConcurrencyMultiplePR(t *testing.T) {
 	ctx := context.Background()
 	label := "Github Multiple PullRequest Concurrency-1 MaxKeepRun-1 Multiple"
 	numberOfPullRequest := 3
@@ -46,7 +46,7 @@ func TestGithubSecondPullRequestConcurrencyMultiplePR(t *testing.T) {
 	runcnx.Clients.Log.Infof("Starting %d pipelineruns, (numberOfPullRequest=%d*numberOfPipelineRuns=%d) + (numberOfPullRequest=%d*numberOfRetests=%d*numberOfPipelineRuns=%d) Should end after clean up (maxKeepRun=%d) with %d",
 		allPipelinesRunsCnt, numberOfPullRequest, numberOfPipelineRuns, numberOfPullRequest, numberOfRetests, numberOfPipelineRuns, maxKeepRun, allPipelinesRunAfterCleanUp)
 
-	repoinfo, resp, err := ghcnx.Client.Repositories.Get(ctx, opts.Organization, opts.Repo)
+	repoinfo, resp, err := ghcnx.Client().Repositories.Get(ctx, opts.Organization, opts.Repo)
 	assert.NilError(t, err)
 	if resp != nil && resp.StatusCode == http.StatusNotFound {
 		t.Errorf("Repository %s not found in %s", opts.Organization, opts.Repo)
@@ -74,7 +74,7 @@ func TestGithubSecondPullRequestConcurrencyMultiplePR(t *testing.T) {
 		targetRefName := fmt.Sprintf("refs/heads/%s",
 			names.SimpleNameGenerator.RestrictLengthWithRandomSuffix("pac-e2e-test"))
 
-		sha, vref, err := tgithub.PushFilesToRef(ctx, ghcnx.Client, logmsg, repoinfo.GetDefaultBranch(), targetRefName,
+		sha, vref, err := tgithub.PushFilesToRef(ctx, ghcnx.Client(), logmsg, repoinfo.GetDefaultBranch(), targetRefName,
 			opts.Organization, opts.Repo, entries)
 		assert.NilError(t, err)
 		runcnx.Clients.Log.Infof("Commit %s has been created and pushed to %s", sha, vref.GetURL())
@@ -98,18 +98,26 @@ func TestGithubSecondPullRequestConcurrencyMultiplePR(t *testing.T) {
 	// send some retest to spice things up on concurrency and test the maxKeepRun
 	for i := 0; i < numberOfRetests; i++ {
 		for _, g := range allPullRequests {
-			_, _, err := g.Provider.Client.Issues.CreateComment(ctx,
+			_, _, err := g.Provider.Client().Issues.CreateComment(ctx,
 				g.Options.Organization,
 				g.Options.Repo, g.PRNumber,
-				&github.IssueComment{Body: github.String("/retest")})
+				&github.IssueComment{Body: github.Ptr("/retest")})
 			assert.NilError(t, err)
 		}
 	}
 
+	shas := make([]string, 0, len(allPullRequests))
+	for _, pr := range allPullRequests {
+		shas = append(shas, pr.SHA)
+	}
+	labelSelector := fmt.Sprintf("%s in (%s)", keys.SHA, strings.Join(shas, ","))
+
 	finished := false
 	for i := 0; i < loopMax; i++ {
 		unsuccessful := 0
-		prs, err := runcnx.Clients.Tekton.TektonV1().PipelineRuns(targetNS).List(ctx, metav1.ListOptions{})
+		prs, err := runcnx.Clients.Tekton.TektonV1().PipelineRuns(targetNS).List(ctx, metav1.ListOptions{
+			LabelSelector: labelSelector,
+		})
 		assert.NilError(t, err)
 		for _, pr := range prs.Items {
 			if pr.Status.GetConditions() == nil {
@@ -135,15 +143,34 @@ func TestGithubSecondPullRequestConcurrencyMultiplePR(t *testing.T) {
 		t.Errorf("we didn't get %d pipelineruns as successful, some of them are still pending or it's abnormally slow to process the Q", allPipelinesRunsCnt)
 	}
 
-	prs, err := runcnx.Clients.Tekton.TektonV1().PipelineRuns(targetNS).List(ctx, metav1.ListOptions{})
-	assert.NilError(t, err)
+	maxWaitLoopRun := 10
+	success := false
 	allPipelineRunsNamesAndStatus := []string{}
-	for _, pr := range prs.Items {
-		allPipelineRunsNamesAndStatus = append(allPipelineRunsNamesAndStatus, fmt.Sprintf("%s %s", pr.Name, pr.Status.GetConditions()))
-	}
-	assert.Equal(t, len(prs.Items), allPipelinesRunAfterCleanUp, "we should have had %d kept after cleanup, we got %d: %v", allPipelinesRunAfterCleanUp, len(prs.Items), allPipelineRunsNamesAndStatus)
+	for i := range maxWaitLoopRun {
+		prs, err := runcnx.Clients.Tekton.TektonV1().PipelineRuns(targetNS).List(ctx, metav1.ListOptions{
+			LabelSelector: labelSelector,
+		})
+		assert.NilError(t, err)
+		for _, pr := range prs.Items {
+			allPipelineRunsNamesAndStatus = append(allPipelineRunsNamesAndStatus, fmt.Sprintf("%s %s", pr.Name, pr.Status.GetConditions()))
+		}
+		// Filter out PipelineRuns that don't match our pattern
+		matchingPRs := []tektonv1.PipelineRun{}
+		for _, pr := range prs.Items {
+			if strings.HasPrefix(pr.Name, "prlongrunnning-") {
+				matchingPRs = append(matchingPRs, pr)
+			}
+		}
+		if len(matchingPRs) == allPipelinesRunAfterCleanUp {
+			runcnx.Clients.Log.Infof("we have the expected number of pipelineruns %d/%d, %d/%d", len(matchingPRs), allPipelinesRunAfterCleanUp, i, maxWaitLoopRun)
+			success = true
+			break
+		}
 
-	runcnx.Clients.Log.Infof("success: number of cleaned PR is %d we expected to have %d after the cleanup", len(prs.Items), allPipelinesRunAfterCleanUp)
+		runcnx.Clients.Log.Infof("we are still waiting for pipelineruns to be cleaned up, we have %d/%d, sleeping 10s, %d/%d", len(matchingPRs), allPipelinesRunsCnt, i, maxWaitLoopRun)
+		time.Sleep(10 * time.Second)
+	}
+	assert.Assert(t, success, "we didn't get %d pipelineruns as successful, some of them are still pending or it's abnormally slow to process the Q: %s", allPipelinesRunsCnt, allPipelineRunsNamesAndStatus)
 
 	if os.Getenv("TEST_NOCLEANUP") != "true" {
 		repository.NSTearDown(ctx, t, runcnx, targetNS)

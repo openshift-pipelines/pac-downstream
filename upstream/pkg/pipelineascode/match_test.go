@@ -1,22 +1,30 @@
 package pipelineascode
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
+	"net/http"
 	"strings"
 	"testing"
 
-	"github.com/google/go-github/v61/github"
+	"github.com/google/go-github/v81/github"
 	apipac "github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/consoleui"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/events"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/opscomments"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/clients"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/settings"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
 	ghprovider "github.com/openshift-pipelines/pipelines-as-code/pkg/provider/github"
 	testclient "github.com/openshift-pipelines/pipelines-as-code/pkg/test/clients"
 	ghtesthelper "github.com/openshift-pipelines/pipelines-as-code/pkg/test/github"
 	kitesthelper "github.com/openshift-pipelines/pipelines-as-code/pkg/test/kubernetestint"
+	testprovider "github.com/openshift-pipelines/pipelines-as-code/pkg/test/provider"
 	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 	"go.uber.org/zap"
 	zapobserver "go.uber.org/zap/zaptest/observer"
@@ -50,18 +58,75 @@ func TestPacRun_checkNeedUpdate(t *testing.T) {
 	}
 }
 
-func TestChangeSecret(t *testing.T) {
+func TestChangePipelineRun(t *testing.T) {
+	repo := &v1alpha1.Repository{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "testrepo",
+			Namespace: "test",
+		},
+	}
+
 	prs := []*tektonv1.PipelineRun{
 		{
 			ObjectMeta: metav1.ObjectMeta{
-				Name: "{{git_auth_secret}}",
+				Name:      "{{git_auth_secret}}",
+				Namespace: "{{ repo_name }}",
 			},
 		},
 	}
-	err := changeSecret(prs)
-	assert.NilError(t, err)
-	assert.Assert(t, strings.HasPrefix(prs[0].GetName(), "pac-gitauth"), prs[0].GetName(), "has no pac-gitauth prefix")
-	assert.Assert(t, prs[0].GetAnnotations()[apipac.GitAuthSecret] != "")
+
+	jsonErrorPRs := []*tektonv1.PipelineRun{
+		{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "json-error-pr",
+				Namespace: "test",
+			},
+			Spec: tektonv1.PipelineRunSpec{
+				Params: []tektonv1.Param{
+					{
+						Name: "my-param",
+						Value: tektonv1.ParamValue{
+							// We are intentionally leaving this empty:
+							// Type: tektonv1.ParamTypeString,
+							StringVal: "some-value",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	tests := []struct {
+		name          string
+		prs           []*tektonv1.PipelineRun
+		expectedError string
+	}{
+		{
+			name: "test with params",
+			prs:  prs,
+		},
+		{
+			name:          "test with json error",
+			prs:           jsonErrorPRs,
+			expectedError: "failed to marshal PipelineRun json-error-pr: json: error calling MarshalJSON for type v1.ParamValue: impossible ParamValues.Type: \"\"",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			event := info.NewEvent()
+			event.Repository = "testrepo"
+			p := &PacRun{event: event}
+			ctx, _ := rtesting.SetupFakeContext(t)
+			err := p.changePipelineRun(ctx, repo, tt.prs)
+			if tt.expectedError != "" {
+				assert.Error(t, err, tt.expectedError)
+				return
+			}
+			assert.Assert(t, strings.HasPrefix(tt.prs[0].GetName(), "pac-gitauth"), tt.prs[0].GetName(), "has no pac-gitauth prefix")
+			assert.Assert(t, tt.prs[0].GetAnnotations()[apipac.GitAuthSecret] != "")
+			assert.Assert(t, tt.prs[0].GetNamespace() == "testrepo", "namespace should be testrepo: %v", tt.prs[0].GetNamespace())
+		})
+	}
 }
 
 func TestFilterRunningPipelineRunOnTargetTest(t *testing.T) {
@@ -85,6 +150,135 @@ func TestFilterRunningPipelineRunOnTargetTest(t *testing.T) {
 	assert.Assert(t, ret == nil)
 }
 
+func TestGetPipelineRunsFromRepoExplicitTestUsesTargetNamespaceRepo(t *testing.T) {
+	observerCore, _ := zapobserver.New(zap.InfoLevel)
+	logger := zap.New(observerCore).Sugar()
+
+	tests := []struct {
+		name                string
+		targetNamespaceLine string
+		wantRepositoryNS    string
+		wantRepositoryName  string
+		wantNoMatch         bool
+	}{
+		{
+			name:                "uses target namespace repo from annotation",
+			targetNamespaceLine: "    pipelinesascode.tekton.dev/target-namespace: \"bar\"",
+			wantRepositoryNS:    "bar",
+			wantRepositoryName:  "bar",
+		},
+		{
+			name:                "falls back to matched repo when annotation is absent",
+			targetNamespaceLine: "",
+			wantRepositoryNS:    "foo",
+			wantRepositoryName:  "foo",
+		},
+		{
+			name:                "skips pipelinerun when target namespace repo not found",
+			targetNamespaceLine: "    pipelinesascode.tekton.dev/target-namespace: \"nonexistent\"",
+			wantNoMatch:         true,
+		},
+	}
+
+	template := `apiVersion: tekton.dev/v1beta1
+kind: PipelineRun
+metadata:
+  name: pr-gitops-comment
+  annotations:
+    pipelinesascode.tekton.dev/on-target-branch: "[main]"
+    pipelinesascode.tekton.dev/on-event: "[pull_request]"
+%s
+spec:
+  pipelineSpec:
+    tasks:
+    - name: task
+      taskSpec:
+        steps:
+        - name: task
+          image: quay.io/prometheus/busybox
+          script: |
+            echo "HELLOMOTO"
+            exit 0
+`
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, _ := rtesting.SetupFakeContext(t)
+
+			repositories := []*v1alpha1.Repository{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "foo",
+						Namespace: "foo",
+					},
+					Spec: v1alpha1.RepositorySpec{
+						URL: "https://ghe.pipelinesascode.com/pipelines-as-code/e2e",
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "bar",
+						Namespace: "bar",
+					},
+					Spec: v1alpha1.RepositorySpec{
+						URL: "https://ghe.pipelinesascode.com/pipelines-as-code/e2e",
+					},
+				},
+			}
+			stdata, _ := testclient.SeedTestData(t, ctx, testclient.Data{
+				Repositories: repositories,
+			})
+
+			cs := &params.Run{
+				Clients: clients.Clients{
+					PipelineAsCode: stdata.PipelineAsCode,
+					Kube:           stdata.Kube,
+					Tekton:         stdata.Pipeline,
+					Log:            logger,
+				},
+				Info: info.Info{},
+			}
+			cs.Clients.SetConsoleUI(consoleui.FallBackConsole{})
+
+			event := &info.Event{
+				URL:           "https://ghe.pipelinesascode.com/pipelines-as-code/e2e",
+				Organization:  "pipelines-as-code",
+				Repository:    "e2e",
+				Sender:        "foo",
+				SHA:           "abc123",
+				HeadBranch:    "main",
+				BaseBranch:    "main",
+				EventType:     opscomments.TestSingleCommentEventType.String(),
+				TriggerTarget: triggertype.PullRequest,
+				State: info.State{
+					TargetTestPipelineRun: "pr-gitops-comment",
+				},
+			}
+
+			p := NewPacs(
+				event,
+				&testprovider.TestProviderImp{TektonDirTemplate: fmt.Sprintf(template, tt.targetNamespaceLine)},
+				cs,
+				&info.PacOpts{},
+				nil,
+				logger,
+				nil,
+			)
+
+			matchedPRs, err := p.getPipelineRunsFromRepo(ctx, repositories[0])
+			assert.NilError(t, err)
+			if tt.wantNoMatch {
+				assert.Equal(t, len(matchedPRs), 0)
+				return
+			}
+			assert.Equal(t, len(matchedPRs), 1)
+			assert.Assert(t, matchedPRs[0].Repo != nil)
+			assert.Equal(t, matchedPRs[0].Repo.GetNamespace(), tt.wantRepositoryNS)
+			assert.Equal(t, matchedPRs[0].Repo.GetName(), tt.wantRepositoryName)
+		})
+	}
+}
+
 func TestGetPipelineRunsFromRepo(t *testing.T) {
 	pullRequestEvent := &info.Event{
 		SHA:           "principale",
@@ -95,6 +289,17 @@ func TestGetPipelineRunsFromRepo(t *testing.T) {
 		BaseBranch:    "main",
 		Sender:        "fantasio",
 		EventType:     "pull_request",
+		TriggerTarget: "pull_request",
+	}
+	okToTestEvent := &info.Event{
+		SHA:           "principale",
+		Organization:  "organizationes",
+		Repository:    "lagaffe",
+		URL:           "https://service/documentation",
+		HeadBranch:    "main",
+		BaseBranch:    "main",
+		Sender:        "fantasio",
+		EventType:     "ok-to-test-comment",
 		TriggerTarget: "pull_request",
 	}
 	testExplicitNoMatchPREvent := &info.Event{
@@ -156,7 +361,7 @@ func TestGetPipelineRunsFromRepo(t *testing.T) {
 			},
 			tektondir:  "testdata/invalid_tekton_yaml",
 			event:      pullRequestEvent,
-			logSnippet: `prun: bad-tekton-yaml tekton validation error: json: cannot unmarshal object into Go struct field PipelineSpec.spec.pipelineSpec.tasks of type []v1beta1.PipelineTask`,
+			logSnippet: `json: cannot unmarshal object into Go struct field PipelineSpec.spec.pipelineSpec.tasks of type []v1beta1.PipelineTask`,
 		},
 		{
 			name: "no-match pipelineruns in .tekton dir, only matched should be returned",
@@ -188,6 +393,35 @@ func TestGetPipelineRunsFromRepo(t *testing.T) {
 			expectedNumberOfPruns: 1,
 			event:                 testExplicitNoMatchPREvent,
 		},
+		{
+			name: "no-match pipelineruns in .tekton dir, on ok-to-test command for an external user",
+			repositories: &v1alpha1.Repository{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "testrepo",
+					Namespace: "test",
+				},
+				Spec: v1alpha1.RepositorySpec{},
+			},
+			// if `testdata/no_yaml` dir is supplied here p.getPipelineRunsFromRepo func will return after
+			// GetTektonDir so providing `testdat/push_branch` so that it should call MatchPipelineRunsByAnnotation
+			// first and then create a neutral check-run.
+			tektondir:             "testdata/push_branch",
+			expectedNumberOfPruns: 0,
+			event:                 okToTestEvent,
+		},
+		{
+			name: "no .tekton dir in repository",
+			repositories: &v1alpha1.Repository{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "testrepo",
+					Namespace: "test",
+				},
+				Spec: v1alpha1.RepositorySpec{},
+			},
+			tektondir:             "testdata/no_tekton_dir",
+			expectedNumberOfPruns: 0,
+			event:                 okToTestEvent,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -215,28 +449,268 @@ func TestGetPipelineRunsFromRepo(t *testing.T) {
 				ConsoleURL: "https://console.url",
 			}
 			vcx := &ghprovider.Provider{
-				Client: fakeclient,
-				Token:  github.String("None"),
+				Token:  github.Ptr("None"),
 				Logger: logger,
 			}
+			vcx.SetGithubClient(fakeclient)
 			pacInfo := &info.PacOpts{
 				Settings: settings.Settings{
+					ApplicationName:    "Pipelines as Code CI",
 					SecretAutoCreation: true,
 					RemoteTasks:        true,
 				},
 			}
+			vcx.SetPacInfo(pacInfo)
 			p := NewPacs(tt.event, vcx, cs, pacInfo, k8int, logger, nil)
 			p.eventEmitter = events.NewEventEmitter(stdata.Kube, logger)
 			matchedPRs, err := p.getPipelineRunsFromRepo(ctx, tt.repositories)
 			assert.NilError(t, err)
-			matchedPRNames := []string{}
+			matchedPRNames := make([]string, len(matchedPRs))
 			for i := range matchedPRs {
-				matchedPRNames = append(matchedPRNames, matchedPRs[i].PipelineRun.GetGenerateName())
+				matchedPRNames[i] = matchedPRs[i].PipelineRun.GetGenerateName()
 			}
 			if tt.logSnippet != "" {
 				assert.Assert(t, logCatcher.FilterMessageSnippet(tt.logSnippet).Len() > 0, logCatcher.All())
 			}
 			assert.Equal(t, len(matchedPRNames), tt.expectedNumberOfPruns)
+		})
+	}
+}
+
+func TestVerifyRepoAndUser(t *testing.T) {
+	observerCore, _ := zapobserver.New(zap.InfoLevel)
+	logger := zap.New(observerCore).Sugar()
+
+	payload := []byte(`{"key": "value"}`)
+	mac := hmac.New(sha256.New, []byte("secret"))
+	mac.Write(payload)
+	sha256secret := hex.EncodeToString(mac.Sum(nil))
+
+	header := make(http.Header)
+	header.Set(github.SHA256SignatureHeader, fmt.Sprintf("sha256=%s", sha256secret))
+
+	request := &info.Request{
+		Header:  header,
+		Payload: payload,
+	}
+
+	tests := []struct {
+		name          string
+		runevent      info.Event
+		repositories  []*v1alpha1.Repository
+		webhookSecret string
+		wantRepoNil   bool
+		wantErr       bool
+		wantErrMsg    string
+	}{
+		{
+			name: "no repository match",
+			runevent: info.Event{
+				Organization:  "owner",
+				Repository:    "repo",
+				URL:           "https://example.com/owner/repo",
+				SHA:           "123abc",
+				EventType:     triggertype.PullRequest.String(),
+				TriggerTarget: triggertype.PullRequest,
+			},
+			wantRepoNil: true,
+			wantErr:     false,
+		},
+		{
+			name: "missing git_provider section",
+			runevent: info.Event{
+				Organization:  "owner",
+				Repository:    "repo",
+				URL:           "https://example.com/owner/repo",
+				SHA:           "123abc",
+				EventType:     triggertype.PullRequest.String(),
+				TriggerTarget: triggertype.PullRequest,
+			},
+			repositories: []*v1alpha1.Repository{{
+				ObjectMeta: metav1.ObjectMeta{Name: "repo", Namespace: "ns"},
+				Spec:       v1alpha1.RepositorySpec{URL: "https://example.com/owner/repo"},
+			}},
+			wantRepoNil: false,
+			wantErr:     true,
+			wantErrMsg:  "cannot get secret from repository: failed to find git_provider details in repository spec: ns/repo",
+		},
+		{
+			name: "webhook validation failure",
+			runevent: info.Event{
+				Organization:   "owner",
+				Repository:     "repo",
+				URL:            "https://example.com/owner/repo",
+				SHA:            "123abc",
+				EventType:      triggertype.PullRequest.String(),
+				TriggerTarget:  triggertype.PullRequest,
+				InstallationID: 1,
+				Request:        &info.Request{Header: http.Header{}},
+			},
+			repositories: []*v1alpha1.Repository{{
+				ObjectMeta: metav1.ObjectMeta{Name: "repo", Namespace: "ns"},
+				Spec:       v1alpha1.RepositorySpec{URL: "https://example.com/owner/repo"},
+			}},
+			wantRepoNil: false,
+			wantErr:     true,
+			wantErrMsg:  "could not validate payload, check your webhook secret?: no signature has been detected, for security reason we are not allowing webhooks that has no secret",
+		},
+		{
+			name: "webhook secret is not set",
+			runevent: info.Event{
+				Organization:   "owner",
+				Repository:     "repo",
+				URL:            "https://example.com/owner/repo",
+				SHA:            "123abc",
+				EventType:      triggertype.PullRequest.String(),
+				TriggerTarget:  triggertype.PullRequest,
+				InstallationID: 1,
+				Request:        request,
+			},
+			repositories: []*v1alpha1.Repository{{
+				ObjectMeta: metav1.ObjectMeta{Name: "repo", Namespace: "ns"},
+				Spec:       v1alpha1.RepositorySpec{URL: "https://example.com/owner/repo"},
+			}},
+			wantRepoNil: false,
+			wantErr:     true,
+			wantErrMsg:  "could not validate payload, check your webhook secret?: no webhook secret has been set, in repository CR or secret",
+		},
+		{
+			name: "permission denied push comment",
+			runevent: info.Event{
+				Organization:   "owner",
+				Repository:     "repo",
+				URL:            "https://example.com/owner/repo",
+				SHA:            "123abc",
+				EventType:      opscomments.TestAllCommentEventType.String(),
+				TriggerTarget:  triggertype.Push,
+				Sender:         "intruder",
+				InstallationID: 1,
+				Request:        request,
+			},
+			repositories: []*v1alpha1.Repository{{
+				ObjectMeta: metav1.ObjectMeta{Name: "repo", Namespace: "ns"},
+				Spec:       v1alpha1.RepositorySpec{URL: "https://example.com/owner/repo"},
+			}},
+			webhookSecret: "secret",
+			wantRepoNil:   true,
+			wantErr:       true,
+			wantErrMsg:    "failed to run create status, user is not allowed to run the CI",
+		},
+		{
+			name: "permission denied pull_request comment pending approval",
+			runevent: info.Event{
+				Organization:   "owner",
+				Repository:     "repo",
+				URL:            "https://example.com/owner/repo",
+				SHA:            "123abc",
+				EventType:      triggertype.PullRequest.String(),
+				TriggerTarget:  triggertype.PullRequest,
+				Sender:         "outsider",
+				InstallationID: 1,
+				Request:        request,
+			},
+			repositories: []*v1alpha1.Repository{{
+				ObjectMeta: metav1.ObjectMeta{Name: "repo", Namespace: "ns"},
+				Spec:       v1alpha1.RepositorySpec{URL: "https://example.com/owner/repo"},
+			}},
+			webhookSecret: "secret",
+			wantRepoNil:   true,
+			wantErr:       true,
+			wantErrMsg:    "failed to run create status, user is not allowed to run the CI",
+		},
+		{
+			name: "happy path",
+			runevent: info.Event{
+				Organization:   "owner",
+				Repository:     "repo",
+				URL:            "https://example.com/owner/repo",
+				SHA:            "123abc",
+				EventType:      triggertype.PullRequest.String(),
+				TriggerTarget:  triggertype.PullRequest,
+				InstallationID: 1,
+				Sender:         "owner",
+				Request:        request,
+			},
+			repositories: []*v1alpha1.Repository{{
+				ObjectMeta: metav1.ObjectMeta{Name: "repo", Namespace: "ns"},
+				Spec:       v1alpha1.RepositorySpec{URL: "https://example.com/owner/repo"},
+			}},
+			webhookSecret: "secret",
+			wantRepoNil:   false,
+			wantErr:       false,
+		},
+	}
+
+	pacInfo := &info.PacOpts{Settings: settings.DefaultSettings()}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			baseCtx, _ := rtesting.SetupFakeContext(t)
+			ctx := info.StoreNS(baseCtx, "pac")
+
+			ghClient, mux, _, teardown := ghtesthelper.SetupGH()
+			defer teardown()
+
+			// commit endpoint
+			commitPath := fmt.Sprintf("/repos/%s/%s/git/commits/%s", tt.runevent.Organization, tt.runevent.Repository, tt.runevent.SHA)
+			mux.HandleFunc(commitPath, func(rw http.ResponseWriter, _ *http.Request) {
+				if tt.runevent.SHA == "" {
+					rw.WriteHeader(http.StatusNotFound)
+					return
+				}
+				fmt.Fprint(rw, `{"sha":"123abc","html_url":"https://example.com/commit/123abc","message":"msg"}`)
+			})
+
+			// org members empty
+			mux.HandleFunc(fmt.Sprintf("/orgs/%s/members", tt.runevent.Organization), func(rw http.ResponseWriter, _ *http.Request) { fmt.Fprint(rw, `[]`) })
+			// collaborator check – return 404 for non‐collaborator sender when defined
+			if tt.runevent.Sender != "" && tt.runevent.Sender != tt.runevent.Organization {
+				mux.HandleFunc(
+					fmt.Sprintf("/repos/%s/%s/collaborators/%s", tt.runevent.Organization, tt.runevent.Repository, tt.runevent.Sender),
+					func(rw http.ResponseWriter, _ *http.Request) { rw.WriteHeader(http.StatusNotFound) },
+				)
+			}
+			// status endpoint stub (used when CreateStatus is called)
+			mux.HandleFunc(
+				fmt.Sprintf("/repos/%s/%s/statuses/%s", tt.runevent.Organization, tt.runevent.Repository, tt.runevent.SHA),
+				func(rw http.ResponseWriter, _ *http.Request) { fmt.Fprint(rw, `{}`) },
+			)
+
+			vcx := &ghprovider.Provider{Token: github.Ptr("token"), Logger: logger}
+			vcx.SetGithubClient(ghClient)
+			vcx.SetPacInfo(pacInfo)
+
+			k8int := &kitesthelper.KinterfaceTest{GetSecretResult: map[string]string{"pipelines-as-code-secret": tt.webhookSecret}}
+
+			stdata, _ := testclient.SeedTestData(t, ctx, testclient.Data{Repositories: tt.repositories /*Secret: []*corev1.Secret{secret}*/})
+			in := info.NewInfo()
+			cs := &params.Run{
+				Info: in,
+				Clients: clients.Clients{
+					PipelineAsCode: stdata.PipelineAsCode,
+					Kube:           stdata.Kube,
+					Tekton:         stdata.Pipeline,
+					Log:            logger,
+				},
+			}
+			cs.Clients.SetConsoleUI(consoleui.FallBackConsole{})
+
+			ev := tt.runevent
+			ev.Provider = &info.Provider{Token: "token", WebhookSecret: tt.webhookSecret}
+
+			p := NewPacs(&ev, vcx, cs, pacInfo, k8int, logger, nil)
+			repo, err := p.verifyRepoAndUser(ctx)
+			assert.Assert(t, (err != nil) == tt.wantErr)
+
+			if tt.wantErr {
+				assert.ErrorContains(t, err, tt.wantErrMsg)
+			}
+
+			if tt.wantRepoNil {
+				assert.Assert(t, repo == nil)
+			} else {
+				assert.Assert(t, repo != nil)
+			}
 		})
 	}
 }

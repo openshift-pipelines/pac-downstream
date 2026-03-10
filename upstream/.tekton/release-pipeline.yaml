@@ -8,6 +8,7 @@ metadata:
     pipelinesascode.tekton.dev/on-target-branch: "[refs/tags/*]"
     pipelinesascode.tekton.dev/task: "[.tekton/tasks/goreleaser.yaml]"
     pipelinesascode.tekton.dev/task-1: "[git-clone]"
+    pipelinesascode.tekton.dev/cancel-in-progress: "true"
     pipelinesascode.tekton.dev/max-keep-runs: "2"
 spec:
   params:
@@ -46,7 +47,7 @@ spec:
             - name: source
           steps:
             - name: push-release-to-branch
-              image: registry.access.redhat.com/ubi9/python-311
+              image: registry.access.redhat.com/ubi9/python-312
               workingDir: $(workspaces.source.path)
               env:
                 - name: HUB_TOKEN
@@ -106,8 +107,8 @@ spec:
                   git checkout -B $target {{ revision }}
                   echo ${TARGET_BRANCH} > docs/content/VERSION
                   echo ${allversions} > docs/content/ALLVERSIONS
-                  echo "$version" > pkg/params/version/version.txt
-                  git add release.yaml release.k8s.yaml docs/content/VERSION docs/content/ALLVERSIONS pkg/params/version/version.txt
+                  echo "$version" > pkg/params/versiondata/version.txt
+                  git add release.yaml release.k8s.yaml docs/content/VERSION docs/content/ALLVERSIONS pkg/params/versiondata/version.txt
                   git commit -m "Release yaml generated from {{repo_url}}/commit/{{revision}} for release ${version}"
                   echo git push "https://git:\$HUB_TOKEN@github.com/{{ repo_owner }}/{{ repo_name }} refs/heads/${target}"
                   git push --force https://git:$HUB_TOKEN@github.com/{{ repo_owner }}/{{ repo_name }} refs/heads/${target}
@@ -137,4 +138,4 @@ spec:
             - ReadWriteOnce
           resources:
             requests:
-              storage: 1Gi
+              storage: 3Gi

@@ -16,21 +16,27 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/go-github/v61/github"
+	"github.com/google/go-github/v81/github"
 	"github.com/jonboulle/clockwork"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/clients"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/settings"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
 	testclient "github.com/openshift-pipelines/pipelines-as-code/pkg/test/clients"
 	ghtesthelper "github.com/openshift-pipelines/pipelines-as-code/pkg/test/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/test/logger"
+	metricsutils "github.com/openshift-pipelines/pipelines-as-code/pkg/test/metricstest"
+
 	"go.uber.org/zap"
 	zapobserver "go.uber.org/zap/zaptest/observer"
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"knative.dev/pkg/metrics/metricstest"
+	_ "knative.dev/pkg/metrics/testing"
 	"knative.dev/pkg/ptr"
 	rtesting "knative.dev/pkg/reconciler/testing"
 )
@@ -72,7 +78,7 @@ func TestGetTaskURI(t *testing.T) {
 			ctx, _ := rtesting.SetupFakeContext(t)
 			fakeclient, mux, _, teardown := ghtesthelper.SetupGH()
 			defer teardown()
-			provider := &Provider{Client: fakeclient}
+			provider := &Provider{ghClient: fakeclient}
 			event := info.NewEvent()
 			event.HeadBranch = "main"
 			event.URL = tt.eventURL
@@ -232,17 +238,39 @@ func TestGetTektonDir(t *testing.T) {
 		provenance           string
 		filterMessageSnippet string
 		wantErr              string
+		expectedGHApiCalls   int64
 	}{
 		{
-			name: "test no subtree",
+			name: "test no subtree on pull request",
 			event: &info.Event{
-				Organization: "tekton",
-				Repository:   "cat",
-				SHA:          "123",
+				Organization:  "tekton",
+				Repository:    "cat",
+				SHA:           "123",
+				TriggerTarget: triggertype.PullRequest,
 			},
 			expectedString:       "PipelineRun",
 			treepath:             "testdata/tree/simple",
-			filterMessageSnippet: "Using PipelineRun definition from source pull request tekton/cat#0",
+			filterMessageSnippet: "Using PipelineRun definition from source pull_request tekton/cat#0",
+			// 1. Get Repo root objects
+			// 2. Get Tekton Dir objects
+			// 3/4. Get object content for each object (pipelinerun.yaml, pipeline.yaml)
+			expectedGHApiCalls: 4,
+		},
+		{
+			name: "test no subtree on push",
+			event: &info.Event{
+				Organization:  "tekton",
+				Repository:    "cat",
+				SHA:           "123",
+				TriggerTarget: triggertype.Push,
+			},
+			expectedString:       "PipelineRun",
+			treepath:             "testdata/tree/simple",
+			filterMessageSnippet: "Using PipelineRun definition from source push",
+			// 1. Get Repo root objects
+			// 2. Get Tekton Dir objects
+			// 3/4. Get object content for each object (pipelinerun.yaml, pipeline.yaml)
+			expectedGHApiCalls: 4,
 		},
 		{
 			name: "test provenance default_branch ",
@@ -255,6 +283,10 @@ func TestGetTektonDir(t *testing.T) {
 			treepath:             "testdata/tree/defaultbranch",
 			provenance:           "default_branch",
 			filterMessageSnippet: "Using PipelineRun definition from default_branch: main",
+			// 1. Get Repo root objects
+			// 2. Get Tekton Dir objects
+			// 3/4. Get object content for each object (pipelinerun.yaml, pipeline.yaml)
+			expectedGHApiCalls: 4,
 		},
 		{
 			name: "test with subtree",
@@ -265,6 +297,10 @@ func TestGetTektonDir(t *testing.T) {
 			},
 			expectedString: "FROMSUBTREE",
 			treepath:       "testdata/tree/subdir",
+			// 1. Get Repo root objects
+			// 2. Get Tekton Dir objects
+			// 3-5. Get object content for each object (foo/bar/pipeline.yaml)
+			expectedGHApiCalls: 3,
 		},
 		{
 			name: "test with badly formatted yaml",
@@ -275,20 +311,66 @@ func TestGetTektonDir(t *testing.T) {
 			},
 			expectedString: "FROMSUBTREE",
 			treepath:       "testdata/tree/badyaml",
-			wantErr:        "error unmarshalling yaml file badyaml.yaml: error converting YAML to JSON: yaml: line 2: did not find expected key",
+			wantErr:        "error unmarshalling yaml file badyaml.yaml: yaml: line 2: did not find expected key",
+			// 1. Get Repo root objects
+			// 2. Get Tekton Dir objects
+			// 3. Get object content for object (badyaml.yaml)
+			expectedGHApiCalls: 3,
+		},
+		{
+			name: "test no tekton directory",
+			event: &info.Event{
+				Organization:  "tekton",
+				Repository:    "cat",
+				SHA:           "123",
+				TriggerTarget: triggertype.PullRequest,
+			},
+			expectedString:       "",
+			treepath:             "testdata/tree/notektondir",
+			filterMessageSnippet: "Using PipelineRun definition from source pull_request tekton/cat#0",
+			// 1. Get Repo root objects
+			// _. No tekton dir to fetch
+			expectedGHApiCalls: 1,
+		},
+		{
+			name: "test tekton directory path is file",
+			event: &info.Event{
+				Organization: "tekton",
+				Repository:   "cat",
+				SHA:          "123",
+			},
+			treepath: "testdata/tree/tektondirisfile",
+			wantErr:  ".tekton has been found but is not a directory",
+			// 1. Get Repo root objects
+			// _. Tekton dir is file, no directory to fetch
+			expectedGHApiCalls: 1,
 		},
 	}
 	for _, tt := range testGetTektonDir {
 		t.Run(tt.name, func(t *testing.T) {
+			metricsutils.ResetMetrics()
 			observer, exporter := zapobserver.New(zap.InfoLevel)
 			fakelogger := zap.New(observer).Sugar()
 			ctx, _ := rtesting.SetupFakeContext(t)
 			fakeclient, mux, _, teardown := ghtesthelper.SetupGH()
 			defer teardown()
 			gvcs := Provider{
-				Client: fakeclient,
-				Logger: fakelogger,
+				ghClient:     fakeclient,
+				providerName: "github",
+				Logger:       fakelogger,
 			}
+
+			defer func() {
+				if !t.Failed() {
+					metricstest.CheckCountData(
+						t,
+						"pipelines_as_code_git_provider_api_request_count",
+						map[string]string{"provider": "github"},
+						tt.expectedGHApiCalls,
+					)
+				}
+			}()
+
 			if tt.provenance == "default_branch" {
 				tt.event.SHA = tt.event.DefaultBranch
 			} else {
@@ -300,11 +382,19 @@ func TestGetTektonDir(t *testing.T) {
 			got, err := gvcs.GetTektonDir(ctx, tt.event, ".tekton", tt.provenance)
 			if tt.wantErr != "" {
 				assert.Assert(t, err != nil, "we should have get an error here")
-				assert.Equal(t, tt.wantErr, err.Error())
+				assert.ErrorContains(t, err, tt.wantErr)
 				return
 			}
 			assert.NilError(t, err)
-			assert.Assert(t, strings.Contains(got, tt.expectedString), "expected %s, got %s", tt.expectedString, got)
+
+			var gotMatch bool
+			if tt.expectedString == "" {
+				gotMatch = got == tt.expectedString
+			} else {
+				gotMatch = strings.Contains(got, tt.expectedString)
+			}
+
+			assert.Assert(t, gotMatch, "expected %s, got %s", tt.expectedString, got)
 			if tt.filterMessageSnippet != "" {
 				gotcha := exporter.FilterMessageSnippet(tt.filterMessageSnippet)
 				assert.Assert(t, gotcha.Len() > 0, "expected to find %s in logs, found %v", tt.filterMessageSnippet, exporter.All())
@@ -374,7 +464,7 @@ func TestGetFileInsideRepo(t *testing.T) {
 			fakeclient, mux, _, teardown := ghtesthelper.SetupGH()
 			defer teardown()
 			gvcs := Provider{
-				Client: fakeclient,
+				ghClient: fakeclient,
 			}
 			for s, f := range tt.rets {
 				mux.HandleFunc(s, f)
@@ -438,7 +528,7 @@ func TestCheckSenderOrgMembership(t *testing.T) {
 			defer teardown()
 			ctx, _ := rtesting.SetupFakeContext(t)
 			gprovider := Provider{
-				Client: fakeclient,
+				ghClient: fakeclient,
 			}
 			mux.HandleFunc(fmt.Sprintf("/orgs/%s/members", tt.runevent.Organization), func(rw http.ResponseWriter, _ *http.Request) {
 				fmt.Fprint(rw, tt.apiReturn)
@@ -483,7 +573,7 @@ func TestGetStringPullRequestComment(t *testing.T) {
 			defer teardown()
 			ctx, _ := rtesting.SetupFakeContext(t)
 			gprovider := Provider{
-				Client: fakeclient,
+				ghClient: fakeclient,
 			}
 			mux.HandleFunc(fmt.Sprintf("/repos/issues/%s/comments", filepath.Base(tt.runevent.URL)), func(rw http.ResponseWriter, _ *http.Request) {
 				fmt.Fprint(rw, tt.apiReturn)
@@ -506,21 +596,94 @@ func TestGetStringPullRequestComment(t *testing.T) {
 
 func TestGithubGetCommitInfo(t *testing.T) {
 	tests := []struct {
-		name              string
-		event             *info.Event
-		noclient          bool
-		apiReply, wantErr string
-		shaurl, shatitle  string
+		name                          string
+		event                         *info.Event
+		noclient                      bool
+		apiReply, wantErr             string
+		shaurl, shatitle, message     string
+		authorName, authorEmail       string
+		committerName, committerEmail string
+		authorDate, committerDate     string
+		checkExtendedFields           bool
+		wantHasSkipCmd                bool
 	}{
 		{
-			name: "good",
+			name: "good with full commit info",
 			event: &info.Event{
 				Organization: "owner",
 				Repository:   "repository",
 				SHA:          "shacommitinfo",
 			},
-			shaurl:   "https://git.provider/commit/info",
-			shatitle: "My beautiful pony",
+			shaurl:              "https://git.provider/commit/info",
+			shatitle:            "My beautiful pony",
+			message:             "My beautiful pony\n\nThis is the full commit message with details.",
+			authorName:          "John Doe",
+			authorEmail:         "john@example.com",
+			committerName:       "GitHub",
+			committerEmail:      "noreply@github.com",
+			authorDate:          "2024-01-15T10:30:00Z",
+			committerDate:       "2024-01-15T10:31:00Z",
+			checkExtendedFields: true,
+		},
+		{
+			name: "basic fields only",
+			event: &info.Event{
+				Organization: "owner",
+				Repository:   "repository",
+				SHA:          "shacommitinfo",
+			},
+			shaurl:         "https://git.provider/commit/info",
+			shatitle:       "My beautiful pony",
+			message:        "My beautiful pony",
+			wantHasSkipCmd: false,
+		},
+		{
+			name: "commit with skip ci command",
+			event: &info.Event{
+				Organization: "owner",
+				Repository:   "repository",
+				SHA:          "shacommitinfo",
+			},
+			shaurl:         "https://git.provider/commit/info",
+			shatitle:       "fix: some bug",
+			message:        "fix: some bug\n\n[skip ci]",
+			wantHasSkipCmd: true,
+		},
+		{
+			name: "commit with ci skip command in title",
+			event: &info.Event{
+				Organization: "owner",
+				Repository:   "repository",
+				SHA:          "shacommitinfo",
+			},
+			shaurl:         "https://git.provider/commit/info",
+			shatitle:       "feat: new feature [ci skip]",
+			message:        "feat: new feature [ci skip]",
+			wantHasSkipCmd: true,
+		},
+		{
+			name: "commit with skip tkn command in title",
+			event: &info.Event{
+				Organization: "owner",
+				Repository:   "repository",
+				SHA:          "shacommitinfo",
+			},
+			shaurl:         "https://git.provider/commit/info",
+			shatitle:       "docs: update [skip tkn]",
+			message:        "docs: update [skip tkn]",
+			wantHasSkipCmd: true,
+		},
+		{
+			name: "commit with tkn skip command in body",
+			event: &info.Event{
+				Organization: "owner",
+				Repository:   "repository",
+				SHA:          "shacommitinfo",
+			},
+			shaurl:         "https://git.provider/commit/info",
+			shatitle:       "chore: deps",
+			message:        "chore: deps\n\n[tkn skip]",
+			wantHasSkipCmd: true,
 		},
 		{
 			name: "error",
@@ -545,13 +708,65 @@ func TestGithubGetCommitInfo(t *testing.T) {
 			mux.HandleFunc(fmt.Sprintf("/repos/%s/%s/git/commits/%s",
 				tt.event.Organization, tt.event.Repository, tt.event.SHA), func(rw http.ResponseWriter, _ *http.Request) {
 				if tt.apiReply != "" {
-					fmt.Fprintf(rw, tt.apiReply)
+					fmt.Fprintf(rw, "%s", tt.apiReply)
 					return
 				}
-				fmt.Fprintf(rw, `{"html_url": "%s", "message": "%s"}`, tt.shaurl, tt.shatitle)
+
+				// Build realistic GitHub commit API response
+				type commitResponse struct {
+					SHA     string `json:"sha"`
+					HTMLURL string `json:"html_url"`
+					Message string `json:"message"`
+					Author  *struct {
+						Name  string `json:"name"`
+						Email string `json:"email"`
+						Date  string `json:"date"`
+					} `json:"author,omitempty"`
+					Committer *struct {
+						Name  string `json:"name"`
+						Email string `json:"email"`
+						Date  string `json:"date"`
+					} `json:"committer,omitempty"`
+				}
+
+				// Use message if provided, otherwise use shatitle as fallback
+				message := tt.message
+				if message == "" && tt.shatitle != "" {
+					message = tt.shatitle
+				}
+
+				resp := commitResponse{
+					SHA:     "shacommitinfo",
+					HTMLURL: tt.shaurl,
+					Message: message,
+				}
+
+				if tt.checkExtendedFields {
+					resp.Author = &struct {
+						Name  string `json:"name"`
+						Email string `json:"email"`
+						Date  string `json:"date"`
+					}{
+						Name:  tt.authorName,
+						Email: tt.authorEmail,
+						Date:  tt.authorDate,
+					}
+					resp.Committer = &struct {
+						Name  string `json:"name"`
+						Email string `json:"email"`
+						Date  string `json:"date"`
+					}{
+						Name:  tt.committerName,
+						Email: tt.committerEmail,
+						Date:  tt.committerDate,
+					}
+				}
+
+				jsonData, _ := json.Marshal(resp)
+				fmt.Fprint(rw, string(jsonData))
 			})
 			ctx, _ := rtesting.SetupFakeContext(t)
-			provider := &Provider{Client: fakeclient}
+			provider := &Provider{ghClient: fakeclient}
 			if tt.noclient {
 				provider = &Provider{}
 			}
@@ -562,16 +777,33 @@ func TestGithubGetCommitInfo(t *testing.T) {
 			}
 			assert.Equal(t, tt.shatitle, tt.event.SHATitle)
 			assert.Equal(t, tt.shaurl, tt.event.SHAURL)
+
+			// Verify new extended commit fields are populated
+			if tt.checkExtendedFields {
+				assert.Equal(t, tt.message, tt.event.SHAMessage, "SHAMessage should match")
+				assert.Equal(t, tt.authorName, tt.event.SHAAuthorName, "SHAAuthorName should match")
+				assert.Equal(t, tt.authorEmail, tt.event.SHAAuthorEmail, "SHAAuthorEmail should match")
+				assert.Equal(t, tt.committerName, tt.event.SHACommitterName, "SHACommitterName should match")
+				assert.Equal(t, tt.committerEmail, tt.event.SHACommitterEmail, "SHACommitterEmail should match")
+
+				// Verify dates are parsed correctly
+				expectedAuthorDate, _ := time.Parse(time.RFC3339, tt.authorDate)
+				assert.DeepEqual(t, expectedAuthorDate, tt.event.SHAAuthorDate)
+				expectedCommitterDate, _ := time.Parse(time.RFC3339, tt.committerDate)
+				assert.DeepEqual(t, expectedCommitterDate, tt.event.SHACommitterDate)
+			}
+			assert.Equal(t, tt.wantHasSkipCmd, tt.event.HasSkipCommand)
 		})
 	}
 }
 
 func TestGithubSetClient(t *testing.T) {
 	tests := []struct {
-		name        string
-		event       *info.Event
-		expectedURL string
-		isGHE       bool
+		name           string
+		event          *info.Event
+		expectedURL    string
+		isGHE          bool
+		installationID int64
 	}{
 		{
 			name: "api url set",
@@ -580,28 +812,65 @@ func TestGithubSetClient(t *testing.T) {
 					URL: "foo.com",
 				},
 			},
-			expectedURL: "https://foo.com",
-			isGHE:       true,
+			expectedURL:    "https://foo.com",
+			isGHE:          true,
+			installationID: 0,
 		},
 		{
-			name:        "default to public github",
-			expectedURL: fmt.Sprintf("%s/", keys.PublicGithubAPIURL),
-			event:       info.NewEvent(),
+			name:           "default to public github",
+			expectedURL:    fmt.Sprintf("%s/", keys.PublicGithubAPIURL),
+			event:          info.NewEvent(),
+			installationID: 12345,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			tt.event.InstallationID = tt.installationID
 			ctx, _ := rtesting.SetupFakeContext(t)
+			core, observer := zapobserver.New(zap.InfoLevel)
+			testLog := zap.New(core).Sugar()
+			fakeRun := &params.Run{
+				Clients: clients.Clients{
+					Log: testLog,
+				},
+			}
 			v := Provider{}
-			err := v.SetClient(ctx, nil, tt.event, nil, nil)
+			err := v.SetClient(ctx, fakeRun, tt.event, nil, nil)
 			assert.NilError(t, err)
 			assert.Equal(t, tt.expectedURL, *v.APIURL)
-			assert.Equal(t, "https", v.Client.BaseURL.Scheme)
+			assert.Equal(t, "https", v.Client().BaseURL.Scheme)
 			if tt.isGHE {
-				assert.Equal(t, "/api/v3/", v.Client.BaseURL.Path)
+				assert.Equal(t, "/api/v3/", v.Client().BaseURL.Path)
 			} else {
-				assert.Equal(t, "/", v.Client.BaseURL.Path)
+				assert.Equal(t, "/", v.Client().BaseURL.Path)
 			}
+
+			logs := observer.TakeAll()
+			assert.Assert(t, len(logs) == 1, "expected exactly one log entry, got %d", len(logs))
+
+			prefix := "github-webhook"
+			if tt.installationID != 0 {
+				prefix = "github-app"
+			}
+			wantStart := fmt.Sprintf("%s: initialized OAuth2 client", prefix)
+			got := logs[0].Message
+			assert.Assert(t, strings.HasPrefix(got, wantStart), "log entry should start with %q, got %q", wantStart, got)
+
+			// Determine expected providerName based on whether it's GHE or public GitHub.
+			expectedProviderName := "github"
+			if tt.isGHE {
+				expectedProviderName = "github-enterprise"
+			}
+
+			// Build the full expected log message.
+			fullExpected := fmt.Sprintf(
+				"%s: initialized OAuth2 client for providerName=%s providerURL=%s",
+				prefix,
+				expectedProviderName,
+				tt.event.Provider.URL,
+			)
+
+			assert.Equal(t, fullExpected, logs[0].Message)
 		})
 	}
 }
@@ -681,6 +950,7 @@ func TestGetFiles(t *testing.T) {
 		wantDeletedFilesCount  int
 		wantModifiedFilesCount int
 		wantRenamedFilesCount  int
+		wantAPIRequestCount    int64
 	}{
 		{
 			name: "pull-request",
@@ -709,6 +979,7 @@ func TestGetFiles(t *testing.T) {
 			wantDeletedFilesCount:  1,
 			wantModifiedFilesCount: 1,
 			wantRenamedFilesCount:  1,
+			wantAPIRequestCount:    2,
 		},
 		{
 			name: "push",
@@ -739,43 +1010,15 @@ func TestGetFiles(t *testing.T) {
 			wantDeletedFilesCount:  1,
 			wantModifiedFilesCount: 1,
 			wantRenamedFilesCount:  1,
+			wantAPIRequestCount:    1,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			fakeclient, mux, _, teardown := ghtesthelper.SetupGH()
 			defer teardown()
-			prCommitFiles := []*github.CommitFile{
-				{
-					Filename: ptr.String("modified.yaml"),
-					Status:   ptr.String("modified"),
-				}, {
-					Filename: ptr.String("added.doc"),
-					Status:   ptr.String("added"),
-				}, {
-					Filename: ptr.String("removed.yaml"),
-					Status:   ptr.String("removed"),
-				}, {
-					Filename: ptr.String("renamed.doc"),
-					Status:   ptr.String("renamed"),
-				},
-			}
+			metricsutils.ResetMetrics()
 
-			pushCommitFiles := []*github.CommitFile{
-				{
-					Filename: ptr.String("modified.yaml"),
-					Status:   ptr.String("modified"),
-				}, {
-					Filename: ptr.String("added.doc"),
-					Status:   ptr.String("added"),
-				}, {
-					Filename: ptr.String("removed.yaml"),
-					Status:   ptr.String("removed"),
-				}, {
-					Filename: ptr.String("renamed.doc"),
-					Status:   ptr.String("renamed"),
-				},
-			}
 			if tt.event.TriggerTarget == "pull_request" {
 				mux.HandleFunc(fmt.Sprintf("/repos/%s/%s/pulls/%d/files",
 					tt.event.Organization, tt.event.Repository, tt.event.PullRequestNumber), func(rw http.ResponseWriter, r *http.Request) {
@@ -783,7 +1026,7 @@ func TestGetFiles(t *testing.T) {
 						rw.Header().Add("Link", fmt.Sprintf("<https://api.github.com/repos/%s/%s/pulls/%d/files?page=2>; rel=\"next\"", tt.event.Organization, tt.event.Repository, tt.event.PullRequestNumber))
 						fmt.Fprint(rw, "[]")
 					} else {
-						b, _ := json.Marshal(prCommitFiles)
+						b, _ := json.Marshal(tt.commitFiles)
 						fmt.Fprint(rw, string(b))
 					}
 				})
@@ -792,17 +1035,26 @@ func TestGetFiles(t *testing.T) {
 				mux.HandleFunc(fmt.Sprintf("/repos/%s/%s/commits/%s",
 					tt.event.Organization, tt.event.Repository, tt.event.SHA), func(rw http.ResponseWriter, _ *http.Request) {
 					c := &github.RepositoryCommit{
-						Files: pushCommitFiles,
+						Files: tt.commit.Files,
 					}
 					b, _ := json.Marshal(c)
 					fmt.Fprint(rw, string(b))
 				})
 			}
 
+			metricsTags := map[string]string{"provider": "github", "event-type": string(tt.event.TriggerTarget)}
+			metricstest.CheckStatsNotReported(t, "pipelines_as_code_git_provider_api_request_count")
+
+			log, _ := logger.GetLogger()
 			ctx, _ := rtesting.SetupFakeContext(t)
 			provider := &Provider{
-				Client:        fakeclient,
+				ghClient:      fakeclient,
 				PaginedNumber: 1,
+
+				// necessary for metrics
+				providerName: "github",
+				triggerEvent: string(tt.event.TriggerTarget),
+				Logger:       log,
 			}
 			changedFiles, err := provider.GetFiles(ctx, tt.event)
 			assert.NilError(t, err, nil)
@@ -821,8 +1073,19 @@ func TestGetFiles(t *testing.T) {
 					assert.Equal(t, *tt.commit.Files[i].Filename, changedFiles.All[i])
 				}
 			}
+
+			// Check caching
+			metricstest.CheckCountData(t, "pipelines_as_code_git_provider_api_request_count", metricsTags, tt.wantAPIRequestCount)
+			_, _ = provider.GetFiles(ctx, tt.event)
+			metricstest.CheckCountData(t, "pipelines_as_code_git_provider_api_request_count", metricsTags, tt.wantAPIRequestCount)
 		})
 	}
+}
+
+type roundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripperFunc) RoundTrip(r *http.Request) (*http.Response, error) {
+	return f(r)
 }
 
 func TestProvider_checkWebhookSecretValidity(t *testing.T) {
@@ -836,7 +1099,9 @@ func TestProvider_checkWebhookSecretValidity(t *testing.T) {
 		expHeaderSet   bool
 		apiNotEnabled  bool
 		wantLogSnippet string
-		report500      bool
+		statusCode     int
+		wantNilSCIM    bool
+		wantNilResp    bool
 	}{
 		{
 			name:         "remaining scim calls",
@@ -846,7 +1111,7 @@ func TestProvider_checkWebhookSecretValidity(t *testing.T) {
 		},
 		{
 			name:         "no remaining scim calls",
-			wantSubErr:   "token is ratelimited",
+			wantSubErr:   "api rate limit exceeded. Access will be restored at Mon, 01 Jan 0001 00:00:00 UTC",
 			remaining:    0,
 			expHeaderSet: true,
 			expTime:      cw.Now().Add(1 * time.Minute),
@@ -862,14 +1127,35 @@ func TestProvider_checkWebhookSecretValidity(t *testing.T) {
 			remaining: 5,
 		},
 		{
+			name:       "skipping api rate limit is not enabled",
+			remaining:  0,
+			statusCode: http.StatusNotFound,
+		},
+		{
+			name:        "skipping because scim is not available",
+			remaining:   0,
+			wantNilSCIM: true,
+		},
+		{
+			name:        "resp is nil",
+			remaining:   0,
+			wantNilResp: true,
+			wantSubErr:  "error making request to the GitHub API checking rate limit",
+		},
+		{
 			name:       "no header but no remaining scim calls",
 			remaining:  0,
-			wantSubErr: "token is ratelimited",
+			wantSubErr: "api rate limit exceeded. Access will be restored at Mon, 01 Jan 0001 00:00:00 UTC",
 		},
 		{
 			name:       "api error",
 			wantSubErr: "error making request to the GitHub API checking rate limit",
-			report500:  true,
+			statusCode: http.StatusInternalServerError,
+		},
+		{
+			name:           "not enabled",
+			apiNotEnabled:  true,
+			wantLogSnippet: "skipping checking",
 		},
 		{
 			name:           "not enabled",
@@ -885,14 +1171,15 @@ func TestProvider_checkWebhookSecretValidity(t *testing.T) {
 
 			if !tt.apiNotEnabled {
 				mux.HandleFunc("/rate_limit", func(rw http.ResponseWriter, _ *http.Request) {
-					if tt.report500 {
-						rw.WriteHeader(http.StatusInternalServerError)
+					if tt.statusCode != 0 {
+						rw.WriteHeader(tt.statusCode)
 						return
 					}
-					s := &github.RateLimits{
-						SCIM: &github.Rate{
+					s := &github.RateLimits{}
+					if !tt.wantNilSCIM {
+						s.SCIM = &github.Rate{
 							Remaining: tt.remaining,
-						},
+						}
 					}
 					st := new(struct {
 						Resources *github.RateLimits `json:"resources"`
@@ -907,9 +1194,19 @@ func TestProvider_checkWebhookSecretValidity(t *testing.T) {
 				})
 			}
 			defer teardown()
+
+			// create bad round tripper to make response nil and test that it handles that case.
+			if tt.wantNilResp {
+				errRT := roundTripperFunc(func(*http.Request) (*http.Response, error) {
+					return nil, fmt.Errorf("network down")
+				})
+				httpClient := &http.Client{Transport: errRT}
+				fakeclient = github.NewClient(httpClient)
+			}
+
 			v := &Provider{
-				Client: fakeclient,
-				Logger: logger,
+				ghClient: fakeclient,
+				Logger:   logger,
 			}
 			err := v.checkWebhookSecretValidity(ctx, cw)
 			if tt.wantSubErr != "" {
@@ -983,7 +1280,7 @@ func TestListRepos(t *testing.T) {
 	})
 
 	ctx, _ := rtesting.SetupFakeContext(t)
-	provider := &Provider{Client: fakeclient, PaginedNumber: 1}
+	provider := &Provider{ghClient: fakeclient, PaginedNumber: 1}
 	data, err := ListRepos(ctx, provider)
 	assert.NilError(t, err)
 	assert.Equal(t, data[0], "https://matched/by/incoming")
@@ -1078,7 +1375,7 @@ func TestCreateToken(t *testing.T) {
 		})
 	}
 
-	provider := &Provider{Client: fakeclient}
+	provider := &Provider{ghClient: fakeclient}
 	provider.Run = run
 	_, err := provider.CreateToken(ctx, urlData, info)
 	assert.Assert(t, len(provider.RepositoryIDs) == 2, "found repositoryIDs are %d which is less than expected", len(provider.RepositoryIDs))
@@ -1087,7 +1384,7 @@ func TestCreateToken(t *testing.T) {
 	}
 }
 
-func TestGetBranch(t *testing.T) {
+func TestIsHeadCommitOfBranch(t *testing.T) {
 	tests := []struct {
 		name       string
 		sha        string
@@ -1124,9 +1421,535 @@ func TestGetBranch(t *testing.T) {
 			})
 
 			ctx, _ := rtesting.SetupFakeContext(t)
-			provider := &Provider{Client: fakeclient}
-			err := provider.isBranchContainsCommit(ctx, runEvent, "test1")
+			provider := &Provider{ghClient: fakeclient}
+			err := provider.isHeadCommitOfBranch(ctx, runEvent, "test1")
 			assert.Equal(t, err != nil, tt.wantErr)
+		})
+	}
+}
+
+func TestCreateComment(t *testing.T) {
+	tests := []struct {
+		name         string
+		event        *info.Event
+		updateMarker string
+		commentBody  string
+		clientNil    bool
+		wantErr      string
+		setup        func(t *testing.T, mux *http.ServeMux) func(t *testing.T)
+	}{
+		{
+			name:      "nil client error",
+			clientNil: true,
+			event:     &info.Event{PullRequestNumber: 123},
+			wantErr:   "no github client has been initialized",
+		},
+		{
+			name:    "not a pull request error",
+			event:   &info.Event{PullRequestNumber: 0},
+			wantErr: "create comment only works on pull requests",
+		},
+		{
+			name:         "create new comment",
+			event:        &info.Event{Organization: "org", Repository: "repo", PullRequestNumber: 123},
+			updateMarker: "",
+			setup: func(t *testing.T, mux *http.ServeMux) func(t *testing.T) {
+				t.Helper()
+				mux.HandleFunc("/repos/org/repo/issues/123/comments", func(rw http.ResponseWriter, r *http.Request) {
+					assert.Equal(t, r.Method, http.MethodPost)
+					rw.WriteHeader(http.StatusCreated)
+				})
+				return nil
+			},
+		},
+		{
+			name:         "update existing comment",
+			event:        &info.Event{Organization: "org", Repository: "repo", PullRequestNumber: 123},
+			updateMarker: "MARKER",
+			setup: func(t *testing.T, mux *http.ServeMux) func(t *testing.T) {
+				t.Helper()
+				mux.HandleFunc("/repos/org/repo/issues/123/comments", func(rw http.ResponseWriter, r *http.Request) {
+					if r.Method == http.MethodGet {
+						fmt.Fprint(rw, `[{"id": 555, "body": "MARKER"}]`)
+						return
+					}
+				})
+				mux.HandleFunc("/repos/org/repo/issues/comments/555", func(rw http.ResponseWriter, r *http.Request) {
+					assert.Equal(t, r.Method, http.MethodPatch)
+					rw.WriteHeader(http.StatusOK)
+				})
+				return nil
+			},
+		},
+		{
+			name:         "no matching comment creates new",
+			event:        &info.Event{Organization: "org", Repository: "repo", PullRequestNumber: 123},
+			updateMarker: "MARKER",
+			setup: func(t *testing.T, mux *http.ServeMux) func(t *testing.T) {
+				t.Helper()
+				mux.HandleFunc("/repos/org/repo/issues/123/comments", func(rw http.ResponseWriter, r *http.Request) {
+					if r.Method == http.MethodGet {
+						fmt.Fprint(rw, `[{"id": 555, "body": "NO_MATCH"}]`)
+						return
+					}
+					assert.Equal(t, r.Method, http.MethodPost)
+					rw.WriteHeader(http.StatusCreated)
+				})
+				return nil
+			},
+		},
+		{
+			name:         "deduplicates existing marker comments",
+			event:        &info.Event{Organization: "org", Repository: "repo", PullRequestNumber: 123},
+			updateMarker: "MARKER",
+			commentBody:  "new body MARKER",
+			setup: func(t *testing.T, mux *http.ServeMux) func(t *testing.T) {
+				t.Helper()
+				editedPrimary := false
+				deletedDuplicate := false
+				mux.HandleFunc("/repos/org/repo/issues/123/comments", func(rw http.ResponseWriter, r *http.Request) {
+					assert.Equal(t, r.Method, http.MethodGet)
+					fmt.Fprint(rw, `[{"id": 111, "body": "MARKER old"}, {"id": 222, "body": "MARKER old"}]`)
+				})
+				mux.HandleFunc("/repos/org/repo/issues/comments/111", func(rw http.ResponseWriter, r *http.Request) {
+					assert.Equal(t, r.Method, http.MethodPatch)
+					editedPrimary = true
+					rw.WriteHeader(http.StatusOK)
+				})
+				mux.HandleFunc("/repos/org/repo/issues/comments/222", func(rw http.ResponseWriter, r *http.Request) {
+					assert.Equal(t, r.Method, http.MethodDelete)
+					deletedDuplicate = true
+					rw.WriteHeader(http.StatusNoContent)
+				})
+				return func(t *testing.T) {
+					t.Helper()
+					assert.Assert(t, editedPrimary)
+					assert.Assert(t, deletedDuplicate)
+				}
+			},
+		},
+		{
+			name:         "deduplicates post-create marker comments",
+			event:        &info.Event{Organization: "org", Repository: "repo", PullRequestNumber: 123},
+			updateMarker: "MARKER",
+			commentBody:  "body MARKER",
+			setup: func(t *testing.T, mux *http.ServeMux) func(t *testing.T) {
+				t.Helper()
+				listCalls := 0
+				deletedDuplicate := false
+				mux.HandleFunc("/repos/org/repo/issues/123/comments", func(rw http.ResponseWriter, r *http.Request) {
+					switch r.Method {
+					case http.MethodGet:
+						listCalls++
+						if listCalls <= 2 {
+							fmt.Fprint(rw, `[]`)
+							return
+						}
+						fmt.Fprint(rw, `[{"id": 111, "body": "body MARKER"}, {"id": 222, "body": "body MARKER"}]`)
+					case http.MethodPost:
+						rw.WriteHeader(http.StatusCreated)
+					default:
+						t.Fatalf("unexpected method: %s", r.Method)
+					}
+				})
+				mux.HandleFunc("/repos/org/repo/issues/comments/222", func(rw http.ResponseWriter, r *http.Request) {
+					assert.Equal(t, r.Method, http.MethodDelete)
+					deletedDuplicate = true
+					rw.WriteHeader(http.StatusNoContent)
+				})
+				return func(t *testing.T) {
+					t.Helper()
+					assert.Assert(t, deletedDuplicate)
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, _ := rtesting.SetupFakeContext(t)
+
+			var provider *Provider
+			var postAssert func(t *testing.T)
+			if !tt.clientNil {
+				fakeclient, mux, _, teardown := ghtesthelper.SetupGH()
+				defer teardown()
+				provider = &Provider{ghClient: fakeclient}
+
+				if tt.setup != nil {
+					postAssert = tt.setup(t, mux)
+				}
+			} else {
+				provider = &Provider{} // nil client
+			}
+
+			body := tt.commentBody
+			if body == "" {
+				body = "comment body"
+			}
+
+			err := provider.CreateComment(ctx, tt.event, body, tt.updateMarker)
+
+			if tt.wantErr != "" {
+				assert.ErrorContains(t, err, tt.wantErr)
+				return
+			}
+			assert.NilError(t, err)
+			if postAssert != nil {
+				postAssert(t)
+			}
+		})
+	}
+}
+
+func TestCreateCommentDedupLogging(t *testing.T) {
+	tests := []struct {
+		name            string
+		commitBody      string
+		setup           func(t *testing.T, mux *http.ServeMux)
+		expectedPhases  []string
+		unexpectedPhase []string
+	}{
+		{
+			name:       "logs full create flow when marker comment does not exist",
+			commitBody: "new body MARKER",
+			setup: func(t *testing.T, mux *http.ServeMux) {
+				t.Helper()
+				listCalls := 0
+				mux.HandleFunc("/repos/org/repo/issues/123/comments", func(rw http.ResponseWriter, r *http.Request) {
+					switch r.Method {
+					case http.MethodGet:
+						listCalls++
+						switch listCalls {
+						case 1, 2:
+							fmt.Fprint(rw, `[]`)
+						default:
+							fmt.Fprint(rw, `[{"id": 333, "body": "new body MARKER", "created_at": "2024-01-01T00:00:00Z"}]`)
+						}
+					case http.MethodPost:
+						rw.WriteHeader(http.StatusCreated)
+						fmt.Fprint(rw, `{"id": 333, "body": "new body MARKER"}`)
+					default:
+						t.Fatalf("unexpected method %s", r.Method)
+					}
+				})
+			},
+			expectedPhases: []string{
+				"initial_list",
+				"jitter_wait",
+				"post_jitter_list",
+				"pre_create_race_window",
+				"create_comment_start",
+				"create_comment_done",
+				"post_create_list",
+				"dedup_select_primary",
+				"dedup_complete",
+			},
+			unexpectedPhase: []string{"dedup_delete_attempt"},
+		},
+		{
+			name:       "logs dedup select without delete for one existing marker comment",
+			commitBody: "new body MARKER",
+			setup: func(t *testing.T, mux *http.ServeMux) {
+				t.Helper()
+				mux.HandleFunc("/repos/org/repo/issues/123/comments", func(rw http.ResponseWriter, r *http.Request) {
+					assert.Equal(t, r.Method, http.MethodGet)
+					fmt.Fprint(rw, `[{"id": 111, "body": "MARKER old", "created_at": "2024-01-01T00:00:00Z"}]`)
+				})
+				mux.HandleFunc("/repos/org/repo/issues/comments/111", func(rw http.ResponseWriter, r *http.Request) {
+					assert.Equal(t, r.Method, http.MethodPatch)
+					rw.WriteHeader(http.StatusOK)
+				})
+			},
+			expectedPhases: []string{
+				"initial_list",
+				"dedup_select_primary",
+				"dedup_complete",
+			},
+			unexpectedPhase: []string{"create_comment_start", "dedup_delete_attempt"},
+		},
+		{
+			name:       "logs duplicate detection and delete phases for multiple markers",
+			commitBody: "new body MARKER",
+			setup: func(t *testing.T, mux *http.ServeMux) {
+				t.Helper()
+				mux.HandleFunc("/repos/org/repo/issues/123/comments", func(rw http.ResponseWriter, r *http.Request) {
+					assert.Equal(t, r.Method, http.MethodGet)
+					fmt.Fprint(rw, `[{"id": 111, "body": "MARKER old", "created_at": "2024-01-01T00:00:00Z"}, {"id": 222, "body": "MARKER old", "created_at": "2024-01-01T00:01:00Z"}]`)
+				})
+				mux.HandleFunc("/repos/org/repo/issues/comments/111", func(rw http.ResponseWriter, r *http.Request) {
+					assert.Equal(t, r.Method, http.MethodPatch)
+					rw.WriteHeader(http.StatusOK)
+				})
+				mux.HandleFunc("/repos/org/repo/issues/comments/222", func(rw http.ResponseWriter, r *http.Request) {
+					assert.Equal(t, r.Method, http.MethodDelete)
+					rw.WriteHeader(http.StatusNoContent)
+				})
+			},
+			expectedPhases: []string{
+				"initial_list",
+				"duplicate_detected",
+				"dedup_select_primary",
+				"dedup_delete_attempt",
+				"dedup_delete_done",
+				"dedup_complete",
+			},
+			unexpectedPhase: []string{"create_comment_start"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, _ := rtesting.SetupFakeContext(t)
+			ctx = info.StoreCurrentControllerName(ctx, "controller-test")
+
+			fakeclient, mux, _, teardown := ghtesthelper.SetupGH()
+			defer teardown()
+			tt.setup(t, mux)
+
+			core, observedLogs := zapobserver.New(zap.DebugLevel)
+			provider := &Provider{
+				ghClient: fakeclient,
+				Logger:   zap.New(core).Sugar(),
+			}
+			event := &info.Event{
+				Organization:      "org",
+				Repository:        "repo",
+				PullRequestNumber: 123,
+				Request: &info.Request{
+					Header: http.Header{
+						"X-Github-Delivery": []string{"evt-123"},
+					},
+				},
+			}
+
+			err := provider.CreateComment(ctx, event, tt.commitBody, "MARKER")
+			assert.NilError(t, err)
+
+			logEntries := observedLogs.FilterMessage("github comment dedup flow").All()
+			assert.Assert(t, len(logEntries) > 0, "expected debug comment logs to be emitted")
+
+			phaseCounts := map[string]int{}
+			seenDedupTrace := ""
+			for _, entry := range logEntries {
+				fields := entry.ContextMap()
+				phase := fmt.Sprint(fields["phase"])
+				phaseCounts[phase]++
+
+				traceID := fmt.Sprint(fields["dedup_trace"])
+				assert.Assert(t, traceID != "" && traceID != "<nil>")
+				if seenDedupTrace == "" {
+					seenDedupTrace = traceID
+				}
+				assert.Equal(t, seenDedupTrace, traceID)
+
+				eventID, hasEventID := fields["event_id"]
+				assert.Assert(t, hasEventID, "event_id field should be present in %+v", fields)
+				assert.Equal(t, "evt-123", fmt.Sprint(eventID), "event_id should match X-GitHub-Delivery header")
+				assert.Equal(t, "123", fmt.Sprint(fields["pr"]))
+				assert.Equal(t, "controller-test", fmt.Sprint(fields["controller_label"]))
+
+				if phase == "initial_list" || phase == "post_jitter_list" || phase == "post_create_list" {
+					_, hasMatchedCount := fields["matched_count"]
+					assert.Assert(t, hasMatchedCount, "phase=%s should include matched_count fields=%+v", phase, fields)
+				}
+			}
+
+			for _, phase := range tt.expectedPhases {
+				assert.Assert(t, phaseCounts[phase] > 0, "missing phase %s in logs: %+v", phase, phaseCounts)
+			}
+			for _, phase := range tt.unexpectedPhase {
+				assert.Assert(t, phaseCounts[phase] == 0, "unexpected phase %s in logs: %+v", phase, phaseCounts)
+			}
+		})
+	}
+}
+
+func TestSkipPushEventForPRCommits(t *testing.T) {
+	iid := int64(1234)
+	tests := []struct {
+		name                string
+		pacInfoEnabled      bool
+		pushEvent           *github.PushEvent
+		mockAPIs            map[string]func(rw http.ResponseWriter, r *http.Request)
+		isPartOfPR          bool
+		wantErr             bool
+		wantErrContains     string
+		skipWarnLogContains string
+	}{
+		{
+			name:           "skip push event when commit is part of an open PR",
+			pacInfoEnabled: true,
+			pushEvent: &github.PushEvent{
+				Repo: &github.PushEventRepository{
+					Name:  github.Ptr("testRepo"),
+					Owner: &github.User{Login: github.Ptr("testOrg")},
+				},
+				HeadCommit: &github.HeadCommit{
+					ID: github.Ptr("abc123"),
+				},
+			},
+			mockAPIs: map[string]func(rw http.ResponseWriter, r *http.Request){
+				"/repos/testOrg/testRepo/commits/abc123/pulls": func(rw http.ResponseWriter, r *http.Request) {
+					assert.Equal(t, r.Method, http.MethodGet)
+					fmt.Fprint(rw, `[{"number": 42, "state": "open"}]`)
+				},
+			},
+			isPartOfPR:      true,
+			wantErr:         false,
+			wantErrContains: "",
+		},
+		{
+			name:           "continue processing push event when commit is not part of PR",
+			pacInfoEnabled: true,
+			pushEvent: &github.PushEvent{
+				Repo: &github.PushEventRepository{
+					Name:          github.Ptr("testRepo"),
+					Owner:         &github.User{Login: github.Ptr("testOrg")},
+					DefaultBranch: github.Ptr("main"),
+					HTMLURL:       github.Ptr("https://github.com/testOrg/testRepo"),
+					ID:            github.Ptr(iid),
+				},
+				HeadCommit: &github.HeadCommit{
+					ID:      github.Ptr("abc123"),
+					URL:     github.Ptr("https://github.com/testOrg/testRepo/commit/abc123"),
+					Message: github.Ptr("Test commit message"),
+				},
+				Ref:    github.Ptr("refs/heads/main"),
+				Sender: &github.User{Login: github.Ptr("testUser")},
+			},
+			mockAPIs: map[string]func(rw http.ResponseWriter, r *http.Request){
+				"/repos/testOrg/testRepo/pulls": func(rw http.ResponseWriter, r *http.Request) {
+					assert.Equal(t, r.Method, http.MethodGet)
+					assert.Equal(t, r.URL.Query().Get("state"), "open")
+					fmt.Fprint(rw, `[{"number": 42}]`)
+				},
+				"/repos/testOrg/testRepo/pulls/42/commits": func(rw http.ResponseWriter, r *http.Request) {
+					assert.Equal(t, r.Method, http.MethodGet)
+					fmt.Fprint(rw, `[{"sha": "def456"}, {"sha": "xyz789"}]`)
+				},
+			},
+			isPartOfPR: false,
+			wantErr:    false,
+		},
+		{
+			name:           "continue when skip feature is disabled",
+			pacInfoEnabled: false,
+			pushEvent: &github.PushEvent{
+				Repo: &github.PushEventRepository{
+					Name:          github.Ptr("testRepo"),
+					Owner:         &github.User{Login: github.Ptr("testOrg")},
+					DefaultBranch: github.Ptr("main"),
+					HTMLURL:       github.Ptr("https://github.com/testOrg/testRepo"),
+					ID:            github.Ptr(iid),
+				},
+				HeadCommit: &github.HeadCommit{
+					ID:      github.Ptr("abc123"),
+					URL:     github.Ptr("https://github.com/testOrg/testRepo/commit/abc123"),
+					Message: github.Ptr("Test commit message"),
+				},
+				Ref:    github.Ptr("refs/heads/main"),
+				Sender: &github.User{Login: github.Ptr("testUser")},
+			},
+			isPartOfPR: false, // This should not be checked when feature is disabled
+			wantErr:    false,
+		},
+		{
+			name:           "log warning when API error occurs",
+			pacInfoEnabled: true,
+			pushEvent: &github.PushEvent{
+				Repo: &github.PushEventRepository{
+					Name:  github.Ptr("testRepo"),
+					Owner: &github.User{Login: github.Ptr("testOrg")},
+				},
+				HeadCommit: &github.HeadCommit{
+					ID: github.Ptr("1234"),
+				},
+			},
+			mockAPIs: map[string]func(rw http.ResponseWriter, r *http.Request){
+				"/repos/testOrg/testRepo/pulls": func(rw http.ResponseWriter, _ *http.Request) {
+					rw.WriteHeader(http.StatusInternalServerError)
+					fmt.Fprint(rw, `{"message": "API error"}`)
+				},
+			},
+			isPartOfPR:          false,
+			wantErr:             false,
+			skipWarnLogContains: "Error getting pull requests associated with the commit in this push event",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, _ := rtesting.SetupFakeContext(t)
+			fakeclient, mux, _, teardown := ghtesthelper.SetupGH()
+			defer teardown()
+
+			// Register API endpoints
+			for pattern, handler := range tt.mockAPIs {
+				mux.HandleFunc(pattern, handler)
+			}
+
+			// Create a logger that captures logs
+			observer, logs := zapobserver.New(zap.InfoLevel)
+			logger := zap.New(observer).Sugar()
+
+			// Create provider with the test configuration
+			provider := &Provider{
+				ghClient: fakeclient,
+				Logger:   logger,
+				pacInfo: &info.PacOpts{
+					Settings: settings.Settings{
+						SkipPushEventForPRCommits: tt.pacInfoEnabled,
+					},
+				},
+			}
+
+			// Create event with the right trigger type
+			event := info.NewEvent()
+			event.TriggerTarget = triggertype.Push
+
+			// Process the event
+			result, err := provider.processEvent(ctx, event, tt.pushEvent)
+
+			// Check errors if expected
+			if tt.wantErr {
+				assert.Assert(t, err != nil)
+				if tt.wantErrContains != "" {
+					assert.ErrorContains(t, err, tt.wantErrContains)
+				}
+				assert.Assert(t, result == nil, "Expected nil result when error occurs")
+				return
+			}
+
+			// If no error expected, check the result
+			assert.NilError(t, err)
+
+			// If push event was skipped (commit is part of PR), result should be nil
+			if tt.pacInfoEnabled && tt.isPartOfPR {
+				assert.Assert(t, result == nil, "Expected nil result when push event is skipped for PR commit")
+				return
+			}
+
+			assert.Assert(t, result != nil, "Expected non-nil result when no error occurs")
+
+			// Check event fields were properly processed
+			assert.Equal(t, result.Organization, tt.pushEvent.GetRepo().GetOwner().GetLogin())
+			assert.Equal(t, result.Repository, tt.pushEvent.GetRepo().GetName())
+			assert.Equal(t, result.SHA, tt.pushEvent.GetHeadCommit().GetID())
+			assert.Equal(t, result.Sender, tt.pushEvent.GetSender().GetLogin())
+
+			// Check for warning logs if applicable
+			if tt.skipWarnLogContains != "" {
+				// Look for warning logs
+				found := false
+				for _, logEntry := range logs.All() {
+					if strings.Contains(logEntry.Message, tt.skipWarnLogContains) {
+						found = true
+						break
+					}
+				}
+				assert.Assert(t, found, "Expected warning log containing: %s", tt.skipWarnLogContains)
+			}
 		})
 	}
 }

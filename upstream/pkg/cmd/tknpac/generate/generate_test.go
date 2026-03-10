@@ -31,6 +31,8 @@ func TestGenerateTemplate(t *testing.T) {
 		addExtraFilesInRepo     map[string]string
 		regenerateTemplate      bool
 		useClusterTask          bool
+		fileName                string
+		overwrite               bool
 	}{
 		{
 			name: "pull request default",
@@ -50,23 +52,6 @@ func TestGenerateTemplate(t *testing.T) {
 			regenerateTemplate: true,
 		},
 		{
-			name: "pull request with clustertasks",
-			askStubs: func(as *prompt.AskStubber) {
-				as.StubOneDefault() // pull_request
-				as.StubOne("")      // default as main
-				as.StubOne(true)    // pipelinerun generation
-			},
-			checkGeneratedFile: ".tekton/pull-request.yaml",
-			checkRegInGeneratedFile: []*regexp.Regexp{
-				regexp.MustCompile("kind: ClusterTask"),
-			},
-			gitinfo: git.Info{
-				URL: "https://hello/moto",
-			},
-			regenerateTemplate: true,
-			useClusterTask:     true,
-		},
-		{
 			name: "pull request already exist don't overwrite",
 			askStubs: func(as *prompt.AskStubber) {
 				as.StubOneDefault() // pull_request
@@ -82,6 +67,27 @@ func TestGenerateTemplate(t *testing.T) {
 			},
 			gitinfo: git.Info{
 				URL: "https://hello/moto",
+			},
+			regenerateTemplate: true,
+		},
+		{
+			name: "pull request python poetry",
+			askStubs: func(as *prompt.AskStubber) {
+				as.StubOneDefault() // pull_request
+				as.StubOne("")      // default as main
+			},
+			addExtraFilesInRepo: map[string]string{
+				"poetry.lock": "hello",
+			},
+			checkGeneratedFile: ".tekton/pull-request.yaml",
+			checkRegInGeneratedFile: []*regexp.Regexp{
+				regexp.MustCompile("name: python-pull-request"),
+				regexp.MustCompile(".*on-event.*pull_request"),
+				regexp.MustCompile(".*test our Python project"),
+				regexp.MustCompile("- name: pylint"),
+			},
+			gitinfo: git.Info{
+				URL: "https://hello/python",
 			},
 			regenerateTemplate: true,
 		},
@@ -146,6 +152,34 @@ func TestGenerateTemplate(t *testing.T) {
 			},
 			regenerateTemplate: false,
 		},
+		{
+			name: "create .tekton directory if it doesn't exists",
+			askStubs: func(as *prompt.AskStubber) {
+				as.StubOneDefault() // pull_request
+				as.StubOne("")      // default as main
+			},
+			checkGeneratedFile: ".tekton/another.yaml",
+			gitinfo: git.Info{
+				URL: "https://hello/moto",
+			},
+			regenerateTemplate: false,
+			fileName:           ".tekton/another.yaml",
+			overwrite:          true,
+		},
+		{
+			name: "create /tmp/foobar if it doesn't exists",
+			askStubs: func(as *prompt.AskStubber) {
+				as.StubOneDefault() // pull_request
+				as.StubOne("")      // default as main
+			},
+			checkGeneratedFile: "/tmp/foobar/remove.yaml",
+			gitinfo: git.Info{
+				URL: "https://hello/moto",
+			},
+			regenerateTemplate: false,
+			fileName:           "/tmp/foobar/remove.yaml",
+			overwrite:          true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -169,12 +203,18 @@ func TestGenerateTemplate(t *testing.T) {
 				assert.NilError(t, err, "failed to create file", key)
 			}
 
+			if tt.fileName != "" {
+				tt.fileName = newdir.Path() + "/" + tt.fileName
+			}
+
 			err := Generate(&Opts{
 				Event:                   &tt.event,
 				GitInfo:                 &tt.gitinfo,
 				IOStreams:               io,
 				CLIOpts:                 &cli.PacCliOpts{},
 				generateWithClusterTask: tt.useClusterTask,
+				FileName:                tt.fileName,
+				overwrite:               tt.overwrite,
 			}, tt.regenerateTemplate)
 			assert.NilError(t, err)
 
