@@ -12,7 +12,7 @@ import (
 
 	pacv1alpha1 "github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	tknpacdesc "github.com/openshift-pipelines/pipelines-as-code/pkg/cmd/tknpac/describe"
-	tknpaclist "github.com/openshift-pipelines/pipelines-as-code/pkg/cmd/tknpac/list"
+	tknpaclist "github.com/openshift-pipelines/pipelines-as-code/pkg/cmd/tknpac/listcmd"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
 	cli2 "github.com/openshift-pipelines/pipelines-as-code/test/pkg/cli"
 	tgithub "github.com/openshift-pipelines/pipelines-as-code/test/pkg/github"
@@ -24,10 +24,10 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-func TestGithubPacCli(t *testing.T) {
+func TestGithubGHEPacCli(t *testing.T) {
 	targetNS := names.SimpleNameGenerator.RestrictLengthWithRandomSuffix("pac-e2e-ns")
 	ctx := context.Background()
-	ctx, runcnx, opts, ghprovider, err := tgithub.Setup(ctx, false, false)
+	ctx, runcnx, opts, ghprovider, err := tgithub.Setup(ctx, true, false)
 	assert.NilError(t, err)
 
 	entries := map[string]string{
@@ -47,7 +47,7 @@ spec:
         taskSpec:
           steps:
             - name: task
-              image: registry.access.redhat.com/ubi9/ubi-micro
+              image: registry.access.redhat.com/ubi10/ubi-micro
               command: ["/bin/echo", "HELLOMOTO"]
 `, targetNS, options.MainBranch, triggertype.PullRequest.String()),
 	}

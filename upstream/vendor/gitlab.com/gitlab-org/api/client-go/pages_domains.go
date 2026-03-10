@@ -24,12 +24,12 @@ import (
 
 type (
 	PagesDomainsServiceInterface interface {
-		ListPagesDomains(pid interface{}, opt *ListPagesDomainsOptions, options ...RequestOptionFunc) ([]*PagesDomain, *Response, error)
+		ListPagesDomains(pid any, opt *ListPagesDomainsOptions, options ...RequestOptionFunc) ([]*PagesDomain, *Response, error)
 		ListAllPagesDomains(options ...RequestOptionFunc) ([]*PagesDomain, *Response, error)
-		GetPagesDomain(pid interface{}, domain string, options ...RequestOptionFunc) (*PagesDomain, *Response, error)
-		CreatePagesDomain(pid interface{}, opt *CreatePagesDomainOptions, options ...RequestOptionFunc) (*PagesDomain, *Response, error)
-		UpdatePagesDomain(pid interface{}, domain string, opt *UpdatePagesDomainOptions, options ...RequestOptionFunc) (*PagesDomain, *Response, error)
-		DeletePagesDomain(pid interface{}, domain string, options ...RequestOptionFunc) (*Response, error)
+		GetPagesDomain(pid any, domain string, options ...RequestOptionFunc) (*PagesDomain, *Response, error)
+		CreatePagesDomain(pid any, opt *CreatePagesDomainOptions, options ...RequestOptionFunc) (*PagesDomain, *Response, error)
+		UpdatePagesDomain(pid any, domain string, opt *UpdatePagesDomainOptions, options ...RequestOptionFunc) (*PagesDomain, *Response, error)
+		DeletePagesDomain(pid any, domain string, options ...RequestOptionFunc) (*Response, error)
 	}
 
 	// PagesDomainsService handles communication with the pages domains
@@ -47,33 +47,40 @@ var _ PagesDomainsServiceInterface = (*PagesDomainsService)(nil)
 //
 // GitLab API docs: https://docs.gitlab.com/api/pages_domains/
 type PagesDomain struct {
-	Domain           string     `json:"domain"`
-	AutoSslEnabled   bool       `json:"auto_ssl_enabled"`
-	URL              string     `json:"url"`
-	ProjectID        int        `json:"project_id"`
-	Verified         bool       `json:"verified"`
-	VerificationCode string     `json:"verification_code"`
-	EnabledUntil     *time.Time `json:"enabled_until"`
-	Certificate      struct {
-		Subject         string     `json:"subject"`
-		Expired         bool       `json:"expired"`
-		Expiration      *time.Time `json:"expiration"`
-		Certificate     string     `json:"certificate"`
-		CertificateText string     `json:"certificate_text"`
-	} `json:"certificate"`
+	Domain           string                 `json:"domain"`
+	AutoSslEnabled   bool                   `json:"auto_ssl_enabled"`
+	URL              string                 `json:"url"`
+	ProjectID        int64                  `json:"project_id"`
+	Verified         bool                   `json:"verified"`
+	VerificationCode string                 `json:"verification_code"`
+	EnabledUntil     *time.Time             `json:"enabled_until"`
+	Certificate      PagesDomainCertificate `json:"certificate"`
+}
+
+// PagesDomainCertificate represents a pages domain certificate.
+//
+// GitLab API docs: https://docs.gitlab.com/api/pages_domains/
+type PagesDomainCertificate struct {
+	Subject         string     `json:"subject"`
+	Expired         bool       `json:"expired"`
+	Expiration      *time.Time `json:"expiration"`
+	Certificate     string     `json:"certificate"`
+	CertificateText string     `json:"certificate_text"`
 }
 
 // ListPagesDomainsOptions represents the available ListPagesDomains() options.
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/pages_domains/#list-pages-domains
-type ListPagesDomainsOptions ListOptions
+type ListPagesDomainsOptions struct {
+	ListOptions
+}
 
 // ListPagesDomains gets a list of project pages domains.
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/pages_domains/#list-pages-domains
-func (s *PagesDomainsService) ListPagesDomains(pid interface{}, opt *ListPagesDomainsOptions, options ...RequestOptionFunc) ([]*PagesDomain, *Response, error) {
+func (s *PagesDomainsService) ListPagesDomains(pid any, opt *ListPagesDomainsOptions, options ...RequestOptionFunc) ([]*PagesDomain, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err
@@ -117,7 +124,7 @@ func (s *PagesDomainsService) ListAllPagesDomains(options ...RequestOptionFunc) 
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/pages_domains/#single-pages-domain
-func (s *PagesDomainsService) GetPagesDomain(pid interface{}, domain string, options ...RequestOptionFunc) (*PagesDomain, *Response, error) {
+func (s *PagesDomainsService) GetPagesDomain(pid any, domain string, options ...RequestOptionFunc) (*PagesDomain, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err
@@ -153,7 +160,7 @@ type CreatePagesDomainOptions struct {
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/pages_domains/#create-new-pages-domain
-func (s *PagesDomainsService) CreatePagesDomain(pid interface{}, opt *CreatePagesDomainOptions, options ...RequestOptionFunc) (*PagesDomain, *Response, error) {
+func (s *PagesDomainsService) CreatePagesDomain(pid any, opt *CreatePagesDomainOptions, options ...RequestOptionFunc) (*PagesDomain, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err
@@ -188,7 +195,7 @@ type UpdatePagesDomainOptions struct {
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/pages_domains/#update-pages-domain
-func (s *PagesDomainsService) UpdatePagesDomain(pid interface{}, domain string, opt *UpdatePagesDomainOptions, options ...RequestOptionFunc) (*PagesDomain, *Response, error) {
+func (s *PagesDomainsService) UpdatePagesDomain(pid any, domain string, opt *UpdatePagesDomainOptions, options ...RequestOptionFunc) (*PagesDomain, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err
@@ -209,11 +216,11 @@ func (s *PagesDomainsService) UpdatePagesDomain(pid interface{}, domain string, 
 	return pd, resp, nil
 }
 
-// DeletePagesDomain deletes an existing prject pages domain.
+// DeletePagesDomain deletes an existing project pages domain.
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/pages_domains/#delete-pages-domain
-func (s *PagesDomainsService) DeletePagesDomain(pid interface{}, domain string, options ...RequestOptionFunc) (*Response, error) {
+func (s *PagesDomainsService) DeletePagesDomain(pid any, domain string, options ...RequestOptionFunc) (*Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, err

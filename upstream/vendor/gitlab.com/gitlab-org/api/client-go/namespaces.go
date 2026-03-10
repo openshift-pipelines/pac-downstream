@@ -25,8 +25,8 @@ type (
 	NamespacesServiceInterface interface {
 		ListNamespaces(opt *ListNamespacesOptions, options ...RequestOptionFunc) ([]*Namespace, *Response, error)
 		SearchNamespace(query string, options ...RequestOptionFunc) ([]*Namespace, *Response, error)
-		GetNamespace(id interface{}, options ...RequestOptionFunc) (*Namespace, *Response, error)
-		NamespaceExists(id interface{}, opt *NamespaceExistsOptions, options ...RequestOptionFunc) (*NamespaceExistance, *Response, error)
+		GetNamespace(id any, options ...RequestOptionFunc) (*Namespace, *Response, error)
+		NamespaceExists(id any, opt *NamespaceExistsOptions, options ...RequestOptionFunc) (*NamespaceExistance, *Response, error)
 	}
 
 	// NamespacesService handles communication with the namespace related methods
@@ -44,21 +44,21 @@ var _ NamespacesServiceInterface = (*NamespacesService)(nil)
 //
 // GitLab API docs: https://docs.gitlab.com/api/namespaces/
 type Namespace struct {
-	ID                          int      `json:"id"`
+	ID                          int64    `json:"id"`
 	Name                        string   `json:"name"`
 	Path                        string   `json:"path"`
 	Kind                        string   `json:"kind"`
 	FullPath                    string   `json:"full_path"`
-	ParentID                    int      `json:"parent_id"`
+	ParentID                    int64    `json:"parent_id"`
 	AvatarURL                   *string  `json:"avatar_url"`
 	WebURL                      string   `json:"web_url"`
-	MembersCountWithDescendants int      `json:"members_count_with_descendants"`
-	BillableMembersCount        int      `json:"billable_members_count"`
+	MembersCountWithDescendants int64    `json:"members_count_with_descendants"`
+	BillableMembersCount        int64    `json:"billable_members_count"`
 	Plan                        string   `json:"plan"`
 	TrialEndsOn                 *ISOTime `json:"trial_ends_on"`
 	Trial                       bool     `json:"trial"`
-	MaxSeatsUsed                *int     `json:"max_seats_used"`
-	SeatsInUse                  *int     `json:"seats_in_use"`
+	MaxSeatsUsed                *int64   `json:"max_seats_used"`
+	SeatsInUse                  *int64   `json:"seats_in_use"`
 }
 
 func (n Namespace) String() string {
@@ -122,7 +122,7 @@ func (s *NamespacesService) SearchNamespace(query string, options ...RequestOpti
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/namespaces/#get-details-on-a-namespace
-func (s *NamespacesService) GetNamespace(id interface{}, options ...RequestOptionFunc) (*Namespace, *Response, error) {
+func (s *NamespacesService) GetNamespace(id any, options ...RequestOptionFunc) (*Namespace, *Response, error) {
 	namespace, err := parseID(id)
 	if err != nil {
 		return nil, nil, err
@@ -157,14 +157,14 @@ type NamespaceExistance struct {
 // GitLab API docs:
 // https://docs.gitlab.com/api/namespaces/#verify-namespace-availability
 type NamespaceExistsOptions struct {
-	ParentID *int `url:"parent_id,omitempty" json:"parent_id,omitempty"`
+	ParentID *int64 `url:"parent_id,omitempty" json:"parent_id,omitempty"`
 }
 
 // NamespaceExists checks the existence of a namespace.
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/namespaces/#verify-namespace-availability
-func (s *NamespacesService) NamespaceExists(id interface{}, opt *NamespaceExistsOptions, options ...RequestOptionFunc) (*NamespaceExistance, *Response, error) {
+func (s *NamespacesService) NamespaceExists(id any, opt *NamespaceExistsOptions, options ...RequestOptionFunc) (*NamespaceExistance, *Response, error) {
 	namespace, err := parseID(id)
 	if err != nil {
 		return nil, nil, err

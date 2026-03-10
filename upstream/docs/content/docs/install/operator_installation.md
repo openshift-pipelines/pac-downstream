@@ -13,14 +13,14 @@ On the OpenShift Pipelines Operator, the default namespace is `openshift-pipelin
 When Pipelines-as-Code is installed through the [Tekton Operator](https://github.com/tektoncd/operator) the configuration of Pipelines-as-Code is
 controlled by [TektonConfig Custom Resource](https://github.com/tektoncd/operator/blob/main/docs/TektonConfig.md#openshiftpipelinesascode).
 That means Tekton Operator will revert the configuration changes done directly
-on `pipeline-as-code` configmap or `OpenShiftPipelinesAsCode` custom resource.
+on `pipelines-as-code` ConfigMap or `OpenShiftPipelinesAsCode` custom resource.
 
 The default configurations for Pipelines-as-Code in `TektonConfig` looks like
 below.
 Note that since version v0.37.0, Pipelines-as-Code defaults to using Artifact
-Hub rather than Tekton Hub. Tekton Hub is deprecated and will be removed in a
-future version. You can still use the public tekton hub instance  by explicitly
-prefixing your task with `tektonhub://`
+Hub. The public Tekton Hub (hub.tekton.dev) has been deprecated and is no longer
+available. You can still use custom self-hosted Tekton Hub instances by
+configuring them as custom catalogs (see [Remote Hub Catalogs](/docs/install/settings#remote-hub-catalogs)).
 
 ```yaml
 apiVersion: operator.tekton.dev/v1alpha1
@@ -53,7 +53,7 @@ spec:
           remember-ok-to-test: 'true'
 ```
 
-You can add or update all supported configuration keys for Pipelines-as-Code under `settings`. After you change the `TektonConfig` custom resource, the operator updates the configuration of your `pipelines-as-code` configmap automatically.
+You can add or update all supported configuration keys for Pipelines-as-Code under `settings`. After you change the `TektonConfig` custom resource, the operator updates the configuration of your `pipelines-as-code` ConfigMap automatically.
 
 **Note:**
 

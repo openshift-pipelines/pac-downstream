@@ -23,11 +23,11 @@ import (
 
 type (
 	SecureFilesServiceInterface interface {
-		ListProjectSecureFiles(pid interface{}, opt *ListProjectSecureFilesOptions, options ...RequestOptionFunc) ([]*SecureFile, *Response, error)
-		ShowSecureFileDetails(pid interface{}, id int, options ...RequestOptionFunc) (*SecureFile, *Response, error)
-		CreateSecureFile(pid interface{}, content io.Reader, opt *CreateSecureFileOptions, options ...RequestOptionFunc) (*SecureFile, *Response, error)
-		DownloadSecureFile(pid interface{}, id int, options ...RequestOptionFunc) (io.Reader, *Response, error)
-		RemoveSecureFile(pid interface{}, id int, options ...RequestOptionFunc) (*Response, error)
+		ListProjectSecureFiles(pid any, opt *ListProjectSecureFilesOptions, options ...RequestOptionFunc) ([]*SecureFile, *Response, error)
+		ShowSecureFileDetails(pid any, id int64, options ...RequestOptionFunc) (*SecureFile, *Response, error)
+		CreateSecureFile(pid any, content io.Reader, opt *CreateSecureFileOptions, options ...RequestOptionFunc) (*SecureFile, *Response, error)
+		DownloadSecureFile(pid any, id int64, options ...RequestOptionFunc) (io.Reader, *Response, error)
+		RemoveSecureFile(pid any, id int64, options ...RequestOptionFunc) (*Response, error)
 	}
 
 	// SecureFilesService handles communication with the secure files related
@@ -47,7 +47,7 @@ var _ SecureFilesServiceInterface = (*SecureFilesService)(nil)
 // GitLab API docs:
 // https://docs.gitlab.com/api/secure_files/
 type SecureFile struct {
-	ID                int                 `json:"id"`
+	ID                int64               `json:"id"`
 	Name              string              `json:"name"`
 	Checksum          string              `json:"checksum"`
 	ChecksumAlgorithm string              `json:"checksum_algorithm"`
@@ -90,7 +90,7 @@ type SecureFileSubject struct {
 	UID string `json:"UID"`
 }
 
-// Gets a string representation of a SecureFile.
+// String gets a string representation of a SecureFile.
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/secure_files/
@@ -103,13 +103,15 @@ func (f SecureFile) String() string {
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/secure_files/#list-project-secure-files
-type ListProjectSecureFilesOptions ListOptions
+type ListProjectSecureFilesOptions struct {
+	ListOptions
+}
 
 // ListProjectSecureFiles gets a list of secure files in a project.
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/secure_files/#list-project-secure-files
-func (s SecureFilesService) ListProjectSecureFiles(pid interface{}, opt *ListProjectSecureFilesOptions, options ...RequestOptionFunc) ([]*SecureFile, *Response, error) {
+func (s SecureFilesService) ListProjectSecureFiles(pid any, opt *ListProjectSecureFilesOptions, options ...RequestOptionFunc) ([]*SecureFile, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err
@@ -133,7 +135,7 @@ func (s SecureFilesService) ListProjectSecureFiles(pid interface{}, opt *ListPro
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/secure_files/#show-secure-file-details
-func (s SecureFilesService) ShowSecureFileDetails(pid interface{}, id int, options ...RequestOptionFunc) (*SecureFile, *Response, error) {
+func (s SecureFilesService) ShowSecureFileDetails(pid any, id int64, options ...RequestOptionFunc) (*SecureFile, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err
@@ -167,7 +169,7 @@ type CreateSecureFileOptions struct {
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/secure_files/#create-secure-file
-func (s SecureFilesService) CreateSecureFile(pid interface{}, content io.Reader, opt *CreateSecureFileOptions, options ...RequestOptionFunc) (*SecureFile, *Response, error) {
+func (s SecureFilesService) CreateSecureFile(pid any, content io.Reader, opt *CreateSecureFileOptions, options ...RequestOptionFunc) (*SecureFile, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err
@@ -192,7 +194,7 @@ func (s SecureFilesService) CreateSecureFile(pid interface{}, content io.Reader,
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/secure_files/#download-secure-file
-func (s SecureFilesService) DownloadSecureFile(pid interface{}, id int, options ...RequestOptionFunc) (io.Reader, *Response, error) {
+func (s SecureFilesService) DownloadSecureFile(pid any, id int64, options ...RequestOptionFunc) (io.Reader, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err
@@ -217,7 +219,7 @@ func (s SecureFilesService) DownloadSecureFile(pid interface{}, id int, options 
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/secure_files/#remove-secure-file
-func (s SecureFilesService) RemoveSecureFile(pid interface{}, id int, options ...RequestOptionFunc) (*Response, error) {
+func (s SecureFilesService) RemoveSecureFile(pid any, id int64, options ...RequestOptionFunc) (*Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, err

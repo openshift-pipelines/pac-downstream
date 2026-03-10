@@ -2,7 +2,9 @@ package gitea
 
 import (
 	"context"
+	"crypto/hmac"
 	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"net/http"
@@ -10,6 +12,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
@@ -158,6 +161,115 @@ func TestProvider_CreateStatus(t *testing.T) {
 			})
 			if err := p.CreateStatus(context.Background(), tt.args.event, tt.args.statusOpts); (err != nil) != tt.wantErr {
 				t.Errorf("Provider.CreateStatus() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func computeHMACSHA256(payload, secret []byte) string {
+	mac := hmac.New(sha256.New, secret)
+	mac.Write(payload)
+	return hex.EncodeToString(mac.Sum(nil))
+}
+
+func TestProvider_Validate(t *testing.T) {
+	testPayload := []byte(`{"ref":"refs/heads/main"}`)
+	testSecret := "mysecret"
+	validSignature := computeHMACSHA256(testPayload, []byte(testSecret))
+
+	tests := []struct {
+		name            string
+		signatureHeader string
+		signature       string
+		secret          string
+		payload         []byte
+		wantErr         string
+	}{
+		{
+			name:            "valid forgejo signature",
+			signatureHeader: ForgejoSignatureHeader,
+			signature:       validSignature,
+			secret:          testSecret,
+			payload:         testPayload,
+		},
+		{
+			name:            "valid gitea signature",
+			signatureHeader: GiteaSignatureHeader,
+			signature:       validSignature,
+			secret:          testSecret,
+			payload:         testPayload,
+		},
+		{
+			name:            "invalid signature mismatch",
+			signatureHeader: ForgejoSignatureHeader,
+			signature:       computeHMACSHA256([]byte("wrong payload"), []byte(testSecret)),
+			secret:          testSecret,
+			payload:         testPayload,
+			wantErr:         "gitea/forgejo webhook signature validation failed",
+		},
+		{
+			name:            "invalid hex in signature",
+			signatureHeader: ForgejoSignatureHeader,
+			signature:       "not-valid-hex!@#$",
+			secret:          testSecret,
+			payload:         testPayload,
+			wantErr:         "gitea/forgejo webhook signature is not valid hex",
+		},
+		{
+			name:            "signature present but no secret configured",
+			signatureHeader: ForgejoSignatureHeader,
+			signature:       validSignature,
+			secret:          "",
+			payload:         testPayload,
+			wantErr:         "no webhook secret has been set, in repository CR or secret",
+		},
+		{
+			name:            "secret configured but no signature",
+			signatureHeader: "",
+			signature:       "",
+			secret:          testSecret,
+			payload:         testPayload,
+			wantErr:         "no signature has been detected, for security reason we are not allowing webhooks without a secret",
+		},
+		{
+			name:            "no secret and no signature",
+			signatureHeader: "",
+			signature:       "",
+			secret:          "",
+			payload:         testPayload,
+			wantErr:         "no signature has been detected, for security reason we are not allowing webhooks without a secret",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			observer, _ := zapobserver.New(zap.InfoLevel)
+			logger := zap.New(observer).Sugar()
+
+			header := http.Header{}
+			if tt.signatureHeader != "" && tt.signature != "" {
+				header.Set(tt.signatureHeader, tt.signature)
+			}
+
+			event := &info.Event{
+				Provider: &info.Provider{
+					WebhookSecret: tt.secret,
+				},
+				Request: &info.Request{
+					Header:  header,
+					Payload: tt.payload,
+				},
+			}
+
+			p := &Provider{Logger: logger}
+			err := p.Validate(context.Background(), nil, event)
+
+			if tt.wantErr != "" {
+				assert.Assert(t, err != nil, "expected error but got nil")
+				assert.Assert(t, strings.Contains(err.Error(), tt.wantErr),
+					"expected error to contain %q, got %q", tt.wantErr, err.Error())
+			} else {
+				assert.NilError(t, err)
 			}
 		})
 	}
@@ -474,6 +586,110 @@ func TestProvider_CreateStatusCommit(t *testing.T) {
 	}
 }
 
+func TestProviderCreateStatusCommitRetryOnTransientError(t *testing.T) {
+	tests := []struct {
+		name           string
+		failCount      int
+		errorMessage   string
+		wantErr        bool
+		wantRetryCount int
+	}{
+		{
+			name:           "retry on user does not exist error",
+			failCount:      2,
+			errorMessage:   "user does not exist [uid: 0, name: ]",
+			wantErr:        false,
+			wantRetryCount: 2,
+		},
+		{
+			name:           "fail after max retries",
+			failCount:      5, // More than maxRetries (3)
+			errorMessage:   "user does not exist [uid: 0, name: ]",
+			wantErr:        true,
+			wantRetryCount: 3,
+		},
+		{
+			name:           "no retry on other errors",
+			failCount:      1,
+			errorMessage:   "some other error",
+			wantErr:        true,
+			wantRetryCount: 1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fakeclient, mux, teardown := tgitea.Setup(t)
+			defer teardown()
+
+			observer, logs := zapobserver.New(zap.InfoLevel)
+			logger := zap.New(observer).Sugar()
+
+			callCount := 0
+			mux.HandleFunc("/repos/myorg/myrepo/statuses/abc123", func(rw http.ResponseWriter, _ *http.Request) {
+				callCount++
+				if callCount <= tt.failCount {
+					rw.WriteHeader(http.StatusInternalServerError)
+					_, _ = fmt.Fprintf(rw, `{"message": "%s"}`, tt.errorMessage)
+					return
+				}
+				_, _ = rw.Write([]byte(`{"state":"success"}`))
+			})
+
+			v := &Provider{
+				giteaClient: fakeclient,
+				Logger:      logger,
+			}
+
+			event := &info.Event{
+				Organization: "myorg",
+				Repository:   "myrepo",
+				SHA:          "abc123",
+			}
+			pacopts := &info.PacOpts{Settings: settings.Settings{
+				ApplicationName: "myapp",
+			}}
+			status := provider.StatusOpts{
+				Conclusion: "success",
+			}
+
+			err := v.createStatusCommit(event, pacopts, status)
+
+			if tt.wantErr {
+				assert.Assert(t, err != nil, "expected an error but got none")
+			} else {
+				assert.NilError(t, err)
+			}
+
+			// Verify the number of API calls made
+			isTransientError := strings.Contains(tt.errorMessage, "user does not exist")
+			switch {
+			case tt.wantErr && isTransientError:
+				// For transient errors, we should have tried maxRetries (3) times
+				assert.Equal(t, 3, callCount, "expected 3 retries for transient error")
+			case tt.wantErr:
+				// For non-retryable errors, we should have tried only once
+				assert.Equal(t, 1, callCount, "expected only 1 attempt for non-retryable error")
+			default:
+				// For success after retries, we should have failCount+1 calls
+				assert.Equal(t, tt.failCount+1, callCount, "expected failCount+1 calls for eventual success")
+			}
+
+			// Verify warning logs were emitted for retries on "user does not exist" errors
+			if strings.Contains(tt.errorMessage, "user does not exist") && tt.failCount > 0 {
+				retryLogs := 0
+				for _, log := range logs.All() {
+					if strings.Contains(log.Message, "CreateStatus failed with transient error") {
+						retryLogs++
+					}
+				}
+				expectedLogs := min(tt.failCount, 3)
+				assert.Equal(t, expectedLogs, retryLogs, "unexpected number of retry warning logs")
+			}
+		})
+	}
+}
+
 func TestGetTektonDir(t *testing.T) {
 	testGetTektonDir := []struct {
 		treepath             string
@@ -619,6 +835,141 @@ func TestCreateComment(t *testing.T) {
 				assert.ErrorContains(t, err, tt.wantErr)
 			} else {
 				assert.NilError(t, err)
+			}
+		})
+	}
+}
+
+func TestGetCommitInfo(t *testing.T) {
+	tests := []struct {
+		name                string
+		event               *info.Event
+		mockCommitResponse  string
+		wantErr             bool
+		wantSHATitle        string
+		wantSHAURL          string
+		wantSHAMessage      string
+		wantAuthorName      string
+		wantAuthorEmail     string
+		wantAuthorDate      string
+		wantCommitterName   string
+		wantCommitterEmail  string
+		wantCommitterDate   string
+		checkExtendedFields bool
+		noClient            bool
+	}{
+		{
+			name: "good with full commit info",
+			event: &info.Event{
+				Organization: "owner",
+				Repository:   "repo",
+				SHA:          "abc123",
+			},
+			mockCommitResponse: `{
+				"sha": "abc123",
+				"html_url": "https://gitea.com/owner/repo/commit/abc123",
+				"commit": {
+					"message": "feat: add new feature\n\nThis is the full commit message with details.",
+					"author": {
+						"name": "John Doe",
+						"email": "john@example.com",
+						"date": "2024-01-15T10:30:00Z"
+					},
+					"committer": {
+						"name": "Gitea",
+						"email": "noreply@gitea.com",
+						"date": "2024-01-15T10:31:00Z"
+					}
+				}
+			}`,
+			wantSHATitle:        "feat: add new feature",
+			wantSHAURL:          "https://gitea.com/owner/repo/commit/abc123",
+			wantSHAMessage:      "feat: add new feature\n\nThis is the full commit message with details.",
+			wantAuthorName:      "John Doe",
+			wantAuthorEmail:     "john@example.com",
+			wantAuthorDate:      "2024-01-15T10:30:00Z",
+			wantCommitterName:   "Gitea",
+			wantCommitterEmail:  "noreply@gitea.com",
+			wantCommitterDate:   "2024-01-15T10:31:00Z",
+			checkExtendedFields: true,
+		},
+		{
+			name: "basic fields only",
+			event: &info.Event{
+				Organization: "owner",
+				Repository:   "repo",
+				SHA:          "def456",
+			},
+			mockCommitResponse: `{
+				"sha": "def456",
+				"html_url": "https://gitea.com/owner/repo/commit/def456",
+				"commit": {
+					"message": "fix: simple fix"
+				}
+			}`,
+			wantSHATitle:   "fix: simple fix",
+			wantSHAURL:     "https://gitea.com/owner/repo/commit/def456",
+			wantSHAMessage: "fix: simple fix",
+		},
+		{
+			name: "no client error",
+			event: &info.Event{
+				Organization: "owner",
+				Repository:   "repo",
+				SHA:          "abc123",
+			},
+			noClient: true,
+			wantErr:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, _ := rtesting.SetupFakeContext(t)
+
+			var provider *Provider
+			if !tt.noClient {
+				client, mux, tearDown := tgitea.Setup(t)
+				defer tearDown()
+
+				// Mock the GetSingleCommit API endpoint
+				mux.HandleFunc(fmt.Sprintf("/repos/%s/%s/git/commits/%s", tt.event.Organization, tt.event.Repository, tt.event.SHA),
+					func(rw http.ResponseWriter, _ *http.Request) {
+						fmt.Fprint(rw, tt.mockCommitResponse)
+					})
+
+				provider = &Provider{giteaClient: client}
+			} else {
+				provider = &Provider{}
+			}
+
+			err := provider.GetCommitInfo(ctx, tt.event)
+
+			if tt.wantErr {
+				assert.Assert(t, err != nil, "expected error but got nil")
+				return
+			}
+
+			assert.NilError(t, err)
+			assert.Equal(t, tt.wantSHATitle, tt.event.SHATitle, "SHATitle should match")
+			assert.Equal(t, tt.wantSHAURL, tt.event.SHAURL, "SHAURL should match")
+			assert.Equal(t, tt.wantSHAMessage, tt.event.SHAMessage, "SHAMessage should match")
+
+			if tt.checkExtendedFields {
+				assert.Equal(t, tt.wantAuthorName, tt.event.SHAAuthorName, "SHAAuthorName should match")
+				assert.Equal(t, tt.wantAuthorEmail, tt.event.SHAAuthorEmail, "SHAAuthorEmail should match")
+				assert.Equal(t, tt.wantCommitterName, tt.event.SHACommitterName, "SHACommitterName should match")
+				assert.Equal(t, tt.wantCommitterEmail, tt.event.SHACommitterEmail, "SHACommitterEmail should match")
+
+				// Verify dates are parsed correctly
+				if tt.wantAuthorDate != "" {
+					expectedAuthorDate, _ := time.Parse(time.RFC3339, tt.wantAuthorDate)
+					assert.DeepEqual(t, expectedAuthorDate, tt.event.SHAAuthorDate)
+				}
+				if tt.wantCommitterDate != "" {
+					expectedCommitterDate, _ := time.Parse(time.RFC3339, tt.wantCommitterDate)
+					assert.DeepEqual(t, expectedCommitterDate, tt.event.SHACommitterDate)
+				}
 			}
 		})
 	}

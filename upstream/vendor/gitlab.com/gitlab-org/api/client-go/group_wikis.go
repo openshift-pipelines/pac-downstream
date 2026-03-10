@@ -16,23 +16,21 @@
 package gitlab
 
 import (
-	"fmt"
 	"net/http"
-	"net/url"
 )
 
 type (
 	// GroupWikisServiceInterface defines methods for the GroupWikisService.
 	GroupWikisServiceInterface interface {
-		ListGroupWikis(gid interface{}, opt *ListGroupWikisOptions, options ...RequestOptionFunc) ([]*GroupWiki, *Response, error)
-		GetGroupWikiPage(gid interface{}, slug string, opt *GetGroupWikiPageOptions, options ...RequestOptionFunc) (*GroupWiki, *Response, error)
-		CreateGroupWikiPage(gid interface{}, opt *CreateGroupWikiPageOptions, options ...RequestOptionFunc) (*GroupWiki, *Response, error)
-		EditGroupWikiPage(gid interface{}, slug string, opt *EditGroupWikiPageOptions, options ...RequestOptionFunc) (*GroupWiki, *Response, error)
-		DeleteGroupWikiPage(gid interface{}, slug string, options ...RequestOptionFunc) (*Response, error)
+		ListGroupWikis(gid any, opt *ListGroupWikisOptions, options ...RequestOptionFunc) ([]*GroupWiki, *Response, error)
+		GetGroupWikiPage(gid any, slug string, opt *GetGroupWikiPageOptions, options ...RequestOptionFunc) (*GroupWiki, *Response, error)
+		CreateGroupWikiPage(gid any, opt *CreateGroupWikiPageOptions, options ...RequestOptionFunc) (*GroupWiki, *Response, error)
+		EditGroupWikiPage(gid any, slug string, opt *EditGroupWikiPageOptions, options ...RequestOptionFunc) (*GroupWiki, *Response, error)
+		DeleteGroupWikiPage(gid any, slug string, options ...RequestOptionFunc) (*Response, error)
 	}
 
 	// GroupWikisService handles communication with the group wikis related methods of
-	// the Gitlab API.
+	// the GitLab API.
 	//
 	// GitLab API docs: https://docs.gitlab.com/api/group_wikis/
 	GroupWikisService struct {
@@ -70,25 +68,12 @@ type ListGroupWikisOptions struct {
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/group_wikis/#list-wiki-pages
-func (s *GroupWikisService) ListGroupWikis(gid interface{}, opt *ListGroupWikisOptions, options ...RequestOptionFunc) ([]*GroupWiki, *Response, error) {
-	group, err := parseID(gid)
-	if err != nil {
-		return nil, nil, err
-	}
-	u := fmt.Sprintf("groups/%s/wikis", PathEscape(group))
-
-	req, err := s.client.NewRequest(http.MethodGet, u, opt, options)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	var gws []*GroupWiki
-	resp, err := s.client.Do(req, &gws)
-	if err != nil {
-		return nil, resp, err
-	}
-
-	return gws, resp, nil
+func (s *GroupWikisService) ListGroupWikis(gid any, opt *ListGroupWikisOptions, options ...RequestOptionFunc) ([]*GroupWiki, *Response, error) {
+	return do[[]*GroupWiki](s.client,
+		withPath("groups/%s/wikis", GroupID{gid}),
+		withAPIOpts(opt),
+		withRequestOpts(options...),
+	)
 }
 
 // GetGroupWikiPageOptions represents options to GetGroupWikiPage
@@ -104,25 +89,12 @@ type GetGroupWikiPageOptions struct {
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/group_wikis/#get-a-wiki-page
-func (s *GroupWikisService) GetGroupWikiPage(gid interface{}, slug string, opt *GetGroupWikiPageOptions, options ...RequestOptionFunc) (*GroupWiki, *Response, error) {
-	group, err := parseID(gid)
-	if err != nil {
-		return nil, nil, err
-	}
-	u := fmt.Sprintf("groups/%s/wikis/%s", PathEscape(group), url.PathEscape(slug))
-
-	req, err := s.client.NewRequest(http.MethodGet, u, opt, options)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	gw := new(GroupWiki)
-	resp, err := s.client.Do(req, gw)
-	if err != nil {
-		return nil, resp, err
-	}
-
-	return gw, resp, nil
+func (s *GroupWikisService) GetGroupWikiPage(gid any, slug string, opt *GetGroupWikiPageOptions, options ...RequestOptionFunc) (*GroupWiki, *Response, error) {
+	return do[*GroupWiki](s.client,
+		withPath("groups/%s/wikis/%s", GroupID{gid}, slug),
+		withAPIOpts(opt),
+		withRequestOpts(options...),
+	)
 }
 
 // CreateGroupWikiPageOptions represents options to CreateGroupWikiPage.
@@ -140,25 +112,13 @@ type CreateGroupWikiPageOptions struct {
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/group_wikis/#create-a-new-wiki-page
-func (s *GroupWikisService) CreateGroupWikiPage(gid interface{}, opt *CreateGroupWikiPageOptions, options ...RequestOptionFunc) (*GroupWiki, *Response, error) {
-	group, err := parseID(gid)
-	if err != nil {
-		return nil, nil, err
-	}
-	u := fmt.Sprintf("groups/%s/wikis", PathEscape(group))
-
-	req, err := s.client.NewRequest(http.MethodPost, u, opt, options)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	w := new(GroupWiki)
-	resp, err := s.client.Do(req, w)
-	if err != nil {
-		return nil, resp, err
-	}
-
-	return w, resp, nil
+func (s *GroupWikisService) CreateGroupWikiPage(gid any, opt *CreateGroupWikiPageOptions, options ...RequestOptionFunc) (*GroupWiki, *Response, error) {
+	return do[*GroupWiki](s.client,
+		withMethod(http.MethodPost),
+		withPath("groups/%s/wikis", GroupID{gid}),
+		withAPIOpts(opt),
+		withRequestOpts(options...),
+	)
 }
 
 // EditGroupWikiPageOptions represents options to EditGroupWikiPage.
@@ -176,42 +136,24 @@ type EditGroupWikiPageOptions struct {
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/group_wikis/#edit-an-existing-wiki-page
-func (s *GroupWikisService) EditGroupWikiPage(gid interface{}, slug string, opt *EditGroupWikiPageOptions, options ...RequestOptionFunc) (*GroupWiki, *Response, error) {
-	group, err := parseID(gid)
-	if err != nil {
-		return nil, nil, err
-	}
-	u := fmt.Sprintf("groups/%s/wikis/%s", PathEscape(group), url.PathEscape(slug))
-
-	req, err := s.client.NewRequest(http.MethodPut, u, opt, options)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	w := new(GroupWiki)
-	resp, err := s.client.Do(req, w)
-	if err != nil {
-		return nil, resp, err
-	}
-
-	return w, resp, nil
+func (s *GroupWikisService) EditGroupWikiPage(gid any, slug string, opt *EditGroupWikiPageOptions, options ...RequestOptionFunc) (*GroupWiki, *Response, error) {
+	return do[*GroupWiki](s.client,
+		withMethod(http.MethodPut),
+		withPath("groups/%s/wikis/%s", GroupID{gid}, slug),
+		withAPIOpts(opt),
+		withRequestOpts(options...),
+	)
 }
 
 // DeleteGroupWikiPage deletes a wiki page with a given slug.
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/group_wikis/#delete-a-wiki-page
-func (s *GroupWikisService) DeleteGroupWikiPage(gid interface{}, slug string, options ...RequestOptionFunc) (*Response, error) {
-	group, err := parseID(gid)
-	if err != nil {
-		return nil, err
-	}
-	u := fmt.Sprintf("groups/%s/wikis/%s", PathEscape(group), url.PathEscape(slug))
-
-	req, err := s.client.NewRequest(http.MethodDelete, u, nil, options)
-	if err != nil {
-		return nil, err
-	}
-
-	return s.client.Do(req, nil)
+func (s *GroupWikisService) DeleteGroupWikiPage(gid any, slug string, options ...RequestOptionFunc) (*Response, error) {
+	_, resp, err := do[none](s.client,
+		withMethod(http.MethodDelete),
+		withPath("groups/%s/wikis/%s", GroupID{gid}, slug),
+		withRequestOpts(options...),
+	)
+	return resp, err
 }

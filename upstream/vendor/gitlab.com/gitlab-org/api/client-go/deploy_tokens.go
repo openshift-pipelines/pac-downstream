@@ -24,15 +24,68 @@ import (
 
 type (
 	DeployTokensServiceInterface interface {
+		// ListAllDeployTokens gets a list of all deploy tokens.
+		//
+		// GitLab API docs:
+		// https://docs.gitlab.com/api/deploy_tokens/#list-all-deploy-tokens
+		// ListAllDeployTokens gets a list of all deploy tokens.
+		//
+		// GitLab API docs:
+		// https://docs.gitlab.com/api/deploy_tokens/#list-all-deploy-tokens
 		ListAllDeployTokens(options ...RequestOptionFunc) ([]*DeployToken, *Response, error)
-		ListProjectDeployTokens(pid interface{}, opt *ListProjectDeployTokensOptions, options ...RequestOptionFunc) ([]*DeployToken, *Response, error)
-		GetProjectDeployToken(pid interface{}, deployToken int, options ...RequestOptionFunc) (*DeployToken, *Response, error)
-		CreateProjectDeployToken(pid interface{}, opt *CreateProjectDeployTokenOptions, options ...RequestOptionFunc) (*DeployToken, *Response, error)
-		DeleteProjectDeployToken(pid interface{}, deployToken int, options ...RequestOptionFunc) (*Response, error)
-		ListGroupDeployTokens(gid interface{}, opt *ListGroupDeployTokensOptions, options ...RequestOptionFunc) ([]*DeployToken, *Response, error)
-		GetGroupDeployToken(gid interface{}, deployToken int, options ...RequestOptionFunc) (*DeployToken, *Response, error)
-		CreateGroupDeployToken(gid interface{}, opt *CreateGroupDeployTokenOptions, options ...RequestOptionFunc) (*DeployToken, *Response, error)
-		DeleteGroupDeployToken(gid interface{}, deployToken int, options ...RequestOptionFunc) (*Response, error)
+
+		// ListProjectDeployTokens gets a list of a project's deploy tokens.
+		//
+		// GitLab API docs:
+		// https://docs.gitlab.com/api/deploy_tokens/#list-project-deploy-tokens
+
+		// ListProjectDeployTokens gets a list of a project's deploy tokens.
+		//
+		// GitLab API docs:
+		// https://docs.gitlab.com/api/deploy_tokens/#list-project-deploy-tokens
+		ListProjectDeployTokens(pid any, opt *ListProjectDeployTokensOptions, options ...RequestOptionFunc) ([]*DeployToken, *Response, error)
+
+		// GetProjectDeployToken gets a single deploy token.
+		//
+		// GitLab API docs:
+		// https://docs.gitlab.com/api/deploy_tokens/#get-a-project-deploy-token
+		GetProjectDeployToken(pid any, deployToken int64, options ...RequestOptionFunc) (*DeployToken, *Response, error)
+
+		// CreateProjectDeployToken creates a new deploy token for a project.
+		//
+		// GitLab API docs:
+		// https://docs.gitlab.com/api/deploy_tokens/#create-a-project-deploy-token
+		CreateProjectDeployToken(pid any, opt *CreateProjectDeployTokenOptions, options ...RequestOptionFunc) (*DeployToken, *Response, error)
+
+		// DeleteProjectDeployToken removes a deploy token from the project.
+		//
+		// GitLab API docs:
+		// https://docs.gitlab.com/api/deploy_tokens/#delete-a-project-deploy-token
+		DeleteProjectDeployToken(pid any, deployToken int64, options ...RequestOptionFunc) (*Response, error)
+
+		// ListGroupDeployTokens gets a list of a group’s deploy tokens.
+		//
+		// GitLab API docs:
+		// https://docs.gitlab.com/api/deploy_tokens/#list-group-deploy-tokens
+		ListGroupDeployTokens(gid any, opt *ListGroupDeployTokensOptions, options ...RequestOptionFunc) ([]*DeployToken, *Response, error)
+
+		// GetGroupDeployToken gets a single deploy token.
+		//
+		// GitLab API docs:
+		// https://docs.gitlab.com/api/deploy_tokens/#get-a-group-deploy-token
+		GetGroupDeployToken(gid any, deployToken int64, options ...RequestOptionFunc) (*DeployToken, *Response, error)
+
+		// CreateGroupDeployToken creates a new deploy token for a group.
+		//
+		// GitLab API docs:
+		// https://docs.gitlab.com/api/deploy_tokens/#create-a-group-deploy-token
+		CreateGroupDeployToken(gid any, opt *CreateGroupDeployTokenOptions, options ...RequestOptionFunc) (*DeployToken, *Response, error)
+
+		// DeleteGroupDeployToken removes a deploy token from the group.
+		//
+		// GitLab API docs:
+		// https://docs.gitlab.com/api/deploy_tokens/#delete-a-group-deploy-token
+		DeleteGroupDeployToken(gid any, deployToken int64, options ...RequestOptionFunc) (*Response, error)
 	}
 
 	// DeployTokensService handles communication with the deploy tokens related methods
@@ -46,7 +99,7 @@ type (
 
 // DeployToken represents a GitLab deploy token.
 type DeployToken struct {
-	ID        int        `json:"id"`
+	ID        int64      `json:"id"`
 	Name      string     `json:"name"`
 	Username  string     `json:"username"`
 	ExpiresAt *time.Time `json:"expires_at"`
@@ -60,10 +113,6 @@ func (k DeployToken) String() string {
 	return Stringify(k)
 }
 
-// ListAllDeployTokens gets a list of all deploy tokens.
-//
-// GitLab API docs:
-// https://docs.gitlab.com/api/deploy_tokens/#list-all-deploy-tokens
 func (s *DeployTokensService) ListAllDeployTokens(options ...RequestOptionFunc) ([]*DeployToken, *Response, error) {
 	req, err := s.client.NewRequest(http.MethodGet, "deploy_tokens", nil, options)
 	if err != nil {
@@ -84,13 +133,11 @@ func (s *DeployTokensService) ListAllDeployTokens(options ...RequestOptionFunc) 
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/deploy_tokens/#list-project-deploy-tokens
-type ListProjectDeployTokensOptions ListOptions
+type ListProjectDeployTokensOptions struct {
+	ListOptions
+}
 
-// ListProjectDeployTokens gets a list of a project's deploy tokens.
-//
-// GitLab API docs:
-// https://docs.gitlab.com/api/deploy_tokens/#list-project-deploy-tokens
-func (s *DeployTokensService) ListProjectDeployTokens(pid interface{}, opt *ListProjectDeployTokensOptions, options ...RequestOptionFunc) ([]*DeployToken, *Response, error) {
+func (s *DeployTokensService) ListProjectDeployTokens(pid any, opt *ListProjectDeployTokensOptions, options ...RequestOptionFunc) ([]*DeployToken, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err
@@ -111,11 +158,7 @@ func (s *DeployTokensService) ListProjectDeployTokens(pid interface{}, opt *List
 	return ts, resp, nil
 }
 
-// GetProjectDeployToken gets a single deploy token.
-//
-// GitLab API docs:
-// https://docs.gitlab.com/api/deploy_tokens/#get-a-project-deploy-token
-func (s *DeployTokensService) GetProjectDeployToken(pid interface{}, deployToken int, options ...RequestOptionFunc) (*DeployToken, *Response, error) {
+func (s *DeployTokensService) GetProjectDeployToken(pid any, deployToken int64, options ...RequestOptionFunc) (*DeployToken, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err
@@ -147,11 +190,7 @@ type CreateProjectDeployTokenOptions struct {
 	Scopes    *[]string  `url:"scopes,omitempty" json:"scopes,omitempty"`
 }
 
-// CreateProjectDeployToken creates a new deploy token for a project.
-//
-// GitLab API docs:
-// https://docs.gitlab.com/api/deploy_tokens/#create-a-project-deploy-token
-func (s *DeployTokensService) CreateProjectDeployToken(pid interface{}, opt *CreateProjectDeployTokenOptions, options ...RequestOptionFunc) (*DeployToken, *Response, error) {
+func (s *DeployTokensService) CreateProjectDeployToken(pid any, opt *CreateProjectDeployTokenOptions, options ...RequestOptionFunc) (*DeployToken, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err
@@ -172,11 +211,7 @@ func (s *DeployTokensService) CreateProjectDeployToken(pid interface{}, opt *Cre
 	return t, resp, nil
 }
 
-// DeleteProjectDeployToken removes a deploy token from the project.
-//
-// GitLab API docs:
-// https://docs.gitlab.com/api/deploy_tokens/#delete-a-project-deploy-token
-func (s *DeployTokensService) DeleteProjectDeployToken(pid interface{}, deployToken int, options ...RequestOptionFunc) (*Response, error) {
+func (s *DeployTokensService) DeleteProjectDeployToken(pid any, deployToken int64, options ...RequestOptionFunc) (*Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, err
@@ -196,13 +231,11 @@ func (s *DeployTokensService) DeleteProjectDeployToken(pid interface{}, deployTo
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/deploy_tokens/#list-group-deploy-tokens
-type ListGroupDeployTokensOptions ListOptions
+type ListGroupDeployTokensOptions struct {
+	ListOptions
+}
 
-// ListGroupDeployTokens gets a list of a group’s deploy tokens.
-//
-// GitLab API docs:
-// https://docs.gitlab.com/api/deploy_tokens/#list-group-deploy-tokens
-func (s *DeployTokensService) ListGroupDeployTokens(gid interface{}, opt *ListGroupDeployTokensOptions, options ...RequestOptionFunc) ([]*DeployToken, *Response, error) {
+func (s *DeployTokensService) ListGroupDeployTokens(gid any, opt *ListGroupDeployTokensOptions, options ...RequestOptionFunc) ([]*DeployToken, *Response, error) {
 	group, err := parseID(gid)
 	if err != nil {
 		return nil, nil, err
@@ -223,11 +256,7 @@ func (s *DeployTokensService) ListGroupDeployTokens(gid interface{}, opt *ListGr
 	return ts, resp, nil
 }
 
-// GetGroupDeployToken gets a single deploy token.
-//
-// GitLab API docs:
-// https://docs.gitlab.com/api/deploy_tokens/#get-a-group-deploy-token
-func (s *DeployTokensService) GetGroupDeployToken(gid interface{}, deployToken int, options ...RequestOptionFunc) (*DeployToken, *Response, error) {
+func (s *DeployTokensService) GetGroupDeployToken(gid any, deployToken int64, options ...RequestOptionFunc) (*DeployToken, *Response, error) {
 	group, err := parseID(gid)
 	if err != nil {
 		return nil, nil, err
@@ -259,11 +288,7 @@ type CreateGroupDeployTokenOptions struct {
 	Scopes    *[]string  `url:"scopes,omitempty" json:"scopes,omitempty"`
 }
 
-// CreateGroupDeployToken creates a new deploy token for a group.
-//
-// GitLab API docs:
-// https://docs.gitlab.com/api/deploy_tokens/#create-a-group-deploy-token
-func (s *DeployTokensService) CreateGroupDeployToken(gid interface{}, opt *CreateGroupDeployTokenOptions, options ...RequestOptionFunc) (*DeployToken, *Response, error) {
+func (s *DeployTokensService) CreateGroupDeployToken(gid any, opt *CreateGroupDeployTokenOptions, options ...RequestOptionFunc) (*DeployToken, *Response, error) {
 	group, err := parseID(gid)
 	if err != nil {
 		return nil, nil, err
@@ -284,11 +309,7 @@ func (s *DeployTokensService) CreateGroupDeployToken(gid interface{}, opt *Creat
 	return t, resp, nil
 }
 
-// DeleteGroupDeployToken removes a deploy token from the group.
-//
-// GitLab API docs:
-// https://docs.gitlab.com/api/deploy_tokens/#delete-a-group-deploy-token
-func (s *DeployTokensService) DeleteGroupDeployToken(gid interface{}, deployToken int, options ...RequestOptionFunc) (*Response, error) {
+func (s *DeployTokensService) DeleteGroupDeployToken(gid any, deployToken int64, options ...RequestOptionFunc) (*Response, error) {
 	group, err := parseID(gid)
 	if err != nil {
 		return nil, err

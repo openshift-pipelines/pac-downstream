@@ -169,7 +169,7 @@ func TestGetCatalogHub(t *testing.T) {
 			config: map[string]string{
 				"hub-catalog-type": "invalid",
 			},
-			numCatalogs: 2,
+			numCatalogs: 1,
 			hubCatalogs: &sync.Map{},
 			wantLog:     `CONFIG: invalid hub type invalid, defaulting to artifacthub`,
 			httpClient:  mockHTTPClient,

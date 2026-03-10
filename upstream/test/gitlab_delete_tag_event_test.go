@@ -12,7 +12,6 @@ import (
 	tgitlab "github.com/openshift-pipelines/pipelines-as-code/test/pkg/gitlab"
 	twait "github.com/openshift-pipelines/pipelines-as-code/test/pkg/wait"
 	"github.com/tektoncd/pipeline/pkg/names"
-	gitlab "gitlab.com/gitlab-org/api/client-go"
 	"gotest.tools/v3/assert"
 )
 
@@ -36,19 +35,20 @@ func TestGitlabDeleteTagEvent(t *testing.T) {
 	assert.NilError(t, err)
 
 	tagName := names.SimpleNameGenerator.RestrictLengthWithRandomSuffix("v1.0")
-	err = tgitlab.CreateTag(glprovider.Client(), projectinfo.ID, tagName)
+	err = tgitlab.CreateTag(glprovider.Client(), int(projectinfo.ID), tagName)
 	// if something goes wrong in creating tag and tag remains in
 	// repository CleanTag will clear that and doesn't throw any error.
-	defer tgitlab.CleanTag(glprovider.Client(), projectinfo.ID, tagName)
+	defer tgitlab.CleanTag(glprovider.Client(), int(projectinfo.ID), tagName)
 	assert.NilError(t, err)
 	runcnx.Clients.Log.Infof("Created Tag %s in %s repository", tagName, projectinfo.Name)
 
-	err = tgitlab.DeleteTag(glprovider.Client(), projectinfo.ID, tagName)
+	err = tgitlab.DeleteTag(glprovider.Client(), int(projectinfo.ID), tagName)
 	assert.NilError(t, err)
 	runcnx.Clients.Log.Infof("Deleted Tag %s in %s repository", tagName, projectinfo.Name)
 
-	reg := regexp.MustCompile("event Delete Tag Push Hook is not supported*")
-	err = twait.RegexpMatchingInControllerLog(ctx, runcnx, *reg, 10, "controller", gitlab.Ptr(int64(50)))
+	logLinesToCheck := int64(1000)
+	reg := regexp.MustCompile("event Delete Tag Push Hook is not supported.*")
+	err = twait.RegexpMatchingInControllerLog(ctx, runcnx, *reg, 10, "controller", &logLinesToCheck)
 	assert.NilError(t, err)
 }
 

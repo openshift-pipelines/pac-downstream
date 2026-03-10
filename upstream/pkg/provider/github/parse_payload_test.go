@@ -5,11 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"strconv"
-	"strings"
 	"testing"
 
-	"github.com/google/go-github/v71/github"
+	"github.com/google/go-github/v81/github"
 	"gotest.tools/v3/assert"
 	"gotest.tools/v3/env"
 	corev1 "k8s.io/api/core/v1"
@@ -89,15 +87,17 @@ var samplePRAnother = github.PullRequest{
 }
 
 func TestGetPullRequestsWithCommit(t *testing.T) {
+	apiHitCount := 0
 	tests := []struct {
-		name         string
-		sha          string
-		org          string
-		repo         string
-		hasClient    bool
-		mockAPIs     map[string]func(rw http.ResponseWriter, r *http.Request)
-		wantPRsCount int
-		wantErr      bool
+		name          string
+		sha           string
+		org           string
+		repo          string
+		hasClient     bool
+		mockAPIs      map[string]func(rw http.ResponseWriter, r *http.Request)
+		wantPRsCount  int
+		isMergeCommit bool
+		wantErr       bool
 	}{
 		{
 			name:      "nil client returns error",
@@ -214,6 +214,27 @@ func TestGetPullRequestsWithCommit(t *testing.T) {
 			wantPRsCount: 2,
 			wantErr:      false,
 		},
+		{
+			name:      "commit is part of one PR and is a merge commit",
+			sha:       "abc123",
+			org:       "testorg",
+			repo:      "testrepo",
+			hasClient: true,
+			mockAPIs: map[string]func(rw http.ResponseWriter, r *http.Request){
+				"/repos/testorg/testrepo/commits/abc123/pulls": func(rw http.ResponseWriter, r *http.Request) {
+					assert.Equal(t, r.Method, http.MethodGet)
+					apiHitCount++
+					if apiHitCount == 3 {
+						fmt.Fprint(rw, `[{"number": 42, "state": "closed"}]`)
+					} else {
+						fmt.Fprint(rw, `[]`)
+					}
+				},
+			},
+			wantPRsCount:  1,
+			isMergeCommit: true,
+			wantErr:       false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -242,9 +263,13 @@ func TestGetPullRequestsWithCommit(t *testing.T) {
 				}
 			}
 
-			prs, err := provider.getPullRequestsWithCommit(ctx, tt.sha, tt.org, tt.repo)
+			prs, err := provider.getPullRequestsWithCommit(ctx, tt.sha, tt.org, tt.repo, tt.isMergeCommit)
 			assert.Equal(t, err != nil, tt.wantErr)
 			assert.Equal(t, len(prs), tt.wantPRsCount)
+
+			if tt.isMergeCommit {
+				assert.Equal(t, apiHitCount, 3)
+			}
 
 			if tt.wantErr && err != nil {
 				// Verify error messages for validation cases
@@ -356,6 +381,18 @@ func TestParsePayLoad(t *testing.T) {
 	samplePRNoRepo.Repo = nil
 	samplePrEventClosed := samplePRevent
 	samplePrEventClosed.Action = github.Ptr("closed")
+
+	sampleGhPRs := []*github.PullRequest{
+		{
+			Number: github.Ptr(41),
+			State:  github.Ptr("closed"),
+		},
+		{
+			Number: github.Ptr(42),
+			State:  github.Ptr("open"),
+		},
+	}
+
 	tests := []struct {
 		name                       string
 		wantErrString              string
@@ -369,7 +406,12 @@ func TestParsePayLoad(t *testing.T) {
 		targetPipelinerun          string
 		targetCancelPipelinerun    string
 		wantedBranchName           string
+		wantedTagName              string
+		wantedPullRequestNumber    int
 		isCancelPipelineRunEnabled bool
+		isMergeCommit              bool
+		skipPushEventForPRCommits  bool
+		objectType                 string
 	}{
 		{
 			name:          "bad/unknown event",
@@ -661,7 +703,7 @@ func TestParsePayLoad(t *testing.T) {
 		},
 		{
 			name:          "bad/commit comment for /test command does not contain branch keyword",
-			wantErrString: "the GitOps comment dummy rbanch does not contain a branch word",
+			wantErrString: "the GitOps comment `/test dummy rbanch:test` does not contain a branch or tag word",
 			eventType:     "commit_comment",
 			triggerTarget: "push",
 			githubClient:  true,
@@ -712,6 +754,96 @@ func TestParsePayLoad(t *testing.T) {
 			muxReplies:       map[string]any{"/repos/owner/reponame/pulls/777": samplePR},
 			shaRet:           "samplePRsha",
 			wantedBranchName: "main",
+		},
+		{
+			name:          "good/commit comment for test with tag",
+			eventType:     "commit_comment",
+			triggerTarget: "push",
+			githubClient:  true,
+			payloadEventStruct: github.CommitCommentEvent{
+				Repo: sampleRepo,
+				Comment: &github.RepositoryComment{
+					CommitID: github.Ptr("samplePRsha"),
+					HTMLURL:  github.Ptr("/777"),
+					Body:     github.Ptr("/test tag:v1.0.0"),
+				},
+			},
+			shaRet:           "samplePRsha",
+			objectType:       "tag",
+			wantedBranchName: "refs/tags/v1.0.0",
+		},
+		{
+			name:          "good/commit comment for test with pipelinerun name and tag",
+			eventType:     "commit_comment",
+			triggerTarget: "push",
+			githubClient:  true,
+			payloadEventStruct: github.CommitCommentEvent{
+				Repo: sampleRepo,
+				Comment: &github.RepositoryComment{
+					CommitID: github.Ptr("samplePRsha"),
+					HTMLURL:  github.Ptr("/777"),
+					Body:     github.Ptr("/test dummy tag:v1.0.0"),
+				},
+			},
+			shaRet:            "samplePRsha",
+			targetPipelinerun: "dummy",
+			objectType:        "tag",
+			wantedBranchName:  "refs/tags/v1.0.0",
+		},
+		{
+			name:          "good/commit comment for test tag with object type commit",
+			eventType:     "commit_comment",
+			triggerTarget: "push",
+			githubClient:  true,
+			payloadEventStruct: github.CommitCommentEvent{
+				Repo: sampleRepo,
+				Comment: &github.RepositoryComment{
+					CommitID: github.Ptr("samplePRsha"),
+					HTMLURL:  github.Ptr("/777"),
+					Body:     github.Ptr("/test dummy tag:v1.0.0"),
+				},
+			},
+			shaRet:            "samplePRsha",
+			targetPipelinerun: "dummy",
+			objectType:        "commit",
+			wantedBranchName:  "refs/tags/v1.0.0",
+		},
+		{
+			name:          "bad/commit comment for test tag invalid object type",
+			eventType:     "commit_comment",
+			triggerTarget: "push",
+			githubClient:  true,
+			payloadEventStruct: github.CommitCommentEvent{
+				Repo: sampleRepo,
+				Comment: &github.RepositoryComment{
+					CommitID: github.Ptr("samplePRsha"),
+					HTMLURL:  github.Ptr("/777"),
+					Body:     github.Ptr("/test dummy tag:v1.0.0"),
+				},
+			},
+			shaRet:            "samplePRsha",
+			targetPipelinerun: "dummy",
+			wantedBranchName:  "refs/tags/v1.0.0",
+			objectType:        "blob",
+			wantErrString:     "invalid object type for tag v1.0.0: blob",
+		},
+		{
+			name:          "bad/commit comment for test with pipelinerun name and wrong tag keyword",
+			eventType:     "commit_comment",
+			triggerTarget: "push",
+			githubClient:  true,
+			payloadEventStruct: github.CommitCommentEvent{
+				Repo: sampleRepo,
+				Comment: &github.RepositoryComment{
+					CommitID: github.Ptr("samplePRsha"),
+					HTMLURL:  github.Ptr("/777"),
+					Body:     github.Ptr("/test dummy taig:v1.0.0"),
+				},
+			},
+			shaRet:            "samplePRsha",
+			targetPipelinerun: "dummy",
+			wantedBranchName:  "refs/tags/v1.0.0",
+			wantErrString:     "the GitOps comment `/test dummy taig:v1.0.0` does not contain a branch or tag word",
 		},
 		{
 			name:          "good/commit comment for cancel all",
@@ -807,6 +939,28 @@ func TestParsePayLoad(t *testing.T) {
 			isCancelPipelineRunEnabled: true,
 		},
 		{
+			name:          "good/commit comment want pull request number",
+			eventType:     "commit_comment",
+			triggerTarget: "push",
+			githubClient:  true,
+			payloadEventStruct: github.CommitCommentEvent{
+				Repo: sampleRepo,
+				Comment: &github.RepositoryComment{
+					CommitID: github.Ptr("samplePRsha"),
+					HTMLURL:  github.Ptr("/888"),
+					Body:     github.Ptr("/retest dummy"),
+				},
+			},
+			muxReplies: map[string]any{
+				"/repos/owner/reponame/pulls/8881":                samplePR,
+				"/repos/owner/reponame/commits/samplePRsha/pulls": []*github.PullRequest{&samplePR},
+			},
+			shaRet:                  "samplePRsha",
+			targetPipelinerun:       "dummy",
+			wantedBranchName:        "main",
+			wantedPullRequestNumber: 54321,
+		},
+		{
 			name:          "bad/commit comment for cancel a pr with invalid branch name",
 			eventType:     "commit_comment",
 			triggerTarget: "push",
@@ -844,6 +998,60 @@ func TestParsePayLoad(t *testing.T) {
 			targetPipelinerun: "dummy",
 			wantedBranchName:  "main",
 			wantErrString:     "provided SHA samplePRshanew is not the HEAD commit of the branch main",
+		},
+		{
+			name:          "commit comment to retest a pr with a merge commit",
+			eventType:     "commit_comment",
+			triggerTarget: "push",
+			githubClient:  true,
+			payloadEventStruct: github.CommitCommentEvent{
+				Repo: sampleRepo,
+				Comment: &github.RepositoryComment{
+					CommitID: github.Ptr("samplePRsha"),
+					HTMLURL:  github.Ptr("/777"),
+					Body:     github.Ptr("/retest dummy"),
+				},
+			},
+			muxReplies:        map[string]any{"/repos/owner/reponame/pulls/777": samplePR},
+			shaRet:            "samplePRsha",
+			targetPipelinerun: "dummy",
+			wantedBranchName:  "main",
+			isMergeCommit:     true,
+		},
+		{
+			name:          "good/skip push event for skip-pr-commits setting",
+			eventType:     "push",
+			triggerTarget: "push",
+			githubClient:  true,
+			payloadEventStruct: github.PushEvent{
+				Ref: github.Ptr("refs/heads/main"),
+				Repo: &github.PushEventRepository{
+					Owner: &github.User{Login: github.Ptr("owner")},
+					Name:  github.Ptr("pushRepo"),
+				},
+				HeadCommit: &github.HeadCommit{ID: github.Ptr("SHAPush")},
+			},
+			shaRet:                    "",
+			skipPushEventForPRCommits: true,
+			muxReplies:                map[string]any{"/repos/owner/pushRepo/commits/SHAPush/pulls": sampleGhPRs},
+			wantErrString:             "",
+		},
+		{
+			name:          "good/skip tag push event for skip-pr-commits setting",
+			eventType:     "push",
+			triggerTarget: "push",
+			githubClient:  true,
+			payloadEventStruct: github.PushEvent{
+				Ref: github.Ptr("refs/tags/v1.0.0"),
+				Repo: &github.PushEventRepository{
+					Owner: &github.User{Login: github.Ptr("owner")},
+					Name:  github.Ptr("pushRepo"),
+				},
+				HeadCommit: &github.HeadCommit{ID: github.Ptr("SHAPush")},
+			},
+			shaRet:                    "SHAPush",
+			skipPushEventForPRCommits: true,
+			muxReplies:                map[string]any{"/repos/owner/pushRepo/commits/SHAPush/pulls": sampleGhPRs},
 		},
 	}
 	for _, tt := range tests {
@@ -891,13 +1099,52 @@ func TestParsePayLoad(t *testing.T) {
 		}`)
 					assert.NilError(t, err)
 				})
+
+				mux.HandleFunc(fmt.Sprintf("/repos/%s/%s/git/ref/tags/v1.0.0", "owner", "reponame"), func(rw http.ResponseWriter, _ *http.Request) {
+					ref := &github.Reference{
+						Object: &github.GitObject{
+							SHA:  github.Ptr("samplePRsha"),
+							Type: github.Ptr(tt.objectType),
+						},
+					}
+					bjeez, _ := json.Marshal(ref)
+					fmt.Fprint(rw, string(bjeez))
+				})
+				mux.HandleFunc(fmt.Sprintf("/repos/%s/%s/git/tags/samplePRsha", "owner", "reponame"), func(rw http.ResponseWriter, _ *http.Request) {
+					tag := &github.Tag{
+						Object: &github.GitObject{
+							SHA: github.Ptr("samplePRsha"),
+						},
+					}
+					bjeez, _ := json.Marshal(tag)
+					fmt.Fprint(rw, string(bjeez))
+				})
+
+				mux.HandleFunc(fmt.Sprintf("/repos/%s/%s/git/commits/%s", "owner", "reponame", tt.shaRet), func(rw http.ResponseWriter, _ *http.Request) {
+					name := "test"
+					email := "test@test.com"
+					if tt.isMergeCommit {
+						name = "web-flow"
+						email = "noreply@github.com"
+					}
+					commit := &github.Commit{
+						SHA: github.Ptr(tt.shaRet),
+						Committer: &github.CommitAuthor{
+							Email: github.Ptr(email),
+							Name:  github.Ptr(name),
+						},
+					}
+					bjeez, _ := json.Marshal(commit)
+					fmt.Fprint(rw, string(bjeez))
+				})
 			}
+
 			logger, _ := logger.GetLogger()
 			gprovider := Provider{
 				ghClient: ghClient,
 				Logger:   logger,
 				pacInfo: &info.PacOpts{
-					Settings: settings.Settings{},
+					Settings: settings.Settings{SkipPushEventForPRCommits: tt.skipPushEventForPRCommits},
 				},
 			}
 			request := &http.Request{Header: map[string][]string{}}
@@ -915,6 +1162,12 @@ func TestParsePayLoad(t *testing.T) {
 				return
 			}
 			assert.NilError(t, err)
+			// If shaRet is empty, this is a skip case (push event for PR commit)
+			// In this case, ret should be nil
+			if tt.shaRet == "" {
+				assert.Assert(t, ret == nil, "Expected nil result for skipped push event")
+				return
+			}
 			assert.Assert(t, ret != nil)
 			assert.Equal(t, tt.shaRet, ret.SHA)
 			if tt.eventType == triggertype.PullRequest.String() {
@@ -924,6 +1177,9 @@ func TestParsePayLoad(t *testing.T) {
 				assert.Equal(t, tt.wantedBranchName, ret.HeadBranch)
 				assert.Equal(t, tt.wantedBranchName, ret.BaseBranch)
 				assert.Equal(t, tt.isCancelPipelineRunEnabled, ret.CancelPipelineRuns)
+			}
+			if tt.wantedPullRequestNumber != 0 {
+				assert.Equal(t, tt.wantedPullRequestNumber, ret.PullRequestNumber)
 			}
 			if tt.targetPipelinerun != "" {
 				assert.Equal(t, tt.targetPipelinerun, ret.TargetTestPipelineRun)
@@ -992,16 +1248,13 @@ func TestAppTokenGeneration(t *testing.T) {
 	})
 
 	tests := []struct {
-		ctx                 context.Context
-		ctxNS               string
-		name                string
-		wantErrSubst        string
-		nilClient           bool
-		seedData            testclient.Clients
-		envs                map[string]string
-		resultBaseURL       string
-		checkInstallIDs     []int64
-		extraRepoInstallIDs map[string]string
+		ctx          context.Context
+		ctxNS        string
+		name         string
+		wantErrSubst string
+		nilClient    bool
+		seedData     testclient.Clients
+		envs         map[string]string
 	}{
 		{
 			name:         "secret not found",
@@ -1016,23 +1269,6 @@ func TestAppTokenGeneration(t *testing.T) {
 			ctxNS:     testNamespace,
 			seedData:  vaildSecret,
 			nilClient: false,
-		},
-		{
-			ctx:             ctx,
-			name:            "check installation ids are set",
-			ctxNS:           testNamespace,
-			seedData:        vaildSecret,
-			nilClient:       false,
-			checkInstallIDs: []int64{123},
-		},
-		{
-			ctx:                 ctx,
-			name:                "check extras installations ids set",
-			ctxNS:               testNamespace,
-			seedData:            vaildSecret,
-			nilClient:           false,
-			checkInstallIDs:     []int64{123},
-			extraRepoInstallIDs: map[string]string{"another/one": "789", "andanother/two": "10112"},
 		},
 		{
 			ctx:          ctxInvalidAppID,
@@ -1064,17 +1300,6 @@ func TestAppTokenGeneration(t *testing.T) {
 				ID: &testInstallationID,
 			}
 
-			if len(tt.checkInstallIDs) > 0 {
-				samplePRevent.PullRequest = &github.PullRequest{
-					// order is important here for the check later
-					Base: &github.PullRequestBranch{
-						Repo: &github.Repository{
-							ID: github.Ptr(tt.checkInstallIDs[0]),
-						},
-					},
-				}
-			}
-
 			jeez, _ := json.Marshal(samplePRevent)
 			logger, _ := logger.GetLogger()
 			gprovider := Provider{
@@ -1102,26 +1327,6 @@ func TestAppTokenGeneration(t *testing.T) {
 				},
 			}
 
-			if len(tt.checkInstallIDs) > 0 {
-				gprovider.pacInfo.SecretGHAppRepoScoped = true
-			}
-			if len(tt.extraRepoInstallIDs) > 0 {
-				extras := ""
-				for name := range tt.extraRepoInstallIDs {
-					split := strings.Split(name, "/")
-					mux.HandleFunc(fmt.Sprintf("/repos/%s/%s", split[0], split[1]), func(w http.ResponseWriter, _ *http.Request) {
-						// i can't do a for name, iid and use iid, cause golang shadows the variable out of the for loop
-						// a bit stupid
-						sid := tt.extraRepoInstallIDs[fmt.Sprintf("%s/%s", split[0], split[1])]
-						_, _ = fmt.Fprintf(w, `{"id": %s}`, sid)
-					})
-					extras += fmt.Sprintf("%s, ", name)
-				}
-
-				gprovider.pacInfo.SecretGHAppRepoScoped = true
-				gprovider.pacInfo.SecretGhAppTokenScopedExtraRepos = extras
-			}
-
 			tt.ctx = info.StoreCurrentControllerName(tt.ctx, "default")
 			tt.ctx = info.StoreNS(tt.ctx, tt.ctxNS)
 
@@ -1137,28 +1342,8 @@ func TestAppTokenGeneration(t *testing.T) {
 				return
 			}
 
-			for k, id := range tt.checkInstallIDs {
-				if gprovider.RepositoryIDs[k] != id {
-					t.Errorf("got %d, want %d", gprovider.RepositoryIDs[k], id)
-				}
-			}
-
-			for _, extraid := range tt.extraRepoInstallIDs {
-				// checkInstallIDs and extraRepoInstallIds are merged and extraRepoInstallIds is after
-				found := false
-				extraIDInt, _ := strconv.ParseInt(extraid, 10, 64)
-				for _, rid := range gprovider.RepositoryIDs {
-					if extraIDInt == rid {
-						found = true
-					}
-				}
-				assert.Assert(t, found, "Could not find %s in %s", extraIDInt, tt.extraRepoInstallIDs)
-			}
-
+			// Verify client was created successfully for GitHub App
 			assert.Assert(t, gprovider.Client() != nil)
-			if tt.resultBaseURL != "" {
-				assert.Equal(t, gprovider.Client().BaseURL.String(), tt.resultBaseURL)
-			}
 		})
 	}
 }

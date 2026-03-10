@@ -17,7 +17,6 @@
 package gitlab
 
 import (
-	"fmt"
 	"net/http"
 	"net/url"
 )
@@ -25,11 +24,11 @@ import (
 type (
 	// GroupVariablesServiceInterface defines methods for the GroupVariablesService.
 	GroupVariablesServiceInterface interface {
-		ListVariables(gid interface{}, opt *ListGroupVariablesOptions, options ...RequestOptionFunc) ([]*GroupVariable, *Response, error)
-		GetVariable(gid interface{}, key string, opt *GetGroupVariableOptions, options ...RequestOptionFunc) (*GroupVariable, *Response, error)
-		CreateVariable(gid interface{}, opt *CreateGroupVariableOptions, options ...RequestOptionFunc) (*GroupVariable, *Response, error)
-		UpdateVariable(gid interface{}, key string, opt *UpdateGroupVariableOptions, options ...RequestOptionFunc) (*GroupVariable, *Response, error)
-		RemoveVariable(gid interface{}, key string, opt *RemoveGroupVariableOptions, options ...RequestOptionFunc) (*Response, error)
+		ListVariables(gid any, opt *ListGroupVariablesOptions, options ...RequestOptionFunc) ([]*GroupVariable, *Response, error)
+		GetVariable(gid any, key string, opt *GetGroupVariableOptions, options ...RequestOptionFunc) (*GroupVariable, *Response, error)
+		CreateVariable(gid any, opt *CreateGroupVariableOptions, options ...RequestOptionFunc) (*GroupVariable, *Response, error)
+		UpdateVariable(gid any, key string, opt *UpdateGroupVariableOptions, options ...RequestOptionFunc) (*GroupVariable, *Response, error)
+		RemoveVariable(gid any, key string, opt *RemoveGroupVariableOptions, options ...RequestOptionFunc) (*Response, error)
 	}
 
 	// GroupVariablesService handles communication with the
@@ -69,31 +68,20 @@ func (v GroupVariable) String() string {
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/group_level_variables/#list-group-variables
-type ListGroupVariablesOptions ListOptions
+type ListGroupVariablesOptions struct {
+	ListOptions
+}
 
 // ListVariables gets a list of all variables for a group.
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/group_level_variables/#list-group-variables
-func (s *GroupVariablesService) ListVariables(gid interface{}, opt *ListGroupVariablesOptions, options ...RequestOptionFunc) ([]*GroupVariable, *Response, error) {
-	group, err := parseID(gid)
-	if err != nil {
-		return nil, nil, err
-	}
-	u := fmt.Sprintf("groups/%s/variables", PathEscape(group))
-
-	req, err := s.client.NewRequest(http.MethodGet, u, opt, options)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	var vs []*GroupVariable
-	resp, err := s.client.Do(req, &vs)
-	if err != nil {
-		return nil, resp, err
-	}
-
-	return vs, resp, nil
+func (s *GroupVariablesService) ListVariables(gid any, opt *ListGroupVariablesOptions, options ...RequestOptionFunc) ([]*GroupVariable, *Response, error) {
+	return do[[]*GroupVariable](s.client,
+		withPath("groups/%s/variables", GroupID{gid}),
+		withAPIOpts(opt),
+		withRequestOpts(options...),
+	)
 }
 
 // GetGroupVariableOptions represents the available GetVariable()
@@ -109,25 +97,12 @@ type GetGroupVariableOptions struct {
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/group_level_variables/#show-variable-details
-func (s *GroupVariablesService) GetVariable(gid interface{}, key string, opt *GetGroupVariableOptions, options ...RequestOptionFunc) (*GroupVariable, *Response, error) {
-	group, err := parseID(gid)
-	if err != nil {
-		return nil, nil, err
-	}
-	u := fmt.Sprintf("groups/%s/variables/%s", PathEscape(group), url.PathEscape(key))
-
-	req, err := s.client.NewRequest(http.MethodGet, u, opt, options)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	v := new(GroupVariable)
-	resp, err := s.client.Do(req, v)
-	if err != nil {
-		return nil, resp, err
-	}
-
-	return v, resp, nil
+func (s *GroupVariablesService) GetVariable(gid any, key string, opt *GetGroupVariableOptions, options ...RequestOptionFunc) (*GroupVariable, *Response, error) {
+	return do[*GroupVariable](s.client,
+		withPath("groups/%s/variables/%s", GroupID{gid}, url.PathEscape(key)),
+		withAPIOpts(opt),
+		withRequestOpts(options...),
+	)
 }
 
 // CreateGroupVariableOptions represents the available CreateVariable()
@@ -151,25 +126,13 @@ type CreateGroupVariableOptions struct {
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/group_level_variables/#create-variable
-func (s *GroupVariablesService) CreateVariable(gid interface{}, opt *CreateGroupVariableOptions, options ...RequestOptionFunc) (*GroupVariable, *Response, error) {
-	group, err := parseID(gid)
-	if err != nil {
-		return nil, nil, err
-	}
-	u := fmt.Sprintf("groups/%s/variables", PathEscape(group))
-
-	req, err := s.client.NewRequest(http.MethodPost, u, opt, options)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	v := new(GroupVariable)
-	resp, err := s.client.Do(req, v)
-	if err != nil {
-		return nil, resp, err
-	}
-
-	return v, resp, nil
+func (s *GroupVariablesService) CreateVariable(gid any, opt *CreateGroupVariableOptions, options ...RequestOptionFunc) (*GroupVariable, *Response, error) {
+	return do[*GroupVariable](s.client,
+		withMethod(http.MethodPost),
+		withPath("groups/%s/variables", GroupID{gid}),
+		withAPIOpts(opt),
+		withRequestOpts(options...),
+	)
 }
 
 // UpdateGroupVariableOptions represents the available UpdateVariable()
@@ -193,25 +156,13 @@ type UpdateGroupVariableOptions struct {
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/group_level_variables/#update-variable
-func (s *GroupVariablesService) UpdateVariable(gid interface{}, key string, opt *UpdateGroupVariableOptions, options ...RequestOptionFunc) (*GroupVariable, *Response, error) {
-	group, err := parseID(gid)
-	if err != nil {
-		return nil, nil, err
-	}
-	u := fmt.Sprintf("groups/%s/variables/%s", PathEscape(group), url.PathEscape(key))
-
-	req, err := s.client.NewRequest(http.MethodPut, u, opt, options)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	v := new(GroupVariable)
-	resp, err := s.client.Do(req, v)
-	if err != nil {
-		return nil, resp, err
-	}
-
-	return v, resp, nil
+func (s *GroupVariablesService) UpdateVariable(gid any, key string, opt *UpdateGroupVariableOptions, options ...RequestOptionFunc) (*GroupVariable, *Response, error) {
+	return do[*GroupVariable](s.client,
+		withMethod(http.MethodPut),
+		withPath("groups/%s/variables/%s", GroupID{gid}, url.PathEscape(key)),
+		withAPIOpts(opt),
+		withRequestOpts(options...),
+	)
 }
 
 // RemoveGroupVariableOptions represents the available RemoveVariable()
@@ -227,17 +178,12 @@ type RemoveGroupVariableOptions struct {
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/group_level_variables/#remove-variable
-func (s *GroupVariablesService) RemoveVariable(gid interface{}, key string, opt *RemoveGroupVariableOptions, options ...RequestOptionFunc) (*Response, error) {
-	group, err := parseID(gid)
-	if err != nil {
-		return nil, err
-	}
-	u := fmt.Sprintf("groups/%s/variables/%s", PathEscape(group), url.PathEscape(key))
-
-	req, err := s.client.NewRequest(http.MethodDelete, u, opt, options)
-	if err != nil {
-		return nil, err
-	}
-
-	return s.client.Do(req, nil)
+func (s *GroupVariablesService) RemoveVariable(gid any, key string, opt *RemoveGroupVariableOptions, options ...RequestOptionFunc) (*Response, error) {
+	_, resp, err := do[none](s.client,
+		withMethod(http.MethodDelete),
+		withPath("groups/%s/variables/%s", GroupID{gid}, url.PathEscape(key)),
+		withAPIOpts(opt),
+		withRequestOpts(options...),
+	)
+	return resp, err
 }

@@ -128,10 +128,13 @@ Tests run on:
 
 ### Test Categories
 
-The tests are separated into two main categories (matrix strategy):
+The tests are separated into provider categories (matrix strategy):
 
-- `providers` - Tests for GitHub, GitLab, and Bitbucket
-- `gitea_others` - Tests for Gitea and other non-provider specific functionality
+- `github_public` - Public GitHub tests (excluding GHE and concurrency)
+- `github_ghe` - GitHub Enterprise (GHE) tests
+- `gitlab_bitbucket` - GitLab and Bitbucket tests
+- `gitea_1`, `gitea_2`, `gitea_3` - Gitea tests (split into 3 chunks)
+- `concurrency` - Concurrency-specific tests
 
 This split helps reduce the load on external APIs during testing and provides more focused test results.
 
@@ -151,11 +154,33 @@ Secrets are stored in GitHub Secrets and made available to the workflow via `${{
 The `hack/gh-workflow-ci.sh` script contains several functions that assist in the CI process:
 
 1. `create_pac_github_app_secret` - Creates the required secrets for GitHub app authentication
-2. `create_second_github_app_controller_on_ghe` - Sets up a second controller for GitHub Enterprise
+2. ~~`create_second_github_app_controller_on_ghe`~~ - Use [startpaac](https://github.com/openshift-pipelines/startpaac) instead. See [Second Controller Setup](#second-controller-setup) below.
 3. `run_e2e_tests` - Executes the E2E tests with proper filters
 4. `collect_logs` - Gathers logs and diagnostic information
 
 The script filters tests by category using pattern matching on test function names.
+
+#### Second Controller Setup
+
+In CI, use [startpaac](https://github.com/openshift-pipelines/startpaac) to install the second GitHub controller (GHE). When running with the `--ci` flag, startpaac automatically installs the second controller when `PAC_SECOND_SECRET_FOLDER` is set.
+
+Example from e2e.yaml workflow:
+
+```yaml
+- name: Start installing cluster with startpaac
+  env:
+    PAC_SECOND_SECRET_FOLDER: ~/secrets-second
+  run: |
+    mkdir -p ~/secrets-second
+    echo "${{ vars.TEST_GITHUB_SECOND_APPLICATION_ID }}" > ~/secrets-second/github-application-id
+    echo "${{ secrets.TEST_GITHUB_SECOND_PRIVATE_KEY }}" > ~/secrets-second/github-private-key
+    # ... other secrets ...
+
+    cd startpaac
+    ./startpaac --ci -a  # Automatically installs second controller
+```
+
+For manual setup or non-CI environments, see the [Second Controller documentation](https://pipelinesascode.com/docs/install/second_controller/).
 
 > [!NOTE]
 > For details on how API call metrics are generated and archived as artifacts, see [API Instrumentation (optional)](#api-instrumentation-optional).
@@ -177,8 +202,8 @@ for example:
 
 Log source details:
 
-- Parses controller pod logs from the `pac-controller` container.
-- Uses label selector `app.kubernetes.io/name=controller` (or `ghe-controller` when testing against GHE).
+- Parses controller pod logs by resolving the controller label and container name dynamically.
+- Tries known controller labels first (for example `app.kubernetes.io/name=controller` or `ghe-controller`) and then falls back to the standard PAC controller labels.
 - Considers only log lines after the last occurrence of `github-app: initialized OAuth2 client`.
 - Matches lines containing `GitHub API call completed` and extracts the embedded JSON payload.
 
@@ -243,6 +268,17 @@ For local debugging, you can:
 
 1. Set the same environment variables locally
 2. Run `make test-e2e` with specific test filters
+
+### LLM E2E Tests
+
+The LLM E2E tests uses a fake AI called `nonoai` to reply to the e2e tests and make them reliable (and cheap).
+
+Deploy it with ko with `./pkg/test/nonoai/deployment.yaml`
+
+Responses and fake are included in this json file `./pkg/test/nonoai/responses.json`
+
+See an example of an E2E Test using it in
+[./gitea_llm_test.go](./gitea_llm_test.go)
 
 ### Notifications
 

@@ -1,6 +1,7 @@
 package pipelineascode
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
@@ -14,7 +15,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/google/go-github/v71/github"
+	"github.com/google/go-github/v81/github"
 	apipac "github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
@@ -128,6 +129,7 @@ func TestRun(t *testing.T) {
 		concurrencyLimit             int
 		expectedLogSnippet           string
 		expectedPostedComment        string // TODO: multiple posted comments when we need it
+		secretCreationError          error  // Error to inject for secret creation
 	}{
 		{
 			name: "pull request/fail-to-start-apps",
@@ -227,31 +229,6 @@ func TestRun(t *testing.T) {
 			tektondir:       "testdata/pull_request",
 			finalStatus:     "neutral",
 			finalStatusText: "<th>Status</th><th>Duration</th><th>Name</th>",
-		},
-		{
-			name: "pull request/concurrency limit",
-			runevent: info.Event{
-				Event: &github.PullRequestEvent{
-					PullRequest: &github.PullRequest{
-						Number: github.Ptr(666),
-					},
-				},
-				SHA:               "fromwebhook",
-				Organization:      "owner",
-				Sender:            "owner",
-				Repository:        "repo",
-				URL:               "https://service/documentation",
-				HeadBranch:        "press",
-				BaseBranch:        "main",
-				EventType:         "pull_request",
-				TriggerTarget:     "pull_request",
-				PullRequestNumber: 666,
-				InstallationID:    1234,
-			},
-			tektondir:        "testdata/pull_request",
-			finalStatus:      "neutral",
-			finalStatusText:  "<th>Status</th><th>Duration</th><th>Name</th>",
-			concurrencyLimit: 1,
 		},
 		{
 			name: "pull request/with webhook",
@@ -656,10 +633,20 @@ func TestRun(t *testing.T) {
 			ctx = info.StoreCurrentControllerName(ctx, "default")
 			ctx = info.StoreNS(ctx, repo.InstallNamespace)
 
-			k8int := &kitesthelper.KinterfaceTest{
+			kintTest := kitesthelper.KinterfaceTest{
 				ConsoleURL:               "https://console.url",
 				ExpectedNumberofCleanups: tt.expectedNumberofCleanups,
 				GetSecretResult:          secrets,
+			}
+
+			var k8int kubeinteraction.Interface
+			if tt.secretCreationError != nil {
+				k8int = &KinterfaceTestWithError{
+					KinterfaceTest:    kintTest,
+					CreateSecretError: tt.secretCreationError,
+				}
+			} else {
+				k8int = &kintTest
 			}
 
 			// InstallationID > 0 is used to detect if we are a GitHub APP
@@ -749,4 +736,52 @@ func TestGetLogURLMergePatch(t *testing.T) {
 	a, ok := m["annotations"].(map[string]string)
 	assert.Assert(t, ok)
 	assert.Equal(t, a[path.Join(apipac.GroupName, "log-url")], con.URL())
+}
+
+func TestGetExecutionOrderPatch(t *testing.T) {
+	tests := []struct {
+		name  string
+		order string
+		want  string
+	}{
+		{
+			name:  "single pr",
+			order: "pull-pr-1",
+			want:  "pull-pr-1",
+		},
+		{
+			name:  "multiple prs",
+			order: "pull-pr-1,pull-pr-2,pull-pr-3",
+			want:  "pull-pr-1,pull-pr-2,pull-pr-3",
+		},
+		{
+			name:  "empty",
+			order: "",
+			want:  "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := getExecutionOrderPatch(tt.order)
+			expected := map[string]any{
+				"metadata": map[string]any{
+					"annotations": map[string]string{
+						keys.ExecutionOrder: tt.want,
+					},
+				},
+			}
+			assert.DeepEqual(t, expected, result)
+		})
+	}
+}
+
+// KinterfaceTestWithError extends KinterfaceTest to allow injection of specific errors.
+type KinterfaceTestWithError struct {
+	kitesthelper.KinterfaceTest
+	CreateSecretError error
+}
+
+func (k *KinterfaceTestWithError) CreateSecret(_ context.Context, _ string, _ *corev1.Secret) error {
+	return k.CreateSecretError
 }

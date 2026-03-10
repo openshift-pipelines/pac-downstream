@@ -24,12 +24,12 @@ import (
 
 type (
 	ProjectMirrorServiceInterface interface {
-		ListProjectMirror(pid interface{}, opt *ListProjectMirrorOptions, options ...RequestOptionFunc) ([]*ProjectMirror, *Response, error)
-		GetProjectMirror(pid interface{}, mirror int, options ...RequestOptionFunc) (*ProjectMirror, *Response, error)
-		GetProjectMirrorPublicKey(pid interface{}, mirror int, options ...RequestOptionFunc) (*ProjectMirrorPublicKey, *Response, error)
-		AddProjectMirror(pid interface{}, opt *AddProjectMirrorOptions, options ...RequestOptionFunc) (*ProjectMirror, *Response, error)
-		EditProjectMirror(pid interface{}, mirror int, opt *EditProjectMirrorOptions, options ...RequestOptionFunc) (*ProjectMirror, *Response, error)
-		DeleteProjectMirror(pid interface{}, mirror int, options ...RequestOptionFunc) (*Response, error)
+		ListProjectMirror(pid any, opt *ListProjectMirrorOptions, options ...RequestOptionFunc) ([]*ProjectMirror, *Response, error)
+		GetProjectMirror(pid any, mirror int64, options ...RequestOptionFunc) (*ProjectMirror, *Response, error)
+		GetProjectMirrorPublicKey(pid any, mirror int64, options ...RequestOptionFunc) (*ProjectMirrorPublicKey, *Response, error)
+		AddProjectMirror(pid any, opt *AddProjectMirrorOptions, options ...RequestOptionFunc) (*ProjectMirror, *Response, error)
+		EditProjectMirror(pid any, mirror int64, opt *EditProjectMirrorOptions, options ...RequestOptionFunc) (*ProjectMirror, *Response, error)
+		DeleteProjectMirror(pid any, mirror int64, options ...RequestOptionFunc) (*Response, error)
 	}
 
 	// ProjectMirrorService handles communication with the project mirror
@@ -48,7 +48,7 @@ var _ ProjectMirrorServiceInterface = (*ProjectMirrorService)(nil)
 // GitLAb API docs: https://docs.gitlab.com/api/remote_mirrors/
 type ProjectMirror struct {
 	Enabled                bool       `json:"enabled"`
-	ID                     int        `json:"id"`
+	ID                     int64      `json:"id"`
 	LastError              string     `json:"last_error"`
 	LastSuccessfulUpdateAt *time.Time `json:"last_successful_update_at"`
 	LastUpdateAt           *time.Time `json:"last_update_at"`
@@ -66,13 +66,15 @@ type ProjectMirrorPublicKey struct {
 }
 
 // ListProjectMirrorOptions represents the available ListProjectMirror() options.
-type ListProjectMirrorOptions ListOptions
+type ListProjectMirrorOptions struct {
+	ListOptions
+}
 
 // ListProjectMirror gets a list of mirrors configured on the project.
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/remote_mirrors/#list-a-projects-remote-mirrors
-func (s *ProjectMirrorService) ListProjectMirror(pid interface{}, opt *ListProjectMirrorOptions, options ...RequestOptionFunc) ([]*ProjectMirror, *Response, error) {
+func (s *ProjectMirrorService) ListProjectMirror(pid any, opt *ListProjectMirrorOptions, options ...RequestOptionFunc) ([]*ProjectMirror, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err
@@ -97,7 +99,7 @@ func (s *ProjectMirrorService) ListProjectMirror(pid interface{}, opt *ListProje
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/remote_mirrors/#get-a-single-projects-remote-mirror
-func (s *ProjectMirrorService) GetProjectMirror(pid interface{}, mirror int, options ...RequestOptionFunc) (*ProjectMirror, *Response, error) {
+func (s *ProjectMirrorService) GetProjectMirror(pid any, mirror int64, options ...RequestOptionFunc) (*ProjectMirror, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err
@@ -122,7 +124,7 @@ func (s *ProjectMirrorService) GetProjectMirror(pid interface{}, mirror int, opt
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/remote_mirrors/#get-a-single-projects-remote-mirror-public-key
-func (s *ProjectMirrorService) GetProjectMirrorPublicKey(pid interface{}, mirror int, options ...RequestOptionFunc) (*ProjectMirrorPublicKey, *Response, error) {
+func (s *ProjectMirrorService) GetProjectMirrorPublicKey(pid any, mirror int64, options ...RequestOptionFunc) (*ProjectMirrorPublicKey, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err
@@ -161,7 +163,7 @@ type AddProjectMirrorOptions struct {
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/remote_mirrors/#create-a-push-mirror
-func (s *ProjectMirrorService) AddProjectMirror(pid interface{}, opt *AddProjectMirrorOptions, options ...RequestOptionFunc) (*ProjectMirror, *Response, error) {
+func (s *ProjectMirrorService) AddProjectMirror(pid any, opt *AddProjectMirrorOptions, options ...RequestOptionFunc) (*ProjectMirror, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err
@@ -199,7 +201,7 @@ type EditProjectMirrorOptions struct {
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/remote_mirrors/#update-a-remote-mirrors-attributes
-func (s *ProjectMirrorService) EditProjectMirror(pid interface{}, mirror int, opt *EditProjectMirrorOptions, options ...RequestOptionFunc) (*ProjectMirror, *Response, error) {
+func (s *ProjectMirrorService) EditProjectMirror(pid any, mirror int64, opt *EditProjectMirrorOptions, options ...RequestOptionFunc) (*ProjectMirror, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err
@@ -224,7 +226,7 @@ func (s *ProjectMirrorService) EditProjectMirror(pid interface{}, mirror int, op
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/remote_mirrors/#delete-a-remote-mirror
-func (s *ProjectMirrorService) DeleteProjectMirror(pid interface{}, mirror int, options ...RequestOptionFunc) (*Response, error) {
+func (s *ProjectMirrorService) DeleteProjectMirror(pid any, mirror int64, options ...RequestOptionFunc) (*Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, err

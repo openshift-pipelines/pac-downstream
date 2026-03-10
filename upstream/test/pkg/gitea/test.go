@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"code.gitea.io/sdk/gitea"
+	"codeberg.org/mvdkleijn/forgejo-sdk/forgejo/v2"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
@@ -19,14 +19,15 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	pgitea "github.com/openshift-pipelines/pipelines-as-code/pkg/provider/gitea"
 	"github.com/openshift-pipelines/pipelines-as-code/test/pkg/cctx"
-	tlogs "github.com/openshift-pipelines/pipelines-as-code/test/pkg/logs"
 	"github.com/openshift-pipelines/pipelines-as-code/test/pkg/options"
 	"github.com/openshift-pipelines/pipelines-as-code/test/pkg/payload"
+	tlogs "github.com/openshift-pipelines/pipelines-as-code/test/pkg/podlogs"
 	pacrepo "github.com/openshift-pipelines/pipelines-as-code/test/pkg/repository"
 	"github.com/openshift-pipelines/pipelines-as-code/test/pkg/scm"
 	v1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 	"github.com/tektoncd/pipeline/pkg/names"
 	"gotest.tools/v3/assert"
+	"gotest.tools/v3/golden"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -52,7 +53,7 @@ type TestOpts struct {
 	ParamsRun             *params.Run
 	GiteaCNX              pgitea.Provider
 	Opts                  options.E2E
-	PullRequest           *gitea.PullRequest
+	PullRequest           *forgejo.PullRequest
 	DefaultBranch         string
 	GitCloneURL           string
 	GitHTMLURL            string
@@ -63,12 +64,14 @@ type TestOpts struct {
 	Token                 string
 	SHA                   string
 	FileChanges           []scm.FileChange
+	CreateSecret          []corev1.Secret
+	ProviderType          string // defaults to "forgejo" if empty
 }
 
 func PostCommentOnPullRequest(t *testing.T, topt *TestOpts, body string) {
 	_, _, err := topt.GiteaCNX.Client().CreateIssueComment(topt.Opts.Organization,
 		topt.Opts.Repo, topt.PullRequest.Index,
-		gitea.CreateIssueCommentOption{Body: body})
+		forgejo.CreateIssueCommentOption{Body: body})
 	topt.ParamsRun.Clients.Log.Infof("Posted comment \"%s\" in %s", body, topt.PullRequest.HTMLURL)
 	assert.NilError(t, err)
 }
@@ -95,7 +98,7 @@ func checkEvents(t *testing.T, events *corev1.EventList, topts *TestOpts) {
 
 func AddLabelToIssue(t *testing.T, topt *TestOpts, label string) {
 	var targetID int64
-	allLabels, _, err := topt.GiteaCNX.Client().ListRepoLabels(topt.Opts.Organization, topt.Opts.Repo, gitea.ListLabelsOptions{})
+	allLabels, _, err := topt.GiteaCNX.Client().ListRepoLabels(topt.Opts.Organization, topt.Opts.Repo, forgejo.ListLabelsOptions{})
 	assert.NilError(t, err)
 	for _, l := range allLabels {
 		if l.Name == label {
@@ -103,7 +106,7 @@ func AddLabelToIssue(t *testing.T, topt *TestOpts, label string) {
 		}
 	}
 
-	opt := gitea.IssueLabelsOption{Labels: []int64{targetID}}
+	opt := forgejo.IssueLabelsOption{Labels: []int64{targetID}}
 	_, _, err = topt.GiteaCNX.Client().AddIssueLabels(topt.Opts.Organization, topt.Opts.Repo, topt.PullRequest.Index, opt)
 	assert.NilError(t, err)
 	topt.ParamsRun.Clients.Log.Infof("Added label \"%s\" to %s", label, topt.PullRequest.HTMLURL)
@@ -128,7 +131,7 @@ func TestPR(t *testing.T, topts *TestOpts) (context.Context, func()) {
 	hookURL := os.Getenv("TEST_GITEA_SMEEURL")
 	topts.InternalGiteaURL = os.Getenv("TEST_GITEA_INTERNAL_URL")
 	if topts.InternalGiteaURL == "" {
-		topts.InternalGiteaURL = "http://gitea.gitea:3000"
+		topts.InternalGiteaURL = "http://forgejo.forgejo:3000"
 	}
 	if topts.ExtraArgs == nil {
 		topts.ExtraArgs = map[string]string{}
@@ -153,7 +156,11 @@ func TestPR(t *testing.T, topts *TestOpts) (context.Context, func()) {
 		topts.DefaultBranch = options.MainBranch
 	}
 
-	repoInfo, err := CreateGiteaRepo(topts.GiteaCNX.Client(), topts.Opts.Organization, topts.TargetRepoName, topts.DefaultBranch, hookURL, topts.OnOrg, topts.ParamsRun.Clients.Log)
+	webhookSecret := os.Getenv("TEST_EL_WEBHOOK_SECRET")
+	repoInfo, err := CreateGiteaRepo(topts.GiteaCNX.Client(), topts.Opts.Organization,
+		topts.TargetRepoName, topts.DefaultBranch, hookURL,
+		webhookSecret, topts.OnOrg,
+		topts.ParamsRun.Clients.Log)
 	assert.NilError(t, err)
 	topts.Opts.Repo = repoInfo.Name
 	topts.Opts.Organization = repoInfo.Owner.UserName
@@ -163,8 +170,21 @@ func TestPR(t *testing.T, topts *TestOpts) (context.Context, func()) {
 	topts.Token, err = CreateToken(topts)
 	assert.NilError(t, err)
 
+	for _, sec := range topts.CreateSecret {
+		ns := sec.GetNamespace()
+		if ns == "" {
+			ns = topts.TargetNS
+		}
+		_, err := topts.ParamsRun.Clients.Kube.CoreV1().Secrets(ns).Create(ctx, &sec, metav1.CreateOptions{})
+		assert.NilError(t, err, "failed to create secret %s in namespace %s: %v", sec.GetName(), ns, err)
+	}
+
+	providerType := topts.ProviderType
+	if providerType == "" {
+		providerType = "forgejo"
+	}
 	gp := &v1alpha1.GitProvider{
-		Type: "gitea",
+		Type: providerType,
 		// caveat this assume gitea running on the same cluster, which
 		// we do and need for e2e tests but that may be changed somehow
 		URL:    topts.InternalGiteaURL,
@@ -179,7 +199,7 @@ func TestPR(t *testing.T, topts *TestOpts) (context.Context, func()) {
 	if topts.GlobalRepoCRParams == nil {
 		spec.GitProvider = gp
 	} else {
-		spec.GitProvider = &v1alpha1.GitProvider{Type: "gitea"}
+		spec.GitProvider = &v1alpha1.GitProvider{Type: providerType}
 	}
 	assert.NilError(t, CreateCRD(ctx, topts, spec, false))
 
@@ -224,7 +244,7 @@ func TestPR(t *testing.T, topts *TestOpts) (context.Context, func()) {
 
 	topts.ParamsRun.Clients.Log.Infof("Creating PullRequest")
 	for i := 0; i < 5; i++ {
-		if topts.PullRequest, _, err = topts.GiteaCNX.Client().CreatePullRequest(topts.Opts.Organization, repoInfo.Name, gitea.CreatePullRequestOption{
+		if topts.PullRequest, _, err = topts.GiteaCNX.Client().CreatePullRequest(topts.Opts.Organization, repoInfo.Name, forgejo.CreatePullRequestOption{
 			Title: "Test Pull Request - " + topts.TargetRefName,
 			Head:  topts.TargetRefName,
 			Base:  topts.DefaultBranch,
@@ -290,7 +310,7 @@ func NewPR(t *testing.T, topts *TestOpts) func() {
 	topts.GiteaPassword = giteaPassword
 	topts.InternalGiteaURL = os.Getenv("TEST_GITEA_INTERNAL_URL")
 	if topts.InternalGiteaURL == "" {
-		topts.InternalGiteaURL = "http://gitea.gitea:3000"
+		topts.InternalGiteaURL = "http://forgejo.forgejo:3000"
 	}
 	if topts.ExtraArgs == nil {
 		topts.ExtraArgs = map[string]string{}
@@ -344,7 +364,7 @@ func NewPR(t *testing.T, topts *TestOpts) func() {
 
 	topts.ParamsRun.Clients.Log.Infof("Creating PullRequest")
 	for i := 0; i < 5; i++ {
-		if topts.PullRequest, _, err = topts.GiteaCNX.Client().CreatePullRequest(topts.Opts.Organization, repoInfo.Name, gitea.CreatePullRequestOption{
+		if topts.PullRequest, _, err = topts.GiteaCNX.Client().CreatePullRequest(topts.Opts.Organization, repoInfo.Name, forgejo.CreatePullRequestOption{
 			Title: "Test Pull Request - " + topts.TargetRefName,
 			Head:  topts.TargetRefName,
 			Base:  options.MainBranch,
@@ -409,7 +429,7 @@ func WaitForStatus(t *testing.T, topts *TestOpts, ref, forcontext string, onlyla
 	for {
 		numstatus := 0
 		// get first sha of tree ref
-		statuses, _, err := topts.GiteaCNX.Client().ListStatuses(topts.Opts.Organization, topts.Opts.Repo, ref, gitea.ListStatusesOption{})
+		statuses, _, err := topts.GiteaCNX.Client().ListStatuses(topts.Opts.Organization, topts.Opts.Repo, ref, forgejo.ListStatusesOption{})
 		assert.NilError(t, err)
 		// sort statuses by id
 		sort.Slice(statuses, func(i, j int) bool {
@@ -512,7 +532,7 @@ func WaitForPullRequestCommentMatch(t *testing.T, topts *TestOpts) {
 	i := 0
 	topts.ParamsRun.Clients.Log.Infof("Looking for regexp \"%s\" in PR comments", topts.Regexp.String())
 	for {
-		comments, _, err := topts.GiteaCNX.Client().ListRepoIssueComments(topts.PullRequest.Base.Repository.Owner.UserName, topts.PullRequest.Base.Repository.Name, gitea.ListIssueCommentOptions{})
+		comments, _, err := topts.GiteaCNX.Client().ListRepoIssueComments(topts.PullRequest.Base.Repository.Owner.UserName, topts.PullRequest.Base.Repository.Name, forgejo.ListIssueCommentOptions{})
 		assert.NilError(t, err)
 		for _, v := range comments {
 			if topts.Regexp.MatchString(v.Body) {
@@ -522,6 +542,38 @@ func WaitForPullRequestCommentMatch(t *testing.T, topts *TestOpts) {
 		}
 		if i > 60 {
 			t.Fatalf("gitea driver has not been posted any comment")
+		}
+		time.Sleep(2 * time.Second)
+		i++
+	}
+}
+
+// WaitForPullRequestCommentGoldenMatch will wait for a comment matching exactly (golden style) the content.
+func WaitForPullRequestCommentGoldenMatch(t *testing.T, topts *TestOpts, goldenFile string) {
+	i := 0
+	if topts.Regexp == nil {
+		t.Fatalf("topts.Regexp cannot be nil")
+	}
+
+	for {
+		comments, _, err := topts.GiteaCNX.Client().ListRepoIssueComments(topts.PullRequest.Base.Repository.Owner.UserName, topts.PullRequest.Base.Repository.Name, forgejo.ListIssueCommentOptions{})
+		assert.NilError(t, err)
+		for _, v := range comments {
+			if v.Body == "" {
+				continue
+			}
+			// we do first match on regexp in a comment and then golden string, or golden string update will get the first comment.
+			if !topts.Regexp.MatchString(v.Body) {
+				continue
+			}
+			topts.ParamsRun.Clients.Log.Infof("Found regexp match in comment: %s", topts.Regexp.String())
+			if golden.String(v.Body, goldenFile)().Success() {
+				topts.ParamsRun.Clients.Log.Infof("Found golden match in comment: %s", v.Body)
+				return
+			}
+		}
+		if i > 60 {
+			t.Fatalf("we did not match the expected golden file output in the gitea comments after 2 minutes")
 		}
 		time.Sleep(2 * time.Second)
 		i++

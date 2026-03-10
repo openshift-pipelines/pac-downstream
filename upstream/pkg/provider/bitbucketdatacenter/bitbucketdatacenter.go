@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/google/go-github/v71/github"
+	"github.com/google/go-github/v81/github"
 	"github.com/jenkins-x/go-scm/scm"
 	"github.com/jenkins-x/go-scm/scm/driver/stash"
 	"github.com/jenkins-x/go-scm/scm/transport/oauth2"
@@ -19,7 +19,7 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
-	providerMetrics "github.com/openshift-pipelines/pipelines-as-code/pkg/provider/metrics"
+	providerMetrics "github.com/openshift-pipelines/pipelines-as-code/pkg/provider/providermetrics"
 	"go.uber.org/zap"
 )
 
@@ -42,6 +42,7 @@ type Provider struct {
 	projectKey                string
 	repo                      *v1alpha1.Repository
 	triggerEvent              string
+	cachedChangedFiles        *changedfiles.ChangedFiles
 }
 
 func (v Provider) Client() *scm.Client {
@@ -101,8 +102,12 @@ func (v *Provider) CreateStatus(ctx context.Context, event *info.Event, statusOp
 		statusOpts.Conclusion = "FAILED"
 		statusOpts.Title = "❌ Failed"
 	case "pending":
-		statusOpts.Conclusion = "INPROGRESS"
-		statusOpts.Title = "⚡ CI has started"
+		if statusOpts.Status == "queued" {
+			statusOpts.Conclusion = "UNKNOWN"
+		} else {
+			statusOpts.Conclusion = "INPROGRESS"
+			statusOpts.Title = "⚡ CI has started"
+		}
 	case "success":
 		statusOpts.Conclusion = "SUCCESSFUL"
 		statusOpts.Title = "Commit has been validated"
@@ -119,18 +124,18 @@ func (v *Provider) CreateStatus(ctx context.Context, event *info.Event, statusOp
 
 	key := statusOpts.PipelineRunName
 	if key == "" {
-		key = statusOpts.Conclusion
+		key = statusOpts.Title
 	}
 
 	if v.pacInfo.ApplicationName != "" {
-		key = fmt.Sprintf("%s/%s", v.pacInfo.ApplicationName, key)
+		key = fmt.Sprintf("%s / %s", v.pacInfo.ApplicationName, key)
 	}
 
 	OrgAndRepo := fmt.Sprintf("%s/%s", event.Organization, event.Repository)
 	opts := &scm.StatusInput{
 		State: convertState(statusOpts.Conclusion),
 		Label: key,
-		Desc:  statusOpts.Title,
+		Desc:  statusOpts.Text,
 		Link:  detailsURL,
 	}
 	_, _, err := v.Client().Repositories.CreateStatus(ctx, OrgAndRepo, event.SHA, opts)
@@ -167,6 +172,8 @@ func convertState(from string) scm.State {
 		return scm.StatePending
 	case "SUCCESSFUL":
 		return scm.StateSuccess
+	case "UNKNOWN":
+		return scm.StateUnknown
 	default:
 		return scm.StateUnknown
 	}
@@ -333,6 +340,20 @@ func (v *Provider) GetCommitInfo(_ context.Context, event *info.Event) error {
 	}
 	event.SHATitle = sanitizeTitle(commit.Message)
 	event.SHAURL = fmt.Sprintf("%s/projects/%s/repos/%s/commits/%s", v.baseURL, v.projectKey, event.Repository, event.SHA)
+	event.HasSkipCommand = provider.SkipCI(commit.Message)
+
+	// Populate full commit information for LLM context
+	event.SHAMessage = commit.Message
+	event.SHAAuthorName = commit.Author.Name
+	event.SHAAuthorEmail = commit.Author.Email
+	if !commit.Author.Date.IsZero() {
+		event.SHAAuthorDate = commit.Author.Date
+	}
+	event.SHACommitterName = commit.Committer.Name
+	event.SHACommitterEmail = commit.Committer.Email
+	if !commit.Committer.Date.IsZero() {
+		event.SHACommitterDate = commit.Committer.Date
+	}
 
 	ref, _, err := v.Client().Git.GetDefaultBranch(context.Background(), OrgAndRepo)
 	if err != nil {
@@ -351,13 +372,28 @@ func (v *Provider) GetConfig() *info.ProviderConfig {
 	}
 }
 
+// GetFiles gets and caches the list of files changed by a given event.
 func (v *Provider) GetFiles(ctx context.Context, runevent *info.Event) (changedfiles.ChangedFiles, error) {
-	OrgAndRepo := fmt.Sprintf("%s/%s", runevent.Organization, runevent.Repository)
-	if runevent.TriggerTarget == triggertype.PullRequest {
+	if v.cachedChangedFiles == nil {
+		changes, err := v.fetchChangedFiles(ctx, runevent)
+		if err != nil {
+			return changedfiles.ChangedFiles{}, err
+		}
+		v.cachedChangedFiles = &changes
+	}
+	return *v.cachedChangedFiles, nil
+}
+
+func (v *Provider) fetchChangedFiles(ctx context.Context, runevent *info.Event) (changedfiles.ChangedFiles, error) {
+	changedFiles := changedfiles.ChangedFiles{}
+
+	orgAndRepo := fmt.Sprintf("%s/%s", runevent.Organization, runevent.Repository)
+
+	switch runevent.TriggerTarget {
+	case triggertype.PullRequest:
 		opts := &scm.ListOptions{Page: 1, Size: apiResponseLimit}
-		changedFiles := changedfiles.ChangedFiles{}
 		for {
-			changes, _, err := v.Client().PullRequests.ListChanges(ctx, OrgAndRepo, runevent.PullRequestNumber, opts)
+			changes, _, err := v.Client().PullRequests.ListChanges(ctx, orgAndRepo, runevent.PullRequestNumber, opts)
 			if err != nil {
 				return changedfiles.ChangedFiles{}, fmt.Errorf("failed to list changes for pull request: %w", err)
 			}
@@ -388,14 +424,10 @@ func (v *Provider) GetFiles(ctx context.Context, runevent *info.Event) (changedf
 
 			opts.Page++
 		}
-		return changedFiles, nil
-	}
-
-	if runevent.TriggerTarget == triggertype.Push {
+	case triggertype.Push:
 		opts := &scm.ListOptions{Page: 1, Size: apiResponseLimit}
-		changedFiles := changedfiles.ChangedFiles{}
 		for {
-			changes, _, err := v.Client().Git.ListChanges(ctx, OrgAndRepo, runevent.SHA, opts)
+			changes, _, err := v.Client().Git.ListChanges(ctx, orgAndRepo, runevent.SHA, opts)
 			if err != nil {
 				return changedfiles.ChangedFiles{}, fmt.Errorf("failed to list changes for commit %s: %w", runevent.SHA, err)
 			}
@@ -422,9 +454,10 @@ func (v *Provider) GetFiles(ctx context.Context, runevent *info.Event) (changedf
 
 			opts.Page++
 		}
-		return changedFiles, nil
+	default:
+		// No action necessary
 	}
-	return changedfiles.ChangedFiles{}, nil
+	return changedFiles, nil
 }
 
 func (v *Provider) CreateToken(_ context.Context, _ []string, _ *info.Event) (string, error) {

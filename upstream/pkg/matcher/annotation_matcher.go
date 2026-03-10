@@ -9,8 +9,11 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	apipac "github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/customparams"
 	pacerrors "github.com/openshift-pipelines/pipelines-as-code/pkg/errors"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/events"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/formatting"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/kubeinteraction"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/opscomments"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
@@ -21,6 +24,8 @@ import (
 	"github.com/google/cel-go/common/types"
 	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 	"go.uber.org/zap"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"knative.dev/pkg/apis"
 )
 
 const (
@@ -187,8 +192,9 @@ func checkPipelineRunAnnotation(prun *tektonv1.PipelineRun, eventEmitter *events
 	}
 }
 
-func MatchPipelinerunByAnnotation(ctx context.Context, logger *zap.SugaredLogger, pruns []*tektonv1.PipelineRun, cs *params.Run, event *info.Event, vcx provider.Interface, eventEmitter *events.EventEmitter, repo *apipac.Repository) ([]Match, error) {
+func MatchPipelinerunByAnnotation(ctx context.Context, logger *zap.SugaredLogger, pruns []*tektonv1.PipelineRun, cs *params.Run, event *info.Event, vcx provider.Interface, eventEmitter *events.EventEmitter, repo *apipac.Repository, reportErrors bool) ([]Match, error) {
 	matchedPRs := []Match{}
+	logger.Debugf("MatchPipelinerunByAnnotation: pipelineruns=%d event_type=%s trigger_target=%s report_errors=%t", len(pruns), event.EventType, event.TriggerTarget, reportErrors)
 	infomsg := fmt.Sprintf("matching pipelineruns to event: URL=%s, target-branch=%s, source-branch=%s, target-event=%s",
 		event.URL,
 		event.BaseBranch,
@@ -207,8 +213,17 @@ func MatchPipelinerunByAnnotation(ctx context.Context, logger *zap.SugaredLogger
 	}
 	logger.Info(infomsg)
 
+	// Resolve custom params once for all PipelineRuns (for use in CEL expressions)
+	// Track original event type to detect changes (when on-comment matches)
+	originalEventType := event.EventType
+	customParams := resolveCustomParamsForCEL(ctx, repo, event, cs, vcx, eventEmitter, logger)
+	if len(customParams) > 0 {
+		logger.Debugf("resolved %d custom params from repo for CEL", len(customParams))
+	}
+
 	celValidationErrors := []*pacerrors.PacYamlValidations{}
 	for _, prun := range pruns {
+		logger.Debugf("MatchPipelinerunByAnnotation: evaluating pipelinerun=%s annotations=%d", getName(prun), len(prun.GetObjectMeta().GetAnnotations()))
 		prMatch := Match{
 			PipelineRun: prun,
 			Config:      map[string]string{},
@@ -228,6 +243,7 @@ func MatchPipelinerunByAnnotation(ctx context.Context, logger *zap.SugaredLogger
 
 		if maxPrNumber, ok := prun.GetObjectMeta().GetAnnotations()[keys.MaxKeepRuns]; ok {
 			prMatch.Config["max-keep-runs"] = maxPrNumber
+			logger.Debugf("PipelineRun %s: max-keep-runs=%s", prName, maxPrNumber)
 		}
 
 		if targetNS, ok := prun.GetObjectMeta().GetAnnotations()[keys.TargetNamespace]; ok {
@@ -237,6 +253,7 @@ func MatchPipelinerunByAnnotation(ctx context.Context, logger *zap.SugaredLogger
 				logger.Warnf("could not find Repository CRD in branch %s, the pipelineRun %s has a label that explicitly targets it", targetNS, prName)
 				continue
 			}
+			logger.Debugf("PipelineRun %s: matched target namespace repo=%s/%s", prName, prMatch.Repo.GetNamespace(), prMatch.Repo.GetName())
 		}
 
 		if targetComment, ok := prun.GetObjectMeta().GetAnnotations()[keys.OnComment]; ok {
@@ -250,6 +267,13 @@ func MatchPipelinerunByAnnotation(ctx context.Context, logger *zap.SugaredLogger
 				strings.TrimPrefix(strings.TrimSuffix(event.TriggerComment, "\r\n"), "\r\n"))
 			if re.MatchString(strippedComment) {
 				event.EventType = opscomments.OnCommentEventType.String()
+
+				// Re-resolve custom params if event type changed, so filters based on event_type stay accurate
+				if event.EventType != originalEventType {
+					customParams = resolveCustomParamsForCEL(ctx, repo, event, cs, vcx, eventEmitter, logger)
+					originalEventType = event.EventType
+					logger.Debugf("PipelineRun %s: event_type switched to %s due to comment match", prName, event.EventType)
+				}
 
 				comment := event.TriggerComment
 				if len(comment) > maxCommentLogLength {
@@ -266,43 +290,64 @@ func MatchPipelinerunByAnnotation(ctx context.Context, logger *zap.SugaredLogger
 			continue
 		}
 
-		// If the event is a pull_request and the event type is label_update, but the PipelineRun
-		// does not contain an 'on-label' annotation, do not match this PipelineRun, as it is not intended for this event.
-		_, ok := prun.GetObjectMeta().GetAnnotations()[keys.OnLabel]
-		if event.TriggerTarget == triggertype.PullRequest && event.EventType == string(triggertype.PullRequestLabeled) && !ok {
-			logger.Infof("label update event, PipelineRun %s does not have a on-label for any of those labels: %s", prName, strings.Join(event.PullRequestLabel, "|"))
-			continue
-		}
-
 		if celExpr, ok := prun.GetObjectMeta().GetAnnotations()[keys.OnCelExpression]; ok {
 			checkPipelineRunAnnotation(prun, eventEmitter, repo)
 
-			out, err := celEvaluate(ctx, celExpr, event, vcx)
+			logger.Debugf("PipelineRun %s: evaluating CEL expression", prName)
+			out, err := celEvaluate(ctx, celExpr, event, vcx, customParams, eventEmitter, repo)
 			if err != nil {
 				logger.Errorf("there was an error evaluating the CEL expression, skipping: %v", err)
 				if checkIfCELEvaluateError(err) {
-					celValidationErrors = append(celValidationErrors, &pacerrors.PacYamlValidations{
-						Name: prName,
-						Err:  fmt.Errorf("CEL expression evaluation error: %s", sanitizeErrorAsMarkdown(err)),
-					})
+					if provider.IsCommentStrategyUpdate(repo) {
+						// Using the same logic for getting OriginalPipelineRun as the one used for setting
+						// the annotation which is used in the provider's "update" comment strategy.
+						originPipelineRunName := prun.GetName()
+						if originPipelineRunName == "" && prun.GenerateName != "" {
+							originPipelineRunName = prun.GetGenerateName()
+						}
+
+						if reportErrors {
+							reportCELValidationErrors(ctx, repo, []*pacerrors.PacYamlValidations{{
+								Name: originPipelineRunName,
+								Err:  fmt.Errorf("CEL expression evaluation error: %s", sanitizeErrorAsMarkdown(err)),
+							}}, eventEmitter, vcx, event, fmt.Sprintf(provider.PlrStatusCommentPrefixTemplate, originPipelineRunName))
+						}
+					} else {
+						celValidationErrors = append(celValidationErrors, &pacerrors.PacYamlValidations{
+							Name: prName,
+							Err:  fmt.Errorf("CEL expression evaluation error: %s", sanitizeErrorAsMarkdown(err)),
+						})
+					}
 				}
 				continue
 			}
+			logger.Debugf("PipelineRun %s: CEL result=%v", prName, out)
 			if out != types.True {
 				logger.Infof("CEL expression for PipelineRun %s is not matching, skipping", prName)
 				continue
 			}
 			logger.Infof("CEL expression has been evaluated and matched")
 		} else {
+			// If the event is a pull_request and the event type is label_update, but the PipelineRun
+			// does not contain an 'on-label' annotation, do not match this PipelineRun, as it is not intended for this event.
+			// Check this early to avoid any unnecessary processing.
+			_, hasOnLabel := prun.GetObjectMeta().GetAnnotations()[keys.OnLabel]
+			if event.TriggerTarget == triggertype.PullRequest && event.EventType == string(triggertype.PullRequestLabeled) && !hasOnLabel {
+				logger.Infof("label update event, PipelineRun %s does not have a on-label for any of those labels: %s", prName, strings.Join(event.PullRequestLabel, "|"))
+				continue
+			}
+
 			matched, targetEvent, targetBranch, err := getTargetBranch(prun, event)
 			if err != nil {
 				return matchedPRs, err
 			}
 			if !matched {
+				logger.Debugf("PipelineRun %s: target branch/event did not match", prName)
 				continue
 			}
 			prMatch.Config["target-branch"] = targetBranch
 			prMatch.Config["target-event"] = targetEvent
+			logger.Debugf("PipelineRun %s: matched target event=%s target branch=%s", prName, targetEvent, targetBranch)
 
 			if key, ok := prun.GetObjectMeta().GetAnnotations()[keys.OnPathChange]; ok {
 				changedFiles, err := vcx.GetFiles(ctx, event)
@@ -318,6 +363,7 @@ func MatchPipelinerunByAnnotation(ctx context.Context, logger *zap.SugaredLogger
 					return matchedPRs, err
 				}
 				if !matched {
+					logger.Debugf("PipelineRun %s: path-change annotation did not match", prName)
 					continue
 				}
 				logger.Infof("matched PipelineRun with name: %s, annotation PathChange: %q", prName, key)
@@ -330,6 +376,7 @@ func MatchPipelinerunByAnnotation(ctx context.Context, logger *zap.SugaredLogger
 					return matchedPRs, err
 				}
 				if !matched {
+					logger.Debugf("PipelineRun %s: label annotation did not match", prName)
 					continue
 				}
 				logger.Infof("matched PipelineRun with name: %s, annotation Label: %q", prName, key)
@@ -354,6 +401,7 @@ func MatchPipelinerunByAnnotation(ctx context.Context, logger *zap.SugaredLogger
 					continue
 				}
 				prMatch.Config["path-change-ignore"] = key
+				logger.Debugf("PipelineRun %s: path-change-ignore did not match, continuing", prName)
 			}
 		}
 
@@ -361,15 +409,83 @@ func MatchPipelinerunByAnnotation(ctx context.Context, logger *zap.SugaredLogger
 		matchedPRs = append(matchedPRs, prMatch)
 	}
 
-	if len(celValidationErrors) > 0 {
-		reportCELValidationErrors(ctx, repo, celValidationErrors, eventEmitter, vcx, event)
+	if len(celValidationErrors) > 0 && reportErrors {
+		logger.Debugf("MatchPipelinerunByAnnotation: reporting %d CEL validation errors", len(celValidationErrors))
+		reportCELValidationErrors(ctx, repo, celValidationErrors, eventEmitter, vcx, event, "")
 	}
 
 	if len(matchedPRs) > 0 {
+		// Filter out templates that already have successful PipelineRuns for /retest and /ok-to-test
+		if event.EventType == opscomments.RetestAllCommentEventType.String() ||
+			event.EventType == opscomments.OkToTestCommentEventType.String() {
+			logger.Debugf("MatchPipelinerunByAnnotation: filtering successful templates for event_type=%s", event.EventType)
+			return filterSuccessfulTemplates(ctx, logger, cs, event, repo, matchedPRs), nil
+		}
 		return matchedPRs, nil
 	}
 
 	return nil, fmt.Errorf("%s", buildAvailableMatchingAnnotationErr(event, pruns))
+}
+
+// filterSuccessfulTemplates filters out templates that already have successful PipelineRuns
+// when executing /ok-to-test or /retest gitops commands, implementing per-template checking.
+func filterSuccessfulTemplates(ctx context.Context, logger *zap.SugaredLogger, cs *params.Run, event *info.Event, repo *apipac.Repository, matchedPRs []Match) []Match {
+	if event.SHA == "" {
+		return matchedPRs
+	}
+
+	// Get all existing PipelineRuns for this SHA
+	labelSelector := fmt.Sprintf("%s=%s", keys.SHA, formatting.CleanValueKubernetes(event.SHA))
+	existingPRs, err := cs.Clients.Tekton.TektonV1().PipelineRuns(repo.GetNamespace()).List(ctx, metav1.ListOptions{
+		LabelSelector: labelSelector,
+	})
+	if err != nil {
+		logger.Errorf("failed to list existing PipelineRuns for SHA %s: %v", event.SHA, err)
+		return matchedPRs // Return all templates if we can't check
+	}
+	logger.Debugf("filterSuccessfulTemplates: existing pipelineruns=%d for sha=%s", len(existingPRs.Items), event.SHA)
+
+	// Create a map of template names to their most recent successful run
+	successfulTemplates := make(map[string]*tektonv1.PipelineRun)
+
+	for i := range existingPRs.Items {
+		pr := &existingPRs.Items[i]
+
+		// Get the original template name this PipelineRun came from
+		originalPRName, ok := pr.GetAnnotations()[keys.OriginalPRName]
+		if !ok {
+			originalPRName, ok = pr.GetLabels()[keys.OriginalPRName]
+		}
+		if !ok {
+			continue // Skip PipelineRuns without template identification
+		}
+
+		// Check if this PipelineRun succeeded
+		if pr.Status.GetCondition(apis.ConditionSucceeded).IsTrue() {
+			// Keep the most recent successful run for each template
+			if existing, exists := successfulTemplates[originalPRName]; !exists ||
+				pr.CreationTimestamp.After(existing.CreationTimestamp.Time) {
+				successfulTemplates[originalPRName] = pr
+			}
+		}
+	}
+
+	// Filter out templates that have successful runs
+	var filteredPRs []Match
+
+	for _, match := range matchedPRs {
+		templateName := getName(match.PipelineRun)
+
+		if successfulPR, hasSuccessfulRun := successfulTemplates[templateName]; hasSuccessfulRun {
+			logger.Infof("skipping template '%s' for sha %s as it already has a successful pipelinerun '%s'",
+				templateName, event.SHA, successfulPR.Name)
+		} else {
+			filteredPRs = append(filteredPRs, match)
+		}
+	}
+
+	// Return the filtered list (which may be empty if all templates were skipped)
+	return filteredPRs
 }
 
 func buildAvailableMatchingAnnotationErr(event *info.Event, pruns []*tektonv1.PipelineRun) string {
@@ -439,4 +555,42 @@ func MatchRunningPipelineRunForIncomingWebhook(eventType, incomingPipelineRun st
 		}
 	}
 	return nil
+}
+
+// resolveCustomParamsForCEL resolves custom parameters from the Repository CR for use in CEL expressions.
+// It returns a map of parameter names to values, excluding reserved keywords.
+// All parameters are returned as strings, including those from secret_ref.
+func resolveCustomParamsForCEL(ctx context.Context, repo *apipac.Repository, event *info.Event, cs *params.Run, vcx provider.Interface, eventEmitter *events.EventEmitter, logger *zap.SugaredLogger) map[string]string {
+	if repo == nil || repo.Spec.Params == nil {
+		return map[string]string{}
+	}
+	logger.Debugf("resolveCustomParamsForCEL: repo=%s/%s params=%d", repo.GetNamespace(), repo.GetName(), len(*repo.Spec.Params))
+
+	// Create kubeinteraction interface
+	kinteract, err := kubeinteraction.NewKubernetesInteraction(cs)
+	if err != nil {
+		logger.Warnf("failed to create kubernetes interaction for custom params: %s", err.Error())
+		return map[string]string{}
+	}
+
+	// Use existing customparams package to resolve all params
+	cp := customparams.NewCustomParams(event, repo, cs, kinteract, eventEmitter, vcx)
+	allParams, _, err := cp.GetParams(ctx)
+	if err != nil {
+		eventEmitter.EmitMessage(repo, zap.WarnLevel, "CustomParamsCELError",
+			fmt.Sprintf("failed to resolve custom params for CEL: %s", err.Error()))
+		return map[string]string{}
+	}
+	logger.Debugf("resolveCustomParamsForCEL: resolved %d total params", len(allParams))
+
+	// Filter to only include params defined in repo.Spec.Params (not standard PAC params)
+	result := make(map[string]string)
+	for _, param := range *repo.Spec.Params {
+		if value, ok := allParams[param.Name]; ok {
+			result[param.Name] = value
+		}
+	}
+	logger.Debugf("resolveCustomParamsForCEL: returned %d custom params", len(result))
+
+	return result
 }
