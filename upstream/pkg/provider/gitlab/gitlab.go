@@ -9,6 +9,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
@@ -20,6 +21,7 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
 	providerMetrics "github.com/openshift-pipelines/pipelines-as-code/pkg/provider/providermetrics"
+	providerstatus "github.com/openshift-pipelines/pipelines-as-code/pkg/provider/status"
 	gitlab "gitlab.com/gitlab-org/api/client-go"
 	"go.uber.org/zap"
 )
@@ -66,6 +68,7 @@ type Provider struct {
 	// current provider instance lifecycle to avoid repeated API calls.
 	memberCache        map[int64]bool
 	cachedChangedFiles *changedfiles.ChangedFiles
+	pacUserID          int64 // user login used by PAC
 }
 
 var defaultGitlabListOptions = gitlab.ListOptions{
@@ -114,6 +117,22 @@ func (v *Provider) CreateComment(_ context.Context, event *info.Event, commit, u
 
 			for _, comment := range comments {
 				if commentRe.MatchString(comment.Body) {
+					// Get the UserID for the PAC user.
+					if v.pacUserID == 0 {
+						pacUser, _, err := v.Client().Users.CurrentUser()
+						if err != nil {
+							return fmt.Errorf("unable to fetch user info: %w", err)
+						}
+						v.pacUserID = pacUser.ID
+					}
+					// Only edit comments created by this PAC installation's credentials.
+					// Prevents accidentally modifying comments from other users/bots.
+					if comment.Author.ID != v.pacUserID {
+						v.Logger.Debugf("This comment was not created by PAC, skipping comment edit :%d, created by user %d, PAC user: %d",
+							comment.ID, comment.Author.ID, v.pacUserID)
+						continue
+					}
+
 					_, _, err := v.Client().Notes.UpdateMergeRequestNote(event.TargetProjectID, int64(event.PullRequestNumber), comment.ID, &gitlab.UpdateMergeRequestNoteOptions{
 						Body: &commit,
 					})
@@ -277,39 +296,43 @@ func (v *Provider) SetClient(_ context.Context, run *params.Run, runevent *info.
 }
 
 //nolint:misspell
-func (v *Provider) CreateStatus(ctx context.Context, event *info.Event, statusOpts provider.StatusOpts,
+func (v *Provider) CreateStatus(ctx context.Context, event *info.Event, statusOpts providerstatus.StatusOpts,
 ) error {
 	var detailsURL string
 	if v.gitlabClient == nil {
 		return fmt.Errorf("no gitlab client has been initialized, " +
 			"exiting... (hint: did you forget setting a secret on your repo?)")
 	}
+
+	var state gitlab.BuildStateValue
+
 	switch statusOpts.Conclusion {
-	case "skipped":
-		statusOpts.Conclusion = "canceled"
+	case providerstatus.ConclusionSkipped:
+		state = gitlab.Canceled
 		statusOpts.Title = "skipped validating this commit"
-	case "neutral":
-		statusOpts.Conclusion = "canceled"
+	case providerstatus.ConclusionNeutral:
+		state = gitlab.Canceled
 		statusOpts.Title = "stopped"
-	case "cancelled":
-		statusOpts.Conclusion = "canceled"
+	case providerstatus.ConclusionCancelled:
+		state = gitlab.Canceled
 		statusOpts.Title = "cancelled validating this commit"
-	case "failure":
-		statusOpts.Conclusion = "failed"
+	case providerstatus.ConclusionFailure:
+		state = gitlab.Failed
 		statusOpts.Title = "failed"
-	case "success":
-		statusOpts.Conclusion = "success"
+	case providerstatus.ConclusionSuccess:
+		state = gitlab.Success
 		statusOpts.Title = "successfully validated your commit"
-	case "completed":
-		statusOpts.Conclusion = "success"
+	case providerstatus.ConclusionCompleted:
+		state = gitlab.Success
 		statusOpts.Title = "completed"
-	case "pending":
-		statusOpts.Conclusion = "pending"
+	case providerstatus.ConclusionPending:
+		state = gitlab.Running
 	}
+
 	// When the pipeline is actually running (in_progress), show it as running
 	// not pending. Pending is only for waiting states like /ok-to-test approval.
 	if statusOpts.Status == "in_progress" {
-		statusOpts.Conclusion = "running"
+		state = gitlab.Running
 	}
 	if statusOpts.DetailsURL != "" {
 		detailsURL = statusOpts.DetailsURL
@@ -324,7 +347,7 @@ func (v *Provider) CreateStatus(ctx context.Context, event *info.Event, statusOp
 
 	contextName := provider.GetCheckName(statusOpts, v.pacInfo)
 	opt := &gitlab.SetCommitStatusOptions{
-		State:       gitlab.BuildStateValue(statusOpts.Conclusion),
+		State:       state,
 		Name:        gitlab.Ptr(contextName),
 		TargetURL:   gitlab.Ptr(detailsURL),
 		Description: gitlab.Ptr(statusOpts.Title),
@@ -574,48 +597,10 @@ func (v *Provider) fetchChangedFiles(_ context.Context, runevent *info.Event) (c
 
 	switch runevent.TriggerTarget {
 	case triggertype.PullRequest:
-		opt := &gitlab.ListMergeRequestDiffsOptions{
-			ListOptions: gitlab.ListOptions{
-				OrderBy:    "id",
-				Pagination: "keyset",
-				PerPage:    defaultGitlabListOptions.PerPage,
-				Sort:       "asc",
-			},
-		}
-		options := []gitlab.RequestOptionFunc{}
-
-		for {
-			mrchanges, resp, err := v.Client().MergeRequests.ListMergeRequestDiffs(v.targetProjectID, int64(runevent.PullRequestNumber), opt, options...)
-			if err != nil {
-				// TODO: Should this return the files found so far?
-				return changedfiles.ChangedFiles{}, err
-			}
-
-			for _, change := range mrchanges {
-				changedFiles.All = append(changedFiles.All, change.NewPath)
-				if change.NewFile {
-					changedFiles.Added = append(changedFiles.Added, change.NewPath)
-				}
-				if change.DeletedFile {
-					changedFiles.Deleted = append(changedFiles.Deleted, change.NewPath)
-				}
-				if !change.RenamedFile && !change.DeletedFile && !change.NewFile {
-					changedFiles.Modified = append(changedFiles.Modified, change.NewPath)
-				}
-				if change.RenamedFile {
-					changedFiles.Renamed = append(changedFiles.Renamed, change.NewPath)
-				}
-			}
-
-			// Exit the loop when we've seen all pages.
-			if resp.NextLink == "" {
-				break
-			}
-
-			// Otherwise, set param to query the next page
-			options = []gitlab.RequestOptionFunc{
-				gitlab.WithKeysetPaginationParameters(resp.NextLink),
-			}
+		var err error
+		changedFiles, err = v.mergeRequestFilesChanged(runevent)
+		if err != nil {
+			return changedfiles.ChangedFiles{}, err
 		}
 	case triggertype.Push:
 		options := gitlab.GetCommitDiffOptions{ListOptions: defaultGitlabListOptions}
@@ -658,6 +643,116 @@ func (v *Provider) fetchChangedFiles(_ context.Context, runevent *info.Event) (c
 	return changedFiles, nil
 }
 
+func (v *Provider) mergeRequestFilesChanged(runevent *info.Event) (changedfiles.ChangedFiles, error) {
+	diffTruncated, changeCount, err := v.isMergeRequestDiffTruncated(v.targetProjectID, int64(runevent.PullRequestNumber))
+	if err != nil {
+		return changedfiles.ChangedFiles{}, err
+	}
+
+	changedFiles := changedfiles.ChangedFiles{
+		All:     make([]string, 0, changeCount),
+		Added:   []string{},
+		Deleted: []string{},
+		Renamed: []string{},
+	}
+
+	options := []gitlab.RequestOptionFunc{}
+
+	// Only use the repository/compare API if the standard merge_request/diff API endpoint will
+	// return a truncated set of changes. The repository/compare API returns the entire set of
+	// changes without paging, so it can have a significantly heavier memory footprint if used
+	// in all cases.
+	if diffTruncated {
+		compareOpts := &gitlab.CompareOptions{
+			From: &runevent.BaseBranch,
+			To:   &runevent.SHA,
+		}
+		comparison, _, err := v.Client().Repositories.Compare(v.targetProjectID, compareOpts, options...)
+		if err != nil {
+			return changedfiles.ChangedFiles{}, err
+		}
+
+		for _, change := range comparison.Diffs {
+			changedFiles.All = append(changedFiles.All, change.NewPath)
+			if change.NewFile {
+				changedFiles.Added = append(changedFiles.Added, change.NewPath)
+			}
+			if change.DeletedFile {
+				changedFiles.Deleted = append(changedFiles.Deleted, change.NewPath)
+			}
+			if !change.RenamedFile && !change.DeletedFile && !change.NewFile {
+				changedFiles.Modified = append(changedFiles.Modified, change.NewPath)
+			}
+			if change.RenamedFile {
+				changedFiles.Renamed = append(changedFiles.Renamed, change.NewPath)
+			}
+		}
+	} else {
+		diffOpts := &gitlab.ListMergeRequestDiffsOptions{
+			ListOptions: gitlab.ListOptions{
+				OrderBy:    "id",
+				Pagination: "keyset",
+				PerPage:    defaultGitlabListOptions.PerPage,
+				Sort:       "asc",
+			},
+		}
+		for {
+			mrchanges, resp, err := v.Client().MergeRequests.ListMergeRequestDiffs(v.targetProjectID, int64(runevent.PullRequestNumber), diffOpts, options...)
+			if err != nil {
+				// TODO: Should this return the files found so far?
+				return changedfiles.ChangedFiles{}, err
+			}
+			for _, change := range mrchanges {
+				changedFiles.All = append(changedFiles.All, change.NewPath)
+				if change.NewFile {
+					changedFiles.Added = append(changedFiles.Added, change.NewPath)
+				}
+				if change.DeletedFile {
+					changedFiles.Deleted = append(changedFiles.Deleted, change.NewPath)
+				}
+				if !change.RenamedFile && !change.DeletedFile && !change.NewFile {
+					changedFiles.Modified = append(changedFiles.Modified, change.NewPath)
+				}
+				if change.RenamedFile {
+					changedFiles.Renamed = append(changedFiles.Renamed, change.NewPath)
+				}
+			}
+
+			// Exit the loop when we've seen all pages.
+			if resp.NextLink == "" {
+				break
+			}
+
+			// Otherwise, set param to query the next page
+			options = []gitlab.RequestOptionFunc{
+				gitlab.WithKeysetPaginationParameters(resp.NextLink),
+			}
+		}
+	}
+	return changedFiles, nil
+}
+
+// isMergeRequestDiffTruncated checks if the merge request is affected by the Gitlab API's Diff Limits.
+// This is determined by the Get Merge Request API's returning a ChangeCount number with a "+" suffix.
+// See also: https://docs.gitlab.com/administration/diff_limits/
+// Returns (bool: isTruncated, int: changeCount, err: error).
+func (v *Provider) isMergeRequestDiffTruncated(projectID, mergeRequestID int64) (bool, int, error) {
+	out, _, err := v.Client().MergeRequests.GetMergeRequest(projectID, mergeRequestID, &gitlab.GetMergeRequestsOptions{})
+	if err != nil {
+		return false, 0, fmt.Errorf("error getting merge request %d: %w", mergeRequestID, err)
+	}
+	fileCount := 0
+	truncated := strings.HasSuffix(out.ChangesCount, "+")
+	if out.ChangesCount != "" {
+		countStr := strings.TrimSuffix(out.ChangesCount, "+")
+		fileCount, err = strconv.Atoi(countStr)
+		if err != nil {
+			return false, 0, err
+		}
+	}
+	return truncated, fileCount, nil
+}
+
 func (v *Provider) CreateToken(_ context.Context, _ []string, _ *info.Event) (string, error) {
 	return "", nil
 }
@@ -685,7 +780,7 @@ func (v *Provider) GetTemplate(commentType provider.CommentType) string {
 }
 
 //nolint:misspell
-func (v *Provider) formatPipelineComment(sha string, status provider.StatusOpts) string {
+func (v *Provider) formatPipelineComment(sha string, status providerstatus.StatusOpts) string {
 	var emoji string
 
 	switch status.Conclusion {

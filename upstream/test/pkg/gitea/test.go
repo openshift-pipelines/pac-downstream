@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"codeberg.org/mvdkleijn/forgejo-sdk/forgejo/v2"
+	"codeberg.org/mvdkleijn/forgejo-sdk/forgejo/v3"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
@@ -635,7 +635,7 @@ func GetStandardParams(t *testing.T, topts *TestOpts, eventType string) (repoURL
 		topts.ParamsRun.Clients.Kube.CoreV1(),
 		topts.TargetNS, fmt.Sprintf("tekton.dev/pipelineRun=%s",
 			prs.Items[0].Name), "step-test-standard-params-value",
-		&numLines)
+		&numLines, nil)
 	assert.NilError(t, err)
 	assert.Assert(t, out != "")
 	out = strings.TrimSpace(out)

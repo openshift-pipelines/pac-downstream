@@ -20,7 +20,6 @@ import (
 )
 
 func TestBitbucketDataCenterDynamicVariables(t *testing.T) {
-	t.Skip("skipping test for now, until we ge the bitbucket infra back")
 	targetNS := names.SimpleNameGenerator.RestrictLengthWithRandomSuffix("pac-e2e-ns")
 	ctx := context.Background()
 	bitbucketWSOwner := os.Getenv("TEST_BITBUCKET_SERVER_E2E_REPOSITORY")
@@ -66,6 +65,6 @@ func TestBitbucketDataCenterDynamicVariables(t *testing.T) {
 	wait.Succeeded(ctx, t, runcnx, opts, successOpts)
 
 	reg := *regexp.MustCompile(fmt.Sprintf("event: repo:refs_changed, refId: refs/heads/%s, message: %s", targetNS, commitMsg))
-	err = wait.RegexpMatchingInPodLog(ctx, runcnx, targetNS, "pipelinesascode.tekton.dev/original-prname=pipelinerun-dynamic-vars", "step-task", reg, "", 2)
+	err = wait.RegexpMatchingInPodLog(ctx, runcnx, targetNS, "pipelinesascode.tekton.dev/original-prname=pipelinerun-dynamic-vars", "step-task", reg, "", 2, nil)
 	assert.NilError(t, err)
 }
