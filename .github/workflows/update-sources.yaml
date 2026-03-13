@@ -19,10 +19,10 @@ jobs:
       with:
         ref: release-v1.20.x
 
-    - name: Clone openshift-pipelines/pipelines-as-code
+    - name: Clone tektoncd/pipelines-as-code
       run: |
         rm -fR upstream
-        git clone https://github.com/openshift-pipelines/pipelines-as-code upstream
+        git clone https://github.com/tektoncd/pipelines-as-code upstream
         pushd upstream
         git checkout -B release-v0.42.x origin/release-v0.42.x
         popd
@@ -54,12 +54,12 @@ jobs:
         fi
 
         git commit -F- <<EOF
-        [bot] Update release-v1.20.x from openshift-pipelines/pipelines-as-code to ${NEW_COMMIT}
+        [bot] Update release-v1.20.x from tektoncd/pipelines-as-code to ${NEW_COMMIT}
 
             $ git diff --stat ${NEW_COMMIT}..${OLD_COMMIT}
         $(cat /tmp/diff.txt | sed 's/^/    /' | head -c 55555)
         
-        https://github.com/openshift-pipelines/pipelines-as-code/compare/${NEW_COMMIT}..${OLD_COMMIT}
+        https://github.com/tektoncd/pipelines-as-code/compare/${NEW_COMMIT}..${OLD_COMMIT}
         EOF
         
         git push -f origin actions/update/sources-release-v1.20.x
@@ -69,7 +69,7 @@ jobs:
           gh pr create -B release-v1.20.x -H actions/update/sources-release-v1.20.x --label=automated --label=upstream --fill
         else
           echo "a PR already exists, editing..."
-          gh pr edit --title "[bot] Update release-v1.20.x from openshift-pipelines/pipelines-as-code to ${NEW_COMMIT}" --body "$(cat /tmp/diff.txt | sed 's/^/    /' | head -c 55555)"
+          gh pr edit --title "[bot] Update release-v1.20.x from tektoncd/pipelines-as-code to ${NEW_COMMIT}" --body "$(cat /tmp/diff.txt | sed 's/^/    /' | head -c 55555)"
         fi
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
