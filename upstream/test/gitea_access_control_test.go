@@ -259,7 +259,7 @@ func TestGiteaACLCommentsAllowing(t *testing.T) {
 			tgitea.WaitForPullRequestCommentMatch(t, topts)
 			tgitea.WaitForStatus(t, topts, topts.PullRequest.Head.Sha, "", false)
 			// checking the pod log to make sure /test <prname> works
-			err = twait.RegexpMatchingInPodLog(context.Background(), topts.ParamsRun, topts.TargetNS, "pipelinesascode.tekton.dev/event-type=pull_request", "step-task", *regexp.MustCompile(".*MOTO"), "", 2)
+			err = twait.RegexpMatchingInPodLog(context.Background(), topts.ParamsRun, topts.TargetNS, "pipelinesascode.tekton.dev/event-type=pull_request", "step-task", *regexp.MustCompile(".*MOTO"), "", 2, nil)
 			assert.NilError(t, err, "Error while checking the logs of the pods")
 		})
 	}
@@ -290,7 +290,7 @@ func TestGiteaACLCommentsAllowingRememberOkToTestFalse(t *testing.T) {
 	cfgMapData := map[string]string{
 		"remember-ok-to-test": "false",
 	}
-	defer configmap.ChangeGlobalConfig(ctx, t, topts.ParamsRun, cfgMapData)()
+	defer configmap.ChangeGlobalConfig(ctx, t, topts.ParamsRun, "pipelines-as-code", cfgMapData)()
 
 	_, f := tgitea.TestPR(t, topts)
 	defer f()
