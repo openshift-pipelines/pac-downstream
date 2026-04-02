@@ -32,7 +32,7 @@ func TestCreateStatusWithRetry(t *testing.T) {
 	assert.NilError(t, err)
 }
 
-func TestCreateStatusWithRetry_ErrorCase(t *testing.T) {
+func TestCreateStatusWithRetryErrorCase(t *testing.T) {
 	observer, _ := zapobserver.New(zap.InfoLevel)
 	fakelogger := zap.New(observer).Sugar()
 	vcx := tprovider.TestProviderImp{}

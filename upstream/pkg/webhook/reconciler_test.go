@@ -7,7 +7,7 @@ import (
 
 // Test_Reconcile tests the reconcile function
 // TODO: make it a more complete test.
-func Test_Reconcile(t *testing.T) {
+func TestReconcile(t *testing.T) {
 	tests := []struct {
 		name    string
 		wantErr bool

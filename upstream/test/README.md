@@ -47,6 +47,8 @@ this repo should differ from the one which is configured as part of `TEST_GITHUB
 - `TEST_GITLAB_API_URL` - Gitlab API URL i.e: `https://gitlab.com`
 - `TEST_GITLAB_GROUP` - Gitlab group/namespace where test projects will be created and deleted
 - `TEST_GITLAB_TOKEN` - Gitlab Token
+- `TEST_GITLAB_SECOND_TOKEN` - Optional second GitLab token from a different user for fork-based GitLab tests
+- `TEST_GITLAB_SECOND_GROUP` - Optional group/namespace where the second user should create forks
 - `TEST_GITLAB_SMEEURL` - Smee URL for forwarding GitLab webhooks to the controller
 - `TEST_GITEA_API_URL` - URL where GITEA is running (i.e: [GITEA_HOST](http://localhost:3000))
 - `TEST_GITEA_SMEEURL` - URL of smee
@@ -132,10 +134,14 @@ instance to your local controller (the same pattern as Gitea tests).
    export TEST_GITLAB_API_URL=https://gitlab.pipelinesascode.com
    export TEST_GITLAB_TOKEN=<your-token>
    export TEST_GITLAB_GROUP=<your-group>
+   export TEST_GITLAB_SECOND_TOKEN=<second-user-token> # optional, required for real fork fallback tests
+   export TEST_GITLAB_SECOND_GROUP=<second-user-group> # optional, recommended when the second user has multiple namespaces
    export TEST_GITLAB_SMEEURL="${SMEE_URL}"
    export TEST_EL_URL=https://your-controller-url
    export TEST_EL_WEBHOOK_SECRET=<your-webhook-secret>
    ```
+
+   Fork-status fallback tests skip automatically when `TEST_GITLAB_SECOND_TOKEN` is not set.
 
 4. Run the tests:
 
@@ -151,28 +157,6 @@ To clean up stale test projects (older than 7 days) left from previous runs:
 ```
 
 If you need to update the golden files in the end-to-end test, add the `-update` flag to the [go test](https://pkg.go.dev/cmd/go#hdr-Test_packages) command to refresh those files. First, run it if you expect the test output to change (or for a new test), then run it again without the flag to ensure everything is correct.
-
-## Running nightly tests
-
-Some tests are set as nightly which mean not run on every PR, because exposing rate limitation often.
-We run those as nightly via github action on kind.
-
-You can use `make test-e2e-nightly` if you want to run those manually as long
-as you have all the env variables set.
-
-If you are writing a test targeting a nightly test you need to check for the env variable:
-
-```go
-    if os.Getenv("NIGHTLY_E2E_TEST") != "true" {
-        t.Skip("Skipping test since only enabled for nightly")
-    }
-```
-
-and maybe add to the test-e2e-nightly Makefile target to the -run argument :
-
-```bash
--run '(TestGithub|TestOtherPrefixOfTest)'
-```
 
 ## Continuous Integration (CI) with GitHub Actions
 
@@ -226,7 +210,7 @@ Secrets are stored in GitHub Secrets and made available to the workflow via `${{
 The `hack/gh-workflow-ci.sh` script contains several functions that assist in the CI process:
 
 1. `create_pac_github_app_secret` - Creates the required secrets for GitHub app authentication
-2. ~~`create_second_github_app_controller_on_ghe`~~ - Use [startpaac](https://github.com/openshift-pipelines/startpaac) instead. See [Second Controller Setup](#second-controller-setup) below.
+2. ~~`create_second_github_app_controller_on_ghe`~~ - Use [startpaac](https://github.com/pipelines-as-code/startpaac) instead. See [Second Controller Setup](#second-controller-setup) below.
 3. `run_e2e_tests` - Executes the E2E tests with proper filters
 4. `collect_logs` - Gathers logs and diagnostic information
 
@@ -234,7 +218,7 @@ The script filters tests by category using pattern matching on test function nam
 
 #### Second Controller Setup
 
-In CI, use [startpaac](https://github.com/openshift-pipelines/startpaac) to install the second GitHub controller (GHE). When running with the `--ci` flag, startpaac automatically installs the second controller when `PAC_SECOND_SECRET_FOLDER` is set.
+In CI, use [startpaac](https://github.com/pipelines-as-code/startpaac) to install the second GitHub controller (GHE). When running with the `--ci` flag, startpaac automatically installs the second controller when `PAC_SECOND_SECRET_FOLDER` is set.
 
 Example from e2e.yaml workflow:
 
@@ -363,7 +347,6 @@ To add new provider tests:
 1. Create test files following the existing patterns
 2. Ensure proper naming convention to match the test category filters
 3. Update environment variables if needed
-4. For nightly-only tests, include the check for `NIGHTLY_E2E_TEST`
 
 For infrastructure changes:
 

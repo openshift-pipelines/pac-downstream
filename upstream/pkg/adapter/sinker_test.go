@@ -85,7 +85,7 @@ func setupTestData(t *testing.T, repos []*v1alpha1.Repository) *params.Run {
 }
 
 // TestSetupClient_GitHubAppVsOther tests the different code paths for GitHub Apps vs other providers.
-func TestSetupClient_GitHubAppVsOther(t *testing.T) {
+func TestSetupClientGitHubAppVsOther(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -407,10 +407,10 @@ func TestFindMatchingRepository(t *testing.T) {
 	}
 }
 
-// TestProcessEvent_SkipCI_PushEvent tests the skip-CI logic for push events.
+// TestProcessEventSkipCIPushEvent tests the skip-CI logic for push events.
 // This tests that the SkipCI check works correctly for push events where the
 // commit message is available directly in the webhook payload (event.SHATitle).
-func TestProcessEvent_SkipCI_PushEvent(t *testing.T) {
+func TestProcessEventSkipCIPushEvent(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -473,10 +473,10 @@ func TestProcessEvent_SkipCI_PushEvent(t *testing.T) {
 	}
 }
 
-// TestGetCommitInfo_SetsHasSkipCommand tests that GetCommitInfo correctly sets
+// TestGetCommitInfoSetsHasSkipCommand tests that GetCommitInfo correctly sets
 // HasSkipCommand when the commit message contains skip-CI commands.
 // This tests the full flow that processEvent uses for PR events.
-func TestGetCommitInfo_SetsHasSkipCommand(t *testing.T) {
+func TestGetCommitInfoSetsHasSkipCommand(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -554,10 +554,10 @@ func TestGetCommitInfo_SetsHasSkipCommand(t *testing.T) {
 	}
 }
 
-// TestProcessEvent_SkipCI_Integration documents the skip-CI flow integration.
+// TestProcessEventSkipCIIntegration documents the skip-CI flow integration.
 // This is a documentation test that verifies the skip-CI decision logic
 // matches what's implemented in sinker.go processEvent().
-func TestProcessEvent_SkipCI_Integration(t *testing.T) {
+func TestProcessEventSkipCIIntegration(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {

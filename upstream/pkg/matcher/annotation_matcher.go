@@ -2,7 +2,6 @@ package matcher
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -37,9 +36,20 @@ const (
 	maxCommentLogLength = 160
 )
 
-// ErrNoFailedPipelineToRetest is returned when /retest or /ok-to-test is used
-// but all matching pipelines have already succeeded for this commit.
-var ErrNoFailedPipelineToRetest = errors.New("All PipelineRuns for this commit have already succeeded. Use `/retest <pipeline-name>` to re-run a specific pipeline or `/test` to re-run all pipelines.") // nolint:revive,staticcheck
+// NoFailedPipelineToRetestError is an error type returned when /retest or
+// /ok-to-test is used but all matching pipelines have already succeeded for
+// this commit. The underlying string value is the gitops comment prefix used
+// to construct the user-facing error message with the correct command syntax.
+type NoFailedPipelineToRetestError string
+
+func (e NoFailedPipelineToRetestError) Error() string {
+	return fmt.Sprintf("All PipelineRuns for this commit have already succeeded. Use `%sretest <pipeline-name>` to re-run a specific pipeline or `%stest` to re-run all pipelines.", string(e), string(e))
+}
+
+func (e NoFailedPipelineToRetestError) Is(target error) bool {
+	_, ok := target.(NoFailedPipelineToRetestError)
+	return ok
+}
 
 // prunBranch is value from annotations and baseBranch is event.Base value from event.
 func branchMatch(prunBranch, baseBranch string) bool {
@@ -424,9 +434,9 @@ func MatchPipelinerunByAnnotation(ctx context.Context, logger *zap.SugaredLogger
 		if event.EventType == opscomments.RetestAllCommentEventType.String() ||
 			event.EventType == opscomments.OkToTestCommentEventType.String() {
 			logger.Debugf("MatchPipelinerunByAnnotation: filtering successful templates for event_type=%s", event.EventType)
-			filtered := filterSuccessfulTemplates(ctx, logger, cs, event, repo, matchedPRs)
+			filtered := filterSuccessfulTemplates(ctx, logger, cs, event, repo, vcx, matchedPRs)
 			if len(filtered) == 0 {
-				return nil, ErrNoFailedPipelineToRetest
+				return nil, NoFailedPipelineToRetestError(provider.GetGitOpsCommentPrefix(repo))
 			}
 			return filtered, nil
 		}
@@ -438,7 +448,7 @@ func MatchPipelinerunByAnnotation(ctx context.Context, logger *zap.SugaredLogger
 
 // filterSuccessfulTemplates filters out templates that already have successful PipelineRuns
 // when executing /ok-to-test or /retest gitops commands, implementing per-template checking.
-func filterSuccessfulTemplates(ctx context.Context, logger *zap.SugaredLogger, cs *params.Run, event *info.Event, repo *apipac.Repository, matchedPRs []Match) []Match {
+func filterSuccessfulTemplates(ctx context.Context, logger *zap.SugaredLogger, cs *params.Run, event *info.Event, repo *apipac.Repository, vcx provider.Interface, matchedPRs []Match) []Match {
 	if event.SHA == "" {
 		return matchedPRs
 	}
@@ -469,12 +479,26 @@ func filterSuccessfulTemplates(ctx context.Context, logger *zap.SugaredLogger, c
 			continue // Skip PipelineRuns without template identification
 		}
 
-		// Check if this PipelineRun succeeded
+		// Only completed successful PipelineRuns should suppress a /retest.
 		if pr.Status.GetCondition(apis.ConditionSucceeded).IsTrue() {
 			// Keep the most recent successful run for each template
 			if existing, exists := successfulTemplates[originalPRName]; !exists ||
 				pr.CreationTimestamp.After(existing.CreationTimestamp.Time) {
 				successfulTemplates[originalPRName] = pr
+			}
+		}
+	}
+
+	// Also check provider commit statuses (covers pruned PipelineRuns)
+	commitStatuses, err := vcx.GetCommitStatuses(ctx, event)
+	if err != nil {
+		logger.Warnf("failed to get commit statuses from provider for SHA %s: %v", event.SHA, err)
+	} else if len(commitStatuses) > 0 {
+		appName := cs.Info.GetPacOpts().ApplicationName
+		for _, cs := range commitStatuses {
+			originalName := parseOriginalPRName(cs.Name, appName)
+			if originalName != "" && isSuccessStatus(cs.Status) {
+				successfulTemplates[originalName] = &tektonv1.PipelineRun{} // placeholder
 			}
 		}
 	}
@@ -495,6 +519,26 @@ func filterSuccessfulTemplates(ctx context.Context, logger *zap.SugaredLogger, c
 
 	// Return the filtered list (which may be empty if all templates were skipped)
 	return filteredPRs
+}
+
+// parseOriginalPRName extracts the original PipelineRun name from a commit status name.
+// The commit status name format is "ApplicationName / OriginalPRName".
+func parseOriginalPRName(checkName, appName string) string {
+	prefix := appName + " / "
+	if strings.HasPrefix(checkName, prefix) {
+		return strings.TrimPrefix(checkName, prefix)
+	}
+	return ""
+}
+
+// isSuccessStatus returns true if the status string represents a successful state
+// across different git providers.
+func isSuccessStatus(status string) bool {
+	switch strings.ToLower(status) {
+	case "success", "successful", "completed":
+		return true
+	}
+	return false
 }
 
 func buildAvailableMatchingAnnotationErr(event *info.Event, pruns []*tektonv1.PipelineRun) string {

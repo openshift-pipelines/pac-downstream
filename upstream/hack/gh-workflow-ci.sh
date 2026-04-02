@@ -213,9 +213,20 @@ run_e2e_tests() {
 
   mkdir -p /tmp/logs
 
+  local test_pattern
+  local test_status=0
+  local raw_output=/tmp/logs/e2e-test-output.json
+
   # shellcheck disable=SC2001
-  make test-e2e GO_TEST_FLAGS="-v -run \"$(echo "${tests[*]}" | sed 's/ /|/g')\"" 2>&1 | tee -a /tmp/logs/e2e-test-output.log
-  return "${PIPESTATUS[0]}"
+  test_pattern="$(echo "${tests[*]}" | sed 's/ /|/g')"
+  ./hack/install-gotestsum.sh 1.13.0 "${HOME}/go/bin"
+  env GODEBUG=asynctimerchan=1 \
+    gotestsum --format standard-verbose --jsonfile "${raw_output}" -- \
+    -race -failfast -timeout 45m -count=1 -tags=e2e -run "${test_pattern}" ./test || test_status=$?
+  if ! TESTRR_RUN_LABEL="${TESTRR_RUN_LABEL:-gha-e2e-${target}}" ./hack/upload-testrr.sh "${raw_output}"; then
+    echo "::warning::testrr upload failed; continuing without failing GitHub Actions"
+  fi
+  return "${test_status}"
 }
 
 output_logs() {

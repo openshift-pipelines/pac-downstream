@@ -5,7 +5,6 @@ import (
 	"io"
 	"testing"
 
-	"github.com/google/go-cmp/cmp"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/cli"
@@ -14,6 +13,7 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/clients"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	testclient "github.com/openshift-pipelines/pipelines-as-code/pkg/test/clients"
+	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	rtesting "knative.dev/pkg/reconciler/testing"
@@ -230,13 +230,12 @@ func TestWebhookAdd(t *testing.T) {
 				Info: info.Info{Kube: &info.KubeOpts{Namespace: tt.opts.Namespace}},
 			}
 			io, out := newIOStream()
-			if err := add(ctx, tt.opts, cs, io,
-				tt.repoName, tt.pacNamespace); (err != nil) != tt.wantErr {
-				t.Errorf("add() error = %v, wantErr %v", err, tt.wantErr)
+			err := add(ctx, tt.opts, cs, io, tt.repoName, tt.pacNamespace)
+			if tt.wantErr {
+				assert.Assert(t, err != nil)
 			} else {
-				if res := cmp.Diff(out.String(), tt.wantMsg); res != "" {
-					t.Errorf("Diff %s:", res)
-				}
+				assert.NilError(t, err)
+				assert.Equal(t, tt.wantMsg, out.String())
 			}
 		})
 	}

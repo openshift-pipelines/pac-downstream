@@ -95,18 +95,17 @@ func TestOpenshiftConsoleUI(t *testing.T) {
 			ctx, _ := rtesting.SetupFakeContext(t)
 			o := &OpenshiftConsole{}
 			dynClient := dynamicfake.NewSimpleDynamicClient(runtime.NewScheme(), tt.unsf)
-			if err := o.UI(ctx, dynClient); (err != nil) != tt.wantErr {
-				t.Fatalf("UI() error = %v, wantErr %v", err, tt.wantErr)
+			err := o.UI(ctx, dynClient)
+			if tt.wantErr {
+				assert.Assert(t, err != nil)
+				return
 			}
+			assert.NilError(t, err)
 			if tt.wantHost != "" {
-				if o.host != tt.wantHost {
-					t.Fatalf("UI() host = %v, want %v", o.host, tt.wantHost)
-				}
+				assert.Equal(t, o.host, tt.wantHost)
 			}
 			if tt.wantName != "" {
-				if o.GetName() != tt.wantName {
-					t.Fatalf("UI() name = %v, want %v", o.GetName(), tt.wantName)
-				}
+				assert.Equal(t, o.GetName(), tt.wantName)
 			}
 		})
 	}

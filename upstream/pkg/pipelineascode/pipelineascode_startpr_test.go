@@ -6,7 +6,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/google/go-github/v81/github"
+	"github.com/google/go-github/v84/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/consoleui"
@@ -280,7 +280,7 @@ func TestStartPR(t *testing.T) {
 	assert.Assert(t, hasLogURL, "LogURL annotation should be set")
 }
 
-func TestStartPR_MissingSecretAnnotation(t *testing.T) {
+func TestStartPRMissingSecretAnnotation(t *testing.T) {
 	fixture := setupStartPRTestDefault(t)
 	defer fixture.teardown()
 
@@ -293,7 +293,7 @@ func TestStartPR_MissingSecretAnnotation(t *testing.T) {
 	assert.ErrorContains(t, err, keys.GitAuthSecret)
 }
 
-func TestStartPR_SecretCreationScenarios(t *testing.T) {
+func TestStartPRSecretCreationScenarios(t *testing.T) {
 	tests := []struct {
 		name              string
 		createSecretError error
@@ -351,7 +351,7 @@ func TestStartPR_SecretCreationScenarios(t *testing.T) {
 	}
 }
 
-func TestStartPR_AnnotationAndLabelPropagation(t *testing.T) {
+func TestStartPRAnnotationAndLabelPropagation(t *testing.T) {
 	tests := []struct {
 		name                   string
 		setupMatch             func(*matcher.Match)
@@ -425,7 +425,7 @@ func TestStartPR_AnnotationAndLabelPropagation(t *testing.T) {
 	}
 }
 
-func TestStartPR_ConcurrencyLimitBehavior(t *testing.T) {
+func TestStartPRConcurrencyLimitBehavior(t *testing.T) {
 	tests := []struct {
 		name                    string
 		concurrencyLimit        *int
@@ -502,7 +502,7 @@ func TestStartPR_ConcurrencyLimitBehavior(t *testing.T) {
 	}
 }
 
-func TestStartPR_CreationFailureWithSecretCleanup(t *testing.T) {
+func TestStartPRCreationFailureWithSecretCleanup(t *testing.T) {
 	ctx, _ := rtesting.SetupFakeContext(t)
 	observer, _ := zapobserver.New(zap.InfoLevel)
 	logger := zap.New(observer).Sugar()
@@ -589,7 +589,7 @@ func TestStartPR_CreationFailureWithSecretCleanup(t *testing.T) {
 	assert.Assert(t, kint.SecretDeleted, "Secret should have been deleted on PR creation failure")
 }
 
-func TestStartPR_SecretCleanupError(t *testing.T) {
+func TestStartPRSecretCleanupError(t *testing.T) {
 	ctx, _ := rtesting.SetupFakeContext(t)
 	observer, log := zapobserver.New(zap.InfoLevel)
 	logger := zap.New(observer).Sugar()
@@ -674,7 +674,7 @@ func TestStartPR_SecretCleanupError(t *testing.T) {
 	assert.Assert(t, len(logEntries) > 0, "Should have logged secret deletion error")
 }
 
-func TestStartPR_SecretOwnerRefUpdateErrors(t *testing.T) {
+func TestStartPRSecretOwnerRefUpdateErrors(t *testing.T) {
 	tests := []struct {
 		name              string
 		updateSecretError error
@@ -716,7 +716,7 @@ func TestStartPR_SecretOwnerRefUpdateErrors(t *testing.T) {
 	}
 }
 
-func TestStartPR_StatusCreationFailure(t *testing.T) {
+func TestStartPRStatusCreationFailure(t *testing.T) {
 	config := defaultStartPRTestConfig()
 	config.createStatusErorring = true
 	fixture := setupStartPRTestWithConfig(t, config)
@@ -733,7 +733,7 @@ func TestStartPR_StatusCreationFailure(t *testing.T) {
 	assert.ErrorContains(t, err, "in_progress status")
 }
 
-func TestStartPR_GitHubAppLogURLHandling(t *testing.T) {
+func TestStartPRGitHubAppLogURLHandling(t *testing.T) {
 	fixture := setupStartPRTestDefault(t)
 	defer fixture.teardown()
 
@@ -758,7 +758,7 @@ func TestStartPR_GitHubAppLogURLHandling(t *testing.T) {
 	assert.Assert(t, state == kubeinteraction.StateStarted || state == kubeinteraction.StateQueued)
 }
 
-func TestStartPR_PatchBehavior(t *testing.T) {
+func TestStartPRPatchBehavior(t *testing.T) {
 	tests := []struct {
 		name                string
 		simulatePatchError  bool
@@ -945,7 +945,7 @@ func runConcurrentStartPR(t *testing.T, count int, fn func(idx int) (*pipelinev1
 	return results
 }
 
-func TestStartPR_ConcurrentCreation(t *testing.T) {
+func TestStartPRConcurrentCreation(t *testing.T) {
 	cs, event, logger, ctx, fakeclient, teardown := setupStartPRTest(t)
 	defer teardown()
 
@@ -1003,7 +1003,7 @@ func TestStartPR_ConcurrentCreation(t *testing.T) {
 	t.Logf("Successfully created %d/%d concurrent PipelineRuns", successCount, numConcurrent)
 }
 
-func TestStartPR_ConcurrentWithSameSecret(t *testing.T) {
+func TestStartPRConcurrentWithSameSecret(t *testing.T) {
 	cs, event, logger, ctx, fakeclient, teardown := setupStartPRTest(t)
 	defer teardown()
 

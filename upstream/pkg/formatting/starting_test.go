@@ -2,9 +2,11 @@ package formatting
 
 import (
 	"testing"
+
+	"gotest.tools/v3/assert"
 )
 
-func TestMessageTemplate_MakeTemplate(t *testing.T) {
+func TestMessageTemplateMakeTemplate(t *testing.T) {
 	mt := MessageTemplate{
 		PipelineRunName: "test-pipeline",
 		Namespace:       "test-namespace",
@@ -44,13 +46,12 @@ func TestMessageTemplate_MakeTemplate(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := tt.mt.MakeTemplate(tt.msg)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("MessageTemplate.MakeTemplate() error = %v, wantErr %v", err, tt.wantErr)
+			if tt.wantErr {
+				assert.Assert(t, err != nil)
 				return
 			}
-			if got != tt.want {
-				t.Errorf("MessageTemplate.MakeTemplate() = %v, want %v", got, tt.want)
-			}
+			assert.NilError(t, err)
+			assert.Equal(t, got, tt.want)
 		})
 	}
 }

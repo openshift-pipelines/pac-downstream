@@ -19,18 +19,20 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/settings"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
+	prmetrics "github.com/openshift-pipelines/pipelines-as-code/pkg/pipelinerunmetrics"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
 	thelp "github.com/openshift-pipelines/pipelines-as-code/pkg/provider/gitlab/test"
 	providerstatus "github.com/openshift-pipelines/pipelines-as-code/pkg/provider/status"
 	testclient "github.com/openshift-pipelines/pipelines-as-code/pkg/test/clients"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/test/logger"
-	metricsutils "github.com/openshift-pipelines/pipelines-as-code/pkg/test/metricstest"
 
 	gitlab "gitlab.com/gitlab-org/api/client-go"
+	"go.opentelemetry.io/otel"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 	"go.uber.org/zap"
 	zapobserver "go.uber.org/zap/zaptest/observer"
 	"gotest.tools/v3/assert"
-	"knative.dev/pkg/metrics/metricstest"
-	_ "knative.dev/pkg/metrics/testing"
 	rtesting "knative.dev/pkg/reconciler/testing"
 )
 
@@ -577,6 +579,97 @@ func TestGetCommitInfo(t *testing.T) {
 					}
 				}
 			}
+		})
+	}
+}
+
+func TestGetCommitStatuses(t *testing.T) {
+	tests := []struct {
+		name         string
+		event        *info.Event
+		provider     *Provider
+		mockHandlers map[string]func(http.ResponseWriter, *http.Request)
+		want         []provider.CommitStatusInfo
+	}{
+		{
+			name: "uses event source project statuses",
+			event: &info.Event{
+				SHA:             "abc123",
+				SourceProjectID: 101,
+				TargetProjectID: 202,
+			},
+			provider: &Provider{},
+			mockHandlers: map[string]func(http.ResponseWriter, *http.Request){
+				"/projects/101/repository/commits/abc123/statuses": func(rw http.ResponseWriter, r *http.Request) {
+					assert.Equal(t, r.Method, http.MethodGet)
+					fmt.Fprint(rw, `[{"name":"Pipelines as Code CI / always-good-pipelinerun","status":"success"},{"name":"Pipelines as Code CI / pipelinerun-exit-1","status":"failed"}]`)
+				},
+			},
+			want: []provider.CommitStatusInfo{
+				{Name: "Pipelines as Code CI / always-good-pipelinerun", Status: "success"},
+				{Name: "Pipelines as Code CI / pipelinerun-exit-1", Status: "failed"},
+			},
+		},
+		{
+			name: "falls back to provider source project id when event source project id is empty",
+			event: &info.Event{
+				SHA:             "def456",
+				TargetProjectID: 202,
+			},
+			provider: &Provider{
+				sourceProjectID: 303,
+			},
+			mockHandlers: map[string]func(http.ResponseWriter, *http.Request){
+				"/projects/303/repository/commits/def456/statuses": func(rw http.ResponseWriter, r *http.Request) {
+					assert.Equal(t, r.Method, http.MethodGet)
+					fmt.Fprint(rw, `[{"name":"Pipelines as Code CI / from-provider-source","status":"success"}]`)
+				},
+			},
+			want: []provider.CommitStatusInfo{
+				{Name: "Pipelines as Code CI / from-provider-source", Status: "success"},
+			},
+		},
+		{
+			name: "falls back to target project when source project lookup fails",
+			event: &info.Event{
+				SHA:             "fedcba",
+				SourceProjectID: 404,
+				TargetProjectID: 505,
+			},
+			provider: &Provider{},
+			mockHandlers: map[string]func(http.ResponseWriter, *http.Request){
+				"/projects/404/repository/commits/fedcba/statuses": func(rw http.ResponseWriter, r *http.Request) {
+					assert.Equal(t, r.Method, http.MethodGet)
+					rw.WriteHeader(http.StatusNotFound)
+					fmt.Fprint(rw, `{"message":"404 Project Not Found"}`)
+				},
+				"/projects/505/repository/commits/fedcba/statuses": func(rw http.ResponseWriter, r *http.Request) {
+					assert.Equal(t, r.Method, http.MethodGet)
+					fmt.Fprint(rw, `[{"name":"Pipelines as Code CI / from-target","status":"success"}]`)
+				},
+			},
+			want: []provider.CommitStatusInfo{
+				{Name: "Pipelines as Code CI / from-target", Status: "success"},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fakeclient, mux, tearDown := thelp.Setup(t)
+			defer tearDown()
+			logger, _ := logger.GetLogger()
+
+			for endpoint, handler := range tt.mockHandlers {
+				mux.HandleFunc(endpoint, handler)
+			}
+
+			tt.provider.gitlabClient = fakeclient
+			tt.provider.Logger = logger
+
+			got, err := tt.provider.GetCommitStatuses(context.Background(), tt.event)
+			assert.NilError(t, err)
+			assert.DeepEqual(t, got, tt.want)
 		})
 	}
 }
@@ -1386,7 +1479,6 @@ func TestGetFiles(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx, _ := rtesting.SetupFakeContext(t)
-			metricsutils.ResetMetrics()
 			fakeclient, mux, teardown := thelp.Setup(t)
 			defer teardown()
 
@@ -1439,8 +1531,10 @@ func TestGetFiles(t *testing.T) {
 					})
 			}
 
-			metricsTags := map[string]string{"provider": "api.gitlab.com", "event-type": string(tt.event.TriggerTarget)}
-			metricstest.CheckStatsNotReported(t, "pipelines_as_code_git_provider_api_request_count")
+			prmetrics.ResetRecorder()
+			reader := sdkmetric.NewManualReader()
+			metricProvider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+			otel.SetMeterProvider(metricProvider)
 
 			providerInfo := &Provider{gitlabClient: fakeclient, sourceProjectID: int64(tt.sourceProjectID), targetProjectID: int64(tt.targetProjectID), triggerEvent: string(tt.event.TriggerTarget), apiURL: "api.gitlab.com"}
 			changedFiles, err := providerInfo.GetFiles(ctx, tt.event)
@@ -1463,15 +1557,32 @@ func TestGetFiles(t *testing.T) {
 				}
 			}
 
-			// Check caching
-			metricstest.CheckCountData(t, "pipelines_as_code_git_provider_api_request_count", metricsTags, tt.apiCallCount)
+			var rm metricdata.ResourceMetrics
+			err = reader.Collect(ctx, &rm)
+			assert.NilError(t, err, "error collecting metrics")
+
+			assert.Equal(t, len(rm.ScopeMetrics), 1)
+			assert.Equal(t, len(rm.ScopeMetrics[0].Metrics), 1)
+			assert.Equal(t, rm.ScopeMetrics[0].Metrics[0].Name, "pipelines_as_code_git_provider_api_request_count")
+			count, ok := rm.ScopeMetrics[0].Metrics[0].Data.(metricdata.Sum[int64])
+			assert.Assert(t, ok)
+			assert.Equal(t, count.DataPoints[0].Value, int64(tt.apiCallCount))
+
 			_, _ = providerInfo.GetFiles(ctx, tt.event)
+
+			// recollect the metrics after the second call
+			err = reader.Collect(ctx, &rm)
+			assert.NilError(t, err, "error collecting metrics")
 			if tt.wantError {
 				// No caching on error
-				metricstest.CheckCountData(t, "pipelines_as_code_git_provider_api_request_count", metricsTags, tt.apiCallCount*2)
+				count, ok = rm.ScopeMetrics[0].Metrics[0].Data.(metricdata.Sum[int64])
+				assert.Assert(t, ok)
+				assert.Equal(t, count.DataPoints[0].Value, int64(tt.apiCallCount*2))
 			} else {
 				// Cache API results on success
-				metricstest.CheckCountData(t, "pipelines_as_code_git_provider_api_request_count", metricsTags, tt.apiCallCount)
+				count, ok = rm.ScopeMetrics[0].Metrics[0].Data.(metricdata.Sum[int64])
+				assert.Assert(t, ok)
+				assert.Equal(t, count.DataPoints[0].Value, int64(tt.apiCallCount))
 			}
 		})
 	}
@@ -1503,7 +1614,6 @@ func TestGetFilesPaging(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx, _ := rtesting.SetupFakeContext(t)
-			metricsutils.ResetMetrics()
 			fakeclient, mux, teardown := thelp.Setup(t)
 			defer teardown()
 
@@ -1539,8 +1649,10 @@ func TestGetFilesPaging(t *testing.T) {
 				})
 			}
 
-			metricsTags := map[string]string{"provider": "api.gitlab.com", "event-type": string(tt.event.TriggerTarget)}
-			metricstest.CheckStatsNotReported(t, "pipelines_as_code_git_provider_api_request_count")
+			prmetrics.ResetRecorder()
+			reader := sdkmetric.NewManualReader()
+			metricProvider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+			otel.SetMeterProvider(metricProvider)
 
 			providerInfo := &Provider{gitlabClient: fakeclient, sourceProjectID: 0, targetProjectID: 0, triggerEvent: string(tt.event.TriggerTarget), apiURL: "api.gitlab.com"}
 			changedFiles, err := providerInfo.GetFiles(ctx, tt.event)
@@ -1549,9 +1661,26 @@ func TestGetFilesPaging(t *testing.T) {
 			assert.Equal(t, len(changedFiles.Modified), changeCount)
 
 			// Check caching
-			metricstest.CheckCountData(t, "pipelines_as_code_git_provider_api_request_count", metricsTags, int64(apiCallCount))
+			var rm metricdata.ResourceMetrics
+			err = reader.Collect(ctx, &rm)
+			assert.NilError(t, err, "error collecting metrics")
+
+			assert.Equal(t, len(rm.ScopeMetrics), 1)
+			assert.Equal(t, len(rm.ScopeMetrics[0].Metrics), 1)
+			assert.Equal(t, rm.ScopeMetrics[0].Metrics[0].Name, "pipelines_as_code_git_provider_api_request_count")
+			count, ok := rm.ScopeMetrics[0].Metrics[0].Data.(metricdata.Sum[int64])
+			assert.Assert(t, ok)
+			assert.Equal(t, count.DataPoints[0].Value, int64(apiCallCount))
+
 			_, _ = providerInfo.GetFiles(ctx, tt.event)
-			metricstest.CheckCountData(t, "pipelines_as_code_git_provider_api_request_count", metricsTags, int64(apiCallCount))
+
+			// recollect the metrics after the second call
+			err = reader.Collect(ctx, &rm)
+			assert.NilError(t, err, "error collecting metrics")
+
+			count, ok = rm.ScopeMetrics[0].Metrics[0].Data.(metricdata.Sum[int64])
+			assert.Assert(t, ok)
+			assert.Equal(t, count.DataPoints[0].Value, int64(apiCallCount))
 		})
 	}
 }

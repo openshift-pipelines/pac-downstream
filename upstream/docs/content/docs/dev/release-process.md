@@ -35,13 +35,15 @@ Once the tag is pushed, follow the release pipeline on the PAC cluster:
 
 After a while (gorelease takes some time), the new version should appear as a pre-release at:
 
-<https://github.com/openshift-pipelines/pipelines-as-code/releases>
+<https://github.com/tektoncd/pipelines-as-code/releases>
 
 ## Publishing the Release
 
-Edit the release notes following the same format as previous releases, with a snippet highlighting the key changes.
-
-If you use AI to draft release notes:
+Using claude (or others) skills you can do `/release-notes` to draft the
+release notes it will guide thru the release notes generation and update the
+release notes in the GitHub release page and a Slack announcement. The release
+notes are generated based on the merged PRs since the last release, so it may
+not be perfect, so you should always:
 
 * Verify the content, as it may contain mistakes.
 * Avoid overusing emojis. Keep the tone professional.
@@ -55,7 +57,7 @@ If you need to re-trigger the release process due to system or other issues:
 
 ```shell
    git tag --force v1.2.3
-   git push --force git@github.com:openshift-pipelines/pipelines-as-code v1.2.3
+   git push --force git@github.com:tektoncd/pipelines-as-code v1.2.3
 ```
 
 Common issues:

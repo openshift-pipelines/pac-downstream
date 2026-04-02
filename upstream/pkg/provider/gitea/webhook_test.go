@@ -7,7 +7,7 @@ import (
 	"gotest.tools/v3/assert"
 )
 
-func Test_parseWebhook(t *testing.T) {
+func TestParseWebhook(t *testing.T) {
 	type args struct {
 		eventType   whEventType
 		payloadFile string

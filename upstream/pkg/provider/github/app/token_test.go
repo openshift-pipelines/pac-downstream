@@ -55,7 +55,7 @@ var validSecret = &corev1.Secret{
 	},
 }
 
-func Test_GenerateJWT(t *testing.T) {
+func TestGenerateJWT(t *testing.T) {
 	namespaceWhereSecretNotInstalled := &corev1.Namespace{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "foo",
@@ -161,7 +161,7 @@ func Test_GenerateJWT(t *testing.T) {
 }
 
 // Test_GetAndUpdateInstallationID tests we properly obtain the list of repos for a GitHub App and find a matching repo.
-func Test_GetAndUpdateInstallationID(t *testing.T) {
+func TestGetAndUpdateInstallationID(t *testing.T) {
 	tdata := testclient.Data{
 		Namespaces: []*corev1.Namespace{testNamespace},
 		Secret:     []*corev1.Secret{validSecret},
@@ -274,7 +274,7 @@ func testMethod(t *testing.T, r *http.Request) {
 	}
 }
 
-func TestGetAndUpdateInstallationID_Fallbacks(t *testing.T) {
+func TestGetAndUpdateInstallationIDFallbacks(t *testing.T) {
 	tdata := testclient.Data{
 		Namespaces: []*corev1.Namespace{testNamespace},
 		Secret:     []*corev1.Secret{validSecret},

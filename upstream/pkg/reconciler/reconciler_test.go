@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/google/go-github/v81/github"
+	"github.com/google/go-github/v84/github"
 	"github.com/jonboulle/clockwork"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
@@ -60,7 +60,7 @@ func testSetupGHReplies(t *testing.T, mux *http.ServeMux, runevent *info.Event, 
 		})
 }
 
-func TestReconciler_ReconcileKind(t *testing.T) {
+func TestReconcilerReconcileKind(t *testing.T) {
 	observer, _ := zapobserver.New(zap.InfoLevel)
 	fakelogger := zap.New(observer).Sugar()
 	fakeclient, mux, _, teardown := ghtesthelper.SetupGH()
@@ -314,7 +314,7 @@ func TestUpdatePipelineRunState(t *testing.T) {
 	}
 }
 
-func TestReconcileKind_SCMReportingLogic(t *testing.T) {
+func TestReconcileKindSCMReportingLogic(t *testing.T) {
 	observer, _ := zapobserver.New(zap.InfoLevel)
 	logger := zap.New(observer).Sugar()
 

@@ -68,7 +68,7 @@ func getTestPR(name, state string) *tektonv1.PipelineRun {
 	}
 }
 
-func TestReconciler_FinalizeKind(t *testing.T) {
+func TestReconcilerFinalizeKind(t *testing.T) {
 	observer, _ := zapobserver.New(zap.InfoLevel)
 	fakelogger := zap.New(observer).Sugar()
 
