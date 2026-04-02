@@ -4,10 +4,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/go-github/v81/github"
+	"github.com/google/go-github/v84/github"
 	"github.com/jonboulle/clockwork"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/cli"
+	"gotest.tools/v3/assert"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	knativeapis "knative.dev/pkg/apis"
 	knativeduckv1 "knative.dev/pkg/apis/duck/v1"
@@ -61,9 +62,7 @@ func TestShowLastAge(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := ShowLastAge(tt.repository, cw); got != tt.want {
-				t.Errorf("ShowLastAge() = %v, want %v", got, tt.want)
-			}
+			assert.Equal(t, ShowLastAge(tt.repository, cw), tt.want)
 		})
 	}
 }
@@ -95,9 +94,7 @@ func TestShowLastSHA(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := ShowLastSHA(tt.repository); got != tt.want {
-				t.Errorf("ShowLastSHA() = %v, want %v", got, tt.want)
-			}
+			assert.Equal(t, ShowLastSHA(tt.repository), tt.want)
 		})
 	}
 }
@@ -129,9 +126,7 @@ func TestShowStatus(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := ShowStatus(tt.repository, cli.NewColorScheme(false, false)); got != tt.want {
-				t.Errorf("ShowStatus() = %v, want %v", got, tt.want)
-			}
+			assert.Equal(t, ShowStatus(tt.repository, cli.NewColorScheme(false, false)), tt.want)
 		})
 	}
 }

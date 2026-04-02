@@ -5,14 +5,15 @@ package test
 import (
 	"context"
 	"fmt"
-	"os"
 	"strings"
 	"testing"
+	"time"
 
-	"github.com/google/go-github/v81/github"
+	"github.com/google/go-github/v84/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	tgithub "github.com/openshift-pipelines/pipelines-as-code/test/pkg/github"
 	twait "github.com/openshift-pipelines/pipelines-as-code/test/pkg/wait"
+	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -21,9 +22,6 @@ import (
 // TestGithubGHEPullRequestGitopsCommentRetest will test the retest
 // functionality of a GitHub pull request.
 func TestGithubGHEPullRequestGitopsCommentRetest(t *testing.T) {
-	if os.Getenv("NIGHTLY_E2E_TEST") != "true" {
-		t.Skip("Skipping test since only enabled for nightly")
-	}
 	ctx := context.Background()
 	g := &tgithub.PRTest{
 		Label:         "Github retest comment",
@@ -102,21 +100,21 @@ func TestGithubGHEPullRequestGitopsCommentCancel(t *testing.T) {
 		&github.IssueComment{Body: github.Ptr("/cancel pr-gitops-comment")})
 	assert.NilError(t, err)
 
-	waitOpts = twait.Opts{
+	cancelWaitOpts := twait.Opts{
 		RepoName:        g.TargetNamespace,
 		Namespace:       g.TargetNamespace,
-		MinNumberStatus: 3,
-		PollTimeout:     twait.DefaultTimeout,
+		MinNumberStatus: 1,
+		PollTimeout:     90 * time.Second,
 		TargetSHA:       g.SHA,
 	}
-	g.Cnx.Clients.Log.Info("Waiting for Repository to be updated")
-	_, err = twait.UntilRepositoryUpdated(ctx, g.Cnx.Clients, waitOpts)
+
+	g.Cnx.Clients.Log.Info("Waiting for PipelineRun to be cancelled")
+	err = twait.UntilPipelineRunHasReason(ctx, g.Cnx.Clients, tektonv1.PipelineRunReasonCancelled, cancelWaitOpts)
 	assert.NilError(t, err)
 
-	g.Cnx.Clients.Log.Infof("Check if we have the repository set as succeeded")
-	repo, err := g.Cnx.Clients.PipelineAsCode.PipelinesascodeV1alpha1().Repositories(g.TargetNamespace).Get(ctx, g.TargetNamespace, metav1.GetOptions{})
+	g.Cnx.Clients.Log.Info("Waiting for Repository status to reflect cancellation")
+	_, err = twait.UntilRepositoryHasStatusReason(ctx, g.Cnx.Clients, cancelWaitOpts, tektonv1.PipelineRunReasonCancelled.String())
 	assert.NilError(t, err)
-	assert.Equal(t, repo.Status[len(repo.Status)-1].Conditions[0].Status, corev1.ConditionFalse)
 
 	pruns, err = g.Cnx.Clients.Tekton.TektonV1().PipelineRuns(g.TargetNamespace).List(ctx, metav1.ListOptions{
 		LabelSelector: fmt.Sprintf("%s=%s", keys.SHA, g.SHA),

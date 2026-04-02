@@ -16,7 +16,7 @@ import (
 
 	"github.com/gobwas/glob"
 	"github.com/golang-jwt/jwt/v4"
-	"github.com/google/go-github/v81/github"
+	"github.com/google/go-github/v84/github"
 	"github.com/jonboulle/clockwork"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
@@ -328,6 +328,10 @@ func (v *Provider) SetClient(ctx context.Context, run *params.Run, event *info.E
 	}
 
 	return nil
+}
+
+func (v *Provider) GetCommitStatuses(_ context.Context, _ *info.Event) ([]provider.CommitStatusInfo, error) {
+	return nil, nil
 }
 
 // GetTektonDir retrieves all YAML files from the .tekton directory and returns them as a single concatenated multi-document YAML file.
@@ -661,6 +665,12 @@ func (v *Provider) CreateToken(ctx context.Context, repository []string, event *
 		}
 
 		split := strings.Split(r, "/")
+		// Validate the URLs do not include additional path segments (like https://github.com/org/repo/extra).
+		// This validation is not required for glob as a pattern like "org/*/*" would not be matched.
+		if len(split) > 2 {
+			return "", fmt.Errorf("github repository URL must follow org/repo format without subgroups (found %d path segments, expected 2): %s", len(split), r)
+		}
+
 		infoData, _, err := wrapAPI(v, "get_repository", func() (*github.Repository, *github.Response, error) {
 			return v.Client().Repositories.Get(ctx, split[0], split[1])
 		})

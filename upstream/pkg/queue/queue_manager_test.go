@@ -213,7 +213,7 @@ func newTestPR(name string, time time.Time, labels, annotations map[string]strin
 	}
 }
 
-func TestQueueManager_InitQueues(t *testing.T) {
+func TestQueueManagerInitQueues(t *testing.T) {
 	ctx, _ := rtesting.SetupFakeContext(t)
 	observer, _ := zapobserver.New(zap.InfoLevel)
 	logger := zap.New(observer).Sugar()

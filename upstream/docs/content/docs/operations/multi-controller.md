@@ -42,7 +42,7 @@ status reconciler ("watcher") component is needed cluster-wide.
 
 ## Automated CI Setup with startpaac
 
-For automated testing environments, [startpaac](https://github.com/openshift-pipelines/startpaac) can install and configure second controllers automatically.
+For automated testing environments, [startpaac](https://github.com/pipelines-as-code/startpaac) can install and configure second controllers automatically.
 
 ### Prerequisites
 
@@ -93,7 +93,7 @@ For manual installation or custom configurations, use the `second-controller.py`
 
 The `second-controller.py` script generates the deployment YAML for a second controller.
 
-**Location:** `./hack/second-controller.py` in the [Pipelines-as-Code repository](https://github.com/openshift-pipelines/pipelines-as-code)
+**Location:** `./hack/second-controller.py` in the [Pipelines-as-Code repository](https://github.com/tektoncd/pipelines-as-code)
 
 ### Basic Usage
 
@@ -181,5 +181,5 @@ PAC_CONTROLLER_TARGET_NS  Target namespace (default: pipelines-as-code)
 PAC_CONTROLLER_SECRET     Secret name (default: <LABEL>-secret)
 PAC_CONTROLLER_CONFIGMAP  ConfigMap name (default: <LABEL>-configmap)
 PAC_CONTROLLER_SMEE_URL   Smee.io URL for webhook tunneling
-PAC_CONTROLLER_IMAGE      Controller image (default: ghcr.io/openshift-pipelines/pipelines-as-code-controller:stable)
+PAC_CONTROLLER_IMAGE      Controller image (default: ghcr.io/tektoncd/pipelines-as-code-controller:stable)
 ```

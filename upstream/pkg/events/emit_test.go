@@ -17,7 +17,7 @@ import (
 	rtesting "knative.dev/pkg/reconciler/testing"
 )
 
-func TestEventEmitter_EmitMessage(t *testing.T) {
+func TestEventEmitterEmitMessage(t *testing.T) {
 	observer, _ := zapobserver.New(zap.InfoLevel)
 	fakelogger := zap.New(observer).Sugar()
 	tests := []struct {

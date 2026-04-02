@@ -19,6 +19,7 @@ package sort
 import (
 	"testing"
 
+	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -41,31 +42,23 @@ func createPodSpecResource(t *testing.T, memReq, memLimit, cpuReq, cpuLimit stri
 	req := podSpec.Containers[0].Resources.Requests
 	if memReq != "" {
 		memReq, err := resource.ParseQuantity(memReq)
-		if err != nil {
-			t.Errorf("memory request string is not a valid quantity")
-		}
+		assert.NilError(t, err, "memory request string is not a valid quantity")
 		req["memory"] = memReq
 	}
 	if cpuReq != "" {
 		cpuReq, err := resource.ParseQuantity(cpuReq)
-		if err != nil {
-			t.Errorf("cpu request string is not a valid quantity")
-		}
+		assert.NilError(t, err, "cpu request string is not a valid quantity")
 		req["cpu"] = cpuReq
 	}
 	limit := podSpec.Containers[0].Resources.Limits
 	if memLimit != "" {
 		memLimit, err := resource.ParseQuantity(memLimit)
-		if err != nil {
-			t.Errorf("memory limit string is not a valid quantity")
-		}
+		assert.NilError(t, err, "memory limit string is not a valid quantity")
 		limit["memory"] = memLimit
 	}
 	if cpuLimit != "" {
 		cpuLimit, err := resource.ParseQuantity(cpuLimit)
-		if err != nil {
-			t.Errorf("cpu limit string is not a valid quantity")
-		}
+		assert.NilError(t, err, "cpu limit string is not a valid quantity")
 		limit["cpu"] = cpuLimit
 	}
 
@@ -97,9 +90,7 @@ func TestRuntimeSortLess(t *testing.T) {
 	}
 
 	testobjs, err := meta.ExtractList(testobj)
-	if err != nil {
-		t.Fatalf("ExtractList testobj got unexpected error: %v", err)
-	}
+	assert.NilError(t, err)
 
 	testfieldName := "{.metadata.name}"
 	testruntimeSortName := NewRuntimeSort(testfieldName, testobjs)
@@ -183,12 +174,10 @@ func TestRuntimeSortLess(t *testing.T) {
 		},
 	}
 
-	for i, test := range tests {
+	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			result := test.runtimeSort.Less(test.i, test.j)
-			if result != test.expectResult {
-				t.Errorf("case[%d]:%s Expected result: %v, Got result: %v", i, test.name, test.expectResult, result)
-			}
+			assert.Equal(t, test.expectResult, result)
 		})
 	}
 }

@@ -166,14 +166,66 @@ spec:
 
             - name: check-e2e-tests-naming
               displayName: "Check e2e tests naming convention"
-              image: docker.io/golang:1.25
+              image: docker.io/golang:1.26
               workingDir: $(workspaces.source.path)
               script: |
+                git config --global --add safe.directory $(workspaces.source.path)
                 make lint-e2e-naming
+
+            - name: check-test-conventions
+              displayName: "Check Go test naming and assertion conventions"
+              image: docker.io/golang:1.26
+              workingDir: $(workspaces.source.path)
+              script: |
+                #!/usr/bin/env bash
+                set -eu
+                git config --global --add safe.directory $(workspaces.source.path)
+
+                if [[ "{{ headers['X-Github-Event'] }}" != "pull_request" ]]; then
+                  echo "Not a pull request, skipping test convention check"
+                  exit 0
+                fi
+
+                base_sha="{{ body.pull_request.base.sha }}"
+                if [[ -z "$base_sha" ]]; then
+                  echo "Base SHA is empty, skipping"
+                  exit 0
+                fi
+
+                files=$(git diff --name-only "${base_sha}..HEAD" -- '*.go' | grep -v '^vendor/' | grep '_test\.go$' || true)
+                if [ -z "$files" ]; then
+                  echo "No test files modified."
+                  exit 0
+                fi
+
+                failed=0
+                while IFS= read -r file; do
+                  [ -z "$file" ] && continue
+                  [ ! -f "$file" ] && continue
+
+                  bad_names=$(grep -n '^func Test[A-Za-z]*_[A-Za-z]' "$file" || true)
+                  if [ -n "$bad_names" ]; then
+                    echo "ERROR: $file: test function names must use PascalCase (no underscores):"
+                    echo "$bad_names"
+                    failed=1
+                  fi
+
+                  bad_asserts=$(grep -En '\bt\.(Errorf|Fatalf|Fatal|Error)\(' "$file" || true)
+                  if [ -n "$bad_asserts" ]; then
+                    echo "WARNING: $file: use gotest.tools/v3/assert instead of t.Errorf/t.Fatalf/t.Fatal/t.Error:"
+                    echo "$bad_asserts"
+                  fi
+                done <<< "$files"
+
+                if [ "$failed" -ne 0 ]; then
+                  echo "Fix violations above. See AGENTS.md for testing conventions."
+                  exit 1
+                fi
+                echo "All modified test files pass convention checks."
 
             - name: check-generated-schemas
               displayName: "Check generated OpenAPI schemas"
-              image: docker.io/golang:1.25
+              image: docker.io/golang:1.26
               workingDir: $(workspaces.source.path)
               env:
                 - name: HUB_TOKEN
@@ -251,21 +303,6 @@ spec:
                 curl -sH "Authorization: Bearer ${HUB_TOKEN}" -L https://github.com/errata-ai/vale/releases/download/${version}/vale_${version/v}_Linux_arm64.tar.gz|tar -xz -C /tmp/ -f- vale
                 export NO_COLOR=1
                 /tmp/vale docs/content --minAlertLevel=error --output=line
-
-            - name: check-links
-              displayName: "Documentation Link Checker"
-              image: docker.io/golang:1.25
-              workingDir: $(workspaces.source.path)
-              env:
-                - name: HUB_TOKEN
-                  valueFrom:
-                    secretKeyRef:
-                      name: "nightly-ci-github-hub-token"
-                      key: "hub-token"
-              script: |
-                set -euxo pipefail
-                git config --global --add safe.directory $(workspaces.source.path)
-                ./hack/check-links.sh
 
             - name: goreleaser-check
               displayName: "Goreleaser Check"

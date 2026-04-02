@@ -50,7 +50,7 @@ Q1QWaigUQdpFfNCrqwJBANLgWaJV722PhQXOCmR+INvZ7ksIhJVcq/x1l2BYOLw2
 QsncVExbMiPa9Oclo5qLuTosS8qwHm1MJEytp3/SkB8=
 -----END RSA PRIVATE KEY-----`
 
-func Test_compareSecret(t *testing.T) {
+func TestCompareSecret(t *testing.T) {
 	type args struct {
 		incomingSecret string
 		secretValue    string
@@ -79,14 +79,12 @@ func Test_compareSecret(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := compareSecret(tt.args.incomingSecret, tt.args.secretValue); got != tt.want {
-				t.Errorf("compareSecret() = %v, want %v", got, tt.want)
-			}
+			assert.Equal(t, compareSecret(tt.args.incomingSecret, tt.args.secretValue), tt.want)
 		})
 	}
 }
 
-func Test_listener_detectIncoming(t *testing.T) {
+func TestListenerDetectIncoming(t *testing.T) {
 	const goodURL = "https://matched/by/incoming"
 	envRemove := env.PatchAll(t, map[string]string{"SYSTEM_NAMESPACE": "pipelinesascode"})
 	defer envRemove()
@@ -830,8 +828,8 @@ func Test_listener_detectIncoming(t *testing.T) {
 				run:    client,
 				logger: logger,
 				kint:   kint,
-				event:  info.NewEvent(),
 			}
+			event := info.NewEvent()
 
 			// make a new request
 			req := httptest.NewRequestWithContext(ctx, tt.args.method,
@@ -839,7 +837,7 @@ func Test_listener_detectIncoming(t *testing.T) {
 					tt.args.queryRepository, tt.args.querySecret, tt.args.queryPipelineRun, tt.args.queryBranch, tt.args.queryNamespace),
 				strings.NewReader(tt.args.incomingBody))
 			req.Header = tt.args.queryHeaders
-			got, _, err := l.detectIncoming(ctx, req, []byte(tt.args.incomingBody))
+			got, _, err := l.detectIncoming(ctx, event, req, []byte(tt.args.incomingBody))
 			if tt.wantSubstrErr != "" {
 				assert.Assert(t, err != nil)
 				assert.ErrorContains(t, err, tt.wantSubstrErr)
@@ -850,12 +848,12 @@ func Test_listener_detectIncoming(t *testing.T) {
 				return
 			}
 			assert.Equal(t, got, tt.want, "err = %v", err)
-			assert.Equal(t, l.event.TargetPipelineRun, tt.args.queryPipelineRun)
+			assert.Equal(t, event.TargetPipelineRun, tt.args.queryPipelineRun)
 		})
 	}
 }
 
-func Test_listener_processIncoming(t *testing.T) {
+func TestListenerProcessIncoming(t *testing.T) {
 	tests := []struct {
 		name       string
 		want       provider.Interface
@@ -1012,16 +1010,17 @@ func Test_listener_processIncoming(t *testing.T) {
 			observer, _ := zapobserver.New(zap.InfoLevel)
 			logger := zap.New(observer).Sugar()
 			l := &listener{
-				run: client, kint: kint, logger: logger, event: info.NewEvent(),
+				run: client, kint: kint, logger: logger,
 			}
-			pintf, _, err := l.processIncoming(tt.targetRepo)
+			event := info.NewEvent()
+			pintf, _, err := l.processIncoming(event, tt.targetRepo)
 			if tt.wantErr {
 				assert.Assert(t, err != nil)
 				return
 			}
 			assert.Assert(t, reflect.TypeOf(pintf).Elem() == reflect.TypeOf(tt.want).Elem())
-			assert.Assert(t, l.event.Organization == tt.wantOrg)
-			assert.Assert(t, l.event.Repository == tt.wantRepo)
+			assert.Assert(t, event.Organization == tt.wantOrg)
+			assert.Assert(t, event.Repository == tt.wantRepo)
 		})
 	}
 }
@@ -1080,7 +1079,7 @@ func TestApplyIncomingParams(t *testing.T) {
 	}
 }
 
-func Test_detectIncoming_legacy_warning(t *testing.T) {
+func TestDetectIncomingLegacyWarning(t *testing.T) {
 	ctx, _ := rtesting.SetupFakeContext(t)
 	testNamespace := &corev1.Namespace{
 		ObjectMeta: metav1.ObjectMeta{
@@ -1158,9 +1157,9 @@ func Test_detectIncoming_legacy_warning(t *testing.T) {
 				run:    client,
 				logger: logger,
 				kint:   kint,
-				event:  info.NewEvent(),
 			}
-			got, _, err := l.detectIncoming(ctx, tt.req, tt.body)
+			event := info.NewEvent()
+			got, _, err := l.detectIncoming(ctx, event, tt.req, tt.body)
 			assert.NilError(t, err)
 			assert.Assert(t, got)
 			found := false
@@ -1179,7 +1178,7 @@ func Test_detectIncoming_legacy_warning(t *testing.T) {
 	}
 }
 
-func Test_detectIncoming_body_params_are_parsed(t *testing.T) {
+func TestDetectIncomingBodyParamsAreParsed(t *testing.T) {
 	ctx, _ := rtesting.SetupFakeContext(t)
 	testNamespace := &corev1.Namespace{
 		ObjectMeta: metav1.ObjectMeta{
@@ -1229,14 +1228,14 @@ func Test_detectIncoming_body_params_are_parsed(t *testing.T) {
 		run:    client,
 		logger: zap.NewNop().Sugar(),
 		kint:   kint,
-		event:  info.NewEvent(),
 	}
-	got, _, err := l.detectIncoming(ctx, req, []byte(payload))
+	event := info.NewEvent()
+	got, _, err := l.detectIncoming(ctx, event, req, []byte(payload))
 	assert.NilError(t, err)
 	assert.Assert(t, got)
 }
 
-func Test_parseIncomingPayload(t *testing.T) {
+func TestParseIncomingPayload(t *testing.T) {
 	tests := []struct {
 		name          string
 		method        string
