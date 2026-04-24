@@ -29,8 +29,10 @@ func (rs repoSortRunStatus) Less(i, j int) bool {
 }
 
 func RepositorySortRunStatus(repoStatus []v1alpha1.RepositoryRunStatus) []v1alpha1.RepositoryRunStatus {
-	rrstatus := make(repoSortRunStatus, len(repoStatus))
-	copy(rrstatus, repoStatus)
+	rrstatus := repoSortRunStatus{}
+	for _, status := range repoStatus {
+		rrstatus = append(rrstatus, status)
+	}
 	sort.Sort(rrstatus)
 	return rrstatus
 }

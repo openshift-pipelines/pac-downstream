@@ -65,14 +65,12 @@ func TestGiteaOnCommentAnnotation(t *testing.T) {
 				Value: "bar",
 			},
 			{
-				Name: "custom_no_initial_value",
-			},
-			{
-				Name: "custom_never_value",
+				Name:  "custom3",
+				Value: "moto",
 			},
 		},
 	}
-	triggerComment := "/hello-world\r\n\r\n"
+	triggerComment := "/hello-world"
 	topts.TargetNS = topts.TargetRefName
 	topts.ParamsRun, topts.Opts, topts.GiteaCNX, err = tgitea.Setup(ctx)
 	assert.NilError(t, err, fmt.Errorf("cannot do gitea setup: %w", err))
@@ -110,11 +108,10 @@ func TestGiteaOnCommentAnnotation(t *testing.T) {
 	assert.Equal(t, *repo.Status[len(repo.Status)-1].EventType, opscomments.OnCommentEventType.String(), "should have a on comment event type")
 
 	last := repo.Status[len(repo.Status)-1]
-	twait.GoldenPodLog(context.Background(), t, topts.ParamsRun, topts.TargetNS,
-		fmt.Sprintf("tekton.dev/pipelineRun=%s", last.PipelineRunName),
-		"step-task", strings.ReplaceAll(fmt.Sprintf("%s-pipelinerun-on-comment-annotation.golden", t.Name()), "/", "-"), 2)
+	err = twait.RegexpMatchingInPodLog(context.Background(), topts.ParamsRun, topts.TargetNS, fmt.Sprintf("tekton.dev/pipelineRun=%s", last.PipelineRunName), "step-task", *regexp.MustCompile(triggerComment), "", 2)
+	assert.NilError(t, err)
 
-	tgitea.PostCommentOnPullRequest(t, topts, fmt.Sprintf(`%s revision=main custom1=thisone custom2="another one" custom_no_initial_value="a \"quote\""`, triggerComment))
+	tgitea.PostCommentOnPullRequest(t, topts, fmt.Sprintf(`%s revision=main custom1=thisone custom2="another one" custom3="a \"quote\""`, triggerComment))
 	waitOpts.MinNumberStatus = 4
 	repo, err = twait.UntilRepositoryUpdated(context.Background(), topts.ParamsRun.Clients, waitOpts)
 	assert.NilError(t, err)
@@ -127,9 +124,9 @@ func TestGiteaOnCommentAnnotation(t *testing.T) {
 	assert.NilError(t, err)
 }
 
-// TestGiteaTestPipelineRunExplicitlyWithTestComment will test a pipelinerun
+// TestGiteaTestPipelineRunExplicitelyWithTestComment will test a pipelinerun
 // even if it hasn't matched when we are doing a /test comment.
-func TestGiteaTestPipelineRunExplicitlyWithTestComment(t *testing.T) {
+func TestGiteaTestPipelineRunExplicitelyWithTestComment(t *testing.T) {
 	var err error
 	ctx := context.Background()
 	topts := &tgitea.TestOpts{

@@ -15,7 +15,7 @@ func (p *PullRequests) Create(po *PullRequestsOptions) (interface{}, error) {
 		return nil, err
 	}
 	urlStr := p.c.requestUrl("/repositories/%s/%s/pullrequests/", po.Owner, po.RepoSlug)
-	return p.c.executeWithContext("POST", urlStr, data, po.ctx)
+	return p.c.execute("POST", urlStr, data)
 }
 
 func (p *PullRequests) Update(po *PullRequestsOptions) (interface{}, error) {
@@ -25,16 +25,6 @@ func (p *PullRequests) Update(po *PullRequestsOptions) (interface{}, error) {
 	}
 	urlStr := p.c.GetApiBaseURL() + "/repositories/" + po.Owner + "/" + po.RepoSlug + "/pullrequests/" + po.ID
 	return p.c.execute("PUT", urlStr, data)
-}
-
-func (p *PullRequests) GetByCommit(po *PullRequestsOptions) (interface{}, error) {
-	urlStr := p.c.GetApiBaseURL() + "/repositories/" + po.Owner + "/" + po.RepoSlug + "/commit/" + po.Commit + "/pullrequests/"
-	return p.c.executePaginated("GET", urlStr, "", nil)
-}
-
-func (p *PullRequests) GetCommits(po *PullRequestsOptions) (interface{}, error) {
-	urlStr := p.c.GetApiBaseURL() + "/repositories/" + po.Owner + "/" + po.RepoSlug + "/pullrequests/" + po.ID + "/commits/"
-	return p.c.executePaginated("GET", urlStr, "", nil)
 }
 
 func (p *PullRequests) Gets(po *PullRequestsOptions) (interface{}, error) {
@@ -114,7 +104,7 @@ func (p *PullRequests) Merge(po *PullRequestsOptions) (interface{}, error) {
 		return nil, err
 	}
 	urlStr := p.c.GetApiBaseURL() + "/repositories/" + po.Owner + "/" + po.RepoSlug + "/pullrequests/" + po.ID + "/merge"
-	return p.c.executeWithContext("POST", urlStr, data, po.ctx)
+	return p.c.execute("POST", urlStr, data)
 }
 
 func (p *PullRequests) Decline(po *PullRequestsOptions) (interface{}, error) {
@@ -123,12 +113,12 @@ func (p *PullRequests) Decline(po *PullRequestsOptions) (interface{}, error) {
 		return nil, err
 	}
 	urlStr := p.c.GetApiBaseURL() + "/repositories/" + po.Owner + "/" + po.RepoSlug + "/pullrequests/" + po.ID + "/decline"
-	return p.c.executeWithContext("POST", urlStr, data, po.ctx)
+	return p.c.execute("POST", urlStr, data)
 }
 
 func (p *PullRequests) Approve(po *PullRequestsOptions) (interface{}, error) {
 	urlStr := p.c.GetApiBaseURL() + "/repositories/" + po.Owner + "/" + po.RepoSlug + "/pullrequests/" + po.ID + "/approve"
-	return p.c.executeWithContext("POST", urlStr, "", po.ctx)
+	return p.c.execute("POST", urlStr, "")
 }
 
 func (p *PullRequests) UnApprove(po *PullRequestsOptions) (interface{}, error) {
@@ -138,7 +128,7 @@ func (p *PullRequests) UnApprove(po *PullRequestsOptions) (interface{}, error) {
 
 func (p *PullRequests) RequestChanges(po *PullRequestsOptions) (interface{}, error) {
 	urlStr := p.c.GetApiBaseURL() + "/repositories/" + po.Owner + "/" + po.RepoSlug + "/pullrequests/" + po.ID + "/request-changes"
-	return p.c.executeWithContext("POST", urlStr, "", po.ctx)
+	return p.c.execute("POST", urlStr, "")
 }
 
 func (p *PullRequests) UnRequestChanges(po *PullRequestsOptions) (interface{}, error) {
@@ -153,7 +143,7 @@ func (p *PullRequests) AddComment(co *PullRequestCommentOptions) (interface{}, e
 	}
 
 	urlStr := p.c.requestUrl("/repositories/%s/%s/pullrequests/%s/comments", co.Owner, co.RepoSlug, co.PullRequestID)
-	return p.c.executeWithContext("POST", urlStr, data, co.ctx)
+	return p.c.execute("POST", urlStr, data)
 }
 
 func (p *PullRequests) UpdateComment(co *PullRequestCommentOptions) (interface{}, error) {
@@ -252,12 +242,8 @@ func (p *PullRequests) buildPullRequestBody(po *PullRequestsOptions) (string, er
 		body["message"] = po.Message
 	}
 
-	if po.CloseSourceBranch || !po.CloseSourceBranch {
+	if po.CloseSourceBranch == true || po.CloseSourceBranch == false {
 		body["close_source_branch"] = po.CloseSourceBranch
-	}
-
-	if po.Draft {
-		body["draft"] = true
 	}
 
 	data, err := json.Marshal(body)

@@ -2,15 +2,11 @@
 extends: repetition
 message: "'%s' is repeated."
 level: warning
-link: https://redhat-documentation.github.io/vale-at-red-hat/reference-guide.html#repeated-words
+link: https://redhat-documentation.github.io/vale-at-red-hat/docs/main/reference-guide/repeatedwords/
 ignorecase: false
 alpha: true
 action:
-  name: edit
-  params:
-    - regex
-    - '(\w+)(\s\w+)' # pattern
-    - "$1" # replace
+  name: remove
 tokens:
   - '[^\s\.]+'
   - '[^\s]+'

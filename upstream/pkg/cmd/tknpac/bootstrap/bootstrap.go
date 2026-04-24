@@ -71,12 +71,12 @@ const indexTmpl = `
 `
 
 var successTmpl = fmt.Sprintf(`
-<html><body>You have <span style=\"color: green\">successfully</span> created a new GitHub application. Return to the %s pac CLI to finish the installation.</body></html>
+<html><body>You have <span style=\"color: green\">successfully</span> created a new GitHub application, go back to the %s pac cli to finish the installation.</body></html>
 `, settings.TknBinaryName)
 
 func install(ctx context.Context, run *params.Run, opts *bootstrapOpts) error {
 	if !opts.forceInstall {
-		fmt.Fprintln(opts.ioStreams.Out, "=> Checking if Pipelines-as-Code is installed.")
+		fmt.Fprintln(opts.ioStreams.Out, "=> Checking if Pipelines as Code is installed.")
 	}
 	tektonInstalled, err := checkPipelinesInstalled(run)
 	if err != nil {
@@ -111,7 +111,7 @@ func install(ctx context.Context, run *params.Run, opts *bootstrapOpts) error {
 func createSecret(ctx context.Context, run *params.Run, opts *bootstrapOpts) error {
 	var err error
 
-	if opts.RouteName == "" && !opts.forceInstallGosmee {
+	if opts.RouteName == "" {
 		opts.RouteName, _ = DetectOpenShiftRoute(ctx, run, opts.targetNamespace)
 		if opts.RouteName != "" {
 			opts.autoDetectedRoute = true
@@ -276,11 +276,9 @@ func DetectPacInstallation(ctx context.Context, wantedNS string, run *params.Run
 
 func getConfigMap(ctx context.Context, run *params.Run) (*corev1.ConfigMap, error) {
 	var (
-		err            error
-		configMap      *corev1.ConfigMap
-		foundConfigmap bool
+		err       error
+		configMap *corev1.ConfigMap
 	)
-
 	for _, n := range defaultNamespaces {
 		configMap, err = run.Clients.Kube.CoreV1().ConfigMaps(n).Get(ctx, infoConfigMap, metav1.GetOptions{})
 		if err != nil {
@@ -292,12 +290,11 @@ func getConfigMap(ctx context.Context, run *params.Run) (*corev1.ConfigMap, erro
 			}
 			return nil, err
 		}
-		if configMap != nil && configMap.GetName() != "" {
-			foundConfigmap = true
+		if configMap != nil {
 			break
 		}
 	}
-	if !foundConfigmap {
+	if configMap == nil {
 		return nil, fmt.Errorf("ConfigMap not found in default namespaces (\"openshift-pipelines\", \"pipelines-as-code\")")
 	}
 	return configMap, nil

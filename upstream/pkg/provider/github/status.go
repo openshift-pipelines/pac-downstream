@@ -8,22 +8,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/go-github/v81/github"
+	"github.com/google/go-github/v61/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/action"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/kubeinteraction"
 	kstatus "github.com/openshift-pipelines/pipelines-as-code/pkg/kubeinteraction/status"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/opscomments"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
 	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
-	"go.uber.org/zap"
-)
-
-const (
-	botType         = "Bot"
-	pendingApproval = "Pending approval, waiting for an /ok-to-test"
 )
 
 const taskStatusTemplate = `
@@ -41,16 +34,24 @@ const taskStatusTemplate = `
 {{- end }}
 </table>`
 
+func getCheckName(status provider.StatusOpts, pacopts *info.PacOpts) string {
+	if pacopts.ApplicationName != "" {
+		if status.OriginalPipelineRunName == "" {
+			return pacopts.ApplicationName
+		}
+		return fmt.Sprintf("%s / %s", pacopts.ApplicationName, status.OriginalPipelineRunName)
+	}
+	return status.OriginalPipelineRunName
+}
+
 func (v *Provider) getExistingCheckRunID(ctx context.Context, runevent *info.Event, status provider.StatusOpts) (*int64, error) {
 	opt := github.ListOptions{PerPage: v.PaginedNumber}
 	for {
-		res, resp, err := wrapAPI(v, "list_check_runs_for_ref", func() (*github.ListCheckRunsResults, *github.Response, error) {
-			return v.Client().Checks.ListCheckRunsForRef(ctx, runevent.Organization, runevent.Repository,
-				runevent.SHA, &github.ListCheckRunsOptions{
-					AppID:       v.ApplicationID,
-					ListOptions: opt,
-				})
-		})
+		res, resp, err := v.Client.Checks.ListCheckRunsForRef(ctx, runevent.Organization, runevent.Repository,
+			runevent.SHA, &github.ListCheckRunsOptions{
+				AppID:       v.ApplicationID,
+				ListOptions: opt,
+			})
 		if err != nil {
 			return nil, err
 		}
@@ -113,26 +114,15 @@ func (v *Provider) canIUseCheckrunID(checkrunid *int64) bool {
 func (v *Provider) createCheckRunStatus(ctx context.Context, runevent *info.Event, status provider.StatusOpts) (*int64, error) {
 	now := github.Timestamp{Time: time.Now()}
 	checkrunoption := github.CreateCheckRunOptions{
-		Name:    provider.GetCheckName(status, v.pacInfo),
-		HeadSHA: runevent.SHA,
-		Status:  github.Ptr(status.Status), // take status from statusOpts because it can be in_progress, queued, or failure // same for conclusion as well
-		Output: &github.CheckRunOutput{
-			Title:   github.Ptr(status.Title),
-			Summary: github.Ptr(status.Summary),
-			Text:    github.Ptr(status.Text),
-		},
-		DetailsURL: github.Ptr(status.DetailsURL),
-		ExternalID: github.Ptr(status.PipelineRunName),
+		Name:       getCheckName(status, v.pacInfo),
+		HeadSHA:    runevent.SHA,
+		Status:     github.String("in_progress"),
+		DetailsURL: github.String(status.DetailsURL),
+		ExternalID: github.String(status.PipelineRunName),
 		StartedAt:  &now,
 	}
 
-	if status.Status != "in_progress" && status.Status != "queued" {
-		checkrunoption.Conclusion = github.Ptr(status.Conclusion)
-	}
-
-	checkRun, _, err := wrapAPI(v, "create_check_run", func() (*github.CheckRun, *github.Response, error) {
-		return v.Client().Checks.CreateCheckRun(ctx, runevent.Organization, runevent.Repository, checkrunoption)
-	})
+	checkRun, _, err := v.Client.Checks.CreateCheckRun(ctx, runevent.Organization, runevent.Repository, checkrunoption)
 	if err != nil {
 		return nil, err
 	}
@@ -193,11 +183,11 @@ func (v *Provider) getFailuresMessageAsAnnotations(ctx context.Context, pr *tekt
 				continue
 			}
 			annotations = append(annotations, &github.CheckRunAnnotation{
-				Path:            github.Ptr(filename),
-				StartLine:       github.Ptr(ilinenumber),
-				EndLine:         github.Ptr(ilinenumber),
-				AnnotationLevel: github.Ptr("failure"),
-				Message:         github.Ptr(errmsg),
+				Path:            github.String(filename),
+				StartLine:       github.Int(ilinenumber),
+				EndLine:         github.Int(ilinenumber),
+				AnnotationLevel: github.String("failure"),
+				Message:         github.String(errmsg),
 			})
 		}
 	}
@@ -232,7 +222,7 @@ func (v *Provider) getOrUpdateCheckRunStatus(ctx context.Context, runevent *info
 			if err != nil {
 				return fmt.Errorf("api error: cannot convert checkrunid")
 			}
-			checkRunID = github.Ptr(int64(checkID))
+			checkRunID = github.Int64(int64(checkID))
 		}
 	}
 	if !found {
@@ -242,11 +232,7 @@ func (v *Provider) getOrUpdateCheckRunStatus(ctx context.Context, runevent *info
 				return err
 			}
 		}
-
-		// Patch the pipelineRun with the checkRunID and logURL only when the pipelineRun is not nil and has a name
-		// because on validation failed PipelineRun will provide PipelineRun struct but it is not a valid resource
-		// created in cluster so if its only validation error report then ignore patching the pipelineRun.
-		if statusOpts.PipelineRun != nil && (statusOpts.PipelineRun.GetName() != "" || statusOpts.PipelineRun.GetGenerateName() != "") {
+		if statusOpts.PipelineRun != nil {
 			if _, err := action.PatchPipelineRun(ctx, v.Logger, "checkRunID and logURL", v.Run.Clients.Tekton, statusOpts.PipelineRun, metadataPatch(checkRunID, statusOpts.DetailsURL)); err != nil {
 				return err
 			}
@@ -265,15 +251,15 @@ func (v *Provider) getOrUpdateCheckRunStatus(ctx context.Context, runevent *info
 		}
 	}
 
-	checkRunOutput.Text = github.Ptr(text)
+	checkRunOutput.Text = github.String(text)
 
 	opts := github.UpdateCheckRunOptions{
-		Name:   provider.GetCheckName(statusOpts, pacopts),
-		Status: github.Ptr(statusOpts.Status),
+		Name:   getCheckName(statusOpts, pacopts),
+		Status: github.String(statusOpts.Status),
 		Output: checkRunOutput,
 	}
 	if statusOpts.PipelineRunName != "" {
-		opts.ExternalID = github.Ptr(statusOpts.PipelineRunName)
+		opts.ExternalID = github.String(statusOpts.PipelineRunName)
 	}
 	if statusOpts.DetailsURL != "" {
 		opts.DetailsURL = &statusOpts.DetailsURL
@@ -285,12 +271,10 @@ func (v *Provider) getOrUpdateCheckRunStatus(ctx context.Context, runevent *info
 		opts.Conclusion = &statusOpts.Conclusion
 	}
 	if isPipelineRunCancelledOrStopped(statusOpts.PipelineRun) {
-		opts.Conclusion = github.Ptr("cancelled")
+		opts.Conclusion = github.String("cancelled")
 	}
 
-	_, _, err = wrapAPI(v, "update_check_run", func() (*github.CheckRun, *github.Response, error) {
-		return v.Client().Checks.UpdateCheckRun(ctx, runevent.Organization, runevent.Repository, *checkRunID, opts)
-	})
+	_, _, err = v.Client.Checks.UpdateCheckRun(ctx, runevent.Organization, runevent.Repository, *checkRunID, opts)
 	return err
 }
 
@@ -304,9 +288,9 @@ func isPipelineRunCancelledOrStopped(run *tektonv1.PipelineRun) bool {
 	return false
 }
 
-func metadataPatch(checkRunID *int64, logURL string) map[string]any {
-	return map[string]any{
-		"metadata": map[string]any{
+func metadataPatch(checkRunID *int64, logURL string) map[string]interface{} {
+	return map[string]interface{}{
+		"metadata": map[string]interface{}{
 			"labels": map[string]string{
 				keys.CheckRunID: strconv.FormatInt(*checkRunID, 10),
 			},
@@ -335,67 +319,27 @@ func (v *Provider) createStatusCommit(ctx context.Context, runevent *info.Event,
 		status.Conclusion = "pending"
 	}
 
-	ghstatus := github.RepoStatus{
-		State:       github.Ptr(status.Conclusion),
-		TargetURL:   github.Ptr(status.DetailsURL),
-		Description: github.Ptr(status.Title),
-		Context:     github.Ptr(provider.GetCheckName(status, v.pacInfo)),
+	ghstatus := &github.RepoStatus{
+		State:       github.String(status.Conclusion),
+		TargetURL:   github.String(status.DetailsURL),
+		Description: github.String(status.Title),
+		Context:     github.String(getCheckName(status, v.pacInfo)),
 		CreatedAt:   &github.Timestamp{Time: now},
 	}
 
-	if _, _, err := wrapAPI(v, "create_status", func() (*github.RepoStatus, *github.Response, error) {
-		return v.Client().Repositories.CreateStatus(ctx,
-			runevent.Organization, runevent.Repository, runevent.SHA, ghstatus)
-	}); err != nil {
+	if _, _, err := v.Client.Repositories.CreateStatus(ctx,
+		runevent.Organization, runevent.Repository, runevent.SHA, ghstatus); err != nil {
 		return err
 	}
-	eventType := triggertype.IsPullRequestType(runevent.EventType)
-	if opscomments.IsAnyOpsEventType(eventType.String()) {
-		eventType = triggertype.PullRequest
-	}
-
-	var commentStrategy string
-	if v.repo != nil && v.repo.Spec.Settings != nil && v.repo.Spec.Settings.Github != nil {
-		commentStrategy = v.repo.Spec.Settings.Github.CommentStrategy
-	}
-
-	switch commentStrategy {
-	case provider.DisableAllCommentStrategy:
-		v.Logger.Warn("github: comments related to PipelineRuns status have been disabled for Github pull requests")
-		return nil
-	case provider.UpdateCommentStrategy:
-		if (status.Status == "completed" || (status.Status == "queued" && status.Title == pendingApproval)) &&
-			status.Text != "" && eventType == triggertype.PullRequest {
-			statusComment := v.formatPipelineComment(runevent.SHA, status)
-			// Creating the prefix that is added to the status comment for a pipeline run.
-			plrStatusCommentPrefix := fmt.Sprintf(provider.PlrStatusCommentPrefixTemplate, status.OriginalPipelineRunName)
-			// The entire markdown comment, including the prefix that is added to the pull request for the pipelinerun.
-			markdownStatusComment := fmt.Sprintf("%s\n%s", plrStatusCommentPrefix, statusComment)
-
-			if err := v.CreateComment(ctx, runevent, markdownStatusComment, plrStatusCommentPrefix); err != nil {
-				v.eventEmitter.EmitMessage(
-					v.repo,
-					zap.ErrorLevel,
-					"PipelineRunCommentCreationError",
-					fmt.Sprintf("failed to create comment: %s", err.Error()),
-				)
-				return err
-			}
-		}
-	default:
-		if (status.Status == "completed" || (status.Status == "queued" && status.Title == pendingApproval)) &&
-			status.Text != "" && eventType == triggertype.PullRequest {
-			_, _, err = wrapAPI(v, "create_issue_comment", func() (*github.IssueComment, *github.Response, error) {
-				return v.Client().Issues.CreateComment(ctx, runevent.Organization, runevent.Repository,
-					runevent.PullRequestNumber,
-					&github.IssueComment{
-						Body: github.Ptr(fmt.Sprintf("%s<br>%s", status.Summary, status.Text)),
-					},
-				)
-			})
-			if err != nil {
-				return err
-			}
+	if (status.Status == "completed" || (status.Status == "queued" && status.Title == "Pending approval")) && status.Text != "" && runevent.EventType == triggertype.PullRequest.String() {
+		_, _, err = v.Client.Issues.CreateComment(ctx, runevent.Organization, runevent.Repository,
+			runevent.PullRequestNumber,
+			&github.IssueComment{
+				Body: github.String(fmt.Sprintf("%s<br>%s", status.Summary, status.Text)),
+			},
+		)
+		if err != nil {
+			return err
 		}
 	}
 
@@ -403,13 +347,8 @@ func (v *Provider) createStatusCommit(ctx context.Context, runevent *info.Event,
 }
 
 func (v *Provider) CreateStatus(ctx context.Context, runevent *info.Event, statusOpts provider.StatusOpts) error {
-	if v.ghClient == nil {
+	if v.Client == nil {
 		return fmt.Errorf("cannot set status on github no token or url set")
-	}
-
-	// If the request comes from a bot user, skip setting the status and just log the event silently
-	if statusOpts.AccessDenied && v.userType == botType {
-		return nil
 	}
 
 	switch statusOpts.Conclusion {
@@ -417,9 +356,7 @@ func (v *Provider) CreateStatus(ctx context.Context, runevent *info.Event, statu
 		statusOpts.Title = "Success"
 		statusOpts.Summary = "has <b>successfully</b> validated your commit."
 	case "failure":
-		if statusOpts.Title == "" {
-			statusOpts.Title = "Failed"
-		}
+		statusOpts.Title = "Failed"
 		statusOpts.Summary = "has <b>failed</b>."
 	case "pending":
 		// for concurrency set title as pending
@@ -430,14 +367,9 @@ func (v *Provider) CreateStatus(ctx context.Context, runevent *info.Event, statu
 			// for unauthorized user set title as Pending approval
 			statusOpts.Summary = "is waiting for approval."
 		}
-	case "cancelled":
-		statusOpts.Title = "Cancelled"
-		statusOpts.Summary = "has been <b>cancelled</b>."
 	case "neutral":
-		if statusOpts.Title == "" {
-			statusOpts.Title = "Unknown"
-		}
-		statusOpts.Summary = "<b>Completed</b>"
+		statusOpts.Title = "Unknown"
+		statusOpts.Summary = "doesn't know what happened with this commit."
 	}
 
 	if statusOpts.Status == "in_progress" {
@@ -450,6 +382,7 @@ func (v *Provider) CreateStatus(ctx context.Context, runevent *info.Event, statu
 		onPr = "/" + statusOpts.OriginalPipelineRunName
 	}
 	statusOpts.Summary = fmt.Sprintf("%s%s %s", v.pacInfo.ApplicationName, onPr, statusOpts.Summary)
+
 	// If we have an installationID which mean we have a github apps and we can use the checkRun API
 	if runevent.InstallationID > 0 {
 		return v.getOrUpdateCheckRunStatus(ctx, runevent, statusOpts)
@@ -457,35 +390,4 @@ func (v *Provider) CreateStatus(ctx context.Context, runevent *info.Event, statu
 
 	// Otherwise use the update status commit API
 	return v.createStatusCommit(ctx, runevent, statusOpts)
-}
-
-func (v *Provider) formatPipelineComment(sha string, status provider.StatusOpts) string {
-	var emoji, title string
-
-	switch {
-	case status.Status == "queued":
-		emoji = "⏳"
-		title = "Queued"
-	case status.Status == "in_progress":
-		emoji = "🚀"
-		title = "Running"
-	case status.Status == "completed" && status.Conclusion == "success":
-		emoji = "✅"
-		title = "Success"
-	case status.Status == "completed" && status.Conclusion == "failure":
-		emoji = "❌"
-		title = "Failed"
-	case status.Status == "completed" && status.Conclusion == "cancelled":
-		emoji = "⚠️"
-		title = "Cancelled"
-	case status.Status == "completed" && status.Conclusion == "neutral":
-		emoji = "ℹ️"
-		title = "Completed"
-	default:
-		emoji = "ℹ️"
-		title = "Status Update"
-	}
-
-	return fmt.Sprintf("%s **%s: %s for %s**\n\n%s<br>%s",
-		emoji, title, status.OriginalPipelineRunName, sha, status.Summary, status.Text)
 }

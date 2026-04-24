@@ -1,4 +1,5 @@
 //go:build e2e
+// +build e2e
 
 package test
 
@@ -8,6 +9,7 @@ import (
 	"regexp"
 	"testing"
 
+	"github.com/google/go-github/v61/github"
 	"github.com/openshift-pipelines/pipelines-as-code/test/pkg/cctx"
 	tgithub "github.com/openshift-pipelines/pipelines-as-code/test/pkg/github"
 	"github.com/openshift-pipelines/pipelines-as-code/test/pkg/wait"
@@ -27,19 +29,17 @@ func TestGithubPullRequestGitClone(t *testing.T) {
 
 	ctx, err := cctx.GetControllerCtxInfo(ctx, g.Cnx)
 	assert.NilError(t, err)
-
-	maxLines := int64(1000)
 	assert.NilError(t, wait.RegexpMatchingInControllerLog(ctx, g.Cnx, *regexp.MustCompile(".*fetched git-clone task"),
-		10, "controller", &maxLines), "Error while checking the logs of the pipelines-as-code controller pod")
+		10, "controller", github.Int64(20)), "Error while checking the logs of the pipelines-as-code controller pod")
 	defer g.TearDown(ctx, t)
 }
 
-func TestGithubGHEPullRequestGitClone(t *testing.T) {
+func TestGithubSecondPullRequestGitClone(t *testing.T) {
 	ctx := context.Background()
 	g := &tgithub.PRTest{
-		Label:     "Github GHE - Private Repo",
-		YamlFiles: []string{"testdata/pipelinerun_git_clone_private.yaml"},
-		GHE:       true,
+		Label:            "Github GHE - Private Repo",
+		YamlFiles:        []string{"testdata/pipelinerun_git_clone_private.yaml"},
+		SecondController: true,
 	}
 	g.RunPullRequest(ctx, t)
 	defer g.TearDown(ctx, t)

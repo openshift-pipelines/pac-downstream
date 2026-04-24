@@ -22,9 +22,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
-// +listType=atomic
-type Volumes []corev1.Volume
-
 // Template holds pod specific configuration
 // +k8s:deepcopy-gen=true
 // +k8s:openapi-gen=true
@@ -40,37 +37,29 @@ type Template struct {
 	// +patchMergeKey=name
 	// +patchStrategy=merge
 	// +listType=atomic
-	Env []corev1.EnvVar `json:"env,omitempty" patchMergeKey:"name" patchStrategy:"merge" protobuf:"bytes,7,rep,name=env"`
+	Env []corev1.EnvVar `json:"env,omitempty" patchStrategy:"merge" patchMergeKey:"name" protobuf:"bytes,7,rep,name=env"`
 
 	// If specified, the pod's tolerations.
 	// +optional
 	// +listType=atomic
 	Tolerations []corev1.Toleration `json:"tolerations,omitempty"`
 
-	// If specified, the pod's scheduling constraints.
-	// See Pod.spec.affinity (API version: v1)
+	// If specified, the pod's scheduling constraints
 	// +optional
-	// +kubebuilder:pruning:PreserveUnknownFields
-	// +kubebuilder:validation:Schemaless
 	Affinity *corev1.Affinity `json:"affinity,omitempty"`
 
 	// SecurityContext holds pod-level security attributes and common container settings.
 	// Optional: Defaults to empty.  See type description for default values of each field.
-	// See Pod.spec.securityContext (API version: v1)
 	// +optional
-	// +kubebuilder:pruning:PreserveUnknownFields
-	// +kubebuilder:validation:Schemaless
 	SecurityContext *corev1.PodSecurityContext `json:"securityContext,omitempty"`
 
 	// List of volumes that can be mounted by containers belonging to the pod.
 	// More info: https://kubernetes.io/docs/concepts/storage/volumes
-	// See Pod.spec.volumes (API version: v1)
 	// +optional
 	// +patchMergeKey=name
 	// +patchStrategy=merge,retainKeys
-	// +kubebuilder:pruning:PreserveUnknownFields
-	// +kubebuilder:validation:Schemaless
-	Volumes Volumes `json:"volumes,omitempty" patchMergeKey:"name" patchStrategy:"merge,retainKeys" protobuf:"bytes,1,rep,name=volumes"`
+	// +listType=atomic
+	Volumes []corev1.Volume `json:"volumes,omitempty" patchStrategy:"merge,retainKeys" patchMergeKey:"name" protobuf:"bytes,1,rep,name=volumes"`
 
 	// RuntimeClassName refers to a RuntimeClass object in the node.k8s.io
 	// group, which should be used to run this pod. If no RuntimeClass resource
@@ -159,11 +148,9 @@ func (tpl *Template) ToAffinityAssistantTemplate() *AffinityAssistantTemplate {
 	}
 
 	return &AffinityAssistantTemplate{
-		NodeSelector:      tpl.NodeSelector,
-		Tolerations:       tpl.Tolerations,
-		ImagePullSecrets:  tpl.ImagePullSecrets,
-		SecurityContext:   tpl.SecurityContext,
-		PriorityClassName: tpl.PriorityClassName,
+		NodeSelector:     tpl.NodeSelector,
+		Tolerations:      tpl.Tolerations,
+		ImagePullSecrets: tpl.ImagePullSecrets,
 	}
 }
 
@@ -260,13 +247,6 @@ func MergeAAPodTemplateWithDefault(tpl, defaultTpl *AAPodTemplate) *AAPodTemplat
 		if tpl.ImagePullSecrets == nil {
 			tpl.ImagePullSecrets = defaultTpl.ImagePullSecrets
 		}
-		if tpl.SecurityContext == nil {
-			tpl.SecurityContext = defaultTpl.SecurityContext
-		}
-		if tpl.PriorityClassName == nil {
-			tpl.PriorityClassName = defaultTpl.PriorityClassName
-		}
-
 		return tpl
 	}
 }

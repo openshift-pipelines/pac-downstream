@@ -2,9 +2,7 @@ package git
 
 import (
 	"bytes"
-	"context"
 	"fmt"
-	"os"
 	"os/exec"
 	"strings"
 )
@@ -25,13 +23,7 @@ func RunGit(dir string, args ...string) (string, error) {
 	// insert in args "-c", "gitcommit.gpgsign=false" at the beginning gpg sign when set in user
 	args = append([]string{"-c", "commit.gpgsign=false"}, args...)
 
-	c := exec.CommandContext(context.Background(), gitPath, args...)
-	c.Env = []string{
-		"PATH=" + os.Getenv("PATH"),
-		"HOME=" + os.Getenv("HOME"),
-		"LC_ALL=C",
-		"LANG=C",
-	}
+	c := exec.Command(gitPath, args...)
 	var output bytes.Buffer
 	c.Stderr = &output
 	c.Stdout = &output
@@ -75,7 +67,7 @@ func GetGitInfo(dir string) *Info {
 	gitURL = strings.TrimSuffix(gitURL, ".git")
 
 	// convert github and probably others ssh access format into https
-	// i think it only fails with bitbucket data center
+	// i think it only fails with bitbucket server
 	if strings.HasPrefix(gitURL, "git@") {
 		sp := strings.Split(gitURL, ":")
 		prefix := strings.ReplaceAll(sp[0], "git@", "https://")

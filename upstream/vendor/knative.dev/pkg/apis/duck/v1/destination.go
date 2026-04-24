@@ -40,14 +40,6 @@ type Destination struct {
 	// by the Addressable target, if any.
 	// +optional
 	CACerts *string `json:"CACerts,omitempty"`
-
-	// Audience is the OIDC audience.
-	// This need only be set, if the target is not an Addressable
-	// and thus the Audience can't be received from the Addressable itself.
-	// In case the Addressable specifies an Audience too, the Destinations
-	// Audience takes preference.
-	// +optional
-	Audience *string `json:"audience,omitempty"`
 }
 
 // Validate the Destination has all the necessary fields and check the
@@ -103,11 +95,11 @@ func (d *Destination) SetDefaults(ctx context.Context) {
 	}
 }
 
-func validateCACerts(caCert *string) *apis.FieldError {
+func validateCACerts(CACert *string) *apis.FieldError {
 	// Check the object.
 	var errs *apis.FieldError
 
-	block, err := pem.Decode([]byte(*caCert))
+	block, err := pem.Decode([]byte(*CACert))
 	if err != nil && block == nil {
 		errs = errs.Also(apis.ErrInvalidValue("CA Cert provided is invalid", "caCert"))
 		return errs

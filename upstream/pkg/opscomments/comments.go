@@ -5,13 +5,11 @@ import (
 	"regexp"
 	"strings"
 
-	"go.uber.org/zap"
-
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/acl"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/events"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
+	"go.uber.org/zap"
 )
 
 var (
@@ -19,7 +17,7 @@ var (
 	retestAllRegex    = regexp.MustCompile(`(?m)^/retest\s*$`)
 	testSingleRegex   = regexp.MustCompile(`(?m)^/test[ \t]+\S+`)
 	retestSingleRegex = regexp.MustCompile(`(?m)^/retest[ \t]+\S+`)
-	oktotestRegex     = regexp.MustCompile(acl.OKToTestCommentRegexp)
+	oktotestRegex     = regexp.MustCompile(`(?m)^/ok-to-test\s*$`)
 	cancelAllRegex    = regexp.MustCompile(`(?m)^(/cancel)\s*$`)
 	cancelSingleRegex = regexp.MustCompile(`(?m)^(/cancel)[ \t]+\S+`)
 )
@@ -89,13 +87,8 @@ func IsOkToTestComment(comment string) bool {
 	return oktotestRegex.MatchString(comment)
 }
 
-// GetSHAFromOkToTestComment extracts the optional SHA from an /ok-to-test comment.
-func GetSHAFromOkToTestComment(comment string) string {
-	matches := oktotestRegex.FindStringSubmatch(comment)
-	if len(matches) > 2 {
-		return strings.TrimSpace(matches[2])
-	}
-	return ""
+func IsCancelComment(comment string) bool {
+	return cancelAllRegex.MatchString(comment) || cancelSingleRegex.MatchString(comment)
 }
 
 // EventTypeBackwardCompat handle the backward compatibility we need to keep until
@@ -127,20 +120,6 @@ func IsAnyOpsEventType(eventType string) bool {
 		eventType == CancelCommentAllEventType.String() ||
 		eventType == OkToTestCommentEventType.String() ||
 		eventType == OnCommentEventType.String()
-}
-
-// AnyOpsKubeLabelInSelector will output a Kubernetes label out of all possible
-// CommentEvent Type for selection.
-func AnyOpsKubeLabelInSelector() string {
-	return fmt.Sprintf("%s,%s,%s,%s,%s,%s,%s,%s",
-		TestSingleCommentEventType.String(),
-		TestAllCommentEventType.String(),
-		RetestAllCommentEventType.String(),
-		RetestSingleCommentEventType.String(),
-		CancelCommentSingleEventType.String(),
-		CancelCommentAllEventType.String(),
-		OkToTestCommentEventType.String(),
-		OnCommentEventType.String())
 }
 
 func GetPipelineRunFromTestComment(comment string) string {

@@ -1,8 +1,6 @@
 run:
-  timeout: 5m
-
-issues:
-  exclude-dirs:
+  deadline: 5m
+  skip-dirs:
     - zipkin_proto3
 
 linters:
@@ -18,7 +16,6 @@ linters:
     - lll
     - misspell
     - nakedret
-    - revive
     - unparam
     - unused
 
@@ -29,5 +26,5 @@ linters-settings:
     line-length: 170
   gocyclo:
     min-complexity: 20
-  revive:
-    confidence: 0.85
+  golint:
+    min-confidence: 0.85

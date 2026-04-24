@@ -58,9 +58,11 @@ const (
 	prometheusHostEnvName            = "METRICS_PROMETHEUS_HOST"
 )
 
-// TestOverrideBundleCount is a variable for testing to reduce the size (number of metrics) buffered before
-// OpenCensus will send a bundled metric report. Only applies if non-zero.
-var TestOverrideBundleCount = 0
+var (
+	// TestOverrideBundleCount is a variable for testing to reduce the size (number of metrics) buffered before
+	// OpenCensus will send a bundled metric report. Only applies if non-zero.
+	TestOverrideBundleCount = 0
+)
 
 // Metrics backend "enum".
 const (
@@ -232,7 +234,7 @@ func prometheusPort() (int, error) {
 		return defaultPrometheusPort, nil
 	}
 
-	pp, err := strconv.ParseInt(ppStr, 10, 16)
+	pp, err := strconv.ParseUint(ppStr, 10, 16)
 	if err != nil {
 		return -1, fmt.Errorf("the environment variable %q could not be parsed as a port number: %w",
 			prometheusPortEnvName, err)

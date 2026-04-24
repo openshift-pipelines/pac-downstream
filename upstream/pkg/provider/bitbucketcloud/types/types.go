@@ -1,4 +1,3 @@
-//revive:disable-next-line:var-naming
 package types
 
 type Workspace struct {
@@ -8,7 +7,6 @@ type Workspace struct {
 type Repository struct {
 	Workspace Workspace `json:"workspace"`
 	Name      string    `json:"name"`
-	FullName  string    `json:"full_name"`
 	Links     Links     `json:"links"`
 }
 
@@ -56,7 +54,6 @@ type PullRequest struct {
 	ID          int         `json:"id"`
 	Links       Links
 	Title       string `json:"title"`
-	State       string `json:"state"`
 }
 
 type PullRequestEvent struct {
@@ -78,7 +75,6 @@ type PushRequestEvent struct {
 type ChangeType struct {
 	Name   string
 	Target Commit
-	Type   string
 }
 
 type Change struct {

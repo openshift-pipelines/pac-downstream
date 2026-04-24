@@ -20,7 +20,7 @@ func TestTektonDashboard(t *testing.T) {
 	ctx, _ := rtesting.SetupFakeContext(t)
 
 	unsf := &unstructured.Unstructured{}
-	unsf.SetUnstructuredContent(map[string]any{
+	unsf.SetUnstructuredContent(map[string]interface{}{
 		"apiVersion": "foo.io/v1",
 		"kind":       "Random",
 	})

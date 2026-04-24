@@ -136,7 +136,6 @@ func (r *RepoOptions) generateTemplate(gopt *generate.Opts) error {
 	// defaulting the values for repo create command
 	gopt.Event.EventType = "pull_request, push"
 	gopt.Event.BaseBranch = "main"
-	gopt.Event.URL = r.Event.URL
 
 	return generate.Generate(gopt, false)
 }
@@ -216,7 +215,7 @@ func getRepoURL(opts *RepoOptions) error {
 		return nil
 	}
 
-	q := "Enter the Git repository URL "
+	q := "Enter the Git repository url "
 	var err error
 	if opts.GitInfo.URL != "" {
 		opts.GitInfo.URL, err = cleanupGitURL(opts.GitInfo.URL)

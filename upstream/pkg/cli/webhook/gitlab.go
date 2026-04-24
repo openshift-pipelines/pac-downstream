@@ -10,7 +10,7 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/cli"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/cli/prompt"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/random"
-	gitlab "gitlab.com/gitlab-org/api/client-go"
+	"github.com/xanzy/go-gitlab"
 )
 
 type gitLabConfig struct {
@@ -37,10 +37,9 @@ func (gl *gitLabConfig) Run(_ context.Context, opts *Options) (*response, error)
 	}, gl.create()
 }
 
-// Changes in askGLWebhookConfig function.
 func (gl *gitLabConfig) askGLWebhookConfig(repoURL, controllerURL, apiURL, personalAccessToken string) error {
 	if repoURL == "" {
-		msg := "Enter the GitLab repository URL to configure: "
+		msg := "Please enter the git repository url you want to be configured: "
 		if err := prompt.SurveyAskOne(&survey.Input{Message: msg}, &repoURL,
 			survey.WithValidator(survey.Required)); err != nil {
 			return err
@@ -49,17 +48,19 @@ func (gl *gitLabConfig) askGLWebhookConfig(repoURL, controllerURL, apiURL, perso
 		fmt.Fprintf(gl.IOStream.Out, "✓ Setting up GitLab Webhook for Repository %s\n", repoURL)
 	}
 
-	msg := "Enter the project ID of your GitLab repository.\nThe project ID is a unique number (e.g. 34405323) shown at the top of your GitLab project page: "
+	msg := "Please enter the project ID for the repository you want to be configured, \n  project ID refers to an unique ID (e.g. 34405323) shown at the top of your GitLab project :"
 	if err := prompt.SurveyAskOne(&survey.Input{Message: msg}, &gl.projectID,
 		survey.WithValidator(survey.Required)); err != nil {
 		return err
 	}
 
+	// set controller url
 	gl.controllerURL = controllerURL
 
+	// confirm whether to use the detected url
 	if gl.controllerURL != "" {
 		var answer bool
-		fmt.Fprintf(gl.IOStream.Out, "👀 Controller URL detected: %s\n", gl.controllerURL)
+		fmt.Fprintf(gl.IOStream.Out, "👀 I have detected a controller url: %s\n", gl.controllerURL)
 		err := prompt.SurveyAskOne(&survey.Confirm{
 			Message: "Do you want me to use it?",
 			Default: true,
@@ -74,14 +75,14 @@ func (gl *gitLabConfig) askGLWebhookConfig(repoURL, controllerURL, apiURL, perso
 
 	if gl.controllerURL == "" {
 		if err := prompt.SurveyAskOne(&survey.Input{
-			Message: "Enter your controller's public route URL: ",
+			Message: "Please enter your controller public route URL: ",
 		}, &gl.controllerURL, survey.WithValidator(survey.Required)); err != nil {
 			return err
 		}
 	}
 
 	data := random.AlphaString(12)
-	msg = fmt.Sprintf("Enter a secret for webhook payload validation (default: %s): ", data)
+	msg = fmt.Sprintf("Please enter the secret to configure the webhook for payload validation (default: %s): ", data)
 	var webhookSecret string
 	if err := prompt.SurveyAskOne(&survey.Input{Message: msg, Default: data}, &webhookSecret); err != nil {
 		return err
@@ -90,10 +91,10 @@ func (gl *gitLabConfig) askGLWebhookConfig(repoURL, controllerURL, apiURL, perso
 	gl.webhookSecret = webhookSecret
 
 	if personalAccessToken == "" {
-		fmt.Fprintln(gl.IOStream.Out, "ℹ ️You need to create a GitLab personal access token with 'api' scope")
-		fmt.Fprintln(gl.IOStream.Out, "ℹ ️Generate one at https://gitlab.com/-/profile/personal_access_tokens (see documentation: https://is.gd/rOEo9B)")
+		fmt.Fprintln(gl.IOStream.Out, "ℹ ️You now need to create a GitLab personal access token with `api` scope")
+		fmt.Fprintln(gl.IOStream.Out, "ℹ ️Go to this URL to generate one https://gitlab.com/-/profile/personal_access_tokens, see https://is.gd/rOEo9B for documentation ")
 		if err := prompt.SurveyAskOne(&survey.Password{
-			Message: "Enter your GitLab access token: ",
+			Message: "Please enter the GitLab access token: ",
 		}, &gl.personalAccessToken, survey.WithValidator(survey.Required)); err != nil {
 			return err
 		}
@@ -103,7 +104,7 @@ func (gl *gitLabConfig) askGLWebhookConfig(repoURL, controllerURL, apiURL, perso
 
 	if apiURL == "" {
 		if err := prompt.SurveyAskOne(&survey.Input{
-			Message: "Enter your GitLab API URL: ",
+			Message: "Please enter your GitLab API URL: ",
 		}, &gl.APIURL, survey.WithValidator(survey.Required)); err != nil {
 			return err
 		}
@@ -114,7 +115,6 @@ func (gl *gitLabConfig) askGLWebhookConfig(repoURL, controllerURL, apiURL, perso
 	return nil
 }
 
-// create function.
 func (gl *gitLabConfig) create() error {
 	glClient, err := gl.newClient()
 	if err != nil {
@@ -145,7 +145,7 @@ func (gl *gitLabConfig) create() error {
 			resp.StatusCode, payload)
 	}
 
-	fmt.Fprintln(gl.IOStream.Out, "✓ Webhook successfully created on your repository")
+	fmt.Fprintln(gl.IOStream.Out, "✓ Webhook has been created on your repository")
 	return nil
 }
 

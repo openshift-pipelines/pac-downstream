@@ -3,7 +3,6 @@ package adapter
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -16,10 +15,10 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/kubeinteraction"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/versiondata"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/version"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/bitbucketcloud"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/bitbucketdatacenter"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/bitbucketserver"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/gitea"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/gitlab"
@@ -27,26 +26,16 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"knative.dev/eventing/pkg/adapter/v2"
 	"knative.dev/pkg/logging"
-	"knative.dev/pkg/system"
 )
 
-const globalAdapterPort = "8082"
-
-// For incoming webhook requests and GitHub Apps with many installations the handler takes long
-// e.g GitHub App with ~400 installations, it takes ~180s. For OpenShift deployments this also
-// requires matching timeout on the pipelines-as-code-controller route (default is 30s).
-const httpTimeoutHandler = 600 * time.Second
+const globalAdapterPort = "8080"
 
 type envConfig struct {
 	adapter.EnvConfig
 }
 
 func NewEnvConfig() adapter.EnvConfigAccessor {
-	return &envConfig{
-		adapter.EnvConfig{
-			Namespace: system.Namespace(),
-		},
-	}
+	return &envConfig{}
 }
 
 type listener struct {
@@ -83,7 +72,7 @@ func (l *listener) Start(ctx context.Context) error {
 	// Start pac config syncer
 	go params.StartConfigSync(ctx, l.run)
 
-	l.logger.Infof("Starting Pipelines as Code version: %s", strings.TrimSpace(versiondata.Version))
+	l.logger.Infof("Starting Pipelines as Code version: %s", strings.TrimSpace(version.Version))
 	mux := http.NewServeMux()
 
 	// for handling probes
@@ -94,13 +83,11 @@ func (l *listener) Start(ctx context.Context) error {
 
 	mux.HandleFunc("/", l.handleEvent(ctx))
 
+	//nolint: gosec
 	srv := &http.Server{
 		Addr: ":" + adapterPort,
 		Handler: http.TimeoutHandler(mux,
-			httpTimeoutHandler, "Listener Timeout!\n"),
-		ReadHeaderTimeout: 5 * time.Second,
-		ReadTimeout:       10 * time.Second,
-		IdleTimeout:       30 * time.Second,
+			10*time.Second, "Listener Timeout!\n"),
 	}
 
 	enabled, tlsCertFile, tlsKeyFile := l.isTLSEnabled()
@@ -131,7 +118,7 @@ func (l listener) handleEvent(ctx context.Context) http.HandlerFunc {
 			return
 		}
 
-		var event map[string]any
+		var event map[string]interface{}
 		if string(payload) != "" {
 			if err := json.Unmarshal(payload, &event); err != nil {
 				l.logger.Errorf("Invalid event body format format: %s", err)
@@ -172,9 +159,6 @@ func (l listener) handleEvent(ctx context.Context) http.HandlerFunc {
 
 		isIncoming, targettedRepo, err := l.detectIncoming(ctx, request, payload)
 		if err != nil {
-			if errors.Is(err, errMissingFields) {
-				l.writeResponse(response, http.StatusBadRequest, err.Error())
-			}
 			l.logger.Errorf("error processing incoming webhook: %v", err)
 			return
 		}
@@ -225,7 +209,7 @@ func (l listener) processRes(processEvent bool, provider provider.Interface, log
 	if err != nil {
 		errStr := fmt.Sprintf("got error while processing : %v", err)
 		logger.Error(errStr)
-		return nil, logger, fmt.Errorf("%s", errStr)
+		return nil, logger, fmt.Errorf(errStr)
 	}
 
 	if skipReason != "" {
@@ -238,7 +222,7 @@ func (l listener) detectProvider(req *http.Request, reqBody string) (provider.In
 	log := *l.logger
 
 	// payload validation
-	var event map[string]any
+	var event map[string]interface{}
 	if err := json.Unmarshal([]byte(reqBody), &event); err != nil {
 		return nil, &log, fmt.Errorf("invalid event body format: %w", err)
 	}
@@ -256,15 +240,15 @@ func (l listener) detectProvider(req *http.Request, reqBody string) (provider.In
 		return l.processRes(processReq, zegitea, logger, reason, err)
 	}
 
-	bitServer := &bitbucketdatacenter.Provider{}
+	bitServer := &bitbucketserver.Provider{}
 	isBitServer, processReq, logger, reason, err := bitServer.Detect(req, reqBody, &log)
 	if isBitServer {
 		return l.processRes(processReq, bitServer, logger, reason, err)
 	}
 
 	gitLab := &gitlab.Provider{}
-	isGitLab, processReq, logger, reason, err := gitLab.Detect(req, reqBody, &log)
-	if isGitLab {
+	isGitlab, processReq, logger, reason, err := gitLab.Detect(req, reqBody, &log)
+	if isGitlab {
 		return l.processRes(processReq, gitLab, logger, reason, err)
 	}
 

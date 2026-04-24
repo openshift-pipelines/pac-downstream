@@ -5,11 +5,11 @@ weight: 6
 
 # Status
 
-## GitHub Apps
+## GitHub apps
 
 After the `PipelineRun` has finished, its status will be
 shown in the GitHub Check tabs, along with a concise overview
-of the status, the name, and the duration of each task in the pipeline. If the task has a
+of the status the name and the duration of each task in the pipeline. If the task has a
 [displayName](https://tekton.dev/docs/pipelines/tasks/#specifying-a-display-name)
 it will use it as the description of the task or otherwise just the task
 name.
@@ -42,12 +42,12 @@ the last three lines from the task breakdown is displayed. However, the API has
 a character limit that restricts us to output only the output of the first
 failed task.
 
-To prevent exposing secrets, Pipelines-as-Code analyzes the PipelineRun and
-replaces secret values with hidden characters. This is achieved by retrieving
+To prevent exposing secrets, Pipelines-as-Code analyze the PipelineRun and
+replace secret values with hidden characters. This is achieved by retrieving
 all secrets from the environment variables associated with tasks and steps, and
 searching for matches of these values in the output snippet.
 
-These matches are first sorted by length and then replaced with a
+These matches are first sorted by the longest and then replaced with a
 `"*****"` placeholder in the output snippet. This ensures that the output
 will not contain any leaked secrets.
 
@@ -61,7 +61,7 @@ sources.
 ### Error detection from containers logs as GitHub Annotation
 
 If you enable the `error-detection-from-container-logs` option in the
-pipelines-as-code ConfigMap, Pipelines-as-Code will attempt to detect
+pipeline-as-code configuration map, Pipelines-as-Code will attempt to detect
 errors from the container logs and add them as annotations on the corresponding
 Pull Request where the error occurred.
 
@@ -107,10 +107,6 @@ repository.
 The most recent five statuses of any PipelineRuns associated with a repository
 are stored within the corresponding repository custom resource (CR).
 
-{{< hint danger >}}
-The `pipelinerun_status` field in the `Repository` CR is scheduled for deprecation and will be removed in a future release. Please avoid relying on it.
-{{< /hint >}}
-
 ```console
 % kubectl get repo -n pipelines-as-code-ci
 NAME                  URL                                                        NAMESPACE             SUCCEEDED   REASON      STARTTIME   COMPLETIONTIME
@@ -125,17 +121,17 @@ well as their metadata.
 
 Notifications are not managed by Pipelines-as-Code.
 
-To add notifications to your PipelineRuns, you can use the [finally feature of
+To add notifications to your pipeline runs, you can use the [finally feature of
 Tekton
 Pipelines](https://github.com/tektoncd/pipeline/blob/main/docs/pipelines.md#adding-finally-to-the-pipeline).
 This allows you to execute a set of tasks at the end of a
-PipelineRun, regardless of whether it succeeds or fails.
+pipeline run, regardless of whether it succeeds or fails.
 
 As an example, you can [refer](https://github.com/openshift-pipelines/pipelines-as-code/blob/16596b478f4bce202f9f69de9a4b5a7ca92962c1/.tekton/generate-coverage-release.yaml#L127) to the coverage generation PipelineRun in the
 `.tekton` directory of the Pipelines-as-Code repository, it uses the [finally
 task with the guard
 feature](https://tekton.dev/docs/pipelines/pipelines/#guard-finally-task-execution-using-when-expressions)
-to send a notification to Slack if there is any failure in the PipelineRun. See
+to send a notification to Slack if there is any failure in the pipelinerun. See
 it in action here:
 
 <https://github.com/openshift-pipelines/pipelines-as-code/blob/16596b478f4bce202f9f69de9a4b5a7ca92962c1/.tekton/generate-coverage-release.yaml#L126>

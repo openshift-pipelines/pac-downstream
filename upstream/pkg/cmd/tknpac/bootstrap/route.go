@@ -32,7 +32,7 @@ func DetectOpenShiftRoute(ctx context.Context, run *params.Run, targetNamespace 
 	}
 	route := routes.Items[0]
 
-	spec, ok := route.Object["spec"].(map[string]any)
+	spec, ok := route.Object["spec"].(map[string]interface{})
 	if !ok {
 		return "", fmt.Errorf("couldn't find spec in the PAC Controller route")
 	}
@@ -59,9 +59,7 @@ func detectSelfSignedCertificate(ctx context.Context, url string) string {
 	} else if err != nil {
 		return fmt.Sprintf("⚠️ could not connect to the route %s, make sure the pipelines-as-code controller is running", url)
 	}
-	if err := resp.Body.Close(); err != nil {
-		return fmt.Sprintf("⚠️ could not close the response body: %v", err)
-	}
+	resp.Body.Close()
 	return ""
 }
 

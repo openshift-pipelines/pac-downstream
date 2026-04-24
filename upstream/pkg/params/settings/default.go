@@ -1,43 +1,30 @@
 package settings
 
 import (
-	"context"
 	"fmt"
-	"net/http"
 	"net/url"
-	"strings"
 	"sync"
-	"time"
 
-	hubtypes "github.com/openshift-pipelines/pipelines-as-code/pkg/hub/vars"
 	"go.uber.org/zap"
 )
 
-func getHubCatalogs(logger *zap.SugaredLogger, catalogs *sync.Map, config map[string]string, httpClient *http.Client) *sync.Map {
+func getHubCatalogs(logger *zap.SugaredLogger, catalogs *sync.Map, config map[string]string) *sync.Map {
 	if catalogs == nil {
 		catalogs = &sync.Map{}
 	}
 	if hubURL, ok := config[HubURLKey]; !ok || hubURL == "" {
-		config[HubURLKey] = ArtifactHubURLDefaultValue
-		logger.Infof("CONFIG: using default hub url %s", ArtifactHubURLDefaultValue)
+		config[HubURLKey] = HubURLDefaultValue
+		logger.Infof("CONFIG: using default hub url %s", HubURLDefaultValue)
 	}
 
-	if hubType, ok := config[HubCatalogTypeKey]; !ok || hubType == "" {
-		config[HubCatalogTypeKey] = hubtypes.ArtifactHubType
-		if config[HubURLKey] != "" {
-			config[HubCatalogTypeKey] = getHubCatalogTypeViaAPI(config[HubURLKey], httpClient)
-		}
-	} else if hubType != hubtypes.ArtifactHubType && hubType != hubtypes.TektonHubType {
-		logger.Warnf("CONFIG: invalid hub type %s, defaulting to %s", hubType, hubtypes.ArtifactHubType)
-		config[HubCatalogTypeKey] = hubtypes.ArtifactHubType
+	if hubCatalogName, ok := config[HubCatalogNameKey]; !ok || hubCatalogName == "" {
+		config[HubCatalogNameKey] = HubCatalogNameDefaultValue
 	}
-	hc := HubCatalog{
+	catalogs.Store("default", HubCatalog{
 		Index: "default",
 		Name:  config[HubCatalogNameKey],
 		URL:   config[HubURLKey],
-		Type:  config[HubCatalogTypeKey],
-	}
-	catalogs.Store("default", hc)
+	})
 
 	for k := range config {
 		m := hubCatalogNameRegex.FindStringSubmatch(k)
@@ -71,15 +58,10 @@ func getHubCatalogs(logger *zap.SugaredLogger, catalogs *sync.Map, config map[st
 					break
 				}
 				catalogName := config[fmt.Sprintf("%s-name", cPrefix)]
-				catalogType := config[fmt.Sprintf("%s-type", cPrefix)]
-				if catalogType == "" {
-					catalogType = getHubCatalogTypeViaAPI(config[fmt.Sprintf("%s-url", cPrefix)], httpClient)
-				}
-
 				value, ok := catalogs.Load(catalogID)
 				if ok {
 					catalogValues, ok := value.(HubCatalog)
-					if ok && (catalogValues.Name == catalogName) && (catalogValues.URL == catalogURL) && (catalogValues.Index == index) && (catalogValues.Type == catalogType) {
+					if ok && (catalogValues.Name == catalogName) && (catalogValues.URL == catalogURL) && (catalogValues.Index == index) {
 						continue
 					}
 				}
@@ -88,35 +70,9 @@ func getHubCatalogs(logger *zap.SugaredLogger, catalogs *sync.Map, config map[st
 					Index: index,
 					Name:  catalogName,
 					URL:   catalogURL,
-					Type:  catalogType,
 				})
 			}
 		}
 	}
 	return catalogs
-}
-
-func getHubCatalogTypeViaAPI(hubURL string, httpClient *http.Client) string {
-	statsURL := fmt.Sprintf("%s/api/v1/stats", strings.TrimSuffix(hubURL, "/"))
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, statsURL, nil)
-	if err != nil {
-		return hubtypes.TektonHubType
-	}
-
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		return hubtypes.TektonHubType
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode == http.StatusOK {
-		return hubtypes.ArtifactHubType
-	}
-
-	// if the API call fails, return Tekton Hub type
-	return hubtypes.TektonHubType
 }

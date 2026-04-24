@@ -1,7 +1,6 @@
 package completion
 
 import (
-	"context"
 	"os/exec"
 	"strings"
 
@@ -11,7 +10,7 @@ import (
 // GetObjectsWithKubectl return completions with kubectl, we are doing this with
 // kubectl since we have caching and without it completion is way too slow.
 func GetObjectsWithKubectl(obj string) []string {
-	out, err := exec.CommandContext(context.Background(), "kubectl", "get", obj, "-o=jsonpath={range .items[*]}{.metadata.name} {end}").Output()
+	out, err := exec.Command("kubectl", "get", obj, "-o=jsonpath={range .items[*]}{.metadata.name} {end}").Output()
 	if err != nil {
 		return nil
 	}

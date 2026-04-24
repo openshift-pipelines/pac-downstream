@@ -7,12 +7,12 @@ import (
 	"net/http"
 	"testing"
 
-	"codeberg.org/mvdkleijn/forgejo-sdk/forgejo/v2"
+	giteaStructs "code.gitea.io/gitea/modules/structs"
+	"code.gitea.io/sdk/gitea"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/settings"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/gitea/forgejostructs"
 	tgitea "github.com/openshift-pipelines/pipelines-as-code/pkg/provider/gitea/test"
 	"go.uber.org/zap"
 	zapobserver "go.uber.org/zap/zaptest/observer"
@@ -86,9 +86,9 @@ func TestCheckPolicyAllowing(t *testing.T) {
 				},
 			}
 			gprovider := Provider{
-				giteaClient: fakeclient,
-				repo:        repo,
-				Logger:      logger,
+				Client: fakeclient,
+				repo:   repo,
+				Logger: logger,
 			}
 
 			gotAllowed, gotReason := gprovider.CheckPolicyAllowing(ctx, event, tt.allowedTeams)
@@ -99,16 +99,16 @@ func TestCheckPolicyAllowing(t *testing.T) {
 }
 
 func TestOkToTestComment(t *testing.T) {
-	issueCommentPayload := &forgejostructs.IssueCommentPayload{
-		Comment: &forgejostructs.Comment{
+	issueCommentPayload := &giteaStructs.IssueCommentPayload{
+		Comment: &giteaStructs.Comment{
 			ID: 1,
 		},
-		Issue: &forgejostructs.Issue{
+		Issue: &giteaStructs.Issue{
 			URL: "http://url.com/owner/repo/1",
 		},
 	}
-	pullRequestPayload := &forgejostructs.PullRequestPayload{
-		PullRequest: &forgejostructs.PullRequest{
+	pullRequestPayload := &giteaStructs.PullRequestPayload{
+		PullRequest: &giteaStructs.PullRequest{
 			HTMLURL: "http://url.com/owner/repo/1",
 		},
 	}
@@ -156,7 +156,7 @@ func TestOkToTestComment(t *testing.T) {
 				Repository:   "repo",
 				Sender:       "nonowner",
 				EventType:    "issue_comment",
-				Event:        &forgejostructs.RepositoryPayload{},
+				Event:        &giteaStructs.RepositoryPayload{},
 			},
 			allowed:          false,
 			wantErr:          false,
@@ -226,7 +226,7 @@ func TestOkToTestComment(t *testing.T) {
 				Repository:   "repo",
 				Sender:       "nonowner",
 				EventType:    "issue_comment",
-				Event:        &forgejostructs.RepositoryPayload{},
+				Event:        &giteaStructs.RepositoryPayload{},
 			},
 			allowed:          false,
 			wantErr:          false,
@@ -285,9 +285,9 @@ func TestOkToTestComment(t *testing.T) {
 			})
 			ctx, _ := rtesting.SetupFakeContext(t)
 			gprovider := Provider{
-				giteaClient: fakeclient,
-				Logger:      logger,
-				run:         &params.Run{},
+				Client: fakeclient,
+				Logger: logger,
+				run:    &params.Run{},
 				pacInfo: &info.PacOpts{
 					Settings: settings.Settings{
 						RememberOKToTest: tt.rememberOkToTest,
@@ -361,8 +361,8 @@ func TestAclCheckAll(t *testing.T) {
 
 			ctx, _ := rtesting.SetupFakeContext(t)
 			gprovider := Provider{
-				giteaClient: fakeclient,
-				Logger:      logger,
+				Client: fakeclient,
+				Logger: logger,
 			}
 
 			if tt.allowedRules.collabo {
@@ -381,7 +381,7 @@ func TestAclCheckAll(t *testing.T) {
 					encoded := base64.StdEncoding.EncodeToString([]byte(
 						fmt.Sprintf("approvers:\n  - %s\n", tt.runevent.Sender)))
 					// encode to json
-					b, err := json.Marshal(forgejo.ContentsResponse{
+					b, err := json.Marshal(gitea.ContentsResponse{
 						Content: &encoded,
 					})
 					if err != nil {

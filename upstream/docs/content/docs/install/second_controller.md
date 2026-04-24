@@ -1,177 +1,77 @@
 ---
-title: Multiple GitHub Applications Support
+title: Multiple GitHub Applications
 ---
 
-# Multi-GitHub Application Configuration
+# Multiple GitHub application support
 
-{{< tech_preview "Multi-GitHub Apps Support" >}}
+{{< tech_preview "Multiple GitHub apps support" >}}
 
-Pipelines-as-Code allows multiple GitHub applications to operate on the same
-cluster, enabling integration with different GitHub instances (e.g., public
-GitHub and GitHub Enterprise Server).
+Pipelines-as-Code supports running multiple GitHub applications on the same
+cluster. This allows you to have multiple GitHub applications pointing to the
+same cluster from different installation (like public GitHub and GitHub
+Enterprise).
 
-## Deployment Architecture
+## Running a second controller with a different GitHub application
 
-Each GitHub application requires:
+Each new installs for different GitHub applications have their own controller
+with a Service and a
+[Ingress](https://kubernetes.io/docs/concepts/services-networking/ingress/) or
+a [OpenShift Route](https://docs.openshift.com/container-platform/latest/networking/routes/route-configuration.html)
+attached to it.
 
-1. Dedicated controller deployment
-2. Associated Service resource
-3. Network exposure via Ingress (Kubernetes) or Route (OpenShift) or [smee.io](https://smee.io) for webhook tunneling
-4. Unique configuration through:
-   - Secret containing GitHub App credentials (`private key`, `application_id`, `webhook_secret`)
-   - ConfigMap for application-specific settings
+Each controller can have their own [Configmap]({{< relref "/docs/install/settings" >}}) for their configuration and should have their own
+secret with the GitHub application `private key`/`application_id` and
+`webhook_secret`. See the documentation on how to configure those secrets
+[here]({{< relref "/docs/install/github_apps#manual-setup" >}}).
 
-## Controller Configuration Parameters
+The controller have three different environment variable on its container to
+drive this:
 
-| Environment Variable         | Description                                        | Example                |
-| ---------------------------- | -------------------------------------------------- | ---------------------- |
-| `PAC_CONTROLLER_LABEL`       | Unique identifier for the controller instance      | `github-enterprise`    |
-| `PAC_CONTROLLER_SECRET`      | Secret containing GitHub App credentials           | `gh-enterprise-secret` |
-| `PAC_CONTROLLER_CONFIGMAP`   | ConfigMap with application settings                | `gh-enterprise-config` |
+| Environment Variable       | Description                                              | Example Value   |
+|----------------------------|----------------------------------------------------------|-----------------|
+| `PAC_CONTROLLER_LABEL`     | A unique label to identify this controller               | `ghe`           |
+| `PAC_CONTROLLER_SECRET`    | The Kubernetes secret with the GitHub application secret | `ghe-secret`    |
+| `PAC_CONTROLLER_CONFIGMAP` | The Configmap with the Pipelines-as-Code config          | `ghe-configmap` |
 
 {{< hint info >}}
-**Note:** While each GitHub application requires its own controller, only one
-status reconciler ("watcher") component is needed cluster-wide.
+While you need multiple controllers for different GitHub applications, only one
+`watcher` (the Pipelines-as-Code reconciler that reconcile the status on the
+GitHub interface) is needed.
 {{< /hint >}}
 
-## Automated CI Setup with startpaac
+## Script to help running a second controller
 
-For automated testing environments, [startpaac](https://github.com/openshift-pipelines/startpaac) can automatically install and configure second controllers.
+We have a script in our source code repository to help deploying a second
+controller with its associated service and ConfigMap. As well setting the
+environment variables.
 
-### Prerequisites
+Its located in the `./hack` directory and called [second-controller.py](https://github.com/openshift-pipelines/pipelines-as-code/blob/main/hack/second-controller.py)
 
-- startpaac installed and configured
-- Secret files for the second GitHub application
+To use it first check-out the Pipelines-as-Code repository:
 
-### Automatic Installation in CI Mode
-
-When running startpaac with the `--ci` flag, it automatically detects and installs the second controller if:
-
-1. `PAC_SECOND_SECRET_FOLDER` environment variable is set
-2. Required secret files exist in that folder:
-   - `github-application-id`
-   - `github-private-key`
-   - `webhook.secret`
-   - `smee` (optional, for webhook tunneling)
-
-Example:
-
-```bash
-# Create secret folder with GitHub App credentials
-mkdir -p ~/secrets-second
-echo "12345" > ~/secrets-second/github-application-id
-echo "...RSA PRIVATE KEY..." > ~/secrets-second/github-private-key
-echo "webhook-secret-value" > ~/secrets-second/webhook.secret
-echo "https://smee.io/your-channel" > ~/secrets-second/smee
-
-# Export environment variable
-export PAC_SECOND_SECRET_FOLDER=~/secrets-second
-
-# Run startpaac in CI mode
-cd startpaac
-./startpaac --ci -a
+```shell
+git clone https://github.com/openshift-pipelines/pipelines-as-code
 ```
 
-This will:
+You need to make sure the python-yaml module is installed, you can install it by
+multiple ways (i.e: your operating system package manager) or simply can use pip:
 
-- Generate TLS certificates using minica for the second controller domain
-- Create Kubernetes secrets from the secret folder
-- Deploy the second controller with proper ingress/route configuration
-- Configure gosmee for webhook tunneling (if smee URL provided)
-
-### Manual Setup
-
-For manual installation or custom configurations, use the `second-controller.py` script as described below.
-
-## Deployment Automation Script
-
-The `second-controller.py` script makes it easy to generate the deployment yaml:
-
-**Location:** `./hack/second-controller.py` in the [Pipelines-as-Code repository](https://github.com/openshift-pipelines/pipelines-as-code)
-
-### Basic Usage
-
-```bash
-python3 hack/second-controller.py <LABEL> | kubectl apply -f -
+```shell
+python3 -mpip install PyYAML
 ```
 
-### Advanced Options
+And run it with:
 
-```text
-Usage: second-controller.py [-h] [--configmap CONFIGMAP]
-                            [--ingress-domain INGRESS_DOMAIN]
-                            [--secret SECRET]
-                            [--controller-image CONTROLLER_IMAGE]
-                            [--gosmee-image GOSMEE_IMAGE]
-                            [--smee-url SMEE_URL] [--namespace NAMESPACE]
-                            [--openshift-route]
-                            LABEL
+```shell
+python3 ./hack/second-controller.py LABEL
 ```
 
-#### Key Options
+This will output the generated yaml on the standard output, if you are happy
+with the output you can apply it on your cluster with `kubectl`:
 
-| Option                     | Description                                                                   |
-| -------------------------- | ----------------------------------------------------------------------------- |
-| `--configmap`              | ConfigMap name (default: `<LABEL>-configmap`)                                 |
-| `--secret`                 | Secret name (default: `<LABEL>-secret`)                                       |
-| `--ingress-domain`         | Create Ingress with specified domain (Kubernetes)                             |
-| `--openshift-route`        | Create OpenShift Route instead of Ingress                                     |
-| `--controller-image`       | Custom controller image (use `ko` for local builds)                           |
-| `--smee-url`               | Deploy Gosmee sidecar for webhook tunneling                                   |
-| `--namespace`              | Target namespace (default: `pipelines-as-code`)                               |
-
-### Example Scenarios
-
-- Basic Kubernetes Deployment
-
-```bash
-# Generate and apply configuration for GitHub Enterprise
-python3 hack/second-controller.py ghe \
-  --ingress-domain "ghe.example.com" \
-  --namespace pipelines-as-code | kubectl apply -f -
+```shell
+python3 ./hack/second-controller.py LABEL|kubectl -f-
 ```
 
-- OpenShift Deployment with Custom Config
-
-```bash
-# Create configuration with custom secret and route
-python3 hack/second-controller.py enterprise \
-  --openshift-route \
-  --secret my-custom-secret \
-  --configmap enterprise-config | oc apply -f -
-```
-
-- Local Development with Ko
-
-```bash
-# Build and deploy controller image using ko
-export KO_DOCKER_REPO=quay.io/your-username
-ko apply -f <(
-  python3 hack/second-controller.py dev \
-  --controller-image=ko \
-  --namespace pipelines-as-code
-)
-```
-
-**4. Webhook Tunneling with [Smee.io](https://smee.io)**
-
-The tunneling avoid using a ingress route that is not accessible from the internet.
-
-```bash
-# Deploy with webhook tunneling for local testing
-python3 hack/second-controller.py test \
-  --smee-url https://smee.io/your-channel | kubectl apply -f -
-```
-
-### Environment Variables
-
-The script respects these environment variables for customization:
-
-```text
-PAC_CONTROLLER_LABEL      Controller identifier
-PAC_CONTROLLER_TARGET_NS  Target namespace (default: pipelines-as-code)
-PAC_CONTROLLER_SECRET     Secret name (default: <LABEL>-secret)
-PAC_CONTROLLER_CONFIGMAP  ConfigMap name (default: <LABEL>-configmap)
-PAC_CONTROLLER_SMEE_URL   Smee.io URL for webhook tunneling
-PAC_CONTROLLER_IMAGE      Controller image (default: ghcr.io/openshift-pipelines/pipelines-as-code-controller:stable)
-```
+There is multiple flags you can use to fine grain the output of this script, use
+the `--help` flag to list all the flags that can be passed to the script.

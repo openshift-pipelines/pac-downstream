@@ -3,7 +3,11 @@ package prompt
 import "github.com/AlecAivazis/survey/v2"
 
 // SurveyAskOne ask one question to be stubbed later.
-var SurveyAskOne func(survey.Prompt, any, ...survey.AskOpt) error = survey.AskOne
+var SurveyAskOne = func(p survey.Prompt, response interface{}, opts ...survey.AskOpt) error {
+	return survey.AskOne(p, response, opts...)
+}
 
 // SurveyAsk ask questions to be stubbed later.
-var SurveyAsk func([]*survey.Question, any, ...survey.AskOpt) error = survey.Ask
+var SurveyAsk = func(qs []*survey.Question, response interface{}, opts ...survey.AskOpt) error {
+	return survey.Ask(qs, response, opts...)
+}
