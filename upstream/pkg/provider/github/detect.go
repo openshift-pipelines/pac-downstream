@@ -5,15 +5,10 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/google/go-github/v81/github"
+	"github.com/google/go-github/v61/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
 	"go.uber.org/zap"
-)
-
-var (
-	pullRequestOpenSyncEvent = []string{"opened", "synchronize", "synchronized", "reopened", "ready_for_review"}
-	pullRequestLabelEvent    = []string{"labeled"}
 )
 
 // Detect processes event and detect if it is a github event, whether to process or reject it
@@ -45,7 +40,7 @@ func (v *Provider) Detect(req *http.Request, payload string, logger *zap.Sugared
 	}
 
 	_ = json.Unmarshal([]byte(payload), &eventInt)
-	eType, errReason := v.detectTriggerTypeFromPayload(eventType, eventInt)
+	eType, errReason := detectTriggerTypeFromPayload(eventType, eventInt)
 	if eType != "" {
 		return setLoggerAndProceed(true, "", nil)
 	}
@@ -56,7 +51,7 @@ func (v *Provider) Detect(req *http.Request, payload string, logger *zap.Sugared
 // detectTriggerTypeFromPayload will detect the event type from the payload,
 // filtering out the events that are not supported.
 // first arg will get the event type and the second one will get an error string explaining why it's not supported.
-func (v *Provider) detectTriggerTypeFromPayload(ghEventType string, eventInt any) (triggertype.Trigger, string) {
+func detectTriggerTypeFromPayload(ghEventType string, eventInt any) (triggertype.Trigger, string) {
 	switch event := eventInt.(type) {
 	case *github.PushEvent:
 		if event.GetPusher() != nil {
@@ -64,11 +59,7 @@ func (v *Provider) detectTriggerTypeFromPayload(ghEventType string, eventInt any
 		}
 		return "", "no pusher in payload"
 	case *github.PullRequestEvent:
-		if event.GetAction() == "closed" {
-			return triggertype.PullRequestClosed, ""
-		}
-
-		if provider.Valid(event.GetAction(), pullRequestOpenSyncEvent) || provider.Valid(event.GetAction(), pullRequestLabelEvent) {
+		if provider.Valid(event.GetAction(), []string{"opened", "synchronize", "synchronized", "reopened"}) {
 			return triggertype.PullRequest, ""
 		}
 		return "", fmt.Sprintf("pull_request: unsupported action \"%s\"", event.GetAction())
@@ -102,15 +93,14 @@ func (v *Provider) detectTriggerTypeFromPayload(ghEventType string, eventInt any
 			if provider.IsTestRetestComment(event.GetComment().GetBody()) {
 				return triggertype.Retest, ""
 			}
+			if provider.IsOkToTestComment(event.GetComment().GetBody()) {
+				return triggertype.OkToTest, ""
+			}
 			if provider.IsCancelComment(event.GetComment().GetBody()) {
 				return triggertype.Cancel, ""
 			}
-			// Here, the `/ok-to-test` command is ignored because it is intended for pull requests.
-			// For unauthorized users, it has no relevance to pushed commits, as only authorized users
-			// are allowed to run CI on pushed commits. Therefore, the `ok-to-test` command holds no significance in this context.
-			// However, it is left to be processed by the `on-comment` annotation rather than returning an error.
 		}
-		return triggertype.Comment, ""
+		return "", fmt.Sprintf("commit_comment: unsupported action \"%s\"", event.GetAction())
 	}
 	return "", fmt.Sprintf("github: event \"%v\" is not supported", ghEventType)
 }

@@ -18,10 +18,6 @@ type KinterfaceTest struct {
 	ExpectedNumberofCleanups int
 	GetSecretResult          map[string]string
 	GetPodLogsOutput         map[string]string
-	CreateSecretError        error
-	UpdateSecretError        error
-	DeleteSecretError        error
-	SecretDeleted            bool
 }
 
 var _ kubeinteraction.Interface = (*KinterfaceTest)(nil)
@@ -41,7 +37,7 @@ func (k *KinterfaceTest) GetPodLogs(_ context.Context, _, pod, _ string, _ int64
 }
 
 func (k *KinterfaceTest) UpdateSecretWithOwnerRef(_ context.Context, _ *zap.SugaredLogger, _, _ string, _ *tektonv1.PipelineRun) error {
-	return k.UpdateSecretError
+	return nil
 }
 
 func (k *KinterfaceTest) GetSecret(_ context.Context, secret ktypes.GetSecretOpt) (string, error) {
@@ -61,10 +57,9 @@ func (k *KinterfaceTest) CleanupPipelines(_ context.Context, _ *zap.SugaredLogge
 }
 
 func (k *KinterfaceTest) CreateSecret(_ context.Context, _ string, _ *corev1.Secret) error {
-	return k.CreateSecretError
+	return nil
 }
 
 func (k *KinterfaceTest) DeleteSecret(_ context.Context, _ *zap.SugaredLogger, _, _ string) error {
-	k.SecretDeleted = true
-	return k.DeleteSecretError
+	return nil
 }

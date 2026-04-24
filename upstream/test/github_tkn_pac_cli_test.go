@@ -1,4 +1,5 @@
 //go:build e2e
+// +build e2e
 
 package test
 
@@ -6,13 +7,14 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 	"testing"
 	"time"
 
 	pacv1alpha1 "github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	tknpacdesc "github.com/openshift-pipelines/pipelines-as-code/pkg/cmd/tknpac/describe"
-	tknpaclist "github.com/openshift-pipelines/pipelines-as-code/pkg/cmd/tknpac/listcmd"
+	tknpaclist "github.com/openshift-pipelines/pipelines-as-code/pkg/cmd/tknpac/list"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
 	cli2 "github.com/openshift-pipelines/pipelines-as-code/test/pkg/cli"
 	tgithub "github.com/openshift-pipelines/pipelines-as-code/test/pkg/github"
@@ -24,10 +26,13 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-func TestGithubGHEPacCli(t *testing.T) {
+func TestGithubPacCli(t *testing.T) {
+	if os.Getenv("NIGHTLY_E2E_TEST") != "true" {
+		t.Skip("Skipping test since only enabled for nightly")
+	}
 	targetNS := names.SimpleNameGenerator.RestrictLengthWithRandomSuffix("pac-e2e-ns")
 	ctx := context.Background()
-	ctx, runcnx, opts, ghprovider, err := tgithub.Setup(ctx, true, false)
+	ctx, runcnx, opts, ghprovider, err := tgithub.Setup(ctx, false, false)
 	assert.NilError(t, err)
 
 	entries := map[string]string{
@@ -47,12 +52,12 @@ spec:
         taskSpec:
           steps:
             - name: task
-              image: registry.access.redhat.com/ubi10/ubi-micro
+              image: gcr.io/google-containers/busybox
               command: ["/bin/echo", "HELLOMOTO"]
 `, targetNS, options.MainBranch, triggertype.PullRequest.String()),
 	}
 
-	repoinfo, resp, err := ghprovider.Client().Repositories.Get(ctx, opts.Organization, opts.Repo)
+	repoinfo, resp, err := ghprovider.Client.Repositories.Get(ctx, opts.Organization, opts.Repo)
 	assert.NilError(t, err)
 	if resp != nil && resp.StatusCode == http.StatusNotFound {
 		t.Errorf("Repository %s not found in %s", opts.Organization, opts.Repo)
@@ -84,7 +89,7 @@ spec:
 	targetRefName := fmt.Sprintf("refs/heads/%s",
 		names.SimpleNameGenerator.RestrictLengthWithRandomSuffix("pac-e2e-test"))
 
-	sha, vref, err := tgithub.PushFilesToRef(ctx, ghprovider.Client(), "TestPacCli - "+targetRefName, repoinfo.GetDefaultBranch(), targetRefName, opts.Organization, opts.Repo, entries)
+	sha, vref, err := tgithub.PushFilesToRef(ctx, ghprovider.Client, "TestPacCli - "+targetRefName, repoinfo.GetDefaultBranch(), targetRefName, opts.Organization, opts.Repo, entries)
 	assert.NilError(t, err)
 	runcnx.Clients.Log.Infof("Commit %s has been created and pushed to %s", sha, vref.GetURL())
 
@@ -108,7 +113,7 @@ spec:
 	waitOpts := twait.Opts{
 		RepoName:        targetNS,
 		Namespace:       targetNS,
-		MinNumberStatus: 1,
+		MinNumberStatus: 0,
 		PollTimeout:     twait.DefaultTimeout,
 		TargetSHA:       sha,
 	}
@@ -118,7 +123,7 @@ spec:
 	runcnx.Clients.Log.Infof("Check if we have the repository set as succeeded")
 
 	counter := 0
-	maxVal := 5
+	max := 5
 	for {
 		output, err = cli2.ExecCommand(runcnx, tknpaclist.Root, "-n", targetNS)
 		if err == nil && strings.Contains(output, "Succeeded") {
@@ -126,12 +131,12 @@ spec:
 			break
 		}
 		counter++
-		if counter > maxVal {
+		if counter > max {
 			runcnx.Clients.Log.Errorf("We have waited for 5 minutes and we still do not have the repository set as succeeded: %s", output)
 			t.Fail()
 			break
 		}
-		runcnx.Clients.Log.Infof("Waiting 30s for tkn pac show success, %d/%d", counter, maxVal)
+		runcnx.Clients.Log.Infof("Waiting 30s for tkn pac show success, %d/%d", counter, max)
 		time.Sleep(30 * time.Second)
 	}
 }

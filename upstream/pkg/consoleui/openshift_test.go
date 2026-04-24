@@ -14,42 +14,42 @@ import (
 
 func TestOpenshiftConsoleUI(t *testing.T) {
 	fakeroute := &unstructured.Unstructured{}
-	fakeroute.SetUnstructuredContent(map[string]any{
+	fakeroute.SetUnstructuredContent(map[string]interface{}{
 		"apiVersion": "route.openshift.io/v1",
 		"kind":       "Route",
-		"metadata": map[string]any{
+		"metadata": map[string]interface{}{
 			"name":      "console",
 			"namespace": "openshift-console",
 		},
-		"spec": map[string]any{
+		"spec": map[string]interface{}{
 			"host": "http://fakeconsole",
 		},
 	})
 	emptys := &unstructured.Unstructured{}
-	emptys.SetUnstructuredContent(map[string]any{
+	emptys.SetUnstructuredContent(map[string]interface{}{
 		"apiVersion": "route.openshift.io/v1",
 		"kind":       "Route",
-		"metadata": map[string]any{
+		"metadata": map[string]interface{}{
 			"name":      "not",
 			"namespace": "console",
 		},
 	})
 	nospeccontent := &unstructured.Unstructured{}
-	nospeccontent.SetUnstructuredContent(map[string]any{
+	nospeccontent.SetUnstructuredContent(map[string]interface{}{
 		"apiVersion": "route.openshift.io/v1",
 		"kind":       "Route",
-		"metadata": map[string]any{
+		"metadata": map[string]interface{}{
 			"name":      "console",
 			"namespace": "openshift-console",
 		},
-		"spec": map[string]any{},
+		"spec": map[string]interface{}{},
 	})
 
 	nohost := &unstructured.Unstructured{}
-	nohost.SetUnstructuredContent(map[string]any{
+	nohost.SetUnstructuredContent(map[string]interface{}{
 		"apiVersion": "route.openshift.io/v1",
 		"kind":       "Route",
-		"metadata": map[string]any{
+		"metadata": map[string]interface{}{
 			"name":      "console",
 			"namespace": "openshift-console",
 		},
@@ -127,10 +127,4 @@ func TestOpenshiftConsoleURLs(t *testing.T) {
 	assert.Equal(t, o.DetailURL(pr), "https://fakeconsole/k8s/ns/theNS/tekton.dev~v1~PipelineRun/pr")
 	assert.Equal(t, o.TaskLogURL(pr, trStatus), "https://fakeconsole/k8s/ns/theNS/tekton.dev~v1~PipelineRun/pr/logs/task")
 	assert.Equal(t, o.NamespaceURL(pr), "https://fakeconsole/pipelines/ns/theNS/pipeline-runs")
-
-	emptyHost := OpenshiftConsole{host: ""}
-	assert.Equal(t, emptyHost.URL(), "https://openshift.url.is.not.configured")
-	assert.Equal(t, emptyHost.DetailURL(pr), "https://openshift.url.is.not.configured/k8s/ns/theNS/tekton.dev~v1~PipelineRun/pr")
-	assert.Equal(t, emptyHost.TaskLogURL(pr, trStatus), "https://openshift.url.is.not.configured/k8s/ns/theNS/tekton.dev~v1~PipelineRun/pr/logs/task")
-	assert.Equal(t, emptyHost.NamespaceURL(pr), "https://openshift.url.is.not.configured/pipelines/ns/theNS/pipeline-runs")
 }

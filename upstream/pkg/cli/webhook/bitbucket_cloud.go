@@ -11,7 +11,6 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/cli"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/cli/prompt"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/formatting"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/bitbucketcloud"
 )
 
 type bitbucketCloudConfig struct {
@@ -121,11 +120,7 @@ func (bb *bitbucketCloudConfig) askBBWebhookConfig(repositoryURL, controllerURL,
 
 func (bb *bitbucketCloudConfig) create() error {
 	if bb.Client == nil {
-		var err error
-		bb.Client, err = bitbucket.NewBasicAuth(bb.repoOwner, bb.personalAccessToken)
-		if err != nil {
-			return err
-		}
+		bb.Client = bitbucket.NewBasicAuth(bb.repoOwner, bb.personalAccessToken)
 	}
 	if bb.APIURL != "" {
 		parsedURL, err := url.Parse(bb.APIURL)
@@ -140,8 +135,14 @@ func (bb *bitbucketCloudConfig) create() error {
 		RepoSlug: bb.repoName,
 		Url:      bb.controllerURL,
 		Active:   true,
-		Events:   bitbucketcloud.PullRequestAllEvents,
+		Events: []string{
+			"repo:push",
+			"pullrequest:created",
+			"pullrequest:updated",
+			"pullrequest:comment_created",
+		},
 	}
+
 	_, err := bb.Client.Repositories.Webhooks.Create(opts)
 	if err != nil {
 		return err

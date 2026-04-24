@@ -65,7 +65,7 @@ func (p *Issues) Create(io *IssuesOptions) (interface{}, error) {
 		return nil, err
 	}
 	urlStr := p.c.requestUrl("/repositories/%s/%s/issues", io.Owner, io.RepoSlug)
-	return p.c.executeWithContext("POST", urlStr, data, io.ctx)
+	return p.c.execute("POST", urlStr, data)
 }
 
 func (p *Issues) GetVote(io *IssuesOptions) (bool, interface{}, error) {
@@ -198,7 +198,7 @@ func (p *Issues) CreateComment(ico *IssueCommentsOptions) (interface{}, error) {
 		return nil, err
 	}
 
-	return p.c.executeWithContext("POST", urlStr, data, ico.ctx)
+	return p.c.execute("POST", urlStr, data)
 }
 
 func (p *Issues) GetComment(ico *IssueCommentsOptions) (interface{}, error) {
@@ -288,7 +288,7 @@ func (p *Issues) CreateChange(ico *IssueChangesOptions) (interface{}, error) {
 
 	fmt.Printf("data %s", data)
 
-	return p.c.executeWithContext("POST", url.String(), string(data), ico.ctx)
+	return p.c.execute("POST", url.String(), string(data))
 }
 
 func (p *Issues) GetChange(ico *IssueChangesOptions) (interface{}, error) {

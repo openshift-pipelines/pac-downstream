@@ -6,11 +6,12 @@ import (
 	"strconv"
 
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/formatting"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/bitbucketcloud"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/bitbucketdatacenter"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/bitbucketserver"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/gitea"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/gitlab"
@@ -18,13 +19,6 @@ import (
 	"go.uber.org/zap"
 )
 
-// detectProvider detects the git provider for the given PipelineRun and
-// initializes the corresponding provider interface. It returns the provider
-// interface, event information, and an error if any occurs during detection or
-// initialization.
-//
-// Supported providers: github, gitlab, bitbucket-cloud, bitbucket-datacenter, forgejo (gitea)
-// any new provider should be added to the switch case below.
 func (r *Reconciler) detectProvider(ctx context.Context, logger *zap.SugaredLogger, pr *tektonv1.PipelineRun) (provider.Interface, *info.Event, error) {
 	gitProvider, ok := pr.GetAnnotations()[keys.GitProvider]
 	if !ok {
@@ -49,9 +43,9 @@ func (r *Reconciler) detectProvider(ctx context.Context, logger *zap.SugaredLogg
 		provider = &gitlab.Provider{}
 	case "bitbucket-cloud":
 		provider = &bitbucketcloud.Provider{}
-	case "bitbucket-datacenter":
-		provider = &bitbucketdatacenter.Provider{}
-	case "gitea", "forgejo":
+	case "bitbucket-server":
+		provider = &bitbucketserver.Provider{}
+	case "gitea":
 		provider = &gitea.Provider{}
 	default:
 		return nil, nil, fmt.Errorf("failed to detect provider for pipelinerun: %s : unknown provider", pr.GetName())
@@ -66,8 +60,11 @@ func buildEventFromPipelineRun(pr *tektonv1.PipelineRun) *info.Event {
 	prAnno := pr.GetAnnotations()
 
 	event.URL = prAnno[keys.RepoURL]
-	event.Organization = prAnno[keys.URLOrg]
-	event.Repository = prAnno[keys.URLRepository]
+	// it's safer to get repo, org from repo.url since we have to remove the / and other chars in labels which drops
+	// the SubPath that gitlab is using.
+	repo, org, _ := formatting.GetRepoOwnerSplitted(event.URL)
+	event.Organization = repo
+	event.Repository = org
 	event.EventType = prAnno[keys.EventType]
 	event.TriggerTarget = triggertype.StringToType(prAnno[keys.EventType])
 	event.BaseBranch = prAnno[keys.Branch]
@@ -79,7 +76,6 @@ func buildEventFromPipelineRun(pr *tektonv1.PipelineRun) *info.Event {
 	prNumber := prAnno[keys.PullRequest]
 	if prNumber != "" {
 		event.PullRequestNumber, _ = strconv.Atoi(prNumber)
-		event.TriggerTarget = triggertype.PullRequest
 	}
 
 	// GitHub
@@ -91,14 +87,12 @@ func buildEventFromPipelineRun(pr *tektonv1.PipelineRun) *info.Event {
 		event.GHEURL = gheURL
 	}
 
-	// GitLab
+	// Gitlab
 	if projectID, ok := prAnno[keys.SourceProjectID]; ok {
-		id, _ := strconv.ParseInt(projectID, 10, 64)
-		event.SourceProjectID = id
+		event.SourceProjectID, _ = strconv.Atoi(projectID)
 	}
 	if projectID, ok := prAnno[keys.TargetProjectID]; ok {
-		id, _ := strconv.ParseInt(projectID, 10, 64)
-		event.TargetProjectID = id
+		event.TargetProjectID, _ = strconv.Atoi(projectID)
 	}
 	return event
 }

@@ -3,17 +3,16 @@ package tknpac
 import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/cli"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/cmd/tknpac/bootstrap"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/cmd/tknpac/cel"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/cmd/tknpac/completion"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/cmd/tknpac/create"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/cmd/tknpac/deleterepo"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/cmd/tknpac/describe"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/cmd/tknpac/generate"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/cmd/tknpac/info"
-	list "github.com/openshift-pipelines/pipelines-as-code/pkg/cmd/tknpac/listcmd"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/cmd/tknpac/list"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/cmd/tknpac/logs"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/cmd/tknpac/resolve"
-	versioncmd "github.com/openshift-pipelines/pipelines-as-code/pkg/cmd/tknpac/versioncmd"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/cmd/tknpac/version"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/cmd/tknpac/webhook"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/spf13/cobra"
@@ -22,8 +21,8 @@ import (
 func Root(clients *params.Run) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:          "tkn-pac",
-		Short:        "Pipelines-as-Code CLI",
-		Long:         `tkn plugin to use Pipelines-as-Code as a CLI`,
+		Short:        "Pipelines as Code CLI",
+		Long:         `tkn plugin to use Pipelines as Code as a CLI`,
 		SilenceUsage: true,
 		Annotations: map[string]string{
 			"commandType": "main",
@@ -33,7 +32,7 @@ func Root(clients *params.Run) *cobra.Command {
 
 	ioStreams := cli.NewIOStreams()
 
-	cmd.AddCommand(versioncmd.Command(ioStreams))
+	cmd.AddCommand(version.Command(ioStreams))
 	cmd.AddCommand(info.Root(clients, ioStreams))
 	cmd.AddCommand(create.Root(clients, ioStreams))
 	cmd.AddCommand(list.Root(clients, ioStreams))
@@ -44,7 +43,6 @@ func Root(clients *params.Run) *cobra.Command {
 	cmd.AddCommand(completion.Command())
 	cmd.AddCommand(bootstrap.Command(clients, ioStreams))
 	cmd.AddCommand(generate.Command(clients, ioStreams))
-	cmd.AddCommand(cel.Command(ioStreams))
 	cmd.AddCommand(webhook.Root(clients, ioStreams))
 	return cmd
 }

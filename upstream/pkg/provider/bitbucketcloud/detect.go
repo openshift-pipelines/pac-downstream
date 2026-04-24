@@ -10,14 +10,6 @@ import (
 	"go.uber.org/zap"
 )
 
-var (
-	pullRequestsClosed         = []string{"pullrequest:closed", "pullrequest:fulfilled", "pullrequest:rejected"}
-	pullRequestsCreated        = []string{"pullrequest:created", "pullrequest:updated"}
-	pullRequestsCommentCreated = []string{"pullrequest:comment_created"}
-	pushRepo                   = []string{"repo:push"}
-	PullRequestAllEvents       = append(append(append(append([]string{}, pullRequestsCreated...), pullRequestsCommentCreated...), pullRequestsClosed...), pushRepo...)
-)
-
 func (v *Provider) Detect(req *http.Request, payload string, logger *zap.SugaredLogger) (bool, bool, *zap.SugaredLogger, string, error) {
 	isBitCloud := false
 	reqHeader := req.Header
@@ -28,7 +20,6 @@ func (v *Provider) Detect(req *http.Request, payload string, logger *zap.Sugared
 
 	eventInt, err := parsePayloadType(event, payload)
 	if err != nil || eventInt == nil {
-		logger.Error("skip processing event", zap.String("event", event), zap.Error(err))
 		return false, false, logger, "", err
 	}
 
@@ -46,15 +37,10 @@ func (v *Provider) Detect(req *http.Request, payload string, logger *zap.Sugared
 
 	switch e := eventInt.(type) {
 	case *types.PullRequestEvent:
-		if provider.Valid(event, pullRequestsClosed) {
+		if provider.Valid(event, []string{"pullrequest:created", "pullrequest:updated"}) {
 			return setLoggerAndProceed(true, "", nil)
 		}
-
-		if provider.Valid(event, pullRequestsCreated) {
-			return setLoggerAndProceed(true, "", nil)
-		}
-
-		if provider.Valid(event, pullRequestsCommentCreated) {
+		if provider.Valid(event, []string{"pullrequest:comment_created"}) {
 			if provider.IsTestRetestComment(e.Comment.Content.Raw) {
 				return setLoggerAndProceed(true, "", nil)
 			}
@@ -68,7 +54,7 @@ func (v *Provider) Detect(req *http.Request, payload string, logger *zap.Sugared
 		return setLoggerAndProceed(false, fmt.Sprintf("not a valid gitops comment: \"%s\"", event), nil)
 
 	case *types.PushRequestEvent:
-		if provider.Valid(event, pushRepo) {
+		if provider.Valid(event, []string{"repo:push"}) {
 			if e.Push.Changes != nil {
 				return setLoggerAndProceed(true, "", nil)
 			}

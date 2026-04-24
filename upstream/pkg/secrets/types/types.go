@@ -1,4 +1,3 @@
-//revive:disable-next-line:var-naming
 package types
 
 type SecretValue struct {

@@ -40,7 +40,7 @@ type ConversionController interface {
 
 func conversionHandler(rootLogger *zap.SugaredLogger, stats StatsReporter, c ConversionController) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		ttStart := time.Now()
+		var ttStart = time.Now()
 		logger := rootLogger
 		logger.Infof("Webhook ServeHTTP request=%#v", r)
 

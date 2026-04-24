@@ -19,15 +19,14 @@ package resourcelock
 import (
 	"context"
 	"fmt"
+	clientset "k8s.io/client-go/kubernetes"
+	restclient "k8s.io/client-go/rest"
 	"time"
 
-	v1 "k8s.io/api/coordination/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	clientset "k8s.io/client-go/kubernetes"
 	coordinationv1 "k8s.io/client-go/kubernetes/typed/coordination/v1"
 	corev1 "k8s.io/client-go/kubernetes/typed/core/v1"
-	restclient "k8s.io/client-go/rest"
 )
 
 const (
@@ -35,8 +34,74 @@ const (
 	endpointsResourceLock             = "endpoints"
 	configMapsResourceLock            = "configmaps"
 	LeasesResourceLock                = "leases"
-	endpointsLeasesResourceLock       = "endpointsleases"
-	configMapsLeasesResourceLock      = "configmapsleases"
+	// When using EndpointsLeasesResourceLock, you need to ensure that
+	// API Priority & Fairness is configured with non-default flow-schema
+	// that will catch the necessary operations on leader-election related
+	// endpoint objects.
+	//
+	// The example of such flow scheme could look like this:
+	//   apiVersion: flowcontrol.apiserver.k8s.io/v1beta2
+	//   kind: FlowSchema
+	//   metadata:
+	//     name: my-leader-election
+	//   spec:
+	//     distinguisherMethod:
+	//       type: ByUser
+	//     matchingPrecedence: 200
+	//     priorityLevelConfiguration:
+	//       name: leader-election   # reference the <leader-election> PL
+	//     rules:
+	//     - resourceRules:
+	//       - apiGroups:
+	//         - ""
+	//         namespaces:
+	//         - '*'
+	//         resources:
+	//         - endpoints
+	//         verbs:
+	//         - get
+	//         - create
+	//         - update
+	//       subjects:
+	//       - kind: ServiceAccount
+	//         serviceAccount:
+	//           name: '*'
+	//           namespace: kube-system
+	EndpointsLeasesResourceLock = "endpointsleases"
+	// When using EndpointsLeasesResourceLock, you need to ensure that
+	// API Priority & Fairness is configured with non-default flow-schema
+	// that will catch the necessary operations on leader-election related
+	// configmap objects.
+	//
+	// The example of such flow scheme could look like this:
+	//   apiVersion: flowcontrol.apiserver.k8s.io/v1beta2
+	//   kind: FlowSchema
+	//   metadata:
+	//     name: my-leader-election
+	//   spec:
+	//     distinguisherMethod:
+	//       type: ByUser
+	//     matchingPrecedence: 200
+	//     priorityLevelConfiguration:
+	//       name: leader-election   # reference the <leader-election> PL
+	//     rules:
+	//     - resourceRules:
+	//       - apiGroups:
+	//         - ""
+	//         namespaces:
+	//         - '*'
+	//         resources:
+	//         - configmaps
+	//         verbs:
+	//         - get
+	//         - create
+	//         - update
+	//       subjects:
+	//       - kind: ServiceAccount
+	//         serviceAccount:
+	//           name: '*'
+	//           namespace: kube-system
+	ConfigMapsLeasesResourceLock = "configmapsleases"
 )
 
 // LeaderElectionRecord is the record that is stored in the leader election annotation.
@@ -49,13 +114,11 @@ type LeaderElectionRecord struct {
 	// attempt to acquire leases with empty identities and will wait for the full lease
 	// interval to expire before attempting to reacquire. This value is set to empty when
 	// a client voluntarily steps down.
-	HolderIdentity       string                      `json:"holderIdentity"`
-	LeaseDurationSeconds int                         `json:"leaseDurationSeconds"`
-	AcquireTime          metav1.Time                 `json:"acquireTime"`
-	RenewTime            metav1.Time                 `json:"renewTime"`
-	LeaderTransitions    int                         `json:"leaderTransitions"`
-	Strategy             v1.CoordinatedLeaseStrategy `json:"strategy"`
-	PreferredHolder      string                      `json:"preferredHolder"`
+	HolderIdentity       string      `json:"holderIdentity"`
+	LeaseDurationSeconds int         `json:"leaseDurationSeconds"`
+	AcquireTime          metav1.Time `json:"acquireTime"`
+	RenewTime            metav1.Time `json:"renewTime"`
+	LeaderTransitions    int         `json:"leaderTransitions"`
 }
 
 // EventRecorder records a change in the ResourceLock.
@@ -101,6 +164,22 @@ type Interface interface {
 
 // Manufacture will create a lock of a given type according to the input parameters
 func New(lockType string, ns string, name string, coreClient corev1.CoreV1Interface, coordinationClient coordinationv1.CoordinationV1Interface, rlc ResourceLockConfig) (Interface, error) {
+	endpointsLock := &endpointsLock{
+		EndpointsMeta: metav1.ObjectMeta{
+			Namespace: ns,
+			Name:      name,
+		},
+		Client:     coreClient,
+		LockConfig: rlc,
+	}
+	configmapLock := &configMapLock{
+		ConfigMapMeta: metav1.ObjectMeta{
+			Namespace: ns,
+			Name:      name,
+		},
+		Client:     coreClient,
+		LockConfig: rlc,
+	}
 	leaseLock := &LeaseLock{
 		LeaseMeta: metav1.ObjectMeta{
 			Namespace: ns,
@@ -111,15 +190,21 @@ func New(lockType string, ns string, name string, coreClient corev1.CoreV1Interf
 	}
 	switch lockType {
 	case endpointsResourceLock:
-		return nil, fmt.Errorf("endpoints lock is removed, migrate to %s", LeasesResourceLock)
+		return nil, fmt.Errorf("endpoints lock is removed, migrate to %s", EndpointsLeasesResourceLock)
 	case configMapsResourceLock:
-		return nil, fmt.Errorf("configmaps lock is removed, migrate to %s", LeasesResourceLock)
+		return nil, fmt.Errorf("configmaps lock is removed, migrate to %s", ConfigMapsLeasesResourceLock)
 	case LeasesResourceLock:
 		return leaseLock, nil
-	case endpointsLeasesResourceLock:
-		return nil, fmt.Errorf("endpointsleases lock is removed, migrate to %s", LeasesResourceLock)
-	case configMapsLeasesResourceLock:
-		return nil, fmt.Errorf("configmapsleases lock is removed, migrated to %s", LeasesResourceLock)
+	case EndpointsLeasesResourceLock:
+		return &MultiLock{
+			Primary:   endpointsLock,
+			Secondary: leaseLock,
+		}, nil
+	case ConfigMapsLeasesResourceLock:
+		return &MultiLock{
+			Primary:   configmapLock,
+			Secondary: leaseLock,
+		}, nil
 	default:
 		return nil, fmt.Errorf("Invalid lock-type %s", lockType)
 	}

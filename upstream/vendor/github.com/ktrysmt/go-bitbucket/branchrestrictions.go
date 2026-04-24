@@ -26,7 +26,7 @@ func (b *BranchRestrictions) Create(bo *BranchRestrictionsOptions) (*BranchRestr
 		return nil, err
 	}
 	urlStr := b.c.requestUrl("/repositories/%s/%s/branch-restrictions", bo.Owner, bo.RepoSlug)
-	response, err := b.c.executeWithContext("POST", urlStr, data, bo.ctx)
+	response, err := b.c.execute("POST", urlStr, data)
 	if err != nil {
 		return nil, err
 	}
