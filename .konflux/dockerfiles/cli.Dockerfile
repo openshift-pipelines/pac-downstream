@@ -15,13 +15,13 @@ RUN go build -mod=vendor -tags disable_gcp,strictfipsruntime -v  \
     -o /tmp/tkn-pac ./cmd/tkn-pac
 
 FROM $RUNTIME
-ARG VERSION=next
+ARG VERSION=1.23
 
 COPY --from=builder /tmp/tkn-pac /usr/bin
 
 LABEL \
     com.redhat.component="openshift-pipelines-pipelines-as-code-cli-rhel9-container" \
-    cpe="cpe:/a:redhat:openshift_pipelines:next::el9" \
+    cpe="cpe:/a:redhat:openshift_pipelines:1.23::el9" \
     description="Red Hat OpenShift Pipelines pipelines-as-code cli" \
     io.k8s.description="Red Hat OpenShift Pipelines pipelines-as-code cli" \
     io.k8s.display-name="Red Hat OpenShift Pipelines pipelines-as-code cli" \
@@ -29,7 +29,7 @@ LABEL \
     maintainer="pipelines-extcomm@redhat.com" \
     name="openshift-pipelines/pipelines-pipelines-as-code-cli-rhel9" \
     summary="Red Hat OpenShift Pipelines pipelines-as-code cli" \
-    version="next"
+    version="v1.23.0"
 
 RUN groupadd -r -g 65532 nonroot && \
     useradd --no-log-init -r -u 65532 -g nonroot nonroot

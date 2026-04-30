@@ -10,16 +10,16 @@ metadata:
     build.appstudio.redhat.com/target_branch: '{{target_branch}}'
     pipelinesascode.tekton.dev/max-keep-runs: "3"
     pipelinesascode.tekton.dev/on-cel-expression: event == "push" && target_branch
-      == "next" &&
+      == "release-v1.23.x" &&
       ("upstream/***".pathChanged() || ".konflux/patches/***".pathChanged() || ".konflux/rpms/***".pathChanged() ||
       ".konflux/dockerfiles/webhook.Dockerfile".pathChanged() ||
-      ".tekton/pipelines-as-code-next-webhook-push.yaml".pathChanged())
+      ".tekton/pipelines-as-code-1-23-webhook-push.yaml".pathChanged())
   creationTimestamp: null
   labels:
-    appstudio.openshift.io/application: openshift-pipelines-core-next
-    appstudio.openshift.io/component: pipelines-as-code-next-webhook
+    appstudio.openshift.io/application: openshift-pipelines-core-1-23
+    appstudio.openshift.io/component: pipelines-as-code-1-23-webhook
     pipelines.appstudio.openshift.io/type: build
-  name: pipelines-as-code-next-webhook-on-push
+  name: pipelines-as-code-1-23-webhook-on-push
   namespace: tekton-ecosystem-tenant
 spec:
   params:
@@ -35,14 +35,14 @@ spec:
     value: .konflux/dockerfiles/webhook.Dockerfile
   - name: additional-tags
     value:
-      - "next"
+      - "v1.23.0"
   - name: prefetch-input
     value: |
       {"type": "rpm", "path": ".konflux/rpms"}
   pipelineRef:
     name: docker-build-ta
   taskRunTemplate:
-    serviceAccountName: build-pipeline-pipelines-as-code-next-webhook
+    serviceAccountName: build-pipeline-pipelines-as-code-1-23-webhook
   workspaces:
   - name: git-auth
     secret:
