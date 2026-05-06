@@ -32,7 +32,7 @@ LABEL \
     maintainer="pipelines-extcomm@redhat.com" \
     name="openshift-pipelines/pipelines-pipelines-as-code-controller-rhel9" \
     summary="Red Hat OpenShift Pipelines pipelines-as-code controller" \
-    version="v1.20.5"
+    version="v1.20.4"
 
 RUN groupadd -r -g 65532 nonroot && \
     useradd --no-log-init -r -u 65532 -g nonroot nonroot
