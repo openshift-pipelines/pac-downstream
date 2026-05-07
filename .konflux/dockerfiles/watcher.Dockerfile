@@ -32,7 +32,7 @@ LABEL \
     maintainer="pipelines-extcomm@redhat.com" \
     name="openshift-pipelines/pipelines-pipelines-as-code-watcher-rhel9" \
     summary="Red Hat OpenShift Pipelines pipelines-as-code watcher" \
-    version="v1.20.4"
+    version="v1.20.5"
 
 RUN groupadd -r -g 65532 nonroot && \
     useradd --no-log-init -r -u 65532 -g nonroot nonroot
