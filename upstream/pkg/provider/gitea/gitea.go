@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"codeberg.org/mvdkleijn/forgejo-sdk/forgejo/v3"
+	"github.com/jonboulle/clockwork"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/changedfiles"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/events"
@@ -68,6 +69,7 @@ type Provider struct {
 	triggerEvent       string
 	pacUserID          int64 // user login used by PAC
 	cachedChangedFiles *changedfiles.ChangedFiles
+	clock              clockwork.Clock
 }
 
 func (v *Provider) Client() *forgejo.Client {
@@ -80,6 +82,13 @@ func (v *Provider) Client() *forgejo.Client {
 		v.repo,
 	)
 	return v.giteaClient
+}
+
+func (v *Provider) getClock() clockwork.Clock {
+	if v.clock == nil {
+		return clockwork.NewRealClock()
+	}
+	return v.clock
 }
 
 func (v *Provider) SetGiteaClient(client *forgejo.Client) {
@@ -300,7 +309,7 @@ func (v *Provider) createStatusCommit(ctx context.Context, event *info.Event, pa
 			// Only retry on transient "user does not exist" errors
 			if strings.Contains(err.Error(), "user does not exist") {
 				v.Logger.Warnf("CreateStatus failed with transient error, retrying %d/%d: %v", i+1, maxRetries, err)
-				time.Sleep(time.Duration(i+1) * 500 * time.Millisecond)
+				v.getClock().Sleep(time.Duration(i+1) * 500 * time.Millisecond)
 				continue
 			}
 			return err
@@ -360,8 +369,36 @@ func (v *Provider) createStatusCommit(ctx context.Context, event *info.Event, pa
 	return nil
 }
 
-func (v *Provider) GetCommitStatuses(_ context.Context, _ *info.Event) ([]provider.CommitStatusInfo, error) {
-	return nil, nil
+func (v *Provider) GetCommitStatuses(_ context.Context, event *info.Event) ([]provider.CommitStatusInfo, error) {
+	if v.giteaClient == nil {
+		return nil, fmt.Errorf("no gitea client has been initialized")
+	}
+
+	statuses, _, err := v.Client().ListStatuses(
+		event.Organization, event.Repository, event.SHA,
+		forgejo.ListStatusesOption{},
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	var (
+		result []provider.CommitStatusInfo
+		seen   = map[string]struct{}{}
+	)
+	for _, s := range statuses {
+		key := fmt.Sprintf("%s\x00%s", s.Context, string(s.State))
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		result = append(result, provider.CommitStatusInfo{
+			Name:   s.Context,
+			Status: string(s.State),
+		})
+	}
+
+	return result, nil
 }
 
 func (v *Provider) GetTektonDir(_ context.Context, event *info.Event, path, provenance string) (string, error) {
@@ -395,14 +432,22 @@ func (v *Provider) GetTektonDir(_ context.Context, event *info.Event, path, prov
 	if tektonDirSha == "" {
 		return "", nil
 	}
-	// Get all files in the .tekton directory recursively
-	// TODO: figure out if there is a object limit we need to handle here
-	opts := forgejo.GetTreesOptions{Recursive: false}
-	tektonDirObjects, _, err := v.Client().GetTrees(event.Organization, event.Repository, tektonDirSha, opts)
-	if err != nil {
-		return "", err
+
+	entries := []forgejo.GitEntry{}
+	opts := forgejo.GetTreesOptions{Recursive: true, ListOptions: forgejo.ListOptions{PageSize: 100, Page: 1}}
+	for {
+		tektonDirObjects, _, err := v.Client().GetTrees(event.Organization, event.Repository, tektonDirSha, opts)
+		if err != nil {
+			return "", err
+		}
+		entries = append(entries, tektonDirObjects.Entries...)
+		if !tektonDirObjects.Truncated {
+			break
+		}
+		opts.Page++
 	}
-	return v.concatAllYamlFiles(tektonDirObjects.Entries, event)
+
+	return v.concatAllYamlFiles(entries, event)
 }
 
 func (v *Provider) concatAllYamlFiles(objects []forgejo.GitEntry, event *info.Event) (string,

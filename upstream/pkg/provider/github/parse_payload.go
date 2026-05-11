@@ -1,21 +1,24 @@
 package github
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"os"
-	"path"
 	"strconv"
 	"strings"
 	"time"
 
 	ghinstallation "github.com/bradleyfalzon/ghinstallation/v2"
-	"github.com/google/go-github/v84/github"
+	githubv84 "github.com/google/go-github/v84/github"
+	"github.com/google/go-github/v85/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/gitclient"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/kubeinteraction"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/opscomments"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
@@ -64,7 +67,7 @@ func (v *Provider) GetAppToken(ctx context.Context, kube kubernetes.Interface, g
 	if err != nil {
 		return "", err
 	}
-	itr.InstallationTokenOptions = &github.InstallationTokenOptions{
+	itr.InstallationTokenOptions = &githubv84.InstallationTokenOptions{
 		RepositoryIDs: v.RepositoryIDs,
 	}
 
@@ -96,6 +99,15 @@ func (v *Provider) GetAppToken(ctx context.Context, kube kubernetes.Interface, g
 	v.Token = github.Ptr(token)
 
 	return token, err
+}
+
+func (v *Provider) initGitHubWebhookClient(ctx context.Context, event *info.Event, repo *v1alpha1.Repository) error {
+	kint, err := kubeinteraction.NewKubernetesInteraction(v.Run)
+	if err != nil {
+		return err
+	}
+
+	return gitclient.SetupAuthenticatedClient(ctx, v, kint, v.Run, event, repo, nil, v.pacInfo, v.Logger)
 }
 
 func (v *Provider) parseEventType(request *http.Request, event *info.Event) error {
@@ -156,6 +168,10 @@ func (v *Provider) ParsePayload(ctx context.Context, run *params.Run, request *h
 	// Only apply for GitHub provider since we do fancy token creation at payload parsing
 	v.Run = run
 	event := info.NewEvent()
+	event.Request = &info.Request{
+		Header:  request.Header,
+		Payload: bytes.TrimSpace([]byte(payload)),
+	}
 	systemNS := info.GetNS(ctx)
 	if err := v.parseEventType(request, event); err != nil {
 		return nil, err
@@ -269,7 +285,7 @@ func (v *Provider) getPullRequestsWithCommit(ctx context.Context, sha, org, repo
 			select {
 			case <-ctx.Done():
 				return nil, ctx.Err()
-			case <-time.After(backoff):
+			case <-v.getClock().After(backoff):
 			}
 		}
 	}
@@ -293,11 +309,43 @@ func (v *Provider) isCommitPartOfPullRequest(sha, org, repo string, prs []*githu
 	return false, 0
 }
 
+func selectSingleOpenPullRequest(prs []*github.PullRequest) (*github.PullRequest, error) {
+	var found *github.PullRequest
+	count := 0
+	for _, pr := range prs {
+		if pr.GetState() == "open" {
+			count++
+			if count == 1 {
+				found = pr
+			}
+		}
+	}
+	switch count {
+	case 0:
+		return nil, nil
+	case 1:
+		return found, nil
+	default:
+		return nil, fmt.Errorf("found %d open pull requests associated with the commit", count)
+	}
+}
+
+func (v *Provider) resolveReRequestPullRequest(ctx context.Context, runevent *info.Event) (*github.PullRequest, error) {
+	prs, err := v.getPullRequestsWithCommit(ctx, runevent.SHA, runevent.Organization, runevent.Repository, false)
+	if err != nil {
+		return nil, err
+	}
+
+	return selectSingleOpenPullRequest(prs)
+}
+
 func (v *Provider) processEvent(ctx context.Context, event *info.Event, eventInt any) (*info.Event, error) {
 	var processedEvent *info.Event
 	var err error
 
 	processedEvent = info.NewEvent()
+	// need this for validating the webhook signature
+	processedEvent.Request = event.Request
 
 	switch gitEvent := eventInt.(type) {
 	case *github.CheckRunEvent:
@@ -319,14 +367,7 @@ func (v *Provider) processEvent(ctx context.Context, event *info.Event, eventInt
 		}
 		return v.handleCheckSuites(ctx, gitEvent)
 	case *github.IssueCommentEvent:
-		if v.ghClient == nil {
-			return nil, fmt.Errorf("no github client has been initialized, " +
-				"exiting... (hint: did you forget setting a secret on your repo?)")
-		}
-		if gitEvent.GetAction() != "created" {
-			return nil, fmt.Errorf("only newly created comment is supported, received: %s", gitEvent.GetAction())
-		}
-		processedEvent, err = v.handleIssueCommentEvent(ctx, gitEvent)
+		processedEvent, err = v.handleIssueCommentEvent(ctx, gitEvent, processedEvent)
 		if err != nil {
 			return nil, err
 		}
@@ -473,6 +514,22 @@ func (v *Provider) handleReRequestEvent(ctx context.Context, event *github.Check
 	runevent.HeadURL = event.GetCheckRun().GetCheckSuite().GetRepository().GetHTMLURL()
 	// If we don't have a pull_request in this it probably mean a push
 	if len(event.GetCheckRun().GetCheckSuite().PullRequests) == 0 {
+		// If head_branch is null, try to find a PR by SHA before assuming push
+		if runevent.HeadBranch == "" && runevent.SHA != "" {
+			pr, err := v.resolveReRequestPullRequest(ctx, runevent)
+			if err != nil {
+				return nil, fmt.Errorf("cannot determine pull request for check_run rerequest and SHA %s: %w", runevent.SHA, err)
+			}
+			if pr != nil {
+				runevent.PullRequestNumber = pr.GetNumber()
+				runevent.TriggerTarget = triggertype.PullRequest
+				v.Logger.Infof("Recheck of PR %s/%s#%d has been requested (resolved from SHA)", runevent.Organization, runevent.Repository, runevent.PullRequestNumber)
+				return v.populateRunEventFromPullRequest(runevent, pr), nil
+			}
+		}
+		if runevent.HeadBranch == "" {
+			return nil, fmt.Errorf("cannot determine branch for check_run rerequest: head_branch is null and no associated PR found for SHA %s", runevent.SHA)
+		}
 		runevent.BaseBranch = runevent.HeadBranch
 		runevent.BaseURL = runevent.HeadURL
 		runevent.EventType = "push"
@@ -503,6 +560,22 @@ func (v *Provider) handleCheckSuites(ctx context.Context, event *github.CheckSui
 	// If we don't have a pull_request in this it probably mean a push
 	// we are not able to know which
 	if len(event.GetCheckSuite().PullRequests) == 0 {
+		// If head_branch is null, try to find a PR by SHA before assuming push
+		if runevent.HeadBranch == "" && runevent.SHA != "" {
+			pr, err := v.resolveReRequestPullRequest(ctx, runevent)
+			if err != nil {
+				return nil, fmt.Errorf("cannot determine pull request for check_suite rerequest and SHA %s: %w", runevent.SHA, err)
+			}
+			if pr != nil {
+				runevent.PullRequestNumber = pr.GetNumber()
+				runevent.TriggerTarget = triggertype.PullRequest
+				v.Logger.Infof("Rerun of all checks on PR %s/%s#%d has been requested (resolved from SHA)", runevent.Organization, runevent.Repository, runevent.PullRequestNumber)
+				return v.populateRunEventFromPullRequest(runevent, pr), nil
+			}
+		}
+		if runevent.HeadBranch == "" {
+			return nil, fmt.Errorf("cannot determine branch for check_suite rerequest: head_branch is null and no associated PR found for SHA %s", runevent.SHA)
+		}
 		runevent.BaseBranch = runevent.HeadBranch
 		runevent.BaseURL = runevent.HeadURL
 		runevent.EventType = "push"
@@ -512,20 +585,11 @@ func (v *Provider) handleCheckSuites(ctx context.Context, event *github.CheckSui
 		runevent.Sender = event.GetSender().GetLogin()
 		v.userType = event.GetSender().GetType()
 		return runevent, nil
-		// return nil, fmt.Errorf("check suite event is not supported for push events")
 	}
 	runevent.PullRequestNumber = event.GetCheckSuite().PullRequests[0].GetNumber()
 	runevent.TriggerTarget = triggertype.PullRequest
 	v.Logger.Infof("Rerun of all check on PR %s/%s#%d has been requested", runevent.Organization, runevent.Repository, runevent.PullRequestNumber)
 	return v.getPullRequest(ctx, runevent)
-}
-
-func convertPullRequestURLtoNumber(pullRequest string) (int, error) {
-	prNumber, err := strconv.Atoi(path.Base(pullRequest))
-	if err != nil {
-		return -1, fmt.Errorf("bad pull request number html_url number: %w", err)
-	}
-	return prNumber, nil
 }
 
 const (
@@ -535,40 +599,41 @@ const (
 	errSHANotMatch           = "the SHA provided in the `/ok-to-test` comment (`%s`) does not match the pull request's HEAD SHA (`%s`)"
 )
 
-func (v *Provider) handleIssueCommentEvent(ctx context.Context, event *github.IssueCommentEvent) (*info.Event, error) {
+func (v *Provider) handleIssueCommentEvent(ctx context.Context, event *github.IssueCommentEvent, runevent *info.Event) (*info.Event, error) {
 	action := "recheck"
-	runevent := info.NewEvent()
 	runevent.Organization = event.GetRepo().GetOwner().GetLogin()
 	runevent.Repository = event.GetRepo().GetName()
 	runevent.Sender = event.GetSender().GetLogin()
+	runevent.URL = event.GetRepo().GetHTMLURL()
 	// Always set the trigger target as pull_request on issue comment events
 	runevent.TriggerTarget = triggertype.PullRequest
 	if !event.GetIssue().IsPullRequest() {
 		return info.NewEvent(), fmt.Errorf("issue comment is not coming from a pull_request")
 	}
 	v.userType = event.GetSender().GetType()
+	runevent.PullRequestNumber = event.GetIssue().GetNumber()
 
-	// We are getting the full URL so we have to get the last part to get the PR number,
-	// we don\'t have to care about URL query string/hash and other stuff because
-	// that comes up from the API.
-	var err error
-	runevent.PullRequestNumber, err = convertPullRequestURLtoNumber(event.GetIssue().GetPullRequestLinks().GetHTMLURL())
-	if err != nil {
-		return info.NewEvent(), err
+	repo, repoErr := MatchEventURLRepo(ctx, v.Run, runevent, "")
+	if repoErr != nil {
+		return nil, repoErr
+	}
+	if repo == nil {
+		return nil, fmt.Errorf("no repository found matching URL: %s", runevent.URL)
+	}
+
+	// if v.ghClient is nil, then it means that it's Github webhook and client is not initialized yet
+	// because we initialize the client above only for github app events.
+	if v.ghClient == nil {
+		err := v.initGitHubWebhookClient(ctx, runevent, repo)
+		if err != nil {
+			return nil, fmt.Errorf("cannot initialize GitHub webhook client: %w", err)
+		}
 	}
 
 	v.Logger.Infof("issue_comment: pipelinerun %s on %s/%s#%d has been requested", action, runevent.Organization, runevent.Repository, runevent.PullRequestNumber)
 	processedEvent, err := v.getPullRequest(ctx, runevent)
 	if err != nil {
 		return nil, err
-	}
-
-	repo, err := MatchEventURLRepo(ctx, v.Run, processedEvent, "")
-	if err != nil {
-		return nil, err
-	}
-	if repo == nil {
-		return nil, fmt.Errorf("no repository found matching URL: %s", processedEvent.URL)
 	}
 
 	gitOpsCommentPrefix := provider.GetGitOpsCommentPrefix(repo)

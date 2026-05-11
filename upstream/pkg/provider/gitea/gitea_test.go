@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/google/go-cmp/cmp"
+	"github.com/jonboulle/clockwork"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/changedfiles"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/opscomments"
@@ -679,9 +680,11 @@ func TestProviderCreateStatusCommitRetryOnTransientError(t *testing.T) {
 				_, _ = rw.Write([]byte(`{"state":"success"}`))
 			})
 
+			fc := clockwork.NewFakeClock()
 			v := &Provider{
 				giteaClient: fakeclient,
 				Logger:      logger,
+				clock:       fc,
 			}
 
 			event := &info.Event{
@@ -696,7 +699,18 @@ func TestProviderCreateStatusCommitRetryOnTransientError(t *testing.T) {
 				Conclusion: "success",
 			}
 
-			err := v.createStatusCommit(context.Background(), event, pacopts, status)
+			ctx := context.Background()
+			if strings.Contains(tt.errorMessage, "user does not exist") && tt.failCount > 0 {
+				// Drive the fake clock only for retryable cases that actually sleep.
+				go func() {
+					for i := range 3 {
+						fc.BlockUntilContext(ctx, 1) //nolint:errcheck
+						fc.Advance(time.Duration(i+1) * 500 * time.Millisecond)
+					}
+				}()
+			}
+
+			err := v.createStatusCommit(ctx, event, pacopts, status)
 
 			if tt.wantErr {
 				assert.Assert(t, err != nil, "expected an error but got none")
@@ -1204,4 +1218,113 @@ func TestGetCommitInfoPRLookupPopulatesURLs(t *testing.T) {
 	assert.Equal(t, "main", event.BaseBranch)
 	assert.Equal(t, "https://gitea.com/fork-owner/repo", event.HeadURL, "HeadURL should be populated from PR lookup")
 	assert.Equal(t, "https://gitea.com/owner/repo", event.BaseURL, "BaseURL should be populated from PR lookup")
+}
+
+func TestGetCommitStatuses(t *testing.T) {
+	tests := []struct {
+		name        string
+		event       *info.Event
+		nilClient   bool
+		mockHandler func(http.ResponseWriter, *http.Request)
+		want        []provider.CommitStatusInfo
+		wantErr     string
+	}{
+		{
+			name: "happy path with multiple statuses",
+			event: &info.Event{
+				Organization: "org",
+				Repository:   "repo",
+				SHA:          "abc123",
+			},
+			mockHandler: func(rw http.ResponseWriter, _ *http.Request) {
+				fmt.Fprint(rw, `[
+					{"context":"Pipelines as Code CI / pr-one","status":"success"},
+					{"context":"Pipelines as Code CI / pr-two","status":"failure"}
+				]`)
+			},
+			want: []provider.CommitStatusInfo{
+				{Name: "Pipelines as Code CI / pr-one", Status: "success"},
+				{Name: "Pipelines as Code CI / pr-two", Status: "failure"},
+			},
+		},
+		{
+			name: "deduplicates identical statuses",
+			event: &info.Event{
+				Organization: "org",
+				Repository:   "repo",
+				SHA:          "abc123",
+			},
+			mockHandler: func(rw http.ResponseWriter, _ *http.Request) {
+				fmt.Fprint(rw, `[
+					{"context":"CI / build","status":"success"},
+					{"context":"CI / build","status":"success"},
+					{"context":"CI / build","status":"failure"}
+				]`)
+			},
+			want: []provider.CommitStatusInfo{
+				{Name: "CI / build", Status: "success"},
+				{Name: "CI / build", Status: "failure"},
+			},
+		},
+		{
+			name: "empty response",
+			event: &info.Event{
+				Organization: "org",
+				Repository:   "repo",
+				SHA:          "abc123",
+			},
+			mockHandler: func(rw http.ResponseWriter, _ *http.Request) {
+				fmt.Fprint(rw, `[]`)
+			},
+		},
+		{
+			name:      "nil client returns error",
+			nilClient: true,
+			event: &info.Event{
+				Organization: "org",
+				Repository:   "repo",
+				SHA:          "abc123",
+			},
+			wantErr: "no gitea client has been initialized",
+		},
+		{
+			name: "API error",
+			event: &info.Event{
+				Organization: "org",
+				Repository:   "repo",
+				SHA:          "abc123",
+			},
+			mockHandler: func(rw http.ResponseWriter, _ *http.Request) {
+				rw.WriteHeader(http.StatusInternalServerError)
+			},
+			wantErr: "500",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var p *Provider
+			if tt.nilClient {
+				p = &Provider{}
+			} else {
+				fakeclient, mux, teardown := tgitea.Setup(t)
+				defer teardown()
+
+				mux.HandleFunc(
+					fmt.Sprintf("/repos/%s/%s/commits/%s/statuses",
+						tt.event.Organization, tt.event.Repository, tt.event.SHA),
+					tt.mockHandler,
+				)
+				p = &Provider{giteaClient: fakeclient}
+			}
+
+			got, err := p.GetCommitStatuses(context.Background(), tt.event)
+			if tt.wantErr != "" {
+				assert.ErrorContains(t, err, tt.wantErr)
+				return
+			}
+			assert.NilError(t, err)
+			assert.DeepEqual(t, got, tt.want)
+		})
+	}
 }

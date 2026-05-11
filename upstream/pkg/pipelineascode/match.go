@@ -11,6 +11,7 @@ import (
 	apipac "github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	pacerrors "github.com/openshift-pipelines/pipelines-as-code/pkg/errors"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/gitclient"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/matcher"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/opscomments"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
@@ -75,7 +76,7 @@ func (p *PacRun) verifyRepoAndUser(ctx context.Context) (*v1alpha1.Repository, e
 	// but we call it here as a safety net for edge cases (e.g., tests calling Run() directly,
 	// or if the early setup in sinker failed/was skipped). The call is idempotent.
 	// SetupAuthenticatedClient will merge global repo settings after determining secret namespace.
-	err = SetupAuthenticatedClient(ctx, p.vcx, p.k8int, p.run, p.event, repo, p.globalRepo, p.pacInfo, p.logger)
+	err = gitclient.SetupAuthenticatedClient(ctx, p.vcx, p.k8int, p.run, p.event, repo, p.globalRepo, p.pacInfo, p.logger)
 	if err != nil {
 		return repo, err
 	}
@@ -123,7 +124,9 @@ func (p *PacRun) verifyRepoAndUser(ctx context.Context) (*v1alpha1.Repository, e
 		}
 		// When /ok-to-test is approved, update the parent "Pipelines as Code CI" status to success
 		// to indicate the approval was successful before pipelines start running.
-		if p.event.EventType == opscomments.OkToTestCommentEventType.String() && p.vcx.GetConfig().Name == "gitea" {
+		// we only do this for all providers except github apps since github apps use the checkRun API to update the status
+		// checking installationID is <= 0 because sometime it's set to -1
+		if p.event.EventType == opscomments.OkToTestCommentEventType.String() && p.event.InstallationID <= 0 {
 			approvalStatus := providerstatus.StatusOpts{
 				Status:     CompletedStatus,
 				Title:      "Approved",

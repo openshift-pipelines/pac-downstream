@@ -16,7 +16,7 @@ import (
 
 	"github.com/gobwas/glob"
 	"github.com/golang-jwt/jwt/v4"
-	"github.com/google/go-github/v84/github"
+	"github.com/google/go-github/v85/github"
 	"github.com/jonboulle/clockwork"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
@@ -41,6 +41,11 @@ const (
 	publicRawURLHost = "raw.githubusercontent.com"
 
 	defaultPaginedNumber = 100
+	// maxCommentPages caps the number of pages fetched when scanning PR
+	// comments (e.g. for /ok-to-test). With defaultPaginedNumber=100 this
+	// allows up to 1000 comments, which is generous for legitimate use while
+	// preventing rate-limit exhaustion from comment flooding.
+	maxCommentPages = 10
 )
 
 var _ provider.Interface = (*Provider)(nil)
@@ -63,12 +68,24 @@ type Provider struct {
 	triggerEvent       string
 	cachedChangedFiles *changedfiles.ChangedFiles
 	commitInfo         *github.Commit
+	cachedPullRequest  *github.PullRequest
 	pacUserLogin       string // user/bot login used by PAC
+	clock              clockwork.Clock
+	graphQLClient      *graphQLClient
+	checkRunsCache     checkRunsCache
 }
 
 type skippedRun struct {
 	mutex      *sync.Mutex
 	checkRunID int64
+}
+
+type checkRunsCache struct {
+	mu        sync.Mutex
+	runs      []*github.CheckRun
+	loading   bool
+	done      chan struct{}
+	populated bool
 }
 
 func New() *Provider {
@@ -78,7 +95,16 @@ func New() *Provider {
 		skippedRun: skippedRun{
 			mutex: &sync.Mutex{},
 		},
+		clock:          clockwork.NewRealClock(),
+		checkRunsCache: checkRunsCache{},
 	}
+}
+
+func (v *Provider) getClock() clockwork.Clock {
+	if v.clock == nil {
+		return clockwork.NewRealClock()
+	}
+	return v.clock
 }
 
 func (v *Provider) Client() *github.Client {
@@ -327,6 +353,19 @@ func (v *Provider) SetClient(ctx context.Context, run *params.Run, event *info.E
 		}
 	}
 
+	// Handle GitHub App token scoping for both global and repo-level configuration
+	if event.InstallationID > 0 {
+		v.Logger.Debugf("setupAuthenticatedClient: scoping github app token")
+		token, err := ScopeTokenToListOfRepos(ctx, v, v.pacInfo, repo, run, event, v.eventEmitter, v.Logger)
+		if err != nil {
+			return fmt.Errorf("failed to scope token: %w", err)
+		}
+		// If Global and Repo level configurations are not provided then lets not override the provider token.
+		if token != "" {
+			event.Provider.Token = token
+		}
+	}
+
 	return nil
 }
 
@@ -342,8 +381,17 @@ func (v *Provider) GetTektonDir(ctx context.Context, runevent *info.Event, path,
 	// default set provenance from the SHA
 	revision := runevent.SHA
 	if provenance == "default_branch" {
-		revision = runevent.DefaultBranch
 		v.Logger.Infof("Using PipelineRun definition from default_branch: %s", runevent.DefaultBranch)
+		branch, _, err := wrapAPI(v, "get_default_branch", func() (*github.Branch, *github.Response, error) {
+			return v.Client().Repositories.GetBranch(ctx, runevent.Organization, runevent.Repository, runevent.DefaultBranch, 1)
+		})
+		if err != nil {
+			return "", err
+		}
+		revision = branch.GetCommit().GetSHA()
+		if revision == "" {
+			return "", fmt.Errorf("default_branch %s did not resolve to a commit SHA", runevent.DefaultBranch)
+		}
 	} else {
 		prInfo := ""
 		if runevent.TriggerTarget == triggertype.PullRequest {
@@ -383,7 +431,7 @@ func (v *Provider) GetTektonDir(ctx context.Context, runevent *info.Event, path,
 	if err != nil {
 		return "", err
 	}
-	return v.concatAllYamlFiles(ctx, tektonDirObjects.Entries, runevent)
+	return v.concatAllYamlFiles(ctx, tektonDirObjects.Entries, runevent, path, revision)
 }
 
 // GetCommitInfo get info (url and title) on a commit in runevent, this needs to
@@ -443,6 +491,21 @@ func (v *Provider) GetCommitInfo(ctx context.Context, runevent *info.Event) erro
 		}
 	}
 
+	// For incoming webhooks, DefaultBranch is not populated from the event
+	// payload (since there is no webhook payload to parse). Fetch it from the
+	// GitHub API so that pipelinerun_provenance: default_branch works correctly.
+	// For other event types (push, pull_request), DefaultBranch is already set
+	// by ParsePayload from the webhook payload's repository.default_branch field.
+	if runevent.DefaultBranch == "" && runevent.EventType == "incoming" {
+		ghRepo, _, err := wrapAPI(v, "get_repo", func() (*github.Repository, *github.Response, error) {
+			return v.Client().Repositories.Get(ctx, runevent.Organization, runevent.Repository)
+		})
+		if err != nil {
+			return err
+		}
+		runevent.DefaultBranch = ghRepo.GetDefaultBranch()
+	}
+
 	return nil
 }
 
@@ -452,7 +515,7 @@ func (v *Provider) GetCommitInfo(ctx context.Context, runevent *info.Event) erro
 func (v *Provider) GetFileInsideRepo(ctx context.Context, runevent *info.Event, path, target string) (string, error) {
 	ref := runevent.SHA
 	if target != "" {
-		ref = runevent.BaseBranch
+		ref = target
 	} else if v.provenance == "default_branch" {
 		ref = runevent.DefaultBranch
 	}
@@ -477,36 +540,74 @@ func (v *Provider) GetFileInsideRepo(ctx context.Context, runevent *info.Event, 
 }
 
 // concatAllYamlFiles concat all yaml files from a directory as one big multi document yaml string.
-func (v *Provider) concatAllYamlFiles(ctx context.Context, objects []*github.TreeEntry, runevent *info.Event) (string, error) {
-	var allTemplates string
-
+func (v *Provider) concatAllYamlFiles(ctx context.Context, objects []*github.TreeEntry, runevent *info.Event, tektonDirPath, ref string) (string, error) {
+	var yamlFiles []string
 	for _, value := range objects {
 		if strings.HasSuffix(value.GetPath(), ".yaml") ||
 			strings.HasSuffix(value.GetPath(), ".yml") {
-			data, err := v.getObject(ctx, value.GetSHA(), runevent)
-			if err != nil {
-				return "", err
-			}
-			if err := provider.ValidateYaml(data, value.GetPath()); err != nil {
-				return "", err
-			}
-			if allTemplates != "" && !strings.HasPrefix(string(data), "---") {
-				allTemplates += "---"
-			}
-			allTemplates += "\n" + string(data) + "\n"
+			fullPath := tektonDirPath + "/" + value.GetPath()
+			yamlFiles = append(yamlFiles, fullPath)
 		}
 	}
-	return allTemplates, nil
+
+	if len(yamlFiles) == 0 {
+		return "", nil
+	}
+
+	if v.graphQLClient == nil {
+		var err error
+		v.graphQLClient, err = newGraphQLClient(v)
+		if err != nil {
+			return "", fmt.Errorf("failed to create GraphQL client: %w", err)
+		}
+	}
+
+	graphQLResults, err := v.graphQLClient.fetchFiles(ctx, runevent.Organization, runevent.Repository, ref, yamlFiles)
+	if err != nil {
+		return "", fmt.Errorf("failed to fetch .tekton files via GraphQL: %w", err)
+	}
+
+	var buf strings.Builder
+	for _, path := range yamlFiles {
+		content, ok := graphQLResults[path]
+		if !ok {
+			return "", fmt.Errorf("file %s not found in GraphQL response", path)
+		}
+
+		// it used to be like that (stripped prefix) before we moved to GraphQL so
+		// let's keep it that way.
+		relativePath := strings.TrimPrefix(path, tektonDirPath+"/")
+		if err := provider.ValidateYaml(content, relativePath); err != nil {
+			return "", err
+		}
+		if buf.Len() > 0 && !strings.HasPrefix(string(content), "---") {
+			buf.WriteString("---")
+		}
+		buf.WriteString("\n")
+		buf.Write(content)
+		buf.WriteString("\n")
+	}
+
+	return buf.String(), nil
 }
 
-// getPullRequest get a pull request details.
+// getPullRequest get a pull request details, caching the result for the lifetime of the event.
 func (v *Provider) getPullRequest(ctx context.Context, runevent *info.Event) (*info.Event, error) {
+	if v.cachedPullRequest != nil {
+		return runevent, nil
+	}
 	pr, _, err := wrapAPI(v, "get_pull_request", func() (*github.PullRequest, *github.Response, error) {
 		return v.Client().PullRequests.Get(ctx, runevent.Organization, runevent.Repository, runevent.PullRequestNumber)
 	})
 	if err != nil {
 		return runevent, err
 	}
+	v.cachedPullRequest = pr
+
+	return v.populateRunEventFromPullRequest(runevent, pr), nil
+}
+
+func (v *Provider) populateRunEventFromPullRequest(runevent *info.Event, pr *github.PullRequest) *info.Event {
 	// Make sure to use the Base for Default BaseBranch or there would be a potential hijack
 	runevent.DefaultBranch = pr.GetBase().GetRepo().GetDefaultBranch()
 	runevent.URL = pr.GetBase().GetRepo().GetHTMLURL()
@@ -533,7 +634,7 @@ func (v *Provider) getPullRequest(ctx context.Context, runevent *info.Event) (*i
 	v.RepositoryIDs = []int64{
 		pr.GetBase().GetRepo().GetID(),
 	}
-	return runevent, nil
+	return runevent
 }
 
 // GetFiles gets and caches the list of files changed by a given event.
