@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"codeberg.org/mvdkleijn/forgejo-sdk/forgejo/v3"
-	"github.com/google/go-github/v84/github"
+	"github.com/google/go-github/v85/github"
 	"github.com/tektoncd/pipeline/pkg/names"
 	"gotest.tools/v3/assert"
 	"gotest.tools/v3/env"
@@ -98,6 +98,25 @@ func TestGiteaPullRequestPipelineAnnotations(t *testing.T) {
 			"RemoteTaskURL":  options.RemoteTaskURL,
 			"RemoteTaskName": options.RemoteTaskName,
 		},
+	}
+	_, f := tgitea.TestPR(t, topts)
+	defer f()
+}
+
+// TestGiteaPullRequestRemotePipelineRelativeTask verifies that relative task paths
+// in a Pipeline's annotations are resolved correctly when the pipeline is
+// fetched from a repository path.
+func TestGiteaPullRequestRemotePipelineRelativeTask(t *testing.T) {
+	topts := &tgitea.TestOpts{
+		Regexp:      successRegexp,
+		TargetEvent: triggertype.PullRequest.String(),
+		YAMLFiles: map[string]string{
+			".tekton/pr.yaml":                        "testdata/pipelinerun_remote_pipeline_repo_path.yaml",
+			".pipelines/pipeline.yaml":               "testdata/pipeline_relative_task.yaml",
+			".tasks/task-referenced-internally.yaml": "testdata/task_referenced_internally.yaml",
+		},
+		ExpectEvents:   false,
+		CheckForStatus: "success",
 	}
 	_, f := tgitea.TestPR(t, topts)
 	defer f()

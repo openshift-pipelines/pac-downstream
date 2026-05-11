@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/google/go-github/v84/github"
+	"github.com/google/go-github/v85/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/bitbucketcloud/types"
@@ -584,6 +584,14 @@ func populateGiteaPullRequestFields(event *info.Event, pr *forgejostructs.PullRe
 
 func (p *GiteaParser) GetEventTypeHeader() string {
 	return "X-Gitea-Event-Type"
+}
+
+type ForgejoParser struct {
+	GiteaParser
+}
+
+func (p *ForgejoParser) GetEventTypeHeader() string {
+	return "X-Forgejo-Event-Type"
 }
 
 func (p *GiteaParser) ParsePayload(eventType string, body []byte) (any, error) {
