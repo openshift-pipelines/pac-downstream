@@ -23,7 +23,10 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// Constants moved to test/github_incoming_test.go to avoid redeclaration
+var (
+	incomingSecreteValue = "shhhh-secrete"
+	incomingSecretName   = "incoming-webhook-secret"
+)
 
 func TestGitlabIncomingWebhookLegacy(t *testing.T) {
 	testGitlabIncomingWebhook(t, true)

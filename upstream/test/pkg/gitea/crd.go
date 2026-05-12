@@ -2,9 +2,8 @@ package gitea
 
 import (
 	"context"
-	"os"
 
-	"codeberg.org/mvdkleijn/forgejo-sdk/forgejo/v2"
+	"code.gitea.io/sdk/gitea"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	pacrepo "github.com/openshift-pipelines/pipelines-as-code/test/pkg/repository"
@@ -12,13 +11,11 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-const webhookSecretName = "webhook-secret"
-
 // CreateToken creates gitea token with all scopes.
 func CreateToken(topts *TestOpts) (string, error) {
-	token, _, err := topts.GiteaCNX.Client().CreateAccessToken(forgejo.CreateAccessTokenOption{
+	token, _, err := topts.GiteaCNX.Client().CreateAccessToken(gitea.CreateAccessTokenOption{
 		Name:   topts.TargetNS,
-		Scopes: []forgejo.AccessTokenScope{forgejo.AccessTokenScopeAll},
+		Scopes: []gitea.AccessTokenScope{gitea.AccessTokenScopeAll},
 	})
 	if err != nil {
 		return "", err
@@ -51,22 +48,14 @@ func CreateCRD(ctx context.Context, topts *TestOpts, spec v1alpha1.RepositorySpe
 		}
 	}
 
-	_ = topts.ParamsRun.Clients.Kube.CoreV1().Secrets(ns).Delete(ctx, webhookSecretName, metav1.DeleteOptions{})
-	webhookSecret, _ := os.LookupEnv("TEST_EL_WEBHOOK_SECRET")
-	if err := secret.Create(ctx, topts.ParamsRun, map[string]string{"secret": webhookSecret}, ns, webhookSecretName); err != nil {
-		return err
-	}
-
-	if spec.GitProvider != nil {
-		spec.GitProvider.WebhookSecret = &v1alpha1.Secret{Name: webhookSecretName, Key: "secret"}
-	}
-	repoName := ns
-	if isGlobal {
-		repoName = info.DefaultGlobalRepoName
-	}
 	repository := &v1alpha1.Repository{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: repoName,
+			Name: func() string {
+				if isGlobal {
+					return info.DefaultGlobalRepoName
+				}
+				return topts.TargetNS
+			}(),
 		},
 		Spec: spec,
 	}

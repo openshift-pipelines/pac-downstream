@@ -12,12 +12,11 @@ import (
 	"testing"
 	"time"
 
-	"codeberg.org/mvdkleijn/forgejo-sdk/forgejo/v2"
-	"github.com/google/go-github/v81/github"
+	"code.gitea.io/sdk/gitea"
+	"github.com/google/go-github/v71/github"
 	"github.com/tektoncd/pipeline/pkg/names"
 	"gotest.tools/v3/assert"
 	"gotest.tools/v3/env"
-	"gotest.tools/v3/golden"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"knative.dev/pkg/apis"
 
@@ -26,7 +25,7 @@ import (
 	tknpacdelete "github.com/openshift-pipelines/pipelines-as-code/pkg/cmd/tknpac/deleterepo"
 	tknpacdesc "github.com/openshift-pipelines/pipelines-as-code/pkg/cmd/tknpac/describe"
 	tknpacgenerate "github.com/openshift-pipelines/pipelines-as-code/pkg/cmd/tknpac/generate"
-	tknpaclist "github.com/openshift-pipelines/pipelines-as-code/pkg/cmd/tknpac/listcmd"
+	tknpaclist "github.com/openshift-pipelines/pipelines-as-code/pkg/cmd/tknpac/list"
 	tknpacresolve "github.com/openshift-pipelines/pipelines-as-code/pkg/cmd/tknpac/resolve"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/git"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
@@ -35,7 +34,6 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/sort"
 	"github.com/openshift-pipelines/pipelines-as-code/test/pkg/cctx"
 	tknpactest "github.com/openshift-pipelines/pipelines-as-code/test/pkg/cli"
-	"github.com/openshift-pipelines/pipelines-as-code/test/pkg/configmap"
 	tgitea "github.com/openshift-pipelines/pipelines-as-code/test/pkg/gitea"
 	"github.com/openshift-pipelines/pipelines-as-code/test/pkg/options"
 	"github.com/openshift-pipelines/pipelines-as-code/test/pkg/payload"
@@ -43,7 +41,6 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/test/pkg/scm"
 	"github.com/openshift-pipelines/pipelines-as-code/test/pkg/secret"
 	twait "github.com/openshift-pipelines/pipelines-as-code/test/pkg/wait"
-	rtesting "knative.dev/pkg/reconciler/testing"
 )
 
 // successRegexp will match a success text paac comment,sometime it includes html tags so we need to consider that.
@@ -63,6 +60,35 @@ func TestGiteaPullRequestTaskAnnotations(t *testing.T) {
 			"RemoteTaskURL":  options.RemoteTaskURL,
 			"RemoteTaskName": options.RemoteTaskName,
 		},
+	}
+	_, f := tgitea.TestPR(t, topts)
+	defer f()
+}
+
+func TestGiteaTaskResolutionFromMultipleHubs(t *testing.T) {
+	topts := &tgitea.TestOpts{
+		Regexp:      successRegexp,
+		TargetEvent: triggertype.PullRequest.String(),
+		YAMLFiles: map[string]string{
+			".tekton/pr1.yaml": "testdata/pipelinerun-multi-hub-tasks-1.yaml",
+			".tekton/pr2.yaml": "testdata/pipelinerun-multi-hub-tasks-2.yaml",
+		},
+		CheckForNumberStatus: 2,
+		CheckForStatus:       "success",
+	}
+	_, f := tgitea.TestPR(t, topts)
+	defer f()
+}
+
+func TestGiteaPipelineResolutionFromHub(t *testing.T) {
+	topts := &tgitea.TestOpts{
+		Regexp:      successRegexp,
+		TargetEvent: triggertype.PullRequest.String(),
+		YAMLFiles: map[string]string{
+			".tekton/pr.yaml": "testdata/pipelinerun-remote-pipeline-from-hub.yaml",
+		},
+		CheckForNumberStatus: 1,
+		CheckForStatus:       "success",
 	}
 	_, f := tgitea.TestPR(t, topts)
 	defer f()
@@ -160,8 +186,8 @@ func TestGiteaPullRequestPrivateRepository(t *testing.T) {
 	}
 	ctx, f := tgitea.TestPR(t, topts)
 	defer f()
-	reg := regexp.MustCompile(".*successfully fetched git-clone task from default configured catalog Hub")
-	maxLines := int64(1000)
+	reg := regexp.MustCompile(".*successfully fetched git-clone task from default configured catalog HUB")
+	maxLines := int64(100)
 	err := twait.RegexpMatchingInControllerLog(ctx, topts.ParamsRun, *reg, 20, "controller", &maxLines)
 	assert.NilError(t, err)
 	tgitea.WaitForSecretDeletion(t, topts, topts.TargetRefName)
@@ -197,7 +223,7 @@ func TestGiteaBadYamlReportingOnPR(t *testing.T) {
 	topts.Regexp = regexp.MustCompile(`.*bad-valid | .json: cannot unmarshal array into Go struct field PipelineRunSpec.spec.pipelineSpec of type v1.PipelineSpec.*`)
 	tgitea.WaitForPullRequestCommentMatch(t, topts)
 
-	comments, _, err := topts.GiteaCNX.Client().ListRepoIssueComments(topts.PullRequest.Base.Repository.Owner.UserName, topts.PullRequest.Base.Repository.Name, forgejo.ListIssueCommentOptions{})
+	comments, _, err := topts.GiteaCNX.Client().ListRepoIssueComments(topts.PullRequest.Base.Repository.Owner.UserName, topts.PullRequest.Base.Repository.Name, gitea.ListIssueCommentOptions{})
 	assert.NilError(t, err)
 	assert.Equal(t, len(comments), 1, "should have only one comment")
 
@@ -221,7 +247,7 @@ func TestGiteaBadYamlReportingOnPR(t *testing.T) {
 	entries := map[string]string{".tekton/pr-bad-validation.yaml": processed}
 	_ = scm.PushFilesToRefGit(t, scmOpts, entries)
 
-	comments, _, err = topts.GiteaCNX.Client().ListRepoIssueComments(topts.PullRequest.Base.Repository.Owner.UserName, topts.PullRequest.Base.Repository.Name, forgejo.ListIssueCommentOptions{})
+	comments, _, err = topts.GiteaCNX.Client().ListRepoIssueComments(topts.PullRequest.Base.Repository.Owner.UserName, topts.PullRequest.Base.Repository.Name, gitea.ListIssueCommentOptions{})
 	assert.NilError(t, err)
 	assert.Equal(t, len(comments), 1, "should have only one comment")
 }
@@ -235,7 +261,7 @@ func TestGiteaYamlReportingNotReportingNotTektonResources(t *testing.T) {
 
 	_, f := tgitea.TestPR(t, topts)
 	defer f()
-	comments, _, err := topts.GiteaCNX.Client().ListRepoIssueComments(topts.PullRequest.Base.Repository.Owner.UserName, topts.PullRequest.Base.Repository.Name, forgejo.ListIssueCommentOptions{})
+	comments, _, err := topts.GiteaCNX.Client().ListRepoIssueComments(topts.PullRequest.Base.Repository.Owner.UserName, topts.PullRequest.Base.Repository.Name, gitea.ListIssueCommentOptions{})
 	assert.NilError(t, err)
 	assert.Equal(t, len(comments), 0, "should have zero comments")
 }
@@ -252,7 +278,7 @@ func TestGiteaBadYamlValidation(t *testing.T) {
 
 	ctx, f := tgitea.TestPR(t, topts)
 	defer f()
-	maxLines := int64(1000)
+	maxLines := int64(20)
 	assert.NilError(t, twait.RegexpMatchingInControllerLog(ctx, topts.ParamsRun, *regexp.MustCompile(
 		"cannot read the PipelineRun: pr-bad-format.yaml, error: yaml validation error: line 3: could not find expected ':'"),
 		10, "controller", &maxLines))
@@ -428,7 +454,7 @@ func TestGiteaConfigMaxKeepRun(t *testing.T) {
 	}
 	_, f := tgitea.TestPR(t, topts)
 	defer f()
-	tgitea.PostCommentOnPullRequest(t, topts, "/test")
+	tgitea.PostCommentOnPullRequest(t, topts, "/retest")
 	tgitea.WaitForStatus(t, topts, "heads/"+topts.TargetRefName, "", false)
 
 	waitOpts := twait.Opts{
@@ -470,8 +496,8 @@ func TestGiteaConfigCancelInProgress(t *testing.T) {
 
 	time.Sleep(3 * time.Second) // “Evil does not sleep. It waits.” - Galadriel
 
-	// wait a bit that the pipelinerun had created, then trigger a new run to test cancel-in-progress
-	tgitea.PostCommentOnPullRequest(t, topts, "/test")
+	// wait a bit that the pipelinerun had created
+	tgitea.PostCommentOnPullRequest(t, topts, "/retest")
 
 	time.Sleep(2 * time.Second) // “Evil does not sleep. It waits.” - Galadriel
 
@@ -489,7 +515,7 @@ func TestGiteaConfigCancelInProgress(t *testing.T) {
 	}
 	_ = scm.PushFilesToRefGit(t, scmOpts, entries)
 
-	pr, _, err := topts.GiteaCNX.Client().CreatePullRequest(topts.Opts.Organization, topts.Opts.Repo, forgejo.CreatePullRequestOption{
+	pr, _, err := topts.GiteaCNX.Client().CreatePullRequest(topts.Opts.Organization, topts.Opts.Repo, gitea.CreatePullRequestOption{
 		Title: "Test Pull Request - " + targetRef,
 		Head:  targetRef,
 		Base:  topts.DefaultBranch,
@@ -511,13 +537,13 @@ func TestGiteaConfigCancelInProgress(t *testing.T) {
 			cancelledPr++
 		}
 	}
-	assert.Equal(t, cancelledPr, 1, "only one pr should have been cancelled")
+	assert.Equal(t, cancelledPr, 1, "only one pr should have been canceled")
 
-	// Test that cancelling works with /retest - use specific PipelineRun name to bypass success check
-	tgitea.PostCommentOnPullRequest(t, topts, "/retest pr-cancel-in-progress")
+	// Test that cancelling works with /retest
+	tgitea.PostCommentOnPullRequest(t, topts, "/retest")
 	topts.ParamsRun.Clients.Log.Info("Waiting 10 seconds before a new retest")
-	time.Sleep(10 * time.Second) // "Evil does not sleep. It waits." - Galadriel
-	tgitea.PostCommentOnPullRequest(t, topts, "/retest pr-cancel-in-progress")
+	time.Sleep(10 * time.Second) // “Evil does not sleep. It waits.” - Galadriel
+	tgitea.PostCommentOnPullRequest(t, topts, "/retest")
 	tgitea.WaitForStatus(t, topts, "heads/"+targetRef, "", false)
 
 	for _, pr := range prs.Items {
@@ -525,7 +551,7 @@ func TestGiteaConfigCancelInProgress(t *testing.T) {
 			cancelledPr++
 		}
 	}
-	assert.Equal(t, cancelledPr, 2, "two pr should have been cancelled")
+	assert.Equal(t, cancelledPr, 2, "tweo pr should have been canceled")
 }
 
 func TestGiteaConfigCancelInProgressAfterPRClosed(t *testing.T) {
@@ -551,21 +577,20 @@ func TestGiteaConfigCancelInProgressAfterPRClosed(t *testing.T) {
 	err := twait.UntilPipelineRunCreated(context.Background(), topts.ParamsRun.Clients, waitOpts)
 	assert.NilError(t, err)
 
-	closed := forgejo.StateClosed
-	_, _, err = topts.GiteaCNX.Client().EditPullRequest(topts.Opts.Organization, topts.Opts.Repo, topts.PullRequest.Index, forgejo.EditPullRequestOption{
+	closed := gitea.StateClosed
+	_, _, err = topts.GiteaCNX.Client().EditPullRequest(topts.Opts.Organization, topts.Opts.Repo, topts.PullRequest.Index, gitea.EditPullRequestOption{
 		State: &closed,
-		Body:  topts.PullRequest.Body,
 	})
 	assert.NilError(t, err)
 
-	topts.ParamsRun.Clients.Log.Info("Waiting 10 seconds to check things has been cancelled")
+	topts.ParamsRun.Clients.Log.Info("Waiting 10 seconds to check things has been canceled")
 	time.Sleep(10 * time.Second) // “Evil does not sleep. It waits.” - Galadriel
 
 	prs, err := topts.ParamsRun.Clients.Tekton.TektonV1().PipelineRuns(topts.TargetNS).List(context.Background(), metav1.ListOptions{})
 	assert.NilError(t, err)
 	assert.Equal(t, len(prs.Items), 1, "should have only one pipelinerun, but we have: %d", len(prs.Items))
 
-	assert.Equal(t, prs.Items[0].GetStatusCondition().GetCondition(apis.ConditionSucceeded).GetReason(), "Cancelled", "should have been cancelled")
+	assert.Equal(t, prs.Items[0].GetStatusCondition().GetCondition(apis.ConditionSucceeded).GetReason(), "Cancelled", "should have been canceled")
 }
 
 func TestGiteaPush(t *testing.T) {
@@ -581,7 +606,7 @@ func TestGiteaPush(t *testing.T) {
 	_, f := tgitea.TestPR(t, topts)
 	defer f()
 	merged, resp, err := topts.GiteaCNX.Client().MergePullRequest(topts.Opts.Organization, topts.Opts.Repo, topts.PullRequest.Index,
-		forgejo.MergePullRequestOption{
+		gitea.MergePullRequestOption{
 			Title: "Merged with Panache",
 			Style: "merge",
 		},
@@ -625,7 +650,7 @@ func TestGiteaWithCLI(t *testing.T) {
 
 	output, err = tknpactest.ExecCommand(topts.ParamsRun, tknpacdelete.Root, "-n", topts.TargetNS, "repository", topts.TargetNS, "--cascade")
 	assert.NilError(t, err)
-	expectedOutput := fmt.Sprintf("secret %s has been deleted\nsecret webhook-secret has been deleted\nrepository %s has been deleted\n", topts.TargetNS, topts.TargetNS)
+	expectedOutput := fmt.Sprintf("secret %s has been deleted\nrepository %s has been deleted\n", topts.TargetNS, topts.TargetNS)
 	assert.Assert(t, output == expectedOutput, topts.TargetRefName, fmt.Sprintf("delete command should have this output: %s received: %s", expectedOutput, output))
 }
 
@@ -652,11 +677,11 @@ func TestGiteaWithCLIGeneratePipeline(t *testing.T) {
 					"license": "BSD"
 				  }`,
 			},
-			generateOutputRegexp: `We detected your repository uses the.*[Nn]odejs.*programming language`,
+			generateOutputRegexp: `We have detected your repository using the programming language.*Nodejs`,
 		},
 		{
 			name:                 "CLI generate python",
-			generateOutputRegexp: `We detected your repository uses the.*Python.*programming language`,
+			generateOutputRegexp: `We have detected your repository using the programming language.*Python`,
 			fileToAdd: map[string]string{
 				"setup.py":    "# setup.py\n",
 				"__init__.py": "# __init__.py\n",
@@ -664,7 +689,7 @@ func TestGiteaWithCLIGeneratePipeline(t *testing.T) {
 		},
 		{
 			name:                 "CLI generate golang",
-			generateOutputRegexp: `We detected your repository uses the.*Go.*programming language`,
+			generateOutputRegexp: `We have detected your repository using the programming language.*Go`,
 			fileToAdd: map[string]string{
 				"go.mod": "module github.com/mylady/ismybike",
 				"main.go": `package main
@@ -869,50 +894,6 @@ func TestGiteaErrorSnippet(t *testing.T) {
 	tgitea.WaitForPullRequestCommentMatch(t, topts)
 }
 
-func TestGiteaErrorSnippetCustomLines(t *testing.T) {
-	ctx, _ := rtesting.SetupFakeContext(t)
-	topts := &tgitea.TestOpts{
-		TargetEvent: triggertype.PullRequest.String(),
-		YAMLFiles: map[string]string{
-			".tekton/pr.yaml": "testdata/pipelinerun-error-snippet.yaml",
-		},
-		CheckForStatus:   "failure",
-		ExpectEvents:     false,
-		SkipEventsCheck:  true,
-		StatusOnlyLatest: true,
-	}
-	topts.TargetRefName = names.SimpleNameGenerator.RestrictLengthWithRandomSuffix("pac-e2e-test")
-	topts.TargetNS = topts.TargetRefName
-	topts.ParamsRun, topts.Opts, topts.GiteaCNX, _ = tgitea.Setup(ctx)
-	assert.NilError(t, topts.ParamsRun.Clients.NewClients(ctx, &topts.ParamsRun.Info))
-	ctx, err := cctx.GetControllerCtxInfo(ctx, topts.ParamsRun)
-	assert.NilError(t, err)
-	assert.NilError(t, pacrepo.CreateNS(ctx, topts.TargetNS, topts.ParamsRun))
-	cfgMapData := map[string]string{
-		"error-log-snippet-number-of-lines": "5",
-	}
-	defer configmap.ChangeGlobalConfig(ctx, t, topts.ParamsRun, cfgMapData)()
-
-	_, f := tgitea.TestPR(t, topts)
-	defer f()
-
-	topts.Regexp = regexp.MustCompile(`Hey man i just wanna to say i am not such a failure, i am useful in my failure`)
-	tgitea.WaitForPullRequestCommentMatch(t, topts)
-
-	comments, _, err := topts.GiteaCNX.Client().ListRepoIssueComments(topts.PullRequest.Base.Repository.Owner.UserName, topts.PullRequest.Base.Repository.Name, forgejo.ListIssueCommentOptions{})
-	assert.NilError(t, err)
-	assert.Assert(t, len(comments) > 0)
-	lastComment := comments[len(comments)-1]
-	body := lastComment.Body
-
-	// Keep only the content from `<h4>Failure snippet:</h4>` onwards, if present; otherwise, we cannot perform a comparison due to the random e2e test name.
-	const marker = "<h4>Failure snippet:</h4>"
-	if idx := strings.Index(body, marker); idx != -1 {
-		body = body[idx:]
-	}
-	golden.Assert(t, body, strings.ReplaceAll(fmt.Sprintf("%s.golden", t.Name()), "/", "-"))
-}
-
 func TestGiteaOnPullRequestLabels(t *testing.T) {
 	prName := "on-label"
 	topts := &tgitea.TestOpts{
@@ -998,7 +979,7 @@ func TestGiteaBadLinkOfTask(t *testing.T) {
 	ctx, f := tgitea.TestPR(t, topts)
 	defer f()
 	errre := regexp.MustCompile("There was an error starting the PipelineRun")
-	maxLines := int64(1000)
+	maxLines := int64(20)
 	assert.NilError(t, twait.RegexpMatchingInControllerLog(ctx, topts.ParamsRun, *errre, 10, "controller", &maxLines))
 }
 
@@ -1019,7 +1000,7 @@ func TestGiteaPipelineRunWithSameName(t *testing.T) {
 	ctx, f := tgitea.TestPR(t, topts)
 	defer f()
 	errre := regexp.MustCompile("found multiple pipelinerun in .tekton with the same name")
-	maxLines := int64(1000)
+	maxLines := int64(20)
 	assert.NilError(t, twait.RegexpMatchingInControllerLog(ctx, topts.ParamsRun, *errre, 10, "controller", &maxLines))
 }
 
@@ -1132,7 +1113,7 @@ func verifyProvenance(t *testing.T, topts *tgitea.TestOpts, expectedOutput, cNam
 	scmOpts.TargetRefName = targetRef
 	_ = scm.PushFilesToRefGit(t, scmOpts, entries)
 
-	pr, _, err := topts.GiteaCNX.Client().CreatePullRequest(topts.Opts.Organization, targetRef, forgejo.CreatePullRequestOption{
+	pr, _, err := topts.GiteaCNX.Client().CreatePullRequest(topts.Opts.Organization, targetRef, gitea.CreatePullRequestOption{
 		Title: "Test Pull Request - " + targetRef,
 		Head:  targetRef,
 		Base:  options.MainBranch,

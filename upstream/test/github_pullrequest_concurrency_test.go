@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/sort"
 	tgithub "github.com/openshift-pipelines/pipelines-as-code/test/pkg/github"
@@ -27,7 +26,7 @@ import (
 
 const pipelineRunFileNamePrefix = "prlongrunnning-"
 
-func TestGithubGHEPullRequestConcurrency1by1(t *testing.T) {
+func TestGithubSecondPullRequestConcurrency1by1(t *testing.T) {
 	ctx := context.Background()
 	label := "Github PullRequest Concurrent, sequentially one by one"
 	numberOfPipelineRuns := 5
@@ -39,10 +38,10 @@ func TestGithubGHEPullRequestConcurrency1by1(t *testing.T) {
 	testGithubConcurrency(ctx, t, g, numberOfPipelineRuns, checkOrdering)
 }
 
-// TestGithubGHEPullRequestConcurrencyRestartedWhenWatcherIsUp tests that
+// TestGithubSecondPullRequestConcurrencyRestartedWhenWatcherIsUp tests that
 // when the watcher is down and a PR is created, the PipelineRuns are kept in
 // Pending state. When the watcher is up again, the PipelineRuns are restarted.
-func TestGithubGHEPullRequestConcurrencyRestartedWhenWatcherIsUp(t *testing.T) {
+func TestGithubSecondPullRequestConcurrencyRestartedWhenWatcherIsUp(t *testing.T) {
 	ctx := context.Background()
 	label := "Github PullRequest Concurrent, sequentially one by one"
 	numberOfPipelineRuns := 2
@@ -61,9 +60,7 @@ func TestGithubGHEPullRequestConcurrencyRestartedWhenWatcherIsUp(t *testing.T) {
 	maxLoop := 30
 	allPipelineRunsStarted := true
 	for i := 0; i < maxLoop; i++ {
-		prs, err := g.Cnx.Clients.Tekton.TektonV1().PipelineRuns(g.TargetNamespace).List(ctx, metav1.ListOptions{
-			LabelSelector: fmt.Sprintf("%s=%s", keys.SHA, g.SHA),
-		})
+		prs, err := g.Cnx.Clients.Tekton.TektonV1().PipelineRuns(g.TargetNamespace).List(ctx, metav1.ListOptions{})
 		assert.NilError(t, err)
 
 		assert.Assert(t, len(prs.Items) <= numberOfPipelineRuns, "Too many PipelineRuns have been created, expected: %d, got: %d", numberOfPipelineRuns, len(prs.Items))
@@ -88,7 +85,7 @@ func TestGithubGHEPullRequestConcurrencyRestartedWhenWatcherIsUp(t *testing.T) {
 	testGithubConcurrency(ctx, t, g, numberOfPipelineRuns, checkOrdering)
 }
 
-func TestGithubGHEPullRequestConcurrency3by3(t *testing.T) {
+func TestGithubSecondPullRequestConcurrency3by3(t *testing.T) {
 	ctx := context.Background()
 	label := "Github PullRequest Concurrent three at time"
 	numberOfPipelineRuns := 10
@@ -101,7 +98,7 @@ func TestGithubGHEPullRequestConcurrency3by3(t *testing.T) {
 	testGithubConcurrency(ctx, t, g, numberOfPipelineRuns, checkOrdering)
 }
 
-func TestGithubGHEPullRequestConcurrency1by1WithError(t *testing.T) {
+func TestGithubSecondPullRequestConcurrency1by1WithError(t *testing.T) {
 	ctx := context.Background()
 	label := "Github PullRequest Concurrent, sequentially one by one with one bad apple"
 	numberOfPipelineRuns := 1
@@ -218,23 +215,13 @@ func testGithubConcurrency(ctx context.Context, t *testing.T, g tgithub.PRTest, 
 
 	// sort all the PR by when they have started
 	if checkOrdering {
-		prs, err := g.Cnx.Clients.Tekton.TektonV1().PipelineRuns(g.TargetNamespace).List(ctx, metav1.ListOptions{
-			LabelSelector: fmt.Sprintf("%s=%s", keys.SHA, g.SHA),
-		})
+		prs, err := g.Cnx.Clients.Tekton.TektonV1().PipelineRuns(g.TargetNamespace).List(ctx, metav1.ListOptions{})
 		assert.NilError(t, err)
-
-		// Verify we have the expected number of PipelineRuns
-		assert.Assert(t, len(prs.Items) == numberOfPipelineRuns,
-			"Expected %d PipelineRuns with SHA %s, but found %d",
-			numberOfPipelineRuns, g.SHA, len(prs.Items))
-
 		sort.PipelineRunSortByStartTime(prs.Items)
 		for i := range make([]int, numberOfPipelineRuns) {
 			prExpectedName := fmt.Sprintf("%s%d", pipelineRunFileNamePrefix, len(prs.Items)-i)
 			prActualName := prs.Items[i].GetName()
-			assert.Assert(t, strings.HasPrefix(prActualName, prExpectedName),
-				"prActualName: %s does not start with expected prefix %s, ordering check failed",
-				prActualName, prExpectedName)
+			assert.Assert(t, strings.HasPrefix(prActualName, prExpectedName), "prActualName: %s does not start with expected prefix %s, was is ordered properly at start time", prActualName, prExpectedName)
 		}
 	}
 }
@@ -244,11 +231,8 @@ func waitForPipelineRunsHasStarted(ctx context.Context, t *testing.T, g tgithub.
 	maxLoop := 30
 	for i := range make([]int, maxLoop) {
 		unsuccessful := 0
-		prs, err := g.Cnx.Clients.Tekton.TektonV1().PipelineRuns(g.TargetNamespace).List(ctx, metav1.ListOptions{
-			LabelSelector: fmt.Sprintf("%s=%s", keys.SHA, g.SHA),
-		})
+		prs, err := g.Cnx.Clients.Tekton.TektonV1().PipelineRuns(g.TargetNamespace).List(ctx, metav1.ListOptions{})
 		assert.NilError(t, err)
-
 		for _, pr := range prs.Items {
 			if pr.Status.GetConditions() == nil {
 				unsuccessful++
@@ -271,11 +255,8 @@ func waitForPipelineRunsHasStarted(ctx context.Context, t *testing.T, g tgithub.
 		time.Sleep(10 * time.Second)
 	}
 	if !finished {
-		prs, err := g.Cnx.Clients.Tekton.TektonV1().PipelineRuns(g.TargetNamespace).List(ctx, metav1.ListOptions{
-			LabelSelector: fmt.Sprintf("%s=%s", keys.SHA, g.SHA),
-		})
+		prs, err := g.Cnx.Clients.Tekton.TektonV1().PipelineRuns(g.TargetNamespace).List(ctx, metav1.ListOptions{})
 		assert.NilError(t, err)
-
 		for _, pr := range prs.Items {
 			t.Logf("PipelineRun %s has conditions: %v", pr.GetName(), pr.Status.Conditions)
 		}

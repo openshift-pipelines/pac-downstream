@@ -23,7 +23,7 @@ import (
 // interface, event information, and an error if any occurs during detection or
 // initialization.
 //
-// Supported providers: github, gitlab, bitbucket-cloud, bitbucket-datacenter, forgejo (gitea)
+// Supported providers: github, gitlab, bitbucket-cloud, bitbucket-datacenter, gitea
 // any new provider should be added to the switch case below.
 func (r *Reconciler) detectProvider(ctx context.Context, logger *zap.SugaredLogger, pr *tektonv1.PipelineRun) (provider.Interface, *info.Event, error) {
 	gitProvider, ok := pr.GetAnnotations()[keys.GitProvider]
@@ -51,7 +51,7 @@ func (r *Reconciler) detectProvider(ctx context.Context, logger *zap.SugaredLogg
 		provider = &bitbucketcloud.Provider{}
 	case "bitbucket-datacenter":
 		provider = &bitbucketdatacenter.Provider{}
-	case "gitea", "forgejo":
+	case "gitea":
 		provider = &gitea.Provider{}
 	default:
 		return nil, nil, fmt.Errorf("failed to detect provider for pipelinerun: %s : unknown provider", pr.GetName())
@@ -93,12 +93,10 @@ func buildEventFromPipelineRun(pr *tektonv1.PipelineRun) *info.Event {
 
 	// GitLab
 	if projectID, ok := prAnno[keys.SourceProjectID]; ok {
-		id, _ := strconv.ParseInt(projectID, 10, 64)
-		event.SourceProjectID = id
+		event.SourceProjectID, _ = strconv.Atoi(projectID)
 	}
 	if projectID, ok := prAnno[keys.TargetProjectID]; ok {
-		id, _ := strconv.ParseInt(projectID, 10, 64)
-		event.TargetProjectID = id
+		event.TargetProjectID, _ = strconv.Atoi(projectID)
 	}
 	return event
 }

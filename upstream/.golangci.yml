@@ -57,12 +57,6 @@ linters:
     - whitespace
     - zerologlint
   settings:
-    misspell:
-      ignore-rules:
-        - cancelled
-      extra-words:
-        - typo: "canceled"
-          correction: "cancelled"
     errcheck:
       exclude-functions:
         - (*github.com/tektoncd/pipeline/vendor/go.uber.org/zap.SugaredLogger).Sync
@@ -72,8 +66,6 @@ linters:
         - fmt.Fprintln
         - (io.Closer).Close
         - updateConfigMap
-    exhaustive:
-      default-signifies-exhaustive: true
     gocritic:
       disabled-checks:
         - unlambda
@@ -106,9 +98,6 @@ linters:
           - revive
         path: pkg/test/http/
         text: "var-naming"
-      - linters:
-          - gosec
-        text: "G115|G117|G702|G703|G704|G705|G706"
     paths:
       - vendor
       - pkg/provider/gitea/structs

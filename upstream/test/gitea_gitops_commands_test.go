@@ -127,9 +127,9 @@ func TestGiteaOnCommentAnnotation(t *testing.T) {
 	assert.NilError(t, err)
 }
 
-// TestGiteaTestPipelineRunExplicitlyWithTestComment will test a pipelinerun
+// TestGiteaTestPipelineRunExplicitelyWithTestComment will test a pipelinerun
 // even if it hasn't matched when we are doing a /test comment.
-func TestGiteaTestPipelineRunExplicitlyWithTestComment(t *testing.T) {
+func TestGiteaTestPipelineRunExplicitelyWithTestComment(t *testing.T) {
 	var err error
 	ctx := context.Background()
 	topts := &tgitea.TestOpts{

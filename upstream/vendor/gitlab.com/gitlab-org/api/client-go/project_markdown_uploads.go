@@ -17,26 +17,27 @@
 package gitlab
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 )
 
 type (
 	ProjectMarkdownUploadsServiceInterface interface {
-		UploadProjectMarkdown(pid any, content io.Reader, filename string, options ...RequestOptionFunc) (*ProjectMarkdownUploadedFile, *Response, error)
-		ListProjectMarkdownUploads(pid any, options ...RequestOptionFunc) ([]*ProjectMarkdownUpload, *Response, error)
-		DownloadProjectMarkdownUploadByID(pid any, uploadID int64, options ...RequestOptionFunc) ([]byte, *Response, error)
-		DownloadProjectMarkdownUploadBySecretAndFilename(pid any, secret string, filename string, options ...RequestOptionFunc) ([]byte, *Response, error)
-		DeleteProjectMarkdownUploadByID(pid any, uploadID int64, options ...RequestOptionFunc) (*Response, error)
-		DeleteProjectMarkdownUploadBySecretAndFilename(pid any, secret string, filename string, options ...RequestOptionFunc) (*Response, error)
+		UploadProjectMarkdown(pid interface{}, content io.Reader, filename string, options ...RequestOptionFunc) (*ProjectMarkdownUploadedFile, *Response, error)
+		ListProjectMarkdownUploads(pid interface{}, options ...RequestOptionFunc) ([]*ProjectMarkdownUpload, *Response, error)
+		DownloadProjectMarkdownUploadByID(pid interface{}, uploadID int, options ...RequestOptionFunc) ([]byte, *Response, error)
+		DownloadProjectMarkdownUploadBySecretAndFilename(pid interface{}, secret string, filename string, options ...RequestOptionFunc) ([]byte, *Response, error)
+		DeleteProjectMarkdownUploadByID(pid interface{}, uploadID int, options ...RequestOptionFunc) (*Response, error)
+		DeleteProjectMarkdownUploadBySecretAndFilename(pid interface{}, secret string, filename string, options ...RequestOptionFunc) (*Response, error)
 	}
 
-	// ProjectMarkdownUploadsService handles communication with the project
-	// markdown uploads related methods of the GitLab API.
+	// ProjectMarkdownUploadsService handles communication with the project markdown uploads
+	// related methods of the GitLab API.
 	//
-	// GitLab API docs:
-	// https://docs.gitlab.com/api/project_markdown_uploads/
+	// Gitlab API docs: https://docs.gitlab.com/api/project_markdown_uploads/
 	ProjectMarkdownUploadsService struct {
 		client *Client
 	}
@@ -44,17 +45,40 @@ type (
 
 var _ ProjectMarkdownUploadsServiceInterface = (*ProjectMarkdownUploadsService)(nil)
 
-// Type aliases for backward compatibility
-type (
-	ProjectMarkdownUpload       = MarkdownUpload
-	ProjectMarkdownUploadedFile = MarkdownUploadedFile
-)
+// ProjectMarkdownUploadedFile represents a single project markdown uploaded file.
+//
+// Gitlab API docs: https://docs.gitlab.com/api/project_markdown_uploads/
+type ProjectMarkdownUploadedFile struct {
+	ID       int    `json:"id"`
+	Alt      string `json:"alt"`
+	URL      string `json:"url"`
+	FullPath string `json:"full_path"`
+	Markdown string `json:"markdown"`
+}
+
+// ProjectMarkdownUpload represents a single project markdown upload.
+//
+// Gitlab API docs: https://docs.gitlab.com/api/project_markdown_uploads/
+type ProjectMarkdownUpload struct {
+	ID         int        `json:"id"`
+	Size       int        `json:"size"`
+	Filename   string     `json:"filename"`
+	CreatedAt  *time.Time `json:"created_at"`
+	UploadedBy *User      `json:"uploaded_by"`
+}
+
+// Gets a string representation of a ProjectMarkdownUpload.
+//
+// GitLab API docs: https://docs.gitlab.com/api/project_markdown_uploads/
+func (m ProjectMarkdownUpload) String() string {
+	return Stringify(m)
+}
 
 // UploadProjectMarkdown uploads a markdown file to a project.
 //
 // GitLab docs:
 // https://docs.gitlab.com/api/project_markdown_uploads/#upload-a-file
-func (s *ProjectMarkdownUploadsService) UploadProjectMarkdown(pid any, content io.Reader, filename string, options ...RequestOptionFunc) (*ProjectMarkdownUploadedFile, *Response, error) {
+func (s *ProjectMarkdownUploadsService) UploadProjectMarkdown(pid interface{}, content io.Reader, filename string, options ...RequestOptionFunc) (*ProjectMarkdownUploadedFile, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err
@@ -87,20 +111,50 @@ func (s *ProjectMarkdownUploadsService) UploadProjectMarkdown(pid any, content i
 //
 // GitLab API Docs:
 // https://docs.gitlab.com/api/project_markdown_uploads/#list-uploads
-func (s *ProjectMarkdownUploadsService) ListProjectMarkdownUploads(pid any, options ...RequestOptionFunc) ([]*ProjectMarkdownUpload, *Response, error) {
-	return listMarkdownUploads[ProjectMarkdownUpload](s.client, ProjectResource, ProjectID{pid}, nil, options)
+func (s *ProjectMarkdownUploadsService) ListProjectMarkdownUploads(pid interface{}, options ...RequestOptionFunc) ([]*ProjectMarkdownUpload, *Response, error) {
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, nil, err
+	}
+	u := fmt.Sprintf("projects/%s/uploads", PathEscape(project))
+
+	req, err := s.client.NewRequest(http.MethodGet, u, nil, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var uploads []*ProjectMarkdownUpload
+	resp, err := s.client.Do(req, &uploads)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return uploads, resp, err
 }
 
 // DownloadProjectMarkdownUploadByID downloads a specific upload by ID.
 //
 // GitLab API Docs:
 // https://docs.gitlab.com/api/project_markdown_uploads/#download-an-uploaded-file-by-id
-func (s *ProjectMarkdownUploadsService) DownloadProjectMarkdownUploadByID(pid any, uploadID int64, options ...RequestOptionFunc) ([]byte, *Response, error) {
-	buffer, resp, err := downloadMarkdownUploadByID(s.client, ProjectResource, ProjectID{pid}, uploadID, options)
+func (s *ProjectMarkdownUploadsService) DownloadProjectMarkdownUploadByID(pid interface{}, uploadID int, options ...RequestOptionFunc) ([]byte, *Response, error) {
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, nil, err
+	}
+	u := fmt.Sprintf("projects/%s/uploads/%d", PathEscape(project), uploadID)
+
+	req, err := s.client.NewRequest(http.MethodGet, u, nil, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var f bytes.Buffer
+	resp, err := s.client.Do(req, &f)
 	if err != nil {
 		return nil, resp, err
 	}
-	return buffer.Bytes(), resp, nil
+
+	return f.Bytes(), resp, err
 }
 
 // DownloadProjectMarkdownUploadBySecretAndFilename downloads a specific upload
@@ -108,20 +162,44 @@ func (s *ProjectMarkdownUploadsService) DownloadProjectMarkdownUploadByID(pid an
 //
 // GitLab API Docs:
 // https://docs.gitlab.com/api/project_markdown_uploads/#download-an-uploaded-file-by-secret-and-filename
-func (s *ProjectMarkdownUploadsService) DownloadProjectMarkdownUploadBySecretAndFilename(pid any, secret string, filename string, options ...RequestOptionFunc) ([]byte, *Response, error) {
-	buffer, resp, err := downloadMarkdownUploadBySecretAndFilename(s.client, ProjectResource, ProjectID{pid}, secret, filename, options)
+func (s *ProjectMarkdownUploadsService) DownloadProjectMarkdownUploadBySecretAndFilename(pid interface{}, secret string, filename string, options ...RequestOptionFunc) ([]byte, *Response, error) {
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, nil, err
+	}
+	u := fmt.Sprintf("projects/%s/uploads/%s/%s", PathEscape(project), PathEscape(secret), PathEscape(filename))
+
+	req, err := s.client.NewRequest(http.MethodGet, u, nil, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var f bytes.Buffer
+	resp, err := s.client.Do(req, &f)
 	if err != nil {
 		return nil, resp, err
 	}
-	return buffer.Bytes(), resp, nil
+
+	return f.Bytes(), resp, err
 }
 
 // DeleteProjectMarkdownUploadByID deletes an upload by ID.
 //
 // GitLab API Docs:
 // https://docs.gitlab.com/api/project_markdown_uploads/#delete-an-uploaded-file-by-id
-func (s *ProjectMarkdownUploadsService) DeleteProjectMarkdownUploadByID(pid any, uploadID int64, options ...RequestOptionFunc) (*Response, error) {
-	return deleteMarkdownUploadByID(s.client, ProjectResource, ProjectID{pid}, uploadID, options)
+func (s *ProjectMarkdownUploadsService) DeleteProjectMarkdownUploadByID(pid interface{}, uploadID int, options ...RequestOptionFunc) (*Response, error) {
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, err
+	}
+	u := fmt.Sprintf("projects/%s/uploads/%d", PathEscape(project), uploadID)
+
+	req, err := s.client.NewRequest(http.MethodDelete, u, nil, options)
+	if err != nil {
+		return nil, err
+	}
+
+	return s.client.Do(req, nil)
 }
 
 // DeleteProjectMarkdownUploadBySecretAndFilename deletes an upload
@@ -129,6 +207,18 @@ func (s *ProjectMarkdownUploadsService) DeleteProjectMarkdownUploadByID(pid any,
 //
 // GitLab API Docs:
 // https://docs.gitlab.com/api/project_markdown_uploads/#delete-an-uploaded-file-by-secret-and-filename
-func (s *ProjectMarkdownUploadsService) DeleteProjectMarkdownUploadBySecretAndFilename(pid any, secret string, filename string, options ...RequestOptionFunc) (*Response, error) {
-	return deleteMarkdownUploadBySecretAndFilename(s.client, ProjectResource, ProjectID{pid}, secret, filename, options)
+func (s *ProjectMarkdownUploadsService) DeleteProjectMarkdownUploadBySecretAndFilename(pid interface{}, secret string, filename string, options ...RequestOptionFunc) (*Response, error) {
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, err
+	}
+	u := fmt.Sprintf("projects/%s/uploads/%s/%s",
+		PathEscape(project), PathEscape(secret), PathEscape(filename))
+
+	req, err := s.client.NewRequest(http.MethodDelete, u, nil, options)
+	if err != nil {
+		return nil, err
+	}
+
+	return s.client.Do(req, nil)
 }

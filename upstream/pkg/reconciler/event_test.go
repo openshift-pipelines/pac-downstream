@@ -99,11 +99,6 @@ func TestDetectProvider(t *testing.T) {
 			errStr:     "",
 		},
 		{
-			name:       "forgejo provider resolves to gitea",
-			annotation: "forgejo",
-			errStr:     "",
-		},
-		{
 			name:       "unknown provider",
 			annotation: "batman",
 			errStr:     "failed to detect provider for pipelinerun: test : unknown provider",

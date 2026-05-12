@@ -53,6 +53,7 @@ type CustomRunSpec struct {
 	CustomSpec *EmbeddedCustomRunSpec `json:"customSpec,omitempty"`
 
 	// +optional
+	// +listType=atomic
 	Params Params `json:"params,omitempty"`
 
 	// Used for cancelling a customrun (and maybe more later on)

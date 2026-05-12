@@ -24,15 +24,15 @@ import (
 
 type (
 	ResourceLabelEventsServiceInterface interface {
-		ListIssueLabelEvents(pid any, issue int64, opt *ListLabelEventsOptions, options ...RequestOptionFunc) ([]*LabelEvent, *Response, error)
-		GetIssueLabelEvent(pid any, issue int64, event int64, options ...RequestOptionFunc) (*LabelEvent, *Response, error)
-		ListMergeRequestsLabelEvents(pid any, request int64, opt *ListLabelEventsOptions, options ...RequestOptionFunc) ([]*LabelEvent, *Response, error)
-		GetMergeRequestLabelEvent(pid any, request int64, event int64, options ...RequestOptionFunc) (*LabelEvent, *Response, error)
+		ListIssueLabelEvents(pid interface{}, issue int, opt *ListLabelEventsOptions, options ...RequestOptionFunc) ([]*LabelEvent, *Response, error)
+		GetIssueLabelEvent(pid interface{}, issue int, event int, options ...RequestOptionFunc) (*LabelEvent, *Response, error)
+		ListMergeRequestsLabelEvents(pid interface{}, request int, opt *ListLabelEventsOptions, options ...RequestOptionFunc) ([]*LabelEvent, *Response, error)
+		GetMergeRequestLabelEvent(pid interface{}, request int, event int, options ...RequestOptionFunc) (*LabelEvent, *Response, error)
 
-		// Will be removed in v5, use Work Items API instead
-		ListGroupEpicLabelEvents(gid any, epic int64, opt *ListLabelEventsOptions, options ...RequestOptionFunc) ([]*LabelEvent, *Response, error)
-		// Will be removed in v5, use Work Items API instead
-		GetGroupEpicLabelEvent(gid any, epic int64, event int64, options ...RequestOptionFunc) (*LabelEvent, *Response, error)
+		// Deprecated: for removal in v5 of the API, use Work Items API instead
+		ListGroupEpicLabelEvents(gid interface{}, epic int, opt *ListLabelEventsOptions, options ...RequestOptionFunc) ([]*LabelEvent, *Response, error)
+		// Deprecated: for removal in v5 of the API, use Work Items API instead
+		GetGroupEpicLabelEvent(gid interface{}, epic int, event int, options ...RequestOptionFunc) (*LabelEvent, *Response, error)
 	}
 
 	// ResourceLabelEventsService handles communication with the event related
@@ -51,25 +51,26 @@ var _ ResourceLabelEventsServiceInterface = (*ResourceLabelEventsService)(nil)
 // GitLab API docs:
 // https://docs.gitlab.com/api/resource_label_events/#get-single-issue-label-event
 type LabelEvent struct {
-	ID           int64           `json:"id"`
-	Action       string          `json:"action"`
-	CreatedAt    *time.Time      `json:"created_at"`
-	ResourceType string          `json:"resource_type"`
-	ResourceID   int64           `json:"resource_id"`
-	User         BasicUser       `json:"user"`
-	Label        LabelEventLabel `json:"label"`
-}
-
-// LabelEventLabel represents a resource label event label.
-//
-// GitLab API docs:
-// https://docs.gitlab.com/api/resource_label_events/#get-single-issue-label-event
-type LabelEventLabel struct {
-	ID          int64  `json:"id"`
-	Name        string `json:"name"`
-	Color       string `json:"color"`
-	TextColor   string `json:"text_color"`
-	Description string `json:"description"`
+	ID           int        `json:"id"`
+	Action       string     `json:"action"`
+	CreatedAt    *time.Time `json:"created_at"`
+	ResourceType string     `json:"resource_type"`
+	ResourceID   int        `json:"resource_id"`
+	User         struct {
+		ID        int    `json:"id"`
+		Name      string `json:"name"`
+		Username  string `json:"username"`
+		State     string `json:"state"`
+		AvatarURL string `json:"avatar_url"`
+		WebURL    string `json:"web_url"`
+	} `json:"user"`
+	Label struct {
+		ID          int    `json:"id"`
+		Name        string `json:"name"`
+		Color       string `json:"color"`
+		TextColor   string `json:"text_color"`
+		Description string `json:"description"`
+	} `json:"label"`
 }
 
 // ListLabelEventsOptions represents the options for all resource label events
@@ -86,7 +87,7 @@ type ListLabelEventsOptions struct {
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/resource_label_events/#list-project-issue-label-events
-func (s *ResourceLabelEventsService) ListIssueLabelEvents(pid any, issue int64, opt *ListLabelEventsOptions, options ...RequestOptionFunc) ([]*LabelEvent, *Response, error) {
+func (s *ResourceLabelEventsService) ListIssueLabelEvents(pid interface{}, issue int, opt *ListLabelEventsOptions, options ...RequestOptionFunc) ([]*LabelEvent, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err
@@ -111,7 +112,7 @@ func (s *ResourceLabelEventsService) ListIssueLabelEvents(pid any, issue int64, 
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/resource_label_events/#get-single-issue-label-event
-func (s *ResourceLabelEventsService) GetIssueLabelEvent(pid any, issue int64, event int64, options ...RequestOptionFunc) (*LabelEvent, *Response, error) {
+func (s *ResourceLabelEventsService) GetIssueLabelEvent(pid interface{}, issue int, event int, options ...RequestOptionFunc) (*LabelEvent, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err
@@ -134,11 +135,11 @@ func (s *ResourceLabelEventsService) GetIssueLabelEvent(pid any, issue int64, ev
 
 // ListGroupEpicLabelEvents retrieves resource label events for the specified
 // group and epic.
-// Will be removed in v5, use Work Items API instead
+// Deprecated: for removal in v5 of the API, use Work Items API instead
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/resource_label_events/#list-group-epic-label-events
-func (s *ResourceLabelEventsService) ListGroupEpicLabelEvents(gid any, epic int64, opt *ListLabelEventsOptions, options ...RequestOptionFunc) ([]*LabelEvent, *Response, error) {
+func (s *ResourceLabelEventsService) ListGroupEpicLabelEvents(gid interface{}, epic int, opt *ListLabelEventsOptions, options ...RequestOptionFunc) ([]*LabelEvent, *Response, error) {
 	group, err := parseID(gid)
 	if err != nil {
 		return nil, nil, err
@@ -160,11 +161,11 @@ func (s *ResourceLabelEventsService) ListGroupEpicLabelEvents(gid any, epic int6
 }
 
 // GetGroupEpicLabelEvent gets a single group epic label event.
-// Will be removed in v5, use Work Items API instead
+// Deprecated: for removal in v5 of the API, use Work Items API instead
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/resource_label_events/#get-single-epic-label-event
-func (s *ResourceLabelEventsService) GetGroupEpicLabelEvent(gid any, epic int64, event int64, options ...RequestOptionFunc) (*LabelEvent, *Response, error) {
+func (s *ResourceLabelEventsService) GetGroupEpicLabelEvent(gid interface{}, epic int, event int, options ...RequestOptionFunc) (*LabelEvent, *Response, error) {
 	group, err := parseID(gid)
 	if err != nil {
 		return nil, nil, err
@@ -190,7 +191,7 @@ func (s *ResourceLabelEventsService) GetGroupEpicLabelEvent(gid any, epic int64,
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/resource_label_events/#list-project-merge-request-label-events
-func (s *ResourceLabelEventsService) ListMergeRequestsLabelEvents(pid any, request int64, opt *ListLabelEventsOptions, options ...RequestOptionFunc) ([]*LabelEvent, *Response, error) {
+func (s *ResourceLabelEventsService) ListMergeRequestsLabelEvents(pid interface{}, request int, opt *ListLabelEventsOptions, options ...RequestOptionFunc) ([]*LabelEvent, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err
@@ -215,7 +216,7 @@ func (s *ResourceLabelEventsService) ListMergeRequestsLabelEvents(pid any, reque
 //
 // GitLab API docs:
 // https://docs.gitlab.com/api/resource_label_events/#get-single-merge-request-label-event
-func (s *ResourceLabelEventsService) GetMergeRequestLabelEvent(pid any, request int64, event int64, options ...RequestOptionFunc) (*LabelEvent, *Response, error) {
+func (s *ResourceLabelEventsService) GetMergeRequestLabelEvent(pid interface{}, request int, event int, options ...RequestOptionFunc) (*LabelEvent, *Response, error) {
 	project, err := parseID(pid)
 	if err != nil {
 		return nil, nil, err

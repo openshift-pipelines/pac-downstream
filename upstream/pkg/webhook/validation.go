@@ -7,7 +7,6 @@ import (
 
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	pac "github.com/openshift-pipelines/pipelines-as-code/pkg/generated/listers/pipelinesascode/v1alpha1"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
 	v1 "k8s.io/api/admission/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -18,7 +17,7 @@ import (
 
 var universalDeserializer = serializer.NewCodecFactory(runtime.NewScheme()).UniversalDeserializer()
 
-var allowedGitlabDisableCommentStrategyOnMr = sets.NewString("", provider.DisableAllCommentStrategy, provider.UpdateCommentStrategy)
+var allowedGitlabDisableCommentStrategyOnMr = sets.NewString("", "disable_all")
 
 // Path implements AdmissionController.
 func (ac *reconciler) Path() string {

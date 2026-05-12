@@ -253,13 +253,13 @@ func TestGetTaskFromAnnotationName(t *testing.T) {
 					"code": "200",
 				},
 			},
-			wantErr: "not found",
+			wantErr: "returning empty",
 		},
 		{
 			name:                   "test-good-coming-from-provider",
 			task:                   "http://provider/remote.task",
 			wantProviderRemoteTask: true,
-			wantErr:                "not found",
+			wantErr:                "returning empty",
 		},
 		{
 			name:                   "test-bad-coming-from-provider",
@@ -312,7 +312,7 @@ func TestGetTaskFromAnnotationName(t *testing.T) {
 					"code": "200",
 				},
 			},
-			wantErr: "remote task from URI http://remote.task has not been recognized as a Tekton task",
+			wantErr: "remote task from uri: http://remote.task has not been recognized as a tekton task",
 		},
 		{
 			name:        "test-annotations-inside-repo",
@@ -337,19 +337,19 @@ func TestGetTaskFromAnnotationName(t *testing.T) {
 			name:    "test-annotations-remote-no-event-not-found-no-error",
 			task:    "not/here",
 			wantLog: "could not find remote file not/here",
-			wantErr: "not found",
+			wantErr: "returning empty",
 		},
 		{
 			name:    "test-annotations-unknown-hub",
 			task:    "foo://bar",
 			wantLog: "custom catalog foo is not found",
-			wantErr: "remote task \"foo://bar\" not found",
+			wantErr: "could not get remote task \"foo://bar\": returning empty",
 		},
 		{
 			name:        "test-get-from-custom-hub",
 			gotTaskName: "task",
 			task:        "anotherHub://chmouzie",
-			wantLog:     "successfully fetched task chmouzie from custom catalog Hub anotherHub on URL https://mybelovedhub",
+			wantLog:     "successfully fetched task chmouzie from custom catalog HUB anotherHub on URL https://mybelovedhub",
 			remoteURLS: map[string]map[string]string{
 				testHubURL + "/resource/" + testCatalogHubName + "/task/chmouzie": {
 					"body": `{"data": {"LatestVersion": {"version": "0.1"}}}`,
@@ -546,7 +546,7 @@ func TestGetPipelineFromAnnotationName(t *testing.T) {
 		// 			"code": "200",
 		// 		},
 		// 	},
-		// 	wantErr: "remote pipeline from URI http://remote.pipeline with name pipeline-test1 cannot be validated:",
+		// 	wantErr: "remote pipeline from uri: http://remote.pipeline with name pipeline-test1 cannot be validated:",
 		// },
 		// {
 		// 	name: "invalid-remote-pipeline",
@@ -580,7 +580,7 @@ func TestGetPipelineFromAnnotationName(t *testing.T) {
 					"code": "200",
 				},
 			},
-			wantErr: "remote pipeline from URI http://remote.pipeline has not been recognized as a Tekton pipeline",
+			wantErr: "remote pipeline from uri: http://remote.pipeline has not been recognized as a tekton pipeline",
 		},
 		{
 			name:     "bad/could not get remote",
@@ -588,7 +588,7 @@ func TestGetPipelineFromAnnotationName(t *testing.T) {
 			wantErr:  "error getting remote pipeline",
 		},
 		{
-			name:     "bad/not found",
+			name:     "bad/returning empty",
 			pipeline: "http://remote.pipeline",
 			remoteURLS: map[string]map[string]string{
 				"http://remote.pipeline": {
@@ -596,19 +596,19 @@ func TestGetPipelineFromAnnotationName(t *testing.T) {
 					"code": "200",
 				},
 			},
-			wantErr: "not found",
+			wantErr: "returning empty",
 		},
 		{
 			name:     "test-annotations-unknown-hub",
 			pipeline: "foo://bar",
 			wantLog:  "custom catalog foo is not found",
-			wantErr:  "remote pipeline \"foo://bar\" not found",
+			wantErr:  "could not get remote pipeline \"foo://bar\": returning empty",
 		},
 		{
 			name:            "test-get-from-custom-hub",
 			gotPipelineName: "pipeline",
 			pipeline:        "anotherHub://chmouzie",
-			wantLog:         "successfully fetched pipeline chmouzie from custom catalog Hub anotherHub on URL https://mybelovedhub",
+			wantLog:         "successfully fetched pipeline chmouzie from custom catalog HUB anotherHub on URL https://mybelovedhub",
 			remoteURLS: map[string]map[string]string{
 				testHubURL + "/resource/" + testCatalogHubName + "/pipeline/chmouzie": {
 					"body": `{"data": {"LatestVersion": {"version": "0.1"}}}`,
