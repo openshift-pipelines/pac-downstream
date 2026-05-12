@@ -10,16 +10,16 @@ metadata:
     build.appstudio.redhat.com/target_branch: '{{target_branch}}'
     pipelinesascode.tekton.dev/max-keep-runs: "3"
     pipelinesascode.tekton.dev/on-cel-expression: event == "push" && target_branch
-      == "next" &&
+      == "nightly" &&
       ("upstream/***".pathChanged() || ".konflux/patches/***".pathChanged() || ".konflux/rpms/***".pathChanged() ||
-      ".konflux/dockerfiles/cli.Dockerfile".pathChanged() ||
-      ".tekton/pipelines-as-code-next-cli-push.yaml".pathChanged())
+      ".konflux/dockerfiles/watcher.Dockerfile".pathChanged() ||
+      ".tekton/pipelines-as-code-nightly-watcher-push.yaml".pathChanged())
   creationTimestamp: null
   labels:
-    appstudio.openshift.io/application: openshift-pipelines-core-next
-    appstudio.openshift.io/component: pipelines-as-code-next-cli
+    appstudio.openshift.io/application: openshift-pipelines-core-nightly
+    appstudio.openshift.io/component: pipelines-as-code-nightly-watcher
     pipelines.appstudio.openshift.io/type: build
-  name: pipelines-as-code-next-cli-on-push
+  name: pipelines-as-code-nightly-watcher-on-push
   namespace: tekton-ecosystem-tenant
 spec:
   params:
@@ -30,19 +30,19 @@ spec:
   - name: revision
     value: '{{revision}}'
   - name: output-image
-    value: quay.io/redhat-user-workloads/tekton-ecosystem-tenant/pipelines-pipelines-as-code-cli-rhel9:{{revision}}
+    value: quay.io/redhat-user-workloads/tekton-ecosystem-tenant/pipelines-pipelines-as-code-watcher-rhel9:{{revision}}
   - name: dockerfile
-    value: .konflux/dockerfiles/cli.Dockerfile
+    value: .konflux/dockerfiles/watcher.Dockerfile
   - name: additional-tags
     value:
-      - "next"
+      - "vlatest"
   - name: prefetch-input
     value: |
       {"type": "rpm", "path": ".konflux/rpms"}
   pipelineRef:
     name: docker-build-ta
   taskRunTemplate:
-    serviceAccountName: build-pipeline-pipelines-as-code-next-cli
+    serviceAccountName: build-pipeline-pipelines-as-code-nightly-watcher
   workspaces:
   - name: git-auth
     secret:
