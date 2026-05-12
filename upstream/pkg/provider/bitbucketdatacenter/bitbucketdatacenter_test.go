@@ -13,7 +13,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/clients"
@@ -22,14 +21,11 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
 	bbtest "github.com/openshift-pipelines/pipelines-as-code/pkg/provider/bitbucketdatacenter/test"
-	metricsutils "github.com/openshift-pipelines/pipelines-as-code/pkg/test/metricstest"
 
 	"github.com/jenkins-x/go-scm/scm"
 	"go.uber.org/zap"
 	zapobserver "go.uber.org/zap/zaptest/observer"
 	"gotest.tools/v3/assert"
-	"knative.dev/pkg/metrics/metricstest"
-	_ "knative.dev/pkg/metrics/testing"
 	rtesting "knative.dev/pkg/reconciler/testing"
 )
 
@@ -115,6 +111,7 @@ func TestCreateStatus(t *testing.T) {
 	tests := []struct {
 		name                  string
 		status                provider.StatusOpts
+		expectedDescSubstr    string
 		expectedCommentSubstr string
 		pacOpts               info.PacOpts
 		nilClient             bool
@@ -129,28 +126,26 @@ func TestCreateStatus(t *testing.T) {
 			name: "good/skipped",
 			status: provider.StatusOpts{
 				Conclusion: "skipped",
-				Text:       "Skipping",
 			},
-
-			pacOpts: pacopts,
+			expectedDescSubstr: "Skipping",
+			pacOpts:            pacopts,
 		},
 		{
 			name: "good/neutral",
 			status: provider.StatusOpts{
 				Conclusion: "neutral",
-				Text:       "stopped",
 			},
-
-			pacOpts: pacopts,
+			expectedDescSubstr: "stopped",
+			pacOpts:            pacopts,
 		},
 		{
 			name: "good/completed with comment",
 			status: provider.StatusOpts{
 				Conclusion: "success",
 				Status:     "completed",
-				Text:       "validated",
+				Text:       "Happy as a bunny",
 			},
-
+			expectedDescSubstr:    "validated",
 			expectedCommentSubstr: "Happy as a bunny",
 			pacOpts:               pacopts,
 		},
@@ -158,57 +153,42 @@ func TestCreateStatus(t *testing.T) {
 			name: "good/failed",
 			status: provider.StatusOpts{
 				Conclusion: "failure",
-				Text:       "Failed",
 			},
-
-			pacOpts: pacopts,
+			expectedDescSubstr: "Failed",
+			pacOpts:            pacopts,
 		},
 		{
 			name: "good/details url",
 			status: provider.StatusOpts{
 				Conclusion: "failure",
 				DetailsURL: "http://fail.com",
-				Text:       "Failed",
 			},
-
-			pacOpts: pacopts,
+			expectedDescSubstr: "Failed",
+			pacOpts:            pacopts,
 		},
 		{
 			name: "good/pending",
 			status: provider.StatusOpts{
 				Conclusion: "pending",
-				Text:       "started",
 			},
-
-			pacOpts: pacopts,
+			expectedDescSubstr: "started",
+			pacOpts:            pacopts,
 		},
 		{
 			name: "good/success",
 			status: provider.StatusOpts{
 				Conclusion: "success",
-				Text:       "validated",
 			},
-
-			pacOpts: pacopts,
+			expectedDescSubstr: "validated",
+			pacOpts:            pacopts,
 		},
 		{
 			name: "good/completed",
 			status: provider.StatusOpts{
 				Conclusion: "completed",
-				Text:       "Completed",
 			},
-
-			pacOpts: pacopts,
-		},
-		{
-			name: "good/pending",
-			status: provider.StatusOpts{
-				Conclusion: "pending",
-				Status:     "queued",
-				Text:       "Pending approval, waiting for an /ok-to-test",
-			},
-
-			pacOpts: pacopts,
+			expectedDescSubstr: "Completed",
+			pacOpts:            pacopts,
 		},
 	}
 	for _, tt := range tests {
@@ -230,7 +210,7 @@ func TestCreateStatus(t *testing.T) {
 				run:               &params.Run{},
 				pacInfo:           &tt.pacOpts,
 			}
-			bbtest.MuxCreateAndTestCommitStatus(t, mux, event, tt.status.Text, tt.status)
+			bbtest.MuxCreateAndTestCommitStatus(t, mux, event, tt.expectedDescSubstr, tt.status)
 			bbtest.MuxCreateComment(t, mux, event, tt.expectedCommentSubstr, pullRequestNumber)
 			err := v.CreateStatus(ctx, event, tt.status)
 			if tt.wantErrSubstr != "" {
@@ -409,53 +389,15 @@ func TestSetClient(t *testing.T) {
 }
 
 func TestGetCommitInfo(t *testing.T) {
-	authorDate := time.Date(2024, 1, 15, 10, 30, 0, 0, time.UTC)
-	committerDate := time.Date(2024, 1, 15, 10, 31, 0, 0, time.UTC)
-
 	tests := []struct {
-		name                string
-		event               *info.Event
-		commit              scm.Commit
-		defaultBranch       string
-		latestCommit        string
-		wantSHAMessage      string
-		wantAuthorName      string
-		wantAuthorEmail     string
-		wantCommitterName   string
-		wantCommitterEmail  string
-		checkExtendedFields bool
+		name          string
+		event         *info.Event
+		commit        scm.Commit
+		defaultBranch string
+		latestCommit  string
 	}{
 		{
-			name: "Test valid Commit with full info",
-			event: &info.Event{
-				Organization: "owner",
-				Repository:   "repo",
-				SHA:          "sha",
-			},
-			defaultBranch: "branchmain",
-			commit: scm.Commit{
-				Message: "feat: add new feature\n\nThis is the full commit message with details.",
-				Author: scm.Signature{
-					Name:  "John Doe",
-					Email: "john@example.com",
-					Date:  authorDate,
-				},
-				Committer: scm.Signature{
-					Name:  "Bitbucket",
-					Email: "noreply@bitbucket.com",
-					Date:  committerDate,
-				},
-			},
-			latestCommit:        "latestcommit",
-			wantSHAMessage:      "feat: add new feature\n\nThis is the full commit message with details.",
-			wantAuthorName:      "John Doe",
-			wantAuthorEmail:     "john@example.com",
-			wantCommitterName:   "Bitbucket",
-			wantCommitterEmail:  "noreply@bitbucket.com",
-			checkExtendedFields: true,
-		},
-		{
-			name: "Test valid Commit basic fields",
+			name: "Test valid Commit",
 			event: &info.Event{
 				Organization: "owner",
 				Repository:   "repo",
@@ -465,8 +407,7 @@ func TestGetCommitInfo(t *testing.T) {
 			commit: scm.Commit{
 				Message: "hello moto",
 			},
-			latestCommit:   "latestcommit",
-			wantSHAMessage: "hello moto",
+			latestCommit: "latestcommit",
 		},
 	}
 
@@ -474,44 +415,7 @@ func TestGetCommitInfo(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx, _ := rtesting.SetupFakeContext(t)
 			client, mux, tearDown, tURL := bbtest.SetupBBDataCenterClient()
-
-			// Custom mock for commit info to properly populate all fields
-			// Bitbucket Stash/Data Center API format
-			path := fmt.Sprintf("/projects/%s/repos/%s/commits/%s", tt.event.Organization, tt.event.Repository, tt.event.SHA)
-			mux.HandleFunc(path, func(rw http.ResponseWriter, _ *http.Request) {
-				type CommitPerson struct {
-					Name         string `json:"name"`
-					EmailAddress string `json:"emailAddress"`
-				}
-				response := struct {
-					Message            string       `json:"message"`
-					Author             CommitPerson `json:"author"`
-					Committer          CommitPerson `json:"committer"`
-					AuthorTimestamp    *int64       `json:"authorTimestamp,omitempty"`
-					CommitterTimestamp *int64       `json:"committerTimestamp,omitempty"`
-				}{
-					Message: tt.commit.Message,
-					Author: CommitPerson{
-						Name:         tt.commit.Author.Name,
-						EmailAddress: tt.commit.Author.Email,
-					},
-					Committer: CommitPerson{
-						Name:         tt.commit.Committer.Name,
-						EmailAddress: tt.commit.Committer.Email,
-					},
-				}
-				if !tt.commit.Author.Date.IsZero() {
-					timestamp := tt.commit.Author.Date.UnixMilli()
-					response.AuthorTimestamp = &timestamp
-				}
-				if !tt.commit.Committer.Date.IsZero() {
-					timestamp := tt.commit.Committer.Date.UnixMilli()
-					response.CommitterTimestamp = &timestamp
-				}
-				b, _ := json.Marshal(response)
-				fmt.Fprint(rw, string(b))
-			})
-
+			bbtest.MuxCommitInfo(t, mux, tt.event, tt.commit)
 			bbtest.MuxDefaultBranch(t, mux, tt.event, tt.defaultBranch, tt.latestCommit)
 			defer tearDown()
 			v := &Provider{client: client, baseURL: tURL, projectKey: tt.event.Organization}
@@ -519,17 +423,7 @@ func TestGetCommitInfo(t *testing.T) {
 			assert.NilError(t, err)
 			assert.Equal(t, tt.defaultBranch, tt.event.DefaultBranch)
 			assert.Equal(t, tt.latestCommit, v.defaultBranchLatestCommit)
-
-			// SHATitle is sanitized to first line only
-			expectedTitle := strings.Split(tt.commit.Message, "\n")[0]
-			assert.Equal(t, expectedTitle, tt.event.SHATitle)
-
-			// Verify new extended commit fields
-			assert.Equal(t, tt.wantSHAMessage, tt.event.SHAMessage, "SHAMessage should match")
-
-			// Note: go-scm's stash driver currently doesn't populate Author/Committer fields
-			// from the Bitbucket Data Center API, so we can't test those fields here.
-			// The implementation code is present for when/if go-scm adds support for these fields.
+			assert.Equal(t, tt.commit.Message, tt.event.SHATitle)
 		})
 	}
 }
@@ -799,7 +693,6 @@ func TestGetFiles(t *testing.T) {
 			ctx, _ := rtesting.SetupFakeContext(t)
 			client, mux, tearDown, tURL := bbtest.SetupBBDataCenterClient()
 			defer tearDown()
-			metricsutils.ResetMetrics()
 
 			stats := &bbtest.DiffStats{
 				Values: tt.changeFiles,
@@ -825,17 +718,13 @@ func TestGetFiles(t *testing.T) {
 					}
 				})
 			}
-
-			metricsTags := map[string]string{"provider": "bitbucket-datacenter", "event-type": string(tt.event.TriggerTarget)}
-			metricstest.CheckStatsNotReported(t, "pipelines_as_code_git_provider_api_request_count")
-
-			v := &Provider{client: client, baseURL: tURL, triggerEvent: string(tt.event.TriggerTarget)}
+			v := &Provider{client: client, baseURL: tURL}
 			changedFiles, err := v.GetFiles(ctx, tt.event)
 			if tt.wantError {
 				assert.Equal(t, err.Error(), tt.errMsg)
-			} else {
-				assert.NilError(t, err, nil)
+				return
 			}
+			assert.NilError(t, err, nil)
 			assert.Equal(t, tt.wantAddedFilesCount, len(changedFiles.Added))
 			assert.Equal(t, tt.wantDeletedFilesCount, len(changedFiles.Deleted))
 			assert.Equal(t, tt.wantModifiedFilesCount, len(changedFiles.Modified))
@@ -851,17 +740,6 @@ func TestGetFiles(t *testing.T) {
 				for i := range changedFiles.All {
 					assert.Equal(t, tt.changeFiles[i].Path.ToString, changedFiles.All[i])
 				}
-			}
-
-			// Check caching
-			metricstest.CheckCountData(t, "pipelines_as_code_git_provider_api_request_count", metricsTags, 1)
-			_, _ = v.GetFiles(ctx, tt.event)
-			if tt.wantError {
-				// No caching on error
-				metricstest.CheckCountData(t, "pipelines_as_code_git_provider_api_request_count", metricsTags, 2)
-			} else {
-				// Cache API results on success
-				metricstest.CheckCountData(t, "pipelines_as_code_git_provider_api_request_count", metricsTags, 1)
 			}
 		})
 	}

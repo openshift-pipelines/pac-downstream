@@ -4,11 +4,10 @@ package test
 
 import (
 	"context"
-	"fmt"
 	"testing"
 	"time"
 
-	"github.com/google/go-github/v81/github"
+	ghlib "github.com/google/go-github/v71/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	tgithub "github.com/openshift-pipelines/pipelines-as-code/test/pkg/github"
 	twait "github.com/openshift-pipelines/pipelines-as-code/test/pkg/wait"
@@ -17,19 +16,18 @@ import (
 	"knative.dev/pkg/apis"
 )
 
-func TestGithubGHEMaxKeepRuns(t *testing.T) {
+func TestGithubMaxKeepRuns(t *testing.T) {
 	ctx := context.Background()
 	g := &tgithub.PRTest{
 		Label:     "Github MaxKeepRun config",
 		YamlFiles: []string{"testdata/pipelinerun-max-keep-run-1.yaml"},
-		GHE:       true,
 	}
 	g.RunPullRequest(ctx, t)
 	defer g.TearDown(ctx, t)
 
-	g.Cnx.Clients.Log.Infof("Creating /test in PullRequest to create a second run")
+	g.Cnx.Clients.Log.Infof("Creating /retest in PullRequest")
 	_, _, err := g.Provider.Client().Issues.CreateComment(ctx, g.Options.Organization, g.Options.Repo, g.PRNumber,
-		&github.IssueComment{Body: github.Ptr("/test")})
+		&ghlib.IssueComment{Body: ghlib.Ptr("/retest")})
 	assert.NilError(t, err)
 
 	g.Cnx.Clients.Log.Infof("Wait for the second repository update to be updated")
@@ -45,9 +43,7 @@ func TestGithubGHEMaxKeepRuns(t *testing.T) {
 
 	count := 0
 	for {
-		prs, err := g.Cnx.Clients.Tekton.TektonV1().PipelineRuns(g.TargetNamespace).List(ctx, metav1.ListOptions{
-			LabelSelector: fmt.Sprintf("%s=%s", keys.SHA, g.SHA),
-		})
+		prs, err := g.Cnx.Clients.Tekton.TektonV1().PipelineRuns(g.TargetNamespace).List(ctx, metav1.ListOptions{})
 		if err == nil && len(prs.Items) == 1 {
 			if prs.Items[0].GetStatusCondition().GetCondition(apis.ConditionSucceeded).GetReason() == "Running" {
 				t.Logf("skipping %s since currently running", prs.Items[0].GetName())

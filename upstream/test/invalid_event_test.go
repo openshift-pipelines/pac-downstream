@@ -10,11 +10,11 @@ import (
 	"os"
 	"testing"
 
-	"github.com/google/go-github/v81/github"
+	"github.com/google/go-github/v71/github"
 	"gotest.tools/v3/assert"
 )
 
-func TestOthersUnsupportedEvent(t *testing.T) {
+func TestUnsupportedEvent(t *testing.T) {
 	ctx := context.TODO()
 
 	event := github.ReleaseEvent{}
@@ -48,7 +48,7 @@ func TestOthersUnsupportedEvent(t *testing.T) {
 	assert.Equal(t, resp.StatusCode, http.StatusOK, "%s reply expected 200 OK", elURL)
 }
 
-func TestOthersSkippedEvent(t *testing.T) {
+func TestSkippedEvent(t *testing.T) {
 	ctx := context.TODO()
 
 	event := github.PullRequestEvent{
@@ -84,7 +84,7 @@ func TestOthersSkippedEvent(t *testing.T) {
 	assert.Assert(t, resp.StatusCode >= 200 && resp.StatusCode < 300, "%s reply expected 2xx OK: %d", elURL, resp.StatusCode)
 }
 
-func TestOthersGETCall(t *testing.T) {
+func TestGETCall(t *testing.T) {
 	ctx := context.TODO()
 
 	elURL := os.Getenv("TEST_EL_URL")

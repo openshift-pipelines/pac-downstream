@@ -10,7 +10,6 @@ type E2E struct {
 	Concurrency        int
 	UserName           string
 	Password           string
-	LightweightTag     bool
 	Settings           v1alpha1.Settings
 }
 

@@ -11,8 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/go-github/v81/github"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
+	"github.com/google/go-github/v71/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/random"
 	tgithub "github.com/openshift-pipelines/pipelines-as-code/test/pkg/github"
@@ -25,9 +24,9 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// TestGithubGHEPullRequestConcurrencyMultiplePR concurrency for the same Repository over multiples PR including a /retest
+// TestGithubSecondPullRequestConcurrencyMultiplePR concurrency for the same Repository over multiples PR including a /retest
 // and a max-keep-run, may be a bit slow (180s at least) but it's worth it.
-func TestGithubGHEPullRequestConcurrencyMultiplePR(t *testing.T) {
+func TestGithubSecondPullRequestConcurrencyMultiplePR(t *testing.T) {
 	ctx := context.Background()
 	label := "Github Multiple PullRequest Concurrency-1 MaxKeepRun-1 Multiple"
 	numberOfPullRequest := 3
@@ -106,18 +105,10 @@ func TestGithubGHEPullRequestConcurrencyMultiplePR(t *testing.T) {
 		}
 	}
 
-	shas := make([]string, 0, len(allPullRequests))
-	for _, pr := range allPullRequests {
-		shas = append(shas, pr.SHA)
-	}
-	labelSelector := fmt.Sprintf("%s in (%s)", keys.SHA, strings.Join(shas, ","))
-
 	finished := false
 	for i := 0; i < loopMax; i++ {
 		unsuccessful := 0
-		prs, err := runcnx.Clients.Tekton.TektonV1().PipelineRuns(targetNS).List(ctx, metav1.ListOptions{
-			LabelSelector: labelSelector,
-		})
+		prs, err := runcnx.Clients.Tekton.TektonV1().PipelineRuns(targetNS).List(ctx, metav1.ListOptions{})
 		assert.NilError(t, err)
 		for _, pr := range prs.Items {
 			if pr.Status.GetConditions() == nil {
@@ -147,9 +138,7 @@ func TestGithubGHEPullRequestConcurrencyMultiplePR(t *testing.T) {
 	success := false
 	allPipelineRunsNamesAndStatus := []string{}
 	for i := range maxWaitLoopRun {
-		prs, err := runcnx.Clients.Tekton.TektonV1().PipelineRuns(targetNS).List(ctx, metav1.ListOptions{
-			LabelSelector: labelSelector,
-		})
+		prs, err := runcnx.Clients.Tekton.TektonV1().PipelineRuns(targetNS).List(ctx, metav1.ListOptions{})
 		assert.NilError(t, err)
 		for _, pr := range prs.Items {
 			allPipelineRunsNamesAndStatus = append(allPipelineRunsNamesAndStatus, fmt.Sprintf("%s %s", pr.Name, pr.Status.GetConditions()))

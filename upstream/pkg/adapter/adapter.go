@@ -3,7 +3,6 @@ package adapter
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -16,7 +15,7 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/kubeinteraction"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/versiondata"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/version"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/bitbucketcloud"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/bitbucketdatacenter"
@@ -83,7 +82,7 @@ func (l *listener) Start(ctx context.Context) error {
 	// Start pac config syncer
 	go params.StartConfigSync(ctx, l.run)
 
-	l.logger.Infof("Starting Pipelines as Code version: %s", strings.TrimSpace(versiondata.Version))
+	l.logger.Infof("Starting Pipelines as Code version: %s", strings.TrimSpace(version.Version))
 	mux := http.NewServeMux()
 
 	// for handling probes
@@ -172,9 +171,6 @@ func (l listener) handleEvent(ctx context.Context) http.HandlerFunc {
 
 		isIncoming, targettedRepo, err := l.detectIncoming(ctx, request, payload)
 		if err != nil {
-			if errors.Is(err, errMissingFields) {
-				l.writeResponse(response, http.StatusBadRequest, err.Error())
-			}
 			l.logger.Errorf("error processing incoming webhook: %v", err)
 			return
 		}

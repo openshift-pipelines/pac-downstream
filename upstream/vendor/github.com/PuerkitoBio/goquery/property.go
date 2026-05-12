@@ -167,7 +167,7 @@ func (s *Selection) RemoveClass(class ...string) *Selection {
 		} else {
 			classes, attr := getClassesAndAttr(n, true)
 			for _, rcl := range rclasses {
-				classes = strings.ReplaceAll(classes, " "+rcl+" ", " ")
+				classes = strings.Replace(classes, " "+rcl+" ", " ", -1)
 			}
 
 			setClasses(n, attr, classes)
@@ -191,9 +191,8 @@ func (s *Selection) ToggleClass(class ...string) *Selection {
 	for _, n := range s.Nodes {
 		classes, attr := getClassesAndAttr(n, true)
 		for _, tcl := range tcls {
-			spaceAroundTcl := " " + tcl + " "
-			if strings.Contains(classes, spaceAroundTcl) {
-				classes = strings.ReplaceAll(classes, spaceAroundTcl, " ")
+			if strings.Contains(classes, " "+tcl+" ") {
+				classes = strings.Replace(classes, " "+tcl+" ", " ", -1)
 			} else {
 				classes += tcl + " "
 			}

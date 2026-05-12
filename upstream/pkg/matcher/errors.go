@@ -38,7 +38,7 @@ func checkIfCELEvaluateError(err error) bool {
 	return false
 }
 
-func reportCELValidationErrors(ctx context.Context, repo *apipac.Repository, validationErrors []*pacerrors.PacYamlValidations, eventEmitter *events.EventEmitter, vcx provider.Interface, event *info.Event, prefix string) {
+func reportCELValidationErrors(ctx context.Context, repo *apipac.Repository, validationErrors []*pacerrors.PacYamlValidations, eventEmitter *events.EventEmitter, vcx provider.Interface, event *info.Event) {
 	errorRows := make([]string, 0, len(validationErrors))
 	for _, err := range validationErrors {
 		errorRows = append(errorRows, fmt.Sprintf("| %s | `%s` |", err.Name, err.Err.Error()))
@@ -46,22 +46,9 @@ func reportCELValidationErrors(ctx context.Context, repo *apipac.Repository, val
 	if len(errorRows) == 0 {
 		return
 	}
-
-	var err error
-
-	// The prefix is used for a single comment "update" strategy where the same comment is updated
-	// with the celValidationError and the PipelineRun status for any subsequent or prior "runs".
-	if prefix != "" {
-		markdownErrMessage := fmt.Sprintf(`%s
-%s
-%s`, prefix, provider.ValidationErrorTemplate, strings.Join(errorRows, "\n"))
-		err = vcx.CreateComment(ctx, event, markdownErrMessage, prefix)
-	} else {
-		markdownErrMessage := fmt.Sprintf(`%s
+	markdownErrMessage := fmt.Sprintf(`%s
 %s`, provider.ValidationErrorTemplate, strings.Join(errorRows, "\n"))
-		err = vcx.CreateComment(ctx, event, markdownErrMessage, provider.ValidationErrorTemplate)
-	}
-	if err != nil {
+	if err := vcx.CreateComment(ctx, event, markdownErrMessage, provider.ValidationErrorTemplate); err != nil {
 		eventEmitter.EmitMessage(repo, zap.ErrorLevel, "PipelineRunCommentCreationError",
 			fmt.Sprintf("failed to create comment: %s", err.Error()))
 	}

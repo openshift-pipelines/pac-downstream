@@ -303,7 +303,7 @@ func (f *FunctionDecl) OverloadDecls() []*OverloadDecl {
 	return overloads
 }
 
-// HasLateBinding returns true if the function has late bindings. A function cannot mix late bindings with other bindings.
+// Returns true if the function has late bindings. A function cannot mix late bindings with other bindings.
 func (f *FunctionDecl) HasLateBinding() bool {
 	if f == nil {
 		return false

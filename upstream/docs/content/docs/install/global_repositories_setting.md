@@ -100,8 +100,7 @@ means a repository configured using [GitHub webhooks]({{< relref "/docs/install/
 
 - github
 - gitlab
-- forgejo
-- gitea (alias for forgejo, kept for backwards compatibility)
+- gitea
 - bitbucket-cloud
 - bitbucket-datacenter
 

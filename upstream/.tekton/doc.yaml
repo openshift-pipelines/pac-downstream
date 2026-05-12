@@ -58,7 +58,7 @@ spec:
                   value: $(workspaces.source.path)
 
             - name: hugo-gen
-              image: docker.io/golang:1.25
+              image: golang:1.23
               workingDir: $(workspaces.source.path)
               env:
                 - name: UPLOADER_PUBLIC_URL
@@ -82,7 +82,7 @@ spec:
                 echo "Preview URL: ${url}"
             - name: upload-to-static-server
               # it has curl and we already pulled it
-              image: docker.io/curlimages/curl
+              image: curlimages/curl
               workingDir: $(workspaces.source.path)
               env:
                 - name: HUB_TOKEN
