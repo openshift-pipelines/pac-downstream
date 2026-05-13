@@ -32,7 +32,7 @@ LABEL \
     maintainer="pipelines-extcomm@redhat.com" \
     name="openshift-pipelines/pipelines-pipelines-as-code-webhook-rhel9" \
     summary="Red Hat OpenShift Pipelines pipelines-as-code webhook" \
-    version="vlatest"
+    version="latest"
 
 RUN groupadd -r -g 65532 nonroot && \
     useradd --no-log-init -r -u 65532 -g nonroot nonroot
