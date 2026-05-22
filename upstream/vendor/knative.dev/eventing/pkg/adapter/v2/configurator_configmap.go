@@ -18,19 +18,24 @@ package adapter
 
 import (
 	"context"
+	"fmt"
+	"net/http"
 	"os"
 
-	"go.opentelemetry.io/otel/metric"
-	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 	"knative.dev/pkg/logging"
 	"knative.dev/pkg/logging/logkey"
-	k8sruntime "knative.dev/pkg/observability/runtime/k8s"
+	"knative.dev/pkg/metrics"
+	"knative.dev/pkg/profiling"
+	"knative.dev/pkg/tracing"
+	tracingconfig "knative.dev/pkg/tracing/config"
 
 	"knative.dev/eventing/pkg/adapter/v2/util/crstatusevent"
-	"knative.dev/eventing/pkg/observability"
-	o11yconfigmap "knative.dev/eventing/pkg/observability/configmap"
-	"knative.dev/eventing/pkg/observability/otel"
+)
+
+const (
+	defaultMetricsPort   = 9092
+	defaultMetricsDomain = "knative.dev/eventing"
 )
 
 // loggerConfiguratorFromConfigMap dynamically
@@ -117,46 +122,128 @@ func SetupLoggerFromConfig(config *logging.Config, component string) (*zap.Sugar
 	return l, level
 }
 
-type observabilityConfiguratorFromConfigMap struct {
+// metricsExporterConfiguratorFromConfigMap dynamically configures
+// a metrics exporter using a watcher on a Configmap.
+type metricsExporterConfiguratorFromConfigMap struct {
+	component     string
 	configMapName string
+	metricsDomain string
+	metricsPort   int
 }
 
-type ObservabilityConfiguratorFromConfigMapOption func(*observabilityConfiguratorFromConfigMap)
+// MetricsExporterConfiguratorFromConfigMapOption for teawking the metrics exporter configurator.
+type MetricsExporterConfiguratorFromConfigMapOption func(*metricsExporterConfiguratorFromConfigMap)
 
-func WithObservabilityConfiguratorConfigMapName(name string) ObservabilityConfiguratorFromConfigMapOption {
-	return func(ocfcm *observabilityConfiguratorFromConfigMap) {
-		ocfcm.configMapName = name
+// WithMetricsExporterConfiguratorConfigMapName sets the ConfigMap name for the metrics exporter configuration.
+func WithMetricsExporterConfiguratorConfigMapName(name string) MetricsExporterConfiguratorFromConfigMapOption {
+	return func(c *metricsExporterConfiguratorFromConfigMap) {
+		c.configMapName = name
 	}
 }
 
-func NewObservabilityConfiguratorFromConfigMap(opts ...ObservabilityConfiguratorFromConfigMapOption) ObservabilityConfigurator {
-	o := &observabilityConfiguratorFromConfigMap{
-		configMapName: o11yconfigmap.Name(),
+// WithMetricsExporterConfiguratorMetricsDomain sets the metrics domain for the metrics exporter configuration.
+func WithMetricsExporterConfiguratorMetricsDomain(domain string) MetricsExporterConfiguratorFromConfigMapOption {
+	return func(c *metricsExporterConfiguratorFromConfigMap) {
+		c.metricsDomain = domain
+	}
+}
+
+// WithMetricsExporterConfiguratorMetricsPort sets the metrics exporter port for the metrics exporter configuration.
+func WithMetricsExporterConfiguratorMetricsPort(port int) MetricsExporterConfiguratorFromConfigMapOption {
+	return func(c *metricsExporterConfiguratorFromConfigMap) {
+		c.metricsPort = port
+	}
+}
+
+// NewMetricsExporterConfiguratorFromConfigMap returns a ConfigMap based metrics exporter configurator.
+func NewMetricsExporterConfiguratorFromConfigMap(component string, opts ...MetricsExporterConfiguratorFromConfigMapOption) MetricsExporterConfigurator {
+	c := &metricsExporterConfiguratorFromConfigMap{
+		component:     component,
+		configMapName: metrics.ConfigMapName(),
+		metricsPort:   defaultMetricsPort,
+	}
+
+	// metricDomainDefaulter is an AdapterDynamicconfig option that
+	// retrieves the adater's metric domain by looking at the
+	// environments metrics.DomainEnv variable first,
+	// then to the component's hardcoded default metrics domain,
+	// and if not present to the eventing default metrics domain.
+	if os.Getenv(metrics.DomainEnv) != "" {
+		c.metricsDomain = os.Getenv(metrics.DomainEnv)
+	} else {
+		c.metricsDomain = defaultMetricsDomain
 	}
 
 	for _, opt := range opts {
-		opt(o)
+		opt(c)
 	}
 
-	return o
+	return c
 }
 
-func (o *observabilityConfiguratorFromConfigMap) SetupObservabilityOrDie(ctx context.Context, component string, logger *zap.SugaredLogger, pprof *k8sruntime.ProfilingServer) (metric.MeterProvider, trace.TracerProvider) {
-	ocm, err := GetConfigMapByPolling(ctx, o.configMapName)
+// SetupMetricsExporter based on the component's ConfigMap.
+// A Watcher is set to update the configuration dynamically.
+func (c *metricsExporterConfiguratorFromConfigMap) SetupMetricsExporter(ctx context.Context) {
+	logger := logging.FromContext(ctx)
+
+	// Configure watcher to update metrics from ConfigMap.
+	updateMetricsFunc, err := metrics.UpdateExporterFromConfigMapWithOpts(ctx, metrics.ExporterOptions{
+		Domain:         c.metricsDomain,
+		Component:      c.component,
+		PrometheusPort: c.metricsPort,
+		Secrets:        SecretFetcher(ctx),
+	}, logger)
 	if err != nil {
-		logger.Panicw("observability ConfigMap "+o.configMapName+" could not be retrieved", zap.Error(err))
+		logger.Fatal("Failed to create metrics exporter update function", zap.Error(err))
 	}
 
-	cfg, err := o11yconfigmap.Parse(ocm)
-	if err != nil {
-		logger.Panicw("failed to parse config from configmap", zap.Error(err))
+	logger.Infof("Adding Watcher on ConfigMap %s for metrics", c.configMapName)
+	ConfigWatcherFromContext(ctx).Watch(c.configMapName, updateMetricsFunc)
+}
+
+// tracingConfiguratorFromConfigMap dynamically
+// configures tracing using a watcher on a Configmap.
+type tracingConfiguratorFromConfigMap struct {
+	configMapName string
+}
+
+// TracingConfiguratorFromConfigMapOption for teawking the tracing configurator.
+type TracingConfiguratorFromConfigMapOption func(*tracingConfiguratorFromConfigMap)
+
+// WithTracingConfiguratorConfigMapName sets the ConfigMap name for the tracing configuration.
+func WithTracingConfiguratorConfigMapName(name string) TracingConfiguratorFromConfigMapOption {
+	return func(c *tracingConfiguratorFromConfigMap) {
+		c.configMapName = name
+	}
+}
+
+// NewTracingConfiguratorFromConfigMap returns a ConfigMap based tracing configurator.
+func NewTracingConfiguratorFromConfigMap(opts ...TracingConfiguratorFromConfigMapOption) TracingConfigurator {
+	c := &tracingConfiguratorFromConfigMap{
+		configMapName: tracingconfig.ConfigName,
 	}
 
-	cfg = observability.MergeWithDefaults(cfg)
+	for _, opt := range opts {
+		opt(c)
+	}
 
-	ctx = observability.WithConfig(ctx, cfg)
+	return c
+}
 
-	return otel.SetupObservabilityOrDie(ctx, component, logger, pprof)
+// SetupTracing based on the component's ConfigMap.
+// A Watcher is set to update the configuration dynamically.
+func (c *tracingConfiguratorFromConfigMap) SetupTracing(ctx context.Context, cfg *TracingConfiguration) tracing.Tracer {
+	logger := logging.FromContext(ctx)
+
+	cmw := ConfigWatcherFromContext(ctx)
+	service := fmt.Sprintf("%s.%s", cfg.InstanceName, NamespaceFromContext(ctx))
+
+	logger.Infof("Adding Watcher on ConfigMap %s for tracing", c.configMapName)
+	tracer, err := tracing.SetupPublishingWithDynamicConfig(logger, cmw, service, c.configMapName)
+	if err != nil {
+		logger.Errorw("Error setting up trace publishing. Tracing configuration will be ignored.", zap.Error(err))
+	}
+	return tracer
 }
 
 // cloudEventsStatusReporterConfiguratorFromConfigMap dynamically configures
@@ -181,7 +268,7 @@ func WithCloudEventsStatusReporterConfiguratorConfigMapName(name string) CloudEv
 // status reporter configurator.
 func NewCloudEventsReporterConfiguratorFromConfigMap(opts ...CloudEventsStatusReporterConfiguratorFromConfigMapOption) CloudEventsStatusReporterConfigurator {
 	c := &cloudEventsStatusReporterConfiguratorFromConfigMap{
-		configMapName: o11yconfigmap.Name(),
+		configMapName: metrics.ConfigMapName(),
 	}
 
 	for _, opt := range opts {
@@ -202,15 +289,75 @@ func (c *cloudEventsStatusReporterConfiguratorFromConfigMap) CreateCloudEventsSt
 		logger.Errorw("observability ConfigMap "+c.configMapName+" could not be retrieved", zap.Error(err))
 	}
 
-	cfg, err := o11yconfigmap.Parse(ocm)
-	if err != nil {
-		logger.Errorw("observability config could not be parsed from ConfigMap, falling back to default (noop) config", zap.Error(err))
-		cfg = observability.DefaultConfig()
+	var crStatusConfig map[string]string
+	if ocm != nil {
+		crStatusConfig = ocm.Data
 	}
-	r := crstatusevent.NewCRStatusEventClient(cfg)
+	r := crstatusevent.NewCRStatusEventClient(crStatusConfig)
 
 	logger.Infof("Adding Watcher on ConfigMap %s for CE client status reporter", c.configMapName)
 	ConfigWatcherFromContext(ctx).Watch(c.configMapName, crstatusevent.UpdateFromConfigMap(r))
 
 	return r
+}
+
+// profilerConfiguratorFromConfigMap dynamically configures
+// the profiler using a watcher on a Configmap.
+type profilerConfiguratorFromConfigMap struct {
+	configMapName string
+}
+
+// ProfilerConfiguratorFromConfigMapOption for teawking the profiler configurator.
+type ProfilerConfiguratorFromConfigMapOption func(*profilerConfiguratorFromConfigMap)
+
+// WithProfilerConfiguratorConfigMapName sets the ConfigMap name for the profiler configuration.
+func WithProfilerConfiguratorConfigMapName(name string) ProfilerConfiguratorFromConfigMapOption {
+	return func(c *profilerConfiguratorFromConfigMap) {
+		c.configMapName = name
+	}
+}
+
+// NewProfilerConfiguratorFromConfigMap returns a ConfigMap based profiler configurator.
+func NewProfilerConfiguratorFromConfigMap(opts ...ProfilerConfiguratorFromConfigMapOption) ProfilerConfigurator {
+	c := &profilerConfiguratorFromConfigMap{
+		configMapName: metrics.ConfigMapName(),
+	}
+
+	for _, opt := range opts {
+		opt(c)
+	}
+
+	return c
+}
+
+// CreateProfilingServer creates and return a profiling server that can be enabled or disabled
+// depending on the ConfigMap configuration. The server is created either case.
+// A Watcher is set to update the configuration dynamically.
+func (c *profilerConfiguratorFromConfigMap) CreateProfilingServer(ctx context.Context) *http.Server {
+	logger := logging.FromContext(ctx)
+
+	// Configure watcher to update profiler from ConfigMap.
+	enabled := false
+
+	ocm, err := GetConfigMapByPolling(ctx, c.configMapName)
+	switch {
+	case err != nil:
+		logger.Errorw("observability ConfigMap "+c.configMapName+" could not be retrieved", zap.Error(err))
+	case ocm == nil:
+		logger.Warn("profiler configuration not found, falling back to disabling profiler requests")
+	default:
+		if enabled, err = profiling.ReadProfilingFlag(ocm.Data); err != nil {
+			logger.Errorw("wrong profiler configuration")
+		}
+	}
+
+	// Setup profiler even if it is disabled at the handler. Users
+	// might activate it through the ConfigMap.
+	profilingHandler := profiling.NewHandler(logger, enabled)
+	profilingServer := profiling.NewServer(profilingHandler)
+
+	logger.Infof("Adding Watcher on ConfigMap %s for profiler", c.configMapName)
+	ConfigWatcherFromContext(ctx).Watch(c.configMapName, profilingHandler.UpdateFromConfigMap)
+
+	return profilingServer
 }

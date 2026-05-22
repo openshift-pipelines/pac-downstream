@@ -17,6 +17,8 @@
 package gitlab
 
 import (
+	"fmt"
+	"net/http"
 	"time"
 )
 
@@ -83,11 +85,24 @@ type ListIterationEventsOptions struct {
 // GitLab API docs:
 // https://docs.gitlab.com/api/resource_iteration_events/#list-project-issue-iteration-events
 func (s *ResourceIterationEventsService) ListIssueIterationEvents(pid any, issue int64, opt *ListIterationEventsOptions, options ...RequestOptionFunc) ([]*IterationEvent, *Response, error) {
-	return do[[]*IterationEvent](s.client,
-		withPath("projects/%s/issues/%d/resource_iteration_events", ProjectID{pid}, issue),
-		withAPIOpts(opt),
-		withRequestOpts(options...),
-	)
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, nil, err
+	}
+	u := fmt.Sprintf("projects/%s/issues/%d/resource_iteration_events", PathEscape(project), issue)
+
+	req, err := s.client.NewRequest(http.MethodGet, u, opt, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var ies []*IterationEvent
+	resp, err := s.client.Do(req, &ies)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return ies, resp, nil
 }
 
 // GetIssueIterationEvent gets a single issue iteration event.
@@ -95,8 +110,22 @@ func (s *ResourceIterationEventsService) ListIssueIterationEvents(pid any, issue
 // GitLab API docs:
 // https://docs.gitlab.com/api/resource_iteration_events/#get-single-issue-iteration-event
 func (s *ResourceIterationEventsService) GetIssueIterationEvent(pid any, issue int64, event int64, options ...RequestOptionFunc) (*IterationEvent, *Response, error) {
-	return do[*IterationEvent](s.client,
-		withPath("projects/%s/issues/%d/resource_iteration_events/%d", ProjectID{pid}, issue, event),
-		withRequestOpts(options...),
-	)
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, nil, err
+	}
+	u := fmt.Sprintf("projects/%s/issues/%d/resource_iteration_events/%d", PathEscape(project), issue, event)
+
+	req, err := s.client.NewRequest(http.MethodGet, u, nil, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	ie := new(IterationEvent)
+	resp, err := s.client.Do(req, ie)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return ie, resp, nil
 }

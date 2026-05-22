@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/go-github/v84/github"
+	"github.com/google/go-github/v81/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/test/pkg/cctx"
 	tgithub "github.com/openshift-pipelines/pipelines-as-code/test/pkg/github"
@@ -44,7 +44,7 @@ func verifySkipCI(ctx context.Context, t *testing.T, g *tgithub.PRTest, eventTyp
 	}
 	numLines := int64(1000)
 	skipLogRegex := regexp.MustCompile(fmt.Sprintf("CI skipped for %s event.*contains skip command in message", eventType))
-	err = twait.RegexpMatchingInControllerLog(ctx, g.Cnx, *skipLogRegex, 10, controllerName, &numLines, nil)
+	err = twait.RegexpMatchingInControllerLog(ctx, g.Cnx, *skipLogRegex, 10, controllerName, &numLines)
 	assert.NilError(t, err, "Expected controller logs to mention CI skip due to skip command")
 
 	g.Cnx.Clients.Log.Infof("✓ Verified controller logs mention skip command detection")
@@ -115,7 +115,7 @@ func TestGithubGHESkipCITestCommand(t *testing.T) {
 	// Verify controller logs mention skip command detection
 	numLines := int64(1000)
 	skipLogRegex := regexp.MustCompile("CI skipped for pull request event.*contains skip command in message")
-	err = twait.RegexpMatchingInControllerLog(ctx, g.Cnx, *skipLogRegex, 10, "ghe-controller", &numLines, nil)
+	err = twait.RegexpMatchingInControllerLog(ctx, g.Cnx, *skipLogRegex, 10, "ghe-controller", &numLines)
 	assert.NilError(t, err, "Expected controller logs to mention CI skip due to skip command")
 
 	g.Cnx.Clients.Log.Infof("✓ Verified controller logs mention skip command detection")

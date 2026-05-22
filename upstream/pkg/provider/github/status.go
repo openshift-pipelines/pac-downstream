@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/go-github/v84/github"
+	"github.com/google/go-github/v81/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/action"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/kubeinteraction"
@@ -17,7 +17,6 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
-	providerstatus "github.com/openshift-pipelines/pipelines-as-code/pkg/provider/status"
 	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 	"go.uber.org/zap"
 )
@@ -42,7 +41,7 @@ const taskStatusTemplate = `
 {{- end }}
 </table>`
 
-func (v *Provider) getExistingCheckRunID(ctx context.Context, runevent *info.Event, status providerstatus.StatusOpts) (*int64, error) {
+func (v *Provider) getExistingCheckRunID(ctx context.Context, runevent *info.Event, status provider.StatusOpts) (*int64, error) {
 	opt := github.ListOptions{PerPage: v.PaginedNumber}
 	for {
 		res, resp, err := wrapAPI(v, "list_check_runs_for_ref", func() (*github.ListCheckRunsResults, *github.Response, error) {
@@ -111,7 +110,7 @@ func (v *Provider) canIUseCheckrunID(checkrunid *int64) bool {
 	return false
 }
 
-func (v *Provider) createCheckRunStatus(ctx context.Context, runevent *info.Event, status providerstatus.StatusOpts) (*int64, error) {
+func (v *Provider) createCheckRunStatus(ctx context.Context, runevent *info.Event, status provider.StatusOpts) (*int64, error) {
 	now := github.Timestamp{Time: time.Now()}
 	checkrunoption := github.CreateCheckRunOptions{
 		Name:    provider.GetCheckName(status, v.pacInfo),
@@ -128,7 +127,7 @@ func (v *Provider) createCheckRunStatus(ctx context.Context, runevent *info.Even
 	}
 
 	if status.Status != "in_progress" && status.Status != "queued" {
-		checkrunoption.Conclusion = github.Ptr(string(status.Conclusion))
+		checkrunoption.Conclusion = github.Ptr(status.Conclusion)
 	}
 
 	checkRun, _, err := wrapAPI(v, "create_check_run", func() (*github.CheckRun, *github.Response, error) {
@@ -207,7 +206,7 @@ func (v *Provider) getFailuresMessageAsAnnotations(ctx context.Context, pr *tekt
 
 // getOrUpdateCheckRunStatus create a status via the checkRun API, which is only
 // available with GitHub apps tokens.
-func (v *Provider) getOrUpdateCheckRunStatus(ctx context.Context, runevent *info.Event, statusOpts providerstatus.StatusOpts) error {
+func (v *Provider) getOrUpdateCheckRunStatus(ctx context.Context, runevent *info.Event, statusOpts provider.StatusOpts) error {
 	var err error
 	var checkRunID *int64
 	var found bool
@@ -281,9 +280,9 @@ func (v *Provider) getOrUpdateCheckRunStatus(ctx context.Context, runevent *info
 	}
 
 	// Only set completed-at if conclusion is set (which means finished)
-	if statusOpts.Conclusion != "" && statusOpts.Conclusion != providerstatus.ConclusionPending {
+	if statusOpts.Conclusion != "" && statusOpts.Conclusion != "pending" {
 		opts.CompletedAt = &github.Timestamp{Time: time.Now()}
-		opts.Conclusion = github.Ptr(string(statusOpts.Conclusion))
+		opts.Conclusion = &statusOpts.Conclusion
 	}
 	if isPipelineRunCancelledOrStopped(statusOpts.PipelineRun) {
 		opts.Conclusion = github.Ptr("cancelled")
@@ -321,24 +320,23 @@ func metadataPatch(checkRunID *int64, logURL string) map[string]any {
 
 // createStatusCommit use the classic/old statuses API which is available when we
 // don't have a github app token.
-func (v *Provider) createStatusCommit(ctx context.Context, runevent *info.Event, status providerstatus.StatusOpts) error {
+func (v *Provider) createStatusCommit(ctx context.Context, runevent *info.Event, status provider.StatusOpts) error {
 	var err error
 	now := time.Now()
 	switch status.Conclusion {
-	case providerstatus.ConclusionNeutral:
-		status.Conclusion = providerstatus.ConclusionSuccess // We don't have a choice other than setting as success, no pending here.
-	case providerstatus.ConclusionPending:
+	case "neutral":
+		status.Conclusion = "success" // We don't have a choice than setting as success, no pending here.
+	case "pending":
 		if status.Title != "" {
-			status.Conclusion = providerstatus.ConclusionPending
+			status.Conclusion = "pending"
 		}
-	default:
 	}
 	if status.Status == "in_progress" {
-		status.Conclusion = providerstatus.ConclusionPending
+		status.Conclusion = "pending"
 	}
 
 	ghstatus := github.RepoStatus{
-		State:       github.Ptr(string(status.Conclusion)),
+		State:       github.Ptr(status.Conclusion),
 		TargetURL:   github.Ptr(status.DetailsURL),
 		Description: github.Ptr(status.Title),
 		Context:     github.Ptr(provider.GetCheckName(status, v.pacInfo)),
@@ -404,7 +402,7 @@ func (v *Provider) createStatusCommit(ctx context.Context, runevent *info.Event,
 	return nil
 }
 
-func (v *Provider) CreateStatus(ctx context.Context, runevent *info.Event, statusOpts providerstatus.StatusOpts) error {
+func (v *Provider) CreateStatus(ctx context.Context, runevent *info.Event, statusOpts provider.StatusOpts) error {
 	if v.ghClient == nil {
 		return fmt.Errorf("cannot set status on github no token or url set")
 	}
@@ -415,15 +413,15 @@ func (v *Provider) CreateStatus(ctx context.Context, runevent *info.Event, statu
 	}
 
 	switch statusOpts.Conclusion {
-	case providerstatus.ConclusionSuccess:
+	case "success":
 		statusOpts.Title = "Success"
 		statusOpts.Summary = "has <b>successfully</b> validated your commit."
-	case providerstatus.ConclusionFailure:
+	case "failure":
 		if statusOpts.Title == "" {
 			statusOpts.Title = "Failed"
 		}
 		statusOpts.Summary = "has <b>failed</b>."
-	case providerstatus.ConclusionPending:
+	case "pending":
 		// for concurrency set title as pending
 		if statusOpts.Title == "" {
 			statusOpts.Title = "Pending"
@@ -432,15 +430,14 @@ func (v *Provider) CreateStatus(ctx context.Context, runevent *info.Event, statu
 			// for unauthorized user set title as Pending approval
 			statusOpts.Summary = "is waiting for approval."
 		}
-	case providerstatus.ConclusionCancelled:
+	case "cancelled":
 		statusOpts.Title = "Cancelled"
 		statusOpts.Summary = "has been <b>cancelled</b>."
-	case providerstatus.ConclusionNeutral:
+	case "neutral":
 		if statusOpts.Title == "" {
 			statusOpts.Title = "Unknown"
 		}
 		statusOpts.Summary = "<b>Completed</b>"
-	case providerstatus.ConclusionCompleted, providerstatus.ConclusionSkipped:
 	}
 
 	if statusOpts.Status == "in_progress" {
@@ -462,7 +459,7 @@ func (v *Provider) CreateStatus(ctx context.Context, runevent *info.Event, statu
 	return v.createStatusCommit(ctx, runevent, statusOpts)
 }
 
-func (v *Provider) formatPipelineComment(sha string, status providerstatus.StatusOpts) string {
+func (v *Provider) formatPipelineComment(sha string, status provider.StatusOpts) string {
 	var emoji, title string
 
 	switch {

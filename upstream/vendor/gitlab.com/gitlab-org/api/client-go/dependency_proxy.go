@@ -14,7 +14,10 @@
 
 package gitlab
 
-import "net/http"
+import (
+	"fmt"
+	"net/http"
+)
 
 type (
 	DependencyProxyServiceInterface interface {
@@ -38,10 +41,16 @@ type (
 var _ DependencyProxyServiceInterface = (*DependencyProxyService)(nil)
 
 func (s *DependencyProxyService) PurgeGroupDependencyProxy(gid any, options ...RequestOptionFunc) (*Response, error) {
-	_, resp, err := do[none](s.client,
-		withMethod(http.MethodDelete),
-		withPath("groups/%s/dependency_proxy/cache", GroupID{gid}),
-		withRequestOpts(options...),
-	)
-	return resp, err
+	group, err := parseID(gid)
+	if err != nil {
+		return nil, err
+	}
+	u := fmt.Sprintf("groups/%s/dependency_proxy/cache", PathEscape(group))
+
+	req, err := s.client.NewRequest(http.MethodDelete, u, nil, options)
+	if err != nil {
+		return nil, err
+	}
+
+	return s.client.Do(req, nil)
 }

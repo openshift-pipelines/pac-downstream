@@ -1,7 +1,6 @@
 package reconciler
 
 import (
-	"context"
 	"fmt"
 	"time"
 
@@ -11,19 +10,19 @@ import (
 	"knative.dev/pkg/apis"
 )
 
-func (r *Reconciler) emitMetrics(ctx context.Context, pr *tektonv1.PipelineRun) error {
-	if err := r.countPipelineRun(ctx, pr); err != nil {
+func (r *Reconciler) emitMetrics(pr *tektonv1.PipelineRun) error {
+	if err := r.countPipelineRun(pr); err != nil {
 		return err
 	}
 
-	if err := r.calculatePRDuration(ctx, pr); err != nil {
+	if err := r.calculatePRDuration(pr); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func (r *Reconciler) countPipelineRun(ctx context.Context, pr *tektonv1.PipelineRun) error {
+func (r *Reconciler) countPipelineRun(pr *tektonv1.PipelineRun) error {
 	gitProvider := pr.GetAnnotations()[keys.GitProvider]
 	eventType := pr.GetAnnotations()[keys.EventType]
 	repository := pr.GetAnnotations()[keys.Repository]
@@ -41,10 +40,10 @@ func (r *Reconciler) countPipelineRun(ctx context.Context, pr *tektonv1.Pipeline
 		return fmt.Errorf("no supported Git provider")
 	}
 
-	return r.metrics.Count(ctx, gitProvider, eventType, pr.GetNamespace(), repository)
+	return r.metrics.Count(gitProvider, eventType, pr.GetNamespace(), repository)
 }
 
-func (r *Reconciler) calculatePRDuration(ctx context.Context, pr *tektonv1.PipelineRun) error {
+func (r *Reconciler) calculatePRDuration(pr *tektonv1.PipelineRun) error {
 	repository := pr.GetAnnotations()[keys.Repository]
 	duration := time.Duration(0)
 	if pr.Status.StartTime != nil {
@@ -64,5 +63,5 @@ func (r *Reconciler) calculatePRDuration(ctx context.Context, pr *tektonv1.Pipel
 	}
 	reason := cond.Reason
 
-	return r.metrics.CountPRDuration(ctx, pr.GetNamespace(), repository, status, reason, duration)
+	return r.metrics.CountPRDuration(pr.GetNamespace(), repository, status, reason, duration)
 }

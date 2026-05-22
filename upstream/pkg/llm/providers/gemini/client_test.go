@@ -240,7 +240,7 @@ func TestAnalyzeSuccess(t *testing.T) {
 	assert.Assert(t, response.Duration > 0)
 }
 
-func TestAnalyzeRequestCreationError(t *testing.T) {
+func TestAnalyze_RequestCreationError(t *testing.T) {
 	tests := []struct {
 		name    string
 		context map[string]any
@@ -318,7 +318,7 @@ func TestAnalyzeResponseParseError(t *testing.T) {
 	}, "response_parse_error")
 }
 
-func TestAnalyzeAPIError(t *testing.T) {
+func TestAnalyze_APIError(t *testing.T) {
 	tests := []struct {
 		name            string
 		mockResponse    geminiResponse
@@ -397,7 +397,7 @@ func TestAnalyzeAPIError(t *testing.T) {
 	}
 }
 
-func TestAnalyzeEmptyContent(t *testing.T) {
+func TestAnalyze_EmptyContent(t *testing.T) {
 	tests := []struct {
 		name         string
 		mockResponse geminiResponse

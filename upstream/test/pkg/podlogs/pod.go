@@ -17,14 +17,14 @@ type ControllerLogSource struct {
 	ContainerName string
 }
 
-func GetControllerLog(ctx context.Context, kclient corev1i.CoreV1Interface, labelselector, containerName string, sinceSeconds *int64) (string, error) {
+func GetControllerLog(ctx context.Context, kclient corev1i.CoreV1Interface, labelselector, containerName string) (string, error) {
 	ns := info.GetNS(ctx)
 	_, err := kclient.Namespaces().Get(ctx, ns, metav1.GetOptions{})
 	if err != nil {
 		return "", err
 	}
 	numLines := int64(10)
-	return GetPodLog(ctx, kclient, ns, labelselector, containerName, &numLines, sinceSeconds)
+	return GetPodLog(ctx, kclient, ns, labelselector, containerName, &numLines)
 }
 
 func GetControllerLogByName(
@@ -32,7 +32,6 @@ func GetControllerLogByName(
 	kclient corev1i.CoreV1Interface,
 	ns, controllerName string,
 	lines *int64,
-	sinceSeconds *int64,
 ) (string, ControllerLogSource, error) {
 	selectors := controllerLabelSelectors(controllerName)
 	containers := controllerContainerNames(controllerName)
@@ -40,7 +39,7 @@ func GetControllerLogByName(
 
 	for _, selector := range selectors {
 		for _, container := range containers {
-			output, err := GetPodLog(ctx, kclient, ns, selector, container, lines, sinceSeconds)
+			output, err := GetPodLog(ctx, kclient, ns, selector, container, lines)
 			if err == nil {
 				return output, ControllerLogSource{
 					LabelSelector: selector,
@@ -58,7 +57,7 @@ func GetControllerLogByName(
 	)
 }
 
-func GetPodLog(ctx context.Context, kclient corev1i.CoreV1Interface, ns, labelselector, containerName string, lines, sinceSeconds *int64) (string, error) {
+func GetPodLog(ctx context.Context, kclient corev1i.CoreV1Interface, ns, labelselector, containerName string, lines *int64) (string, error) {
 	nsO, err := kclient.Namespaces().Get(ctx, ns, metav1.GetOptions{})
 	if err != nil {
 		return "", err
@@ -78,19 +77,10 @@ func GetPodLog(ctx context.Context, kclient corev1i.CoreV1Interface, ns, labelse
 		return "", fmt.Errorf("could not find logs for label selector %q: %w", labelselector, err)
 	}
 
-	pdOpts := &v1.PodLogOptions{
+	ios, err := kclient.Pods(nsO.GetName()).GetLogs(pod.GetName(), &v1.PodLogOptions{
 		Container: containerName,
-	}
-
-	if lines != nil {
-		pdOpts.TailLines = lines
-	}
-
-	if sinceSeconds != nil {
-		pdOpts.SinceSeconds = sinceSeconds
-	}
-
-	ios, err := kclient.Pods(nsO.GetName()).GetLogs(pod.GetName(), pdOpts).Stream(ctx)
+		TailLines: lines,
+	}).Stream(ctx)
 	if err != nil {
 		return "", err
 	}

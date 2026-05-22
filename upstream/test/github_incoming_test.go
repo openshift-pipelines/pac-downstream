@@ -8,13 +8,11 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"os"
 	"regexp"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/google/go-github/v84/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
@@ -43,7 +41,7 @@ func TestGithubGHEAppIncoming(t *testing.T) {
 	}, randomedString, randomedString, triggertype.Incoming.String(), map[string]string{})
 	assert.NilError(t, err)
 
-	verifyIncomingWebhook(t, randomedString, "pipelinerun-incoming", entries, []string{randomedString}, false, 1)
+	verifyIncomingWebhook(t, randomedString, "pipelinerun-incoming", entries, []string{randomedString}, false, true, 1)
 }
 
 func TestGithubGHEIncoming(t *testing.T) {
@@ -54,10 +52,10 @@ func TestGithubGHEIncoming(t *testing.T) {
 	}, randomedString, randomedString, triggertype.Incoming.String(), map[string]string{})
 	assert.NilError(t, err)
 
-	verifyIncomingWebhook(t, randomedString, "pipelinerun-incoming", entries, []string{randomedString}, false, 1)
+	verifyIncomingWebhook(t, randomedString, "pipelinerun-incoming", entries, []string{randomedString}, false, true, 1)
 }
 
-func TestGithubGHEWebhookIncoming(t *testing.T) {
+func TestGithubWebhookIncoming(t *testing.T) {
 	randomedString := names.SimpleNameGenerator.RestrictLengthWithRandomSuffix("pac-e2e-ns")
 
 	// Create entries with different event types to test that only incoming PipelineRun gets triggered
@@ -80,7 +78,7 @@ func TestGithubGHEWebhookIncoming(t *testing.T) {
 		entries[k] = v
 	}
 
-	verifyIncomingWebhook(t, randomedString, "pipelinerun-incoming", entries, []string{randomedString}, true, 1)
+	verifyIncomingWebhook(t, randomedString, "pipelinerun-incoming", entries, []string{randomedString}, true, false, 1)
 }
 
 // TestGithubAppIncomingForDifferentEvent tests that a Pipelinerun with the incoming event
@@ -94,7 +92,7 @@ func TestGithubGHEAppIncomingForDifferentEvent(t *testing.T) {
 	}, randomedString, randomedString, triggertype.PullRequest.String(), map[string]string{})
 	assert.NilError(t, err)
 
-	verifyIncomingWebhook(t, randomedString, "pipelinerun-incoming-", entries, []string{randomedString}, false, 1)
+	verifyIncomingWebhook(t, randomedString, "pipelinerun-incoming-", entries, []string{randomedString}, false, true, 1)
 }
 
 // TestGithubAppIncomingGlobPattern tests incoming webhook with glob pattern matching.
@@ -108,7 +106,7 @@ func TestGithubGHEAppIncomingGlobPattern(t *testing.T) {
 
 	// Test with glob pattern that matches the branch name
 	// Pattern: pac-e2e-ns* should match branch pac-e2e-ns-xxxxx
-	verifyIncomingWebhook(t, randomedString, "pipelinerun-incoming", entries, []string{"pac-e2e-ns*"}, false, 1)
+	verifyIncomingWebhook(t, randomedString, "pipelinerun-incoming", entries, []string{"pac-e2e-ns*"}, false, true, 1)
 }
 
 // TestGithubAppIncomingGlobPrefixPattern tests incoming webhook with prefix glob pattern.
@@ -122,7 +120,7 @@ func TestGithubGHEAppIncomingGlobPrefixPattern(t *testing.T) {
 	assert.NilError(t, err)
 
 	// Test with glob pattern that matches feature branches
-	verifyIncomingWebhook(t, randomedString, "pipelinerun-incoming", entries, []string{"feature-*"}, false, 1)
+	verifyIncomingWebhook(t, randomedString, "pipelinerun-incoming", entries, []string{"feature-*"}, false, true, 1)
 }
 
 // TestGithubAppIncomingGlobFirstMatchWins tests first-match-wins with multiple glob targets.
@@ -136,7 +134,7 @@ func TestGithubGHEAppIncomingGlobFirstMatchWins(t *testing.T) {
 
 	// Multiple patterns - first one that matches should win
 	// Both pac-e2e-ns* and * will match, but first should win
-	verifyIncomingWebhook(t, randomedString, "pipelinerun-incoming", entries, []string{"pac-e2e-ns*", "*"}, false, 1)
+	verifyIncomingWebhook(t, randomedString, "pipelinerun-incoming", entries, []string{"pac-e2e-ns*", "*"}, false, true, 1)
 }
 
 // TestGithubAppIncomingNoMatch tests that incoming webhook fails when branch doesn't match any target.
@@ -150,7 +148,7 @@ func TestGithubGHEAppIncomingNoMatch(t *testing.T) {
 
 	// Test with glob pattern that will NOT match the branch
 	// Pattern: production-* should NOT match branch pac-e2e-ns-xxxxx
-	verifyIncomingWebhook(t, randomedString, "pipelinerun-incoming", entries, []string{"production-*"}, false, 0)
+	verifyIncomingWebhook(t, randomedString, "pipelinerun-incoming", entries, []string{"production-*"}, false, true, 0)
 }
 
 // TestGithubAppIncomingMultiplePatternsNoMatch tests that incoming webhook fails when none of the patterns match.
@@ -163,7 +161,7 @@ func TestGithubGHEAppIncomingMultiplePatternsNoMatch(t *testing.T) {
 	assert.NilError(t, err)
 
 	// Multiple patterns that all don't match the branch
-	verifyIncomingWebhook(t, randomedString, "pipelinerun-incoming", entries, []string{"production-*", "staging-*", "release-*"}, false, 0)
+	verifyIncomingWebhook(t, randomedString, "pipelinerun-incoming", entries, []string{"production-*", "staging-*", "release-*"}, false, true, 0)
 }
 
 // TestGithubAppIncomingNoMatchExactName tests that exact non-matching string doesn't match.
@@ -176,12 +174,11 @@ func TestGithubGHEAppIncomingNoMatchExactName(t *testing.T) {
 	assert.NilError(t, err)
 
 	// Test with exact branch name that doesn't match
-	verifyIncomingWebhook(t, randomedString, "pipelinerun-incoming", entries, []string{"main", "develop", "staging"}, false, 0)
+	verifyIncomingWebhook(t, randomedString, "pipelinerun-incoming", entries, []string{"main", "develop", "staging"}, false, true, 0)
 }
 
-func verifyIncomingWebhook(t *testing.T, randomedString, pipelinerunName string, entries map[string]string, targets []string, onWebhook bool, numberOfPR int) {
+func verifyIncomingWebhook(t *testing.T, randomedString, pipelinerunName string, entries map[string]string, targets []string, onWebhook, onGHE bool, numberOfPR int) {
 	ctx := context.Background()
-	onGHE := true // All incoming webhook tests use GHE
 	ctx, runcnx, opts, ghprovider, err := tgithub.Setup(ctx, onGHE, onWebhook)
 	assert.NilError(t, err)
 	label := "GithubApp Incoming"
@@ -191,29 +188,10 @@ func verifyIncomingWebhook(t *testing.T, randomedString, pipelinerunName string,
 	logmsg := fmt.Sprintf("Testing %s with Github APPS integration on %s with targets %v", label, randomedString, targets)
 	runcnx.Clients.Log.Info(logmsg)
 
-	var repoinfo *github.Repository
-	var dynamicRepoName string
-
-	// For GHE + webhook, create a dynamic repo with SMEE webhook
-	if onGHE && onWebhook {
-		repoName := names.SimpleNameGenerator.RestrictLengthWithRandomSuffix("pac-e2e-test")
-		smeeURL := os.Getenv("TEST_GITHUB_SECOND_WEBHOOK_SMEE_URL")
-		webhookSecret := os.Getenv("TEST_EL_WEBHOOK_SECRET")
-
-		runcnx.Clients.Log.Infof("Creating dynamic GHE repository %s/%s with webhook to %s", opts.Organization, repoName, smeeURL)
-		repoinfo, err = tgithub.CreateGHERepo(ctx, ghprovider.Client(), opts.Organization, repoName, smeeURL, webhookSecret, runcnx.Clients.Log)
-		assert.NilError(t, err)
-
-		opts.Repo = repoName
-		dynamicRepoName = repoName
-	} else {
-		// Use existing pre-configured repo
-		var resp *github.Response
-		repoinfo, resp, err = ghprovider.Client().Repositories.Get(ctx, opts.Organization, opts.Repo)
-		assert.NilError(t, err)
-		if resp != nil && resp.StatusCode == http.StatusNotFound {
-			t.Errorf("Repository %s not found in %s", opts.Organization, opts.Repo)
-		}
+	repoinfo, resp, err := ghprovider.Client().Repositories.Get(ctx, opts.Organization, opts.Repo)
+	assert.NilError(t, err)
+	if resp != nil && resp.StatusCode == http.StatusNotFound {
+		t.Errorf("Repository %s not found in %s", opts.Organization, opts.Repo)
 	}
 
 	incoming := &[]v1alpha1.Incoming{
@@ -230,7 +208,7 @@ func verifyIncomingWebhook(t *testing.T, randomedString, pipelinerunName string,
 		},
 	}
 
-	err = tgithub.CreateCRDIncoming(ctx, t, repoinfo, runcnx, incoming, opts, ghprovider, randomedString)
+	err = tgithub.CreateCRDIncoming(ctx, t, repoinfo, runcnx, incoming, opts, randomedString)
 	assert.NilError(t, err)
 
 	err = secret.Create(ctx, runcnx, map[string]string{"incoming": incomingSecreteValue}, randomedString, incomingSecretName)
@@ -297,7 +275,6 @@ func verifyIncomingWebhook(t *testing.T, randomedString, pipelinerunName string,
 		Logger:          runcnx.Clients.Log,
 		Webhook:         onWebhook,
 		GHE:             onGHE,
-		DynamicRepoName: dynamicRepoName,
 	}
 	defer g.TearDown(ctx, t)
 
@@ -334,7 +311,7 @@ func verifyIncomingWebhook(t *testing.T, randomedString, pipelinerunName string,
 		}
 		assert.Assert(t, prName == "pipelinerun-incoming", "Expected PipelineRun name 'pipelinerun-incoming', got '%s'", prName)
 
-		err = wait.RegexpMatchingInPodLog(context.Background(), runcnx, randomedString, "pipelinesascode.tekton.dev/event-type=incoming", "step-task", *regexp.MustCompile(".*It's a Bird... It's a Plane... It's Superman"), "", 2, nil)
+		err = wait.RegexpMatchingInPodLog(context.Background(), runcnx, randomedString, "pipelinesascode.tekton.dev/event-type=incoming", "step-task", *regexp.MustCompile(".*It's a Bird... It's a Plane... It's Superman"), "", 2)
 		assert.NilError(t, err, "Error while checking the logs of the pods")
 	} else {
 		runcnx.Clients.Log.Infof("Successfully verified no PipelineRun was created for non-matching branch %s with targets %v", randomedString, targets)

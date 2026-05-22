@@ -17,6 +17,7 @@
 package gitlab
 
 import (
+	"fmt"
 	"net/http"
 	"time"
 )
@@ -102,10 +103,24 @@ type ManagementProject struct {
 // GitLab API docs:
 // https://docs.gitlab.com/api/project_clusters/#list-project-clusters
 func (s *ProjectClustersService) ListClusters(pid any, options ...RequestOptionFunc) ([]*ProjectCluster, *Response, error) {
-	return do[[]*ProjectCluster](s.client,
-		withPath("projects/%s/clusters", ProjectID{pid}),
-		withRequestOpts(options...),
-	)
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, nil, err
+	}
+	u := fmt.Sprintf("projects/%s/clusters", PathEscape(project))
+
+	req, err := s.client.NewRequest(http.MethodGet, u, nil, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var pcs []*ProjectCluster
+	resp, err := s.client.Do(req, &pcs)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return pcs, resp, nil
 }
 
 // GetCluster gets a cluster.
@@ -114,10 +129,24 @@ func (s *ProjectClustersService) ListClusters(pid any, options ...RequestOptionF
 // GitLab API docs:
 // https://docs.gitlab.com/api/project_clusters/#get-a-single-project-cluster
 func (s *ProjectClustersService) GetCluster(pid any, cluster int64, options ...RequestOptionFunc) (*ProjectCluster, *Response, error) {
-	return do[*ProjectCluster](s.client,
-		withPath("projects/%s/clusters/%d", ProjectID{pid}, cluster),
-		withRequestOpts(options...),
-	)
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, nil, err
+	}
+	u := fmt.Sprintf("projects/%s/clusters/%d", PathEscape(project), cluster)
+
+	req, err := s.client.NewRequest(http.MethodGet, u, nil, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	pc := new(ProjectCluster)
+	resp, err := s.client.Do(req, &pc)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return pc, resp, nil
 }
 
 // AddClusterOptions represents the available AddCluster() options.
@@ -151,12 +180,24 @@ type AddPlatformKubernetesOptions struct {
 // GitLab API docs:
 // https://docs.gitlab.com/api/project_clusters/#add-existing-cluster-to-project
 func (s *ProjectClustersService) AddCluster(pid any, opt *AddClusterOptions, options ...RequestOptionFunc) (*ProjectCluster, *Response, error) {
-	return do[*ProjectCluster](s.client,
-		withMethod(http.MethodPost),
-		withPath("projects/%s/clusters/user", ProjectID{pid}),
-		withAPIOpts(opt),
-		withRequestOpts(options...),
-	)
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, nil, err
+	}
+	u := fmt.Sprintf("projects/%s/clusters/user", PathEscape(project))
+
+	req, err := s.client.NewRequest(http.MethodPost, u, opt, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	pc := new(ProjectCluster)
+	resp, err := s.client.Do(req, pc)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return pc, resp, nil
 }
 
 // EditClusterOptions represents the available EditCluster() options.
@@ -187,12 +228,24 @@ type EditPlatformKubernetesOptions struct {
 // GitLab API docs:
 // https://docs.gitlab.com/api/project_clusters/#edit-project-cluster
 func (s *ProjectClustersService) EditCluster(pid any, cluster int64, opt *EditClusterOptions, options ...RequestOptionFunc) (*ProjectCluster, *Response, error) {
-	return do[*ProjectCluster](s.client,
-		withMethod(http.MethodPut),
-		withPath("projects/%s/clusters/%d", ProjectID{pid}, cluster),
-		withAPIOpts(opt),
-		withRequestOpts(options...),
-	)
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, nil, err
+	}
+	u := fmt.Sprintf("projects/%s/clusters/%d", PathEscape(project), cluster)
+
+	req, err := s.client.NewRequest(http.MethodPut, u, opt, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	pc := new(ProjectCluster)
+	resp, err := s.client.Do(req, pc)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return pc, resp, nil
 }
 
 // DeleteCluster deletes an existing project cluster.
@@ -201,10 +254,16 @@ func (s *ProjectClustersService) EditCluster(pid any, cluster int64, opt *EditCl
 // GitLab API docs:
 // https://docs.gitlab.com/api/project_clusters/#delete-project-cluster
 func (s *ProjectClustersService) DeleteCluster(pid any, cluster int64, options ...RequestOptionFunc) (*Response, error) {
-	_, resp, err := do[none](s.client,
-		withMethod(http.MethodDelete),
-		withPath("projects/%s/clusters/%d", ProjectID{pid}, cluster),
-		withRequestOpts(options...),
-	)
-	return resp, err
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, err
+	}
+	u := fmt.Sprintf("projects/%s/clusters/%d", PathEscape(project), cluster)
+
+	req, err := s.client.NewRequest(http.MethodDelete, u, nil, options)
+	if err != nil {
+		return nil, err
+	}
+
+	return s.client.Do(req, nil)
 }

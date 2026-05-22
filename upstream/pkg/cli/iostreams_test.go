@@ -15,7 +15,7 @@ func TestNewIOStreams(t *testing.T) {
 	assert.Assert(t, ios.ErrOut != nil)
 }
 
-func TestIOStreamsColorEnabled(t *testing.T) {
+func TestIOStreams_ColorEnabled(t *testing.T) {
 	ios := &IOStreams{colorEnabled: true}
 	assert.Equal(t, ios.ColorEnabled(), true)
 
@@ -23,7 +23,7 @@ func TestIOStreamsColorEnabled(t *testing.T) {
 	assert.Equal(t, ios.ColorEnabled(), false)
 }
 
-func TestIOStreamsColorSupport256(t *testing.T) {
+func TestIOStreams_ColorSupport256(t *testing.T) {
 	ios := &IOStreams{is256enabled: true}
 	assert.Equal(t, ios.ColorSupport256(), true)
 
@@ -31,7 +31,7 @@ func TestIOStreamsColorSupport256(t *testing.T) {
 	assert.Equal(t, ios.ColorSupport256(), false)
 }
 
-func TestIOStreamsIsStdoutTTY(t *testing.T) {
+func TestIOStreams_IsStdoutTTY(t *testing.T) {
 	tests := []struct {
 		name     string
 		setup    func() *IOStreams

@@ -17,6 +17,7 @@
 package gitlab
 
 import (
+	"fmt"
 	"net/http"
 	"time"
 )
@@ -259,18 +260,49 @@ type ListIssueDiscussionsOptions struct {
 }
 
 func (s *DiscussionsService) ListIssueDiscussions(pid any, issue int64, opt *ListIssueDiscussionsOptions, options ...RequestOptionFunc) ([]*Discussion, *Response, error) {
-	return do[[]*Discussion](s.client,
-		withPath("projects/%s/issues/%d/discussions", ProjectID{pid}, issue),
-		withAPIOpts(opt),
-		withRequestOpts(options...),
-	)
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, nil, err
+	}
+	u := fmt.Sprintf("projects/%s/issues/%d/discussions", PathEscape(project), issue)
+
+	req, err := s.client.NewRequest(http.MethodGet, u, opt, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var ds []*Discussion
+	resp, err := s.client.Do(req, &ds)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return ds, resp, nil
 }
 
 func (s *DiscussionsService) GetIssueDiscussion(pid any, issue int64, discussion string, options ...RequestOptionFunc) (*Discussion, *Response, error) {
-	return do[*Discussion](s.client,
-		withPath("projects/%s/issues/%d/discussions/%s", ProjectID{pid}, issue, discussion),
-		withRequestOpts(options...),
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, nil, err
+	}
+	u := fmt.Sprintf("projects/%s/issues/%d/discussions/%s",
+		PathEscape(project),
+		issue,
+		discussion,
 	)
+
+	req, err := s.client.NewRequest(http.MethodGet, u, nil, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	d := new(Discussion)
+	resp, err := s.client.Do(req, d)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return d, resp, nil
 }
 
 // CreateIssueDiscussionOptions represents the available CreateIssueDiscussion()
@@ -284,12 +316,24 @@ type CreateIssueDiscussionOptions struct {
 }
 
 func (s *DiscussionsService) CreateIssueDiscussion(pid any, issue int64, opt *CreateIssueDiscussionOptions, options ...RequestOptionFunc) (*Discussion, *Response, error) {
-	return do[*Discussion](s.client,
-		withMethod(http.MethodPost),
-		withPath("projects/%s/issues/%d/discussions", ProjectID{pid}, issue),
-		withAPIOpts(opt),
-		withRequestOpts(options...),
-	)
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, nil, err
+	}
+	u := fmt.Sprintf("projects/%s/issues/%d/discussions", PathEscape(project), issue)
+
+	req, err := s.client.NewRequest(http.MethodPost, u, opt, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	d := new(Discussion)
+	resp, err := s.client.Do(req, d)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return d, resp, nil
 }
 
 // AddIssueDiscussionNoteOptions represents the available AddIssueDiscussionNote()
@@ -303,12 +347,28 @@ type AddIssueDiscussionNoteOptions struct {
 }
 
 func (s *DiscussionsService) AddIssueDiscussionNote(pid any, issue int64, discussion string, opt *AddIssueDiscussionNoteOptions, options ...RequestOptionFunc) (*Note, *Response, error) {
-	return do[*Note](s.client,
-		withMethod(http.MethodPost),
-		withPath("projects/%s/issues/%d/discussions/%s/notes", ProjectID{pid}, issue, discussion),
-		withAPIOpts(opt),
-		withRequestOpts(options...),
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, nil, err
+	}
+	u := fmt.Sprintf("projects/%s/issues/%d/discussions/%s/notes",
+		PathEscape(project),
+		issue,
+		discussion,
 	)
+
+	req, err := s.client.NewRequest(http.MethodPost, u, opt, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	n := new(Note)
+	resp, err := s.client.Do(req, n)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return n, resp, nil
 }
 
 // UpdateIssueDiscussionNoteOptions represents the available
@@ -322,21 +382,49 @@ type UpdateIssueDiscussionNoteOptions struct {
 }
 
 func (s *DiscussionsService) UpdateIssueDiscussionNote(pid any, issue int64, discussion string, note int64, opt *UpdateIssueDiscussionNoteOptions, options ...RequestOptionFunc) (*Note, *Response, error) {
-	return do[*Note](s.client,
-		withMethod(http.MethodPut),
-		withPath("projects/%s/issues/%d/discussions/%s/notes/%d", ProjectID{pid}, issue, discussion, note),
-		withAPIOpts(opt),
-		withRequestOpts(options...),
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, nil, err
+	}
+	u := fmt.Sprintf("projects/%s/issues/%d/discussions/%s/notes/%d",
+		PathEscape(project),
+		issue,
+		discussion,
+		note,
 	)
+
+	req, err := s.client.NewRequest(http.MethodPut, u, opt, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	n := new(Note)
+	resp, err := s.client.Do(req, n)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return n, resp, nil
 }
 
 func (s *DiscussionsService) DeleteIssueDiscussionNote(pid any, issue int64, discussion string, note int64, options ...RequestOptionFunc) (*Response, error) {
-	_, resp, err := do[none](s.client,
-		withMethod(http.MethodDelete),
-		withPath("projects/%s/issues/%d/discussions/%s/notes/%d", ProjectID{pid}, issue, discussion, note),
-		withRequestOpts(options...),
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, err
+	}
+	u := fmt.Sprintf("projects/%s/issues/%d/discussions/%s/notes/%d",
+		PathEscape(project),
+		issue,
+		discussion,
+		note,
 	)
-	return resp, err
+
+	req, err := s.client.NewRequest(http.MethodDelete, u, nil, options)
+	if err != nil {
+		return nil, err
+	}
+
+	return s.client.Do(req, nil)
 }
 
 // ListSnippetDiscussionsOptions represents the available ListSnippetDiscussions()
@@ -349,18 +437,49 @@ type ListSnippetDiscussionsOptions struct {
 }
 
 func (s *DiscussionsService) ListSnippetDiscussions(pid any, snippet int64, opt *ListSnippetDiscussionsOptions, options ...RequestOptionFunc) ([]*Discussion, *Response, error) {
-	return do[[]*Discussion](s.client,
-		withPath("projects/%s/snippets/%d/discussions", ProjectID{pid}, snippet),
-		withAPIOpts(opt),
-		withRequestOpts(options...),
-	)
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, nil, err
+	}
+	u := fmt.Sprintf("projects/%s/snippets/%d/discussions", PathEscape(project), snippet)
+
+	req, err := s.client.NewRequest(http.MethodGet, u, opt, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var ds []*Discussion
+	resp, err := s.client.Do(req, &ds)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return ds, resp, nil
 }
 
 func (s *DiscussionsService) GetSnippetDiscussion(pid any, snippet int64, discussion string, options ...RequestOptionFunc) (*Discussion, *Response, error) {
-	return do[*Discussion](s.client,
-		withPath("projects/%s/snippets/%d/discussions/%s", ProjectID{pid}, snippet, discussion),
-		withRequestOpts(options...),
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, nil, err
+	}
+	u := fmt.Sprintf("projects/%s/snippets/%d/discussions/%s",
+		PathEscape(project),
+		snippet,
+		discussion,
 	)
+
+	req, err := s.client.NewRequest(http.MethodGet, u, nil, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	d := new(Discussion)
+	resp, err := s.client.Do(req, d)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return d, resp, nil
 }
 
 // CreateSnippetDiscussionOptions represents the available
@@ -374,12 +493,24 @@ type CreateSnippetDiscussionOptions struct {
 }
 
 func (s *DiscussionsService) CreateSnippetDiscussion(pid any, snippet int64, opt *CreateSnippetDiscussionOptions, options ...RequestOptionFunc) (*Discussion, *Response, error) {
-	return do[*Discussion](s.client,
-		withMethod(http.MethodPost),
-		withPath("projects/%s/snippets/%d/discussions", ProjectID{pid}, snippet),
-		withAPIOpts(opt),
-		withRequestOpts(options...),
-	)
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, nil, err
+	}
+	u := fmt.Sprintf("projects/%s/snippets/%d/discussions", PathEscape(project), snippet)
+
+	req, err := s.client.NewRequest(http.MethodPost, u, opt, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	d := new(Discussion)
+	resp, err := s.client.Do(req, d)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return d, resp, nil
 }
 
 // AddSnippetDiscussionNoteOptions represents the available
@@ -393,12 +524,28 @@ type AddSnippetDiscussionNoteOptions struct {
 }
 
 func (s *DiscussionsService) AddSnippetDiscussionNote(pid any, snippet int64, discussion string, opt *AddSnippetDiscussionNoteOptions, options ...RequestOptionFunc) (*Note, *Response, error) {
-	return do[*Note](s.client,
-		withMethod(http.MethodPost),
-		withPath("projects/%s/snippets/%d/discussions/%s/notes", ProjectID{pid}, snippet, discussion),
-		withAPIOpts(opt),
-		withRequestOpts(options...),
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, nil, err
+	}
+	u := fmt.Sprintf("projects/%s/snippets/%d/discussions/%s/notes",
+		PathEscape(project),
+		snippet,
+		discussion,
 	)
+
+	req, err := s.client.NewRequest(http.MethodPost, u, opt, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	n := new(Note)
+	resp, err := s.client.Do(req, n)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return n, resp, nil
 }
 
 // UpdateSnippetDiscussionNoteOptions represents the available
@@ -412,21 +559,49 @@ type UpdateSnippetDiscussionNoteOptions struct {
 }
 
 func (s *DiscussionsService) UpdateSnippetDiscussionNote(pid any, snippet int64, discussion string, note int64, opt *UpdateSnippetDiscussionNoteOptions, options ...RequestOptionFunc) (*Note, *Response, error) {
-	return do[*Note](s.client,
-		withMethod(http.MethodPut),
-		withPath("projects/%s/snippets/%d/discussions/%s/notes/%d", ProjectID{pid}, snippet, discussion, note),
-		withAPIOpts(opt),
-		withRequestOpts(options...),
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, nil, err
+	}
+	u := fmt.Sprintf("projects/%s/snippets/%d/discussions/%s/notes/%d",
+		PathEscape(project),
+		snippet,
+		discussion,
+		note,
 	)
+
+	req, err := s.client.NewRequest(http.MethodPut, u, opt, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	n := new(Note)
+	resp, err := s.client.Do(req, n)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return n, resp, nil
 }
 
 func (s *DiscussionsService) DeleteSnippetDiscussionNote(pid any, snippet int64, discussion string, note int64, options ...RequestOptionFunc) (*Response, error) {
-	_, resp, err := do[none](s.client,
-		withMethod(http.MethodDelete),
-		withPath("projects/%s/snippets/%d/discussions/%s/notes/%d", ProjectID{pid}, snippet, discussion, note),
-		withRequestOpts(options...),
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, err
+	}
+	u := fmt.Sprintf("projects/%s/snippets/%d/discussions/%s/notes/%d",
+		PathEscape(project),
+		snippet,
+		discussion,
+		note,
 	)
-	return resp, err
+
+	req, err := s.client.NewRequest(http.MethodDelete, u, nil, options)
+	if err != nil {
+		return nil, err
+	}
+
+	return s.client.Do(req, nil)
 }
 
 // ListGroupEpicDiscussionsOptions represents the available
@@ -439,18 +614,52 @@ type ListGroupEpicDiscussionsOptions struct {
 }
 
 func (s *DiscussionsService) ListGroupEpicDiscussions(gid any, epic int64, opt *ListGroupEpicDiscussionsOptions, options ...RequestOptionFunc) ([]*Discussion, *Response, error) {
-	return do[[]*Discussion](s.client,
-		withPath("groups/%s/epics/%d/discussions", GroupID{gid}, epic),
-		withAPIOpts(opt),
-		withRequestOpts(options...),
+	group, err := parseID(gid)
+	if err != nil {
+		return nil, nil, err
+	}
+	u := fmt.Sprintf("groups/%s/epics/%d/discussions",
+		PathEscape(group),
+		epic,
 	)
+
+	req, err := s.client.NewRequest(http.MethodGet, u, opt, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var ds []*Discussion
+	resp, err := s.client.Do(req, &ds)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return ds, resp, nil
 }
 
 func (s *DiscussionsService) GetEpicDiscussion(gid any, epic int64, discussion string, options ...RequestOptionFunc) (*Discussion, *Response, error) {
-	return do[*Discussion](s.client,
-		withPath("groups/%s/epics/%d/discussions/%s", GroupID{gid}, epic, discussion),
-		withRequestOpts(options...),
+	group, err := parseID(gid)
+	if err != nil {
+		return nil, nil, err
+	}
+	u := fmt.Sprintf("groups/%s/epics/%d/discussions/%s",
+		PathEscape(group),
+		epic,
+		discussion,
 	)
+
+	req, err := s.client.NewRequest(http.MethodGet, u, nil, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	d := new(Discussion)
+	resp, err := s.client.Do(req, d)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return d, resp, nil
 }
 
 // CreateEpicDiscussionOptions represents the available CreateEpicDiscussion()
@@ -464,12 +673,27 @@ type CreateEpicDiscussionOptions struct {
 }
 
 func (s *DiscussionsService) CreateEpicDiscussion(gid any, epic int64, opt *CreateEpicDiscussionOptions, options ...RequestOptionFunc) (*Discussion, *Response, error) {
-	return do[*Discussion](s.client,
-		withMethod(http.MethodPost),
-		withPath("groups/%s/epics/%d/discussions", GroupID{gid}, epic),
-		withAPIOpts(opt),
-		withRequestOpts(options...),
+	group, err := parseID(gid)
+	if err != nil {
+		return nil, nil, err
+	}
+	u := fmt.Sprintf("groups/%s/epics/%d/discussions",
+		PathEscape(group),
+		epic,
 	)
+
+	req, err := s.client.NewRequest(http.MethodPost, u, opt, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	d := new(Discussion)
+	resp, err := s.client.Do(req, d)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return d, resp, nil
 }
 
 // AddEpicDiscussionNoteOptions represents the available
@@ -483,12 +707,28 @@ type AddEpicDiscussionNoteOptions struct {
 }
 
 func (s *DiscussionsService) AddEpicDiscussionNote(gid any, epic int64, discussion string, opt *AddEpicDiscussionNoteOptions, options ...RequestOptionFunc) (*Note, *Response, error) {
-	return do[*Note](s.client,
-		withMethod(http.MethodPost),
-		withPath("groups/%s/epics/%d/discussions/%s/notes", GroupID{gid}, epic, discussion),
-		withAPIOpts(opt),
-		withRequestOpts(options...),
+	group, err := parseID(gid)
+	if err != nil {
+		return nil, nil, err
+	}
+	u := fmt.Sprintf("groups/%s/epics/%d/discussions/%s/notes",
+		PathEscape(group),
+		epic,
+		discussion,
 	)
+
+	req, err := s.client.NewRequest(http.MethodPost, u, opt, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	n := new(Note)
+	resp, err := s.client.Do(req, n)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return n, resp, nil
 }
 
 // UpdateEpicDiscussionNoteOptions represents the available UpdateEpicDiscussion()
@@ -502,21 +742,49 @@ type UpdateEpicDiscussionNoteOptions struct {
 }
 
 func (s *DiscussionsService) UpdateEpicDiscussionNote(gid any, epic int64, discussion string, note int64, opt *UpdateEpicDiscussionNoteOptions, options ...RequestOptionFunc) (*Note, *Response, error) {
-	return do[*Note](s.client,
-		withMethod(http.MethodPut),
-		withPath("groups/%s/epics/%d/discussions/%s/notes/%d", GroupID{gid}, epic, discussion, note),
-		withAPIOpts(opt),
-		withRequestOpts(options...),
+	group, err := parseID(gid)
+	if err != nil {
+		return nil, nil, err
+	}
+	u := fmt.Sprintf("groups/%s/epics/%d/discussions/%s/notes/%d",
+		PathEscape(group),
+		epic,
+		discussion,
+		note,
 	)
+
+	req, err := s.client.NewRequest(http.MethodPut, u, opt, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	n := new(Note)
+	resp, err := s.client.Do(req, n)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return n, resp, nil
 }
 
 func (s *DiscussionsService) DeleteEpicDiscussionNote(gid any, epic int64, discussion string, note int64, options ...RequestOptionFunc) (*Response, error) {
-	_, resp, err := do[none](s.client,
-		withMethod(http.MethodDelete),
-		withPath("groups/%s/epics/%d/discussions/%s/notes/%d", GroupID{gid}, epic, discussion, note),
-		withRequestOpts(options...),
+	group, err := parseID(gid)
+	if err != nil {
+		return nil, err
+	}
+	u := fmt.Sprintf("groups/%s/epics/%d/discussions/%s/notes/%d",
+		PathEscape(group),
+		epic,
+		discussion,
+		note,
 	)
-	return resp, err
+
+	req, err := s.client.NewRequest(http.MethodDelete, u, nil, options)
+	if err != nil {
+		return nil, err
+	}
+
+	return s.client.Do(req, nil)
 }
 
 // ListMergeRequestDiscussionsOptions represents the available
@@ -529,18 +797,52 @@ type ListMergeRequestDiscussionsOptions struct {
 }
 
 func (s *DiscussionsService) ListMergeRequestDiscussions(pid any, mergeRequest int64, opt *ListMergeRequestDiscussionsOptions, options ...RequestOptionFunc) ([]*Discussion, *Response, error) {
-	return do[[]*Discussion](s.client,
-		withPath("projects/%s/merge_requests/%d/discussions", ProjectID{pid}, mergeRequest),
-		withAPIOpts(opt),
-		withRequestOpts(options...),
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, nil, err
+	}
+	u := fmt.Sprintf("projects/%s/merge_requests/%d/discussions",
+		PathEscape(project),
+		mergeRequest,
 	)
+
+	req, err := s.client.NewRequest(http.MethodGet, u, opt, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var ds []*Discussion
+	resp, err := s.client.Do(req, &ds)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return ds, resp, nil
 }
 
 func (s *DiscussionsService) GetMergeRequestDiscussion(pid any, mergeRequest int64, discussion string, options ...RequestOptionFunc) (*Discussion, *Response, error) {
-	return do[*Discussion](s.client,
-		withPath("projects/%s/merge_requests/%d/discussions/%s", ProjectID{pid}, mergeRequest, discussion),
-		withRequestOpts(options...),
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, nil, err
+	}
+	u := fmt.Sprintf("projects/%s/merge_requests/%d/discussions/%s",
+		PathEscape(project),
+		mergeRequest,
+		discussion,
 	)
+
+	req, err := s.client.NewRequest(http.MethodGet, u, nil, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	d := new(Discussion)
+	resp, err := s.client.Do(req, d)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return d, resp, nil
 }
 
 // CreateMergeRequestDiscussionOptions represents the available
@@ -587,12 +889,27 @@ type LinePositionOptions struct {
 }
 
 func (s *DiscussionsService) CreateMergeRequestDiscussion(pid any, mergeRequest int64, opt *CreateMergeRequestDiscussionOptions, options ...RequestOptionFunc) (*Discussion, *Response, error) {
-	return do[*Discussion](s.client,
-		withMethod(http.MethodPost),
-		withPath("projects/%s/merge_requests/%d/discussions", ProjectID{pid}, mergeRequest),
-		withAPIOpts(opt),
-		withRequestOpts(options...),
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, nil, err
+	}
+	u := fmt.Sprintf("projects/%s/merge_requests/%d/discussions",
+		PathEscape(project),
+		mergeRequest,
 	)
+
+	req, err := s.client.NewRequest(http.MethodPost, u, opt, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	d := new(Discussion)
+	resp, err := s.client.Do(req, d)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return d, resp, nil
 }
 
 // ResolveMergeRequestDiscussionOptions represents the available
@@ -605,12 +922,28 @@ type ResolveMergeRequestDiscussionOptions struct {
 }
 
 func (s *DiscussionsService) ResolveMergeRequestDiscussion(pid any, mergeRequest int64, discussion string, opt *ResolveMergeRequestDiscussionOptions, options ...RequestOptionFunc) (*Discussion, *Response, error) {
-	return do[*Discussion](s.client,
-		withMethod(http.MethodPut),
-		withPath("projects/%s/merge_requests/%d/discussions/%s", ProjectID{pid}, mergeRequest, discussion),
-		withAPIOpts(opt),
-		withRequestOpts(options...),
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, nil, err
+	}
+	u := fmt.Sprintf("projects/%s/merge_requests/%d/discussions/%s",
+		PathEscape(project),
+		mergeRequest,
+		discussion,
 	)
+
+	req, err := s.client.NewRequest(http.MethodPut, u, opt, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	d := new(Discussion)
+	resp, err := s.client.Do(req, d)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return d, resp, nil
 }
 
 // AddMergeRequestDiscussionNoteOptions represents the available
@@ -624,12 +957,28 @@ type AddMergeRequestDiscussionNoteOptions struct {
 }
 
 func (s *DiscussionsService) AddMergeRequestDiscussionNote(pid any, mergeRequest int64, discussion string, opt *AddMergeRequestDiscussionNoteOptions, options ...RequestOptionFunc) (*Note, *Response, error) {
-	return do[*Note](s.client,
-		withMethod(http.MethodPost),
-		withPath("projects/%s/merge_requests/%d/discussions/%s/notes", ProjectID{pid}, mergeRequest, discussion),
-		withAPIOpts(opt),
-		withRequestOpts(options...),
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, nil, err
+	}
+	u := fmt.Sprintf("projects/%s/merge_requests/%d/discussions/%s/notes",
+		PathEscape(project),
+		mergeRequest,
+		discussion,
 	)
+
+	req, err := s.client.NewRequest(http.MethodPost, u, opt, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	n := new(Note)
+	resp, err := s.client.Do(req, n)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return n, resp, nil
 }
 
 // UpdateMergeRequestDiscussionNoteOptions represents the available
@@ -644,21 +993,49 @@ type UpdateMergeRequestDiscussionNoteOptions struct {
 }
 
 func (s *DiscussionsService) UpdateMergeRequestDiscussionNote(pid any, mergeRequest int64, discussion string, note int64, opt *UpdateMergeRequestDiscussionNoteOptions, options ...RequestOptionFunc) (*Note, *Response, error) {
-	return do[*Note](s.client,
-		withMethod(http.MethodPut),
-		withPath("projects/%s/merge_requests/%d/discussions/%s/notes/%d", ProjectID{pid}, mergeRequest, discussion, note),
-		withAPIOpts(opt),
-		withRequestOpts(options...),
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, nil, err
+	}
+	u := fmt.Sprintf("projects/%s/merge_requests/%d/discussions/%s/notes/%d",
+		PathEscape(project),
+		mergeRequest,
+		discussion,
+		note,
 	)
+
+	req, err := s.client.NewRequest(http.MethodPut, u, opt, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	n := new(Note)
+	resp, err := s.client.Do(req, n)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return n, resp, nil
 }
 
 func (s *DiscussionsService) DeleteMergeRequestDiscussionNote(pid any, mergeRequest int64, discussion string, note int64, options ...RequestOptionFunc) (*Response, error) {
-	_, resp, err := do[none](s.client,
-		withMethod(http.MethodDelete),
-		withPath("projects/%s/merge_requests/%d/discussions/%s/notes/%d", ProjectID{pid}, mergeRequest, discussion, note),
-		withRequestOpts(options...),
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, err
+	}
+	u := fmt.Sprintf("projects/%s/merge_requests/%d/discussions/%s/notes/%d",
+		PathEscape(project),
+		mergeRequest,
+		discussion,
+		note,
 	)
-	return resp, err
+
+	req, err := s.client.NewRequest(http.MethodDelete, u, nil, options)
+	if err != nil {
+		return nil, err
+	}
+
+	return s.client.Do(req, nil)
 }
 
 // ListCommitDiscussionsOptions represents the available
@@ -671,18 +1048,52 @@ type ListCommitDiscussionsOptions struct {
 }
 
 func (s *DiscussionsService) ListCommitDiscussions(pid any, commit string, opt *ListCommitDiscussionsOptions, options ...RequestOptionFunc) ([]*Discussion, *Response, error) {
-	return do[[]*Discussion](s.client,
-		withPath("projects/%s/repository/commits/%s/discussions", ProjectID{pid}, commit),
-		withAPIOpts(opt),
-		withRequestOpts(options...),
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, nil, err
+	}
+	u := fmt.Sprintf("projects/%s/repository/commits/%s/discussions",
+		PathEscape(project),
+		commit,
 	)
+
+	req, err := s.client.NewRequest(http.MethodGet, u, opt, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var ds []*Discussion
+	resp, err := s.client.Do(req, &ds)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return ds, resp, nil
 }
 
 func (s *DiscussionsService) GetCommitDiscussion(pid any, commit string, discussion string, options ...RequestOptionFunc) (*Discussion, *Response, error) {
-	return do[*Discussion](s.client,
-		withPath("projects/%s/repository/commits/%s/discussions/%s", ProjectID{pid}, commit, discussion),
-		withRequestOpts(options...),
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, nil, err
+	}
+	u := fmt.Sprintf("projects/%s/repository/commits/%s/discussions/%s",
+		PathEscape(project),
+		commit,
+		discussion,
 	)
+
+	req, err := s.client.NewRequest(http.MethodGet, u, nil, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	d := new(Discussion)
+	resp, err := s.client.Do(req, d)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return d, resp, nil
 }
 
 // CreateCommitDiscussionOptions represents the available
@@ -697,12 +1108,27 @@ type CreateCommitDiscussionOptions struct {
 }
 
 func (s *DiscussionsService) CreateCommitDiscussion(pid any, commit string, opt *CreateCommitDiscussionOptions, options ...RequestOptionFunc) (*Discussion, *Response, error) {
-	return do[*Discussion](s.client,
-		withMethod(http.MethodPost),
-		withPath("projects/%s/repository/commits/%s/discussions", ProjectID{pid}, commit),
-		withAPIOpts(opt),
-		withRequestOpts(options...),
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, nil, err
+	}
+	u := fmt.Sprintf("projects/%s/repository/commits/%s/discussions",
+		PathEscape(project),
+		commit,
 	)
+
+	req, err := s.client.NewRequest(http.MethodPost, u, opt, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	d := new(Discussion)
+	resp, err := s.client.Do(req, d)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return d, resp, nil
 }
 
 // AddCommitDiscussionNoteOptions represents the available
@@ -716,12 +1142,28 @@ type AddCommitDiscussionNoteOptions struct {
 }
 
 func (s *DiscussionsService) AddCommitDiscussionNote(pid any, commit string, discussion string, opt *AddCommitDiscussionNoteOptions, options ...RequestOptionFunc) (*Note, *Response, error) {
-	return do[*Note](s.client,
-		withMethod(http.MethodPost),
-		withPath("projects/%s/repository/commits/%s/discussions/%s/notes", ProjectID{pid}, commit, discussion),
-		withAPIOpts(opt),
-		withRequestOpts(options...),
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, nil, err
+	}
+	u := fmt.Sprintf("projects/%s/repository/commits/%s/discussions/%s/notes",
+		PathEscape(project),
+		commit,
+		discussion,
 	)
+
+	req, err := s.client.NewRequest(http.MethodPost, u, opt, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	n := new(Note)
+	resp, err := s.client.Do(req, n)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return n, resp, nil
 }
 
 // UpdateCommitDiscussionNoteOptions represents the available
@@ -735,19 +1177,47 @@ type UpdateCommitDiscussionNoteOptions struct {
 }
 
 func (s *DiscussionsService) UpdateCommitDiscussionNote(pid any, commit string, discussion string, note int64, opt *UpdateCommitDiscussionNoteOptions, options ...RequestOptionFunc) (*Note, *Response, error) {
-	return do[*Note](s.client,
-		withMethod(http.MethodPut),
-		withPath("projects/%s/repository/commits/%s/discussions/%s/notes/%d", ProjectID{pid}, commit, discussion, note),
-		withAPIOpts(opt),
-		withRequestOpts(options...),
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, nil, err
+	}
+	u := fmt.Sprintf("projects/%s/repository/commits/%s/discussions/%s/notes/%d",
+		PathEscape(project),
+		commit,
+		discussion,
+		note,
 	)
+
+	req, err := s.client.NewRequest(http.MethodPut, u, opt, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	n := new(Note)
+	resp, err := s.client.Do(req, n)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return n, resp, nil
 }
 
 func (s *DiscussionsService) DeleteCommitDiscussionNote(pid any, commit string, discussion string, note int64, options ...RequestOptionFunc) (*Response, error) {
-	_, resp, err := do[none](s.client,
-		withMethod(http.MethodDelete),
-		withPath("projects/%s/repository/commits/%s/discussions/%s/notes/%d", ProjectID{pid}, commit, discussion, note),
-		withRequestOpts(options...),
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, err
+	}
+	u := fmt.Sprintf("projects/%s/repository/commits/%s/discussions/%s/notes/%d",
+		PathEscape(project),
+		commit,
+		discussion,
+		note,
 	)
-	return resp, err
+
+	req, err := s.client.NewRequest(http.MethodDelete, u, nil, options)
+	if err != nil {
+		return nil, err
+	}
+
+	return s.client.Do(req, nil)
 }

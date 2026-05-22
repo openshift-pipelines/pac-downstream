@@ -86,23 +86,6 @@ const (
 	AccessTokenStateInactive AccessTokenState = "inactive"
 )
 
-// AccessTokenSort represents the available sorting options for access tokens.
-//
-// GitLab API docs:
-// https://docs.gitlab.com/api/group_access_tokens/#list-all-group-access-tokens
-type AccessTokenSort string
-
-const (
-	CreatedAsc   AccessTokenSort = "created_asc"
-	CreatedDesc  AccessTokenSort = "created_desc"
-	ExpiresAsc   AccessTokenSort = "expires_asc"
-	ExpiresDesc  AccessTokenSort = "expires_desc"
-	LastUsedAsc  AccessTokenSort = "last_used_asc"
-	LastUsedDesc AccessTokenSort = "last_used_desc"
-	NameAsc      AccessTokenSort = "name_asc"
-	NameDesc     AccessTokenSort = "name_desc"
-)
-
 // UserIDValue represents a user ID value within GitLab.
 type UserIDValue string
 
@@ -894,10 +877,16 @@ type BoolValue bool
 // https://github.com/gitlabhq/terraform-provider-gitlab/issues/348
 func (t *BoolValue) UnmarshalJSON(b []byte) error {
 	switch string(b) {
-	case `"1"`, `"true"`:
+	case `"1"`:
 		*t = true
 		return nil
-	case `"0"`, `"false"`:
+	case `"0"`:
+		*t = false
+		return nil
+	case `"true"`:
+		*t = true
+		return nil
+	case `"false"`:
 		*t = false
 		return nil
 	default:
@@ -922,22 +911,4 @@ const (
 	CiPipelineVariablesOwnerRole        CIPipelineVariablesMinimumOverrideRoleValue = "owner"
 	CiPipelineVariablesMaintainerRole   CIPipelineVariablesMinimumOverrideRoleValue = "maintainer"
 	CIPipelineVariablesDeveloperRole    CIPipelineVariablesMinimumOverrideRoleValue = "developer"
-)
-
-// EnabledGitAccessProtocolValue represents a git access protocol value.
-type EnabledGitAccessProtocolValue string
-
-const (
-	EnabledGitAccessProtocolSSH  EnabledGitAccessProtocolValue = "ssh"
-	EnabledGitAccessProtocolHTTP EnabledGitAccessProtocolValue = "http"
-	EnabledGitAccessProtocolAll  EnabledGitAccessProtocolValue = "all"
-)
-
-// DuoAvailabilityValue represents a GitLab Duo availability value.
-type DuoAvailabilityValue string
-
-const (
-	DuoAvailabilityDefaultOn  DuoAvailabilityValue = "default_on"
-	DuoAvailabilityDefaultOff DuoAvailabilityValue = "default_off"
-	DuoAvailabilityNeverOn    DuoAvailabilityValue = "never_on" // Displayed as "Always Off" in the UI
 )

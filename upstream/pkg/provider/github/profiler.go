@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/google/go-github/v84/github"
+	"github.com/google/go-github/v81/github"
 	providerMetrics "github.com/openshift-pipelines/pipelines-as-code/pkg/provider/providermetrics"
 )
 
@@ -117,7 +117,6 @@ func (v *Provider) logAPICall(operation string, duration time.Duration, resp *gi
 		logFields = append(logFields,
 			"url_path", resp.Request.URL.Path,
 			"rate_limit_remaining", remaining,
-			"github_request_id", resp.Header.Get("X-GitHub-Request-Id"),
 		)
 		if resp.StatusCode > 0 {
 			logFields = append(logFields, "status_code", resp.StatusCode)

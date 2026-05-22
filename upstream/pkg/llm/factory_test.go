@@ -12,7 +12,7 @@ import (
 	"gotest.tools/v3/assert"
 )
 
-func TestFactoryValidateConfig(t *testing.T) {
+func TestFactory_ValidateConfig(t *testing.T) {
 	run := &params.Run{}
 	ktesthelper := &kitesthelper.KinterfaceTest{}
 	factory := NewFactory(run, ktesthelper)
@@ -179,7 +179,7 @@ func TestFactoryValidateConfig(t *testing.T) {
 	}
 }
 
-func TestFactoryCreateClient(t *testing.T) {
+func TestFactory_CreateClient(t *testing.T) {
 	tests := []struct {
 		name         string
 		config       *ClientConfig
@@ -279,7 +279,7 @@ func TestFactoryCreateClient(t *testing.T) {
 	}
 }
 
-func TestFactoryGetSupportedProviders(t *testing.T) {
+func TestFactory_GetSupportedProviders(t *testing.T) {
 	run := &params.Run{}
 
 	ktesthelper := &kitesthelper.KinterfaceTest{}
@@ -304,7 +304,7 @@ func TestFactoryGetSupportedProviders(t *testing.T) {
 	assert.Assert(t, hasGemini, "expected Gemini to be supported")
 }
 
-func TestFactoryCreateClientFromProvider(t *testing.T) {
+func TestFactory_CreateClientFromProvider(t *testing.T) {
 	run := &params.Run{Clients: paramclients.Clients{}}
 	ktesthelper := &kitesthelper.KinterfaceTest{
 		GetSecretResult: map[string]string{
@@ -329,7 +329,7 @@ func TestFactoryCreateClientFromProvider(t *testing.T) {
 	assert.Equal(t, client.GetProviderName(), "openai")
 }
 
-func TestFactoryCreateClientWithModel(t *testing.T) {
+func TestFactory_CreateClient_WithModel(t *testing.T) {
 	run := &params.Run{}
 	ktesthelper := &kitesthelper.KinterfaceTest{}
 	factory := NewFactory(run, ktesthelper)

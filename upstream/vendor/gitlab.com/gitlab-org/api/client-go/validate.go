@@ -16,7 +16,10 @@
 
 package gitlab
 
-import "net/http"
+import (
+	"fmt"
+	"net/http"
+)
 
 type (
 	ValidateServiceInterface interface {
@@ -92,12 +95,24 @@ type ProjectNamespaceLintOptions struct {
 }
 
 func (s *ValidateService) ProjectNamespaceLint(pid any, opt *ProjectNamespaceLintOptions, options ...RequestOptionFunc) (*ProjectLintResult, *Response, error) {
-	return do[*ProjectLintResult](s.client,
-		withMethod(http.MethodPost),
-		withPath("projects/%s/ci/lint", ProjectID{pid}),
-		withAPIOpts(opt),
-		withRequestOpts(options...),
-	)
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, nil, err
+	}
+	u := fmt.Sprintf("projects/%s/ci/lint", PathEscape(project))
+
+	req, err := s.client.NewRequest(http.MethodPost, u, &opt, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	l := new(ProjectLintResult)
+	resp, err := s.client.Do(req, l)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return l, resp, nil
 }
 
 // ProjectLintOptions represents the available ProjectLint() options.
@@ -113,9 +128,22 @@ type ProjectLintOptions struct {
 }
 
 func (s *ValidateService) ProjectLint(pid any, opt *ProjectLintOptions, options ...RequestOptionFunc) (*ProjectLintResult, *Response, error) {
-	return do[*ProjectLintResult](s.client,
-		withPath("projects/%s/ci/lint", ProjectID{pid}),
-		withAPIOpts(opt),
-		withRequestOpts(options...),
-	)
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, nil, err
+	}
+	u := fmt.Sprintf("projects/%s/ci/lint", PathEscape(project))
+
+	req, err := s.client.NewRequest(http.MethodGet, u, &opt, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	l := new(ProjectLintResult)
+	resp, err := s.client.Do(req, l)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return l, resp, nil
 }

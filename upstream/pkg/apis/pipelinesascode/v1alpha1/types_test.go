@@ -58,7 +58,6 @@ func TestMergeSpecs(t *testing.T) {
 					Policy: &Policy{
 						OkToTest: []string{"ok1", "ok2"},
 					},
-					GitOpsCommandPrefix: "pac",
 				}, // Initialize as needed
 				GitProvider:      gp, // Initialize as needed
 				Incomings:        incomings,
@@ -72,7 +71,6 @@ func TestMergeSpecs(t *testing.T) {
 					Policy: &Policy{
 						OkToTest: []string{"ok1", "ok2"},
 					},
-					GitOpsCommandPrefix: "pac",
 				},
 				Incomings:        incomings,
 				GitProvider:      gp,
@@ -89,7 +87,6 @@ func TestMergeSpecs(t *testing.T) {
 					Policy: &Policy{
 						OkToTest: []string{"ok1", "ok2"},
 					},
-					GitOpsCommandPrefix: "pac",
 				}, // Initialize as needed
 				GitProvider: &GitProvider{}, // Initialize as needed
 			},
@@ -113,62 +110,11 @@ func TestMergeSpecs(t *testing.T) {
 					Policy: &Policy{
 						OkToTest: []string{"ok1", "ok2"},
 					},
-					GitOpsCommandPrefix: "pac",
 				},
 				Incomings:        incomings,
 				GitProvider:      gp,
 				Params:           params,
 				ConcurrencyLimit: &two,
-			},
-		},
-		{
-			name: "forgejo settings from global",
-			local: &RepositorySpec{
-				Settings:    &Settings{},
-				GitProvider: &GitProvider{},
-			},
-			global: RepositorySpec{
-				Settings: &Settings{
-					Forgejo: &ForgejoSettings{
-						UserAgent: "my-custom-agent",
-					},
-				},
-				GitProvider: &GitProvider{},
-			},
-			expected: &RepositorySpec{
-				Settings: &Settings{
-					Forgejo: &ForgejoSettings{
-						UserAgent: "my-custom-agent",
-					},
-				},
-				GitProvider: &GitProvider{},
-			},
-		},
-		{
-			name: "local forgejo settings take precedence",
-			local: &RepositorySpec{
-				Settings: &Settings{
-					Forgejo: &ForgejoSettings{
-						UserAgent: "local-agent",
-					},
-				},
-				GitProvider: &GitProvider{},
-			},
-			global: RepositorySpec{
-				Settings: &Settings{
-					Forgejo: &ForgejoSettings{
-						UserAgent: "global-agent",
-					},
-				},
-				GitProvider: &GitProvider{},
-			},
-			expected: &RepositorySpec{
-				Settings: &Settings{
-					Forgejo: &ForgejoSettings{
-						UserAgent: "local-agent",
-					},
-				},
-				GitProvider: &GitProvider{},
 			},
 		},
 		{

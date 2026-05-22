@@ -17,6 +17,7 @@
 package gitlab
 
 import (
+	"fmt"
 	"net/http"
 )
 
@@ -102,18 +103,45 @@ type ListDraftNotesOptions struct {
 }
 
 func (s *DraftNotesService) ListDraftNotes(pid any, mergeRequest int64, opt *ListDraftNotesOptions, options ...RequestOptionFunc) ([]*DraftNote, *Response, error) {
-	return do[[]*DraftNote](s.client,
-		withPath("projects/%s/merge_requests/%d/draft_notes", ProjectID{pid}, mergeRequest),
-		withAPIOpts(opt),
-		withRequestOpts(options...),
-	)
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, nil, err
+	}
+	u := fmt.Sprintf("projects/%s/merge_requests/%d/draft_notes", PathEscape(project), mergeRequest)
+
+	req, err := s.client.NewRequest(http.MethodGet, u, opt, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var n []*DraftNote
+	resp, err := s.client.Do(req, &n)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return n, resp, nil
 }
 
 func (s *DraftNotesService) GetDraftNote(pid any, mergeRequest int64, note int64, options ...RequestOptionFunc) (*DraftNote, *Response, error) {
-	return do[*DraftNote](s.client,
-		withPath("projects/%s/merge_requests/%d/draft_notes/%d", ProjectID{pid}, mergeRequest, note),
-		withRequestOpts(options...),
-	)
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, nil, err
+	}
+	u := fmt.Sprintf("projects/%s/merge_requests/%d/draft_notes/%d", PathEscape(project), mergeRequest, note)
+
+	req, err := s.client.NewRequest(http.MethodGet, u, nil, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	n := new(DraftNote)
+	resp, err := s.client.Do(req, &n)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return n, resp, nil
 }
 
 // CreateDraftNoteOptions represents the available CreateDraftNote()
@@ -131,12 +159,24 @@ type CreateDraftNoteOptions struct {
 }
 
 func (s *DraftNotesService) CreateDraftNote(pid any, mergeRequest int64, opt *CreateDraftNoteOptions, options ...RequestOptionFunc) (*DraftNote, *Response, error) {
-	return do[*DraftNote](s.client,
-		withMethod(http.MethodPost),
-		withPath("projects/%s/merge_requests/%d/draft_notes", ProjectID{pid}, mergeRequest),
-		withAPIOpts(opt),
-		withRequestOpts(options...),
-	)
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, nil, err
+	}
+	u := fmt.Sprintf("projects/%s/merge_requests/%d/draft_notes", PathEscape(project), mergeRequest)
+
+	req, err := s.client.NewRequest(http.MethodPost, u, opt, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	n := new(DraftNote)
+	resp, err := s.client.Do(req, &n)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return n, resp, nil
 }
 
 // UpdateDraftNoteOptions represents the available UpdateDraftNote()
@@ -151,37 +191,67 @@ type UpdateDraftNoteOptions struct {
 }
 
 func (s *DraftNotesService) UpdateDraftNote(pid any, mergeRequest int64, note int64, opt *UpdateDraftNoteOptions, options ...RequestOptionFunc) (*DraftNote, *Response, error) {
-	return do[*DraftNote](s.client,
-		withMethod(http.MethodPut),
-		withPath("projects/%s/merge_requests/%d/draft_notes/%d", ProjectID{pid}, mergeRequest, note),
-		withAPIOpts(opt),
-		withRequestOpts(options...),
-	)
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, nil, err
+	}
+	u := fmt.Sprintf("projects/%s/merge_requests/%d/draft_notes/%d", PathEscape(project), mergeRequest, note)
+
+	req, err := s.client.NewRequest(http.MethodPut, u, opt, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	n := new(DraftNote)
+	resp, err := s.client.Do(req, &n)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return n, resp, nil
 }
 
 func (s *DraftNotesService) DeleteDraftNote(pid any, mergeRequest int64, note int64, options ...RequestOptionFunc) (*Response, error) {
-	_, resp, err := do[none](s.client,
-		withMethod(http.MethodDelete),
-		withPath("projects/%s/merge_requests/%d/draft_notes/%d", ProjectID{pid}, mergeRequest, note),
-		withRequestOpts(options...),
-	)
-	return resp, err
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, err
+	}
+	u := fmt.Sprintf("projects/%s/merge_requests/%d/draft_notes/%d", PathEscape(project), mergeRequest, note)
+
+	req, err := s.client.NewRequest(http.MethodDelete, u, nil, options)
+	if err != nil {
+		return nil, err
+	}
+
+	return s.client.Do(req, nil)
 }
 
 func (s *DraftNotesService) PublishDraftNote(pid any, mergeRequest int64, note int64, options ...RequestOptionFunc) (*Response, error) {
-	_, resp, err := do[none](s.client,
-		withMethod(http.MethodPut),
-		withPath("projects/%s/merge_requests/%d/draft_notes/%d/publish", ProjectID{pid}, mergeRequest, note),
-		withRequestOpts(options...),
-	)
-	return resp, err
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, err
+	}
+	u := fmt.Sprintf("projects/%s/merge_requests/%d/draft_notes/%d/publish", PathEscape(project), mergeRequest, note)
+
+	req, err := s.client.NewRequest(http.MethodPut, u, nil, options)
+	if err != nil {
+		return nil, err
+	}
+
+	return s.client.Do(req, nil)
 }
 
 func (s *DraftNotesService) PublishAllDraftNotes(pid any, mergeRequest int64, options ...RequestOptionFunc) (*Response, error) {
-	_, resp, err := do[none](s.client,
-		withMethod(http.MethodPost),
-		withPath("projects/%s/merge_requests/%d/draft_notes/bulk_publish", ProjectID{pid}, mergeRequest),
-		withRequestOpts(options...),
-	)
-	return resp, err
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, err
+	}
+	u := fmt.Sprintf("projects/%s/merge_requests/%d/draft_notes/bulk_publish", PathEscape(project), mergeRequest)
+
+	req, err := s.client.NewRequest(http.MethodPost, u, nil, options)
+	if err != nil {
+		return nil, err
+	}
+
+	return s.client.Do(req, nil)
 }

@@ -19,6 +19,7 @@ package gitlab
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -64,14 +65,23 @@ func (s *GroupImportExportService) ScheduleExport(gid any, options ...RequestOpt
 // GitLab API docs:
 // https://docs.gitlab.com/api/group_import_export/#export-download
 func (s *GroupImportExportService) ExportDownload(gid any, options ...RequestOptionFunc) (*bytes.Reader, *Response, error) {
-	buf, resp, err := do[bytes.Buffer](s.client,
-		withPath("groups/%s/export/download", GroupID{gid}),
-		withRequestOpts(options...),
-	)
+	group, err := parseID(gid)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	req, err := s.client.NewRequest(http.MethodGet, fmt.Sprintf("groups/%s/export/download", group), nil, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	exportDownload := new(bytes.Buffer)
+	resp, err := s.client.Do(req, exportDownload)
 	if err != nil {
 		return nil, resp, err
 	}
-	return bytes.NewReader(buf.Bytes()), resp, nil
+
+	return bytes.NewReader(exportDownload.Bytes()), resp, err
 }
 
 // GroupImportFileOptions represents the available ImportFile() options.

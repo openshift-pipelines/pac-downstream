@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -19,20 +18,18 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/settings"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
-	prmetrics "github.com/openshift-pipelines/pipelines-as-code/pkg/pipelinerunmetrics"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
 	thelp "github.com/openshift-pipelines/pipelines-as-code/pkg/provider/gitlab/test"
-	providerstatus "github.com/openshift-pipelines/pipelines-as-code/pkg/provider/status"
 	testclient "github.com/openshift-pipelines/pipelines-as-code/pkg/test/clients"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/test/logger"
+	metricsutils "github.com/openshift-pipelines/pipelines-as-code/pkg/test/metricstest"
 
 	gitlab "gitlab.com/gitlab-org/api/client-go"
-	"go.opentelemetry.io/otel"
-	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
-	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 	"go.uber.org/zap"
 	zapobserver "go.uber.org/zap/zaptest/observer"
 	"gotest.tools/v3/assert"
+	"knative.dev/pkg/metrics/metricstest"
+	_ "knative.dev/pkg/metrics/testing"
 	rtesting "knative.dev/pkg/reconciler/testing"
 )
 
@@ -42,7 +39,7 @@ func TestCreateStatus(t *testing.T) {
 	}
 	type args struct {
 		event      *info.Event
-		statusOpts providerstatus.StatusOpts
+		statusOpts provider.StatusOpts
 		postStr    string
 	}
 	tests := []struct {
@@ -61,7 +58,7 @@ func TestCreateStatus(t *testing.T) {
 			wantClient: true,
 			wantErr:    false,
 			args: args{
-				statusOpts: providerstatus.StatusOpts{
+				statusOpts: provider.StatusOpts{
 					Status: "in_progress",
 				},
 			},
@@ -71,7 +68,7 @@ func TestCreateStatus(t *testing.T) {
 			wantClient: true,
 			wantErr:    false,
 			args: args{
-				statusOpts: providerstatus.StatusOpts{
+				statusOpts: provider.StatusOpts{
 					Conclusion: "skipped",
 				},
 				event: &info.Event{
@@ -85,7 +82,7 @@ func TestCreateStatus(t *testing.T) {
 			wantClient: true,
 			wantErr:    false,
 			args: args{
-				statusOpts: providerstatus.StatusOpts{
+				statusOpts: provider.StatusOpts{
 					Conclusion: "neutral",
 				},
 				event: &info.Event{
@@ -99,7 +96,7 @@ func TestCreateStatus(t *testing.T) {
 			wantClient: true,
 			wantErr:    false,
 			args: args{
-				statusOpts: providerstatus.StatusOpts{
+				statusOpts: provider.StatusOpts{
 					Conclusion: "failure",
 				},
 				event: &info.Event{
@@ -113,7 +110,7 @@ func TestCreateStatus(t *testing.T) {
 			wantClient: true,
 			wantErr:    false,
 			args: args{
-				statusOpts: providerstatus.StatusOpts{
+				statusOpts: provider.StatusOpts{
 					Conclusion: "success",
 				},
 				event: &info.Event{
@@ -127,7 +124,7 @@ func TestCreateStatus(t *testing.T) {
 			wantClient: true,
 			wantErr:    false,
 			args: args{
-				statusOpts: providerstatus.StatusOpts{
+				statusOpts: provider.StatusOpts{
 					Conclusion: "pending",
 				},
 				event: &info.Event{
@@ -141,7 +138,7 @@ func TestCreateStatus(t *testing.T) {
 			wantClient: true,
 			wantErr:    false,
 			args: args{
-				statusOpts: providerstatus.StatusOpts{
+				statusOpts: provider.StatusOpts{
 					Conclusion: "completed",
 				},
 				event: &info.Event{
@@ -155,7 +152,7 @@ func TestCreateStatus(t *testing.T) {
 			wantClient: true,
 			wantErr:    false,
 			args: args{
-				statusOpts: providerstatus.StatusOpts{
+				statusOpts: provider.StatusOpts{
 					Conclusion: "cancelled",
 				},
 				event: &info.Event{
@@ -169,7 +166,7 @@ func TestCreateStatus(t *testing.T) {
 			wantClient: true,
 			wantErr:    false,
 			args: args{
-				statusOpts: providerstatus.StatusOpts{
+				statusOpts: provider.StatusOpts{
 					Conclusion: "completed",
 				},
 				event: &info.Event{
@@ -183,7 +180,7 @@ func TestCreateStatus(t *testing.T) {
 			wantClient: true,
 			wantErr:    false,
 			args: args{
-				statusOpts: providerstatus.StatusOpts{
+				statusOpts: provider.StatusOpts{
 					Conclusion: "skipped",
 					DetailsURL: "https://url.com",
 				},
@@ -198,7 +195,7 @@ func TestCreateStatus(t *testing.T) {
 			wantClient: true,
 			wantErr:    false,
 			args: args{
-				statusOpts: providerstatus.StatusOpts{
+				statusOpts: provider.StatusOpts{
 					Conclusion: "pending",
 				},
 				event: &info.Event{
@@ -213,7 +210,7 @@ func TestCreateStatus(t *testing.T) {
 			wantClient: true,
 			wantErr:    false,
 			args: args{
-				statusOpts: providerstatus.StatusOpts{
+				statusOpts: provider.StatusOpts{
 					Conclusion: "completed",
 				},
 				event: &info.Event{
@@ -231,7 +228,7 @@ func TestCreateStatus(t *testing.T) {
 				targetProjectID: 100,
 			},
 			args: args{
-				statusOpts: providerstatus.StatusOpts{
+				statusOpts: provider.StatusOpts{
 					Conclusion: "success",
 				},
 				event: &info.Event{
@@ -251,7 +248,7 @@ func TestCreateStatus(t *testing.T) {
 				targetProjectID: 100,
 			},
 			args: args{
-				statusOpts: providerstatus.StatusOpts{
+				statusOpts: provider.StatusOpts{
 					Conclusion: "success",
 				},
 				event: &info.Event{
@@ -271,7 +268,7 @@ func TestCreateStatus(t *testing.T) {
 				targetProjectID: 100,
 			},
 			args: args{
-				statusOpts: providerstatus.StatusOpts{
+				statusOpts: provider.StatusOpts{
 					Conclusion: "success",
 				},
 				event: &info.Event{
@@ -291,7 +288,7 @@ func TestCreateStatus(t *testing.T) {
 				targetProjectID: 100,
 			},
 			args: args{
-				statusOpts: providerstatus.StatusOpts{
+				statusOpts: provider.StatusOpts{
 					Conclusion: "success",
 				},
 				event: &info.Event{
@@ -311,7 +308,7 @@ func TestCreateStatus(t *testing.T) {
 				targetProjectID: 100,
 			},
 			args: args{
-				statusOpts: providerstatus.StatusOpts{
+				statusOpts: provider.StatusOpts{
 					Conclusion: "success",
 				},
 				event: &info.Event{
@@ -331,7 +328,7 @@ func TestCreateStatus(t *testing.T) {
 				targetProjectID: 100,
 			},
 			args: args{
-				statusOpts: providerstatus.StatusOpts{
+				statusOpts: provider.StatusOpts{
 					Conclusion: "success",
 				},
 				event: &info.Event{
@@ -579,97 +576,6 @@ func TestGetCommitInfo(t *testing.T) {
 					}
 				}
 			}
-		})
-	}
-}
-
-func TestGetCommitStatuses(t *testing.T) {
-	tests := []struct {
-		name         string
-		event        *info.Event
-		provider     *Provider
-		mockHandlers map[string]func(http.ResponseWriter, *http.Request)
-		want         []provider.CommitStatusInfo
-	}{
-		{
-			name: "uses event source project statuses",
-			event: &info.Event{
-				SHA:             "abc123",
-				SourceProjectID: 101,
-				TargetProjectID: 202,
-			},
-			provider: &Provider{},
-			mockHandlers: map[string]func(http.ResponseWriter, *http.Request){
-				"/projects/101/repository/commits/abc123/statuses": func(rw http.ResponseWriter, r *http.Request) {
-					assert.Equal(t, r.Method, http.MethodGet)
-					fmt.Fprint(rw, `[{"name":"Pipelines as Code CI / always-good-pipelinerun","status":"success"},{"name":"Pipelines as Code CI / pipelinerun-exit-1","status":"failed"}]`)
-				},
-			},
-			want: []provider.CommitStatusInfo{
-				{Name: "Pipelines as Code CI / always-good-pipelinerun", Status: "success"},
-				{Name: "Pipelines as Code CI / pipelinerun-exit-1", Status: "failed"},
-			},
-		},
-		{
-			name: "falls back to provider source project id when event source project id is empty",
-			event: &info.Event{
-				SHA:             "def456",
-				TargetProjectID: 202,
-			},
-			provider: &Provider{
-				sourceProjectID: 303,
-			},
-			mockHandlers: map[string]func(http.ResponseWriter, *http.Request){
-				"/projects/303/repository/commits/def456/statuses": func(rw http.ResponseWriter, r *http.Request) {
-					assert.Equal(t, r.Method, http.MethodGet)
-					fmt.Fprint(rw, `[{"name":"Pipelines as Code CI / from-provider-source","status":"success"}]`)
-				},
-			},
-			want: []provider.CommitStatusInfo{
-				{Name: "Pipelines as Code CI / from-provider-source", Status: "success"},
-			},
-		},
-		{
-			name: "falls back to target project when source project lookup fails",
-			event: &info.Event{
-				SHA:             "fedcba",
-				SourceProjectID: 404,
-				TargetProjectID: 505,
-			},
-			provider: &Provider{},
-			mockHandlers: map[string]func(http.ResponseWriter, *http.Request){
-				"/projects/404/repository/commits/fedcba/statuses": func(rw http.ResponseWriter, r *http.Request) {
-					assert.Equal(t, r.Method, http.MethodGet)
-					rw.WriteHeader(http.StatusNotFound)
-					fmt.Fprint(rw, `{"message":"404 Project Not Found"}`)
-				},
-				"/projects/505/repository/commits/fedcba/statuses": func(rw http.ResponseWriter, r *http.Request) {
-					assert.Equal(t, r.Method, http.MethodGet)
-					fmt.Fprint(rw, `[{"name":"Pipelines as Code CI / from-target","status":"success"}]`)
-				},
-			},
-			want: []provider.CommitStatusInfo{
-				{Name: "Pipelines as Code CI / from-target", Status: "success"},
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			fakeclient, mux, tearDown := thelp.Setup(t)
-			defer tearDown()
-			logger, _ := logger.GetLogger()
-
-			for endpoint, handler := range tt.mockHandlers {
-				mux.HandleFunc(endpoint, handler)
-			}
-
-			tt.provider.gitlabClient = fakeclient
-			tt.provider.Logger = logger
-
-			got, err := tt.provider.GetCommitStatuses(context.Background(), tt.event)
-			assert.NilError(t, err)
-			assert.DeepEqual(t, got, tt.want)
 		})
 	}
 }
@@ -1328,7 +1234,6 @@ func TestGetFiles(t *testing.T) {
 		name                             string
 		event                            *info.Event
 		mrchanges                        []*gitlab.MergeRequestDiff
-		diffAPILimitExceeded             bool
 		pushChanges                      []*gitlab.Diff
 		wantAddedFilesCount              int
 		wantDeletedFilesCount            int
@@ -1336,7 +1241,6 @@ func TestGetFiles(t *testing.T) {
 		wantRenamedFilesCount            int
 		sourceProjectID, targetProjectID int
 		wantError                        bool
-		apiCallCount                     int64
 	}{
 		{
 			name: "pull-request",
@@ -1345,9 +1249,6 @@ func TestGetFiles(t *testing.T) {
 				Organization:      "pullrequestowner",
 				Repository:        "pullrequestrepository",
 				PullRequestNumber: 10,
-				BaseBranch:        "main",
-				HeadBranch:        "feature",
-				SHA:               "abc123",
 			},
 			mrchanges: []*gitlab.MergeRequestDiff{
 				{
@@ -1371,44 +1272,6 @@ func TestGetFiles(t *testing.T) {
 			wantModifiedFilesCount: 1,
 			wantRenamedFilesCount:  1,
 			targetProjectID:        10,
-			apiCallCount:           2,
-		},
-		{
-			name: "merge request exceeding gitlab Diff API",
-			event: &info.Event{
-				TriggerTarget:     "pull_request",
-				Organization:      "pullrequestowner",
-				Repository:        "pullrequestrepository",
-				PullRequestNumber: 10,
-				BaseBranch:        "main",
-				HeadBranch:        "feature",
-				SHA:               "abc123",
-			},
-			mrchanges: []*gitlab.MergeRequestDiff{
-				{
-					NewPath: "modified.yaml",
-				},
-				{
-					NewPath: "added.doc",
-					NewFile: true,
-				},
-				{
-					NewPath:     "removed.yaml",
-					DeletedFile: true,
-				},
-				{
-					NewPath:     "renamed.doc",
-					RenamedFile: true,
-				},
-			},
-			wantAddedFilesCount:    1,
-			wantDeletedFilesCount:  1,
-			wantModifiedFilesCount: 1,
-			wantRenamedFilesCount:  1,
-			targetProjectID:        10,
-			wantError:              false,
-			apiCallCount:           2,
-			diffAPILimitExceeded:   true,
 		},
 		{
 			name: "pull-request with wrong project ID",
@@ -1441,7 +1304,6 @@ func TestGetFiles(t *testing.T) {
 			wantRenamedFilesCount:  0,
 			targetProjectID:        12,
 			wantError:              true,
-			apiCallCount:           1,
 		},
 		{
 			name: "push",
@@ -1473,51 +1335,18 @@ func TestGetFiles(t *testing.T) {
 			wantModifiedFilesCount: 1,
 			wantRenamedFilesCount:  1,
 			sourceProjectID:        0,
-			apiCallCount:           1,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx, _ := rtesting.SetupFakeContext(t)
+			metricsutils.ResetMetrics()
 			fakeclient, mux, teardown := thelp.Setup(t)
 			defer teardown()
-
 			if tt.event.TriggerTarget == "pull_request" {
-				mux.HandleFunc(fmt.Sprintf("/projects/10/merge_requests/%d", tt.event.PullRequestNumber),
-					func(rw http.ResponseWriter, _ *http.Request) {
-						resp := gitlab.MergeRequest{
-							ChangesCount: strconv.Itoa(len(tt.mrchanges)),
-						}
-						if tt.diffAPILimitExceeded {
-							resp.ChangesCount = strconv.Itoa(len(tt.mrchanges)-1) + "+"
-						}
-						jeez, err := json.Marshal(resp)
-						assert.NilError(t, err)
-						_, _ = rw.Write(jeez)
-					})
 				mux.HandleFunc(fmt.Sprintf("/projects/10/merge_requests/%d/diffs",
 					tt.event.PullRequestNumber), func(rw http.ResponseWriter, _ *http.Request) {
-					diffAPIChanges := tt.mrchanges
-					if tt.diffAPILimitExceeded {
-						// The Diff API will not return the full list of files
-						diffAPIChanges = diffAPIChanges[:len(tt.mrchanges)-1]
-					}
-
-					jeez, err := json.Marshal(diffAPIChanges)
-					assert.NilError(t, err)
-					_, _ = rw.Write(jeez)
-				})
-				mux.HandleFunc("/projects/10/repository/compare", func(rw http.ResponseWriter, req *http.Request) {
-					if req.URL.Query().Get("from") != tt.event.BaseBranch || req.URL.Query().Get("to") != tt.event.SHA {
-						t.Errorf("expecting compare API call with 'from=%s&to=%s', got %s", tt.event.BaseBranch, tt.event.SHA, req.URL.Query().Encode())
-					}
-
-					// always return the full list, not subject to the Diff API size limitations
-					diffs := []*gitlab.Diff{}
-					for _, d := range tt.mrchanges {
-						diffs = append(diffs, &gitlab.Diff{NewPath: d.NewPath, NewFile: d.NewFile, RenamedFile: d.RenamedFile, DeletedFile: d.DeletedFile})
-					}
-					jeez, err := json.Marshal(gitlab.Compare{Diffs: diffs})
+					jeez, err := json.Marshal(tt.mrchanges)
 					assert.NilError(t, err)
 					_, _ = rw.Write(jeez)
 				})
@@ -1531,10 +1360,8 @@ func TestGetFiles(t *testing.T) {
 					})
 			}
 
-			prmetrics.ResetRecorder()
-			reader := sdkmetric.NewManualReader()
-			metricProvider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
-			otel.SetMeterProvider(metricProvider)
+			metricsTags := map[string]string{"provider": "api.gitlab.com", "event-type": string(tt.event.TriggerTarget)}
+			metricstest.CheckStatsNotReported(t, "pipelines_as_code_git_provider_api_request_count")
 
 			providerInfo := &Provider{gitlabClient: fakeclient, sourceProjectID: int64(tt.sourceProjectID), targetProjectID: int64(tt.targetProjectID), triggerEvent: string(tt.event.TriggerTarget), apiURL: "api.gitlab.com"}
 			changedFiles, err := providerInfo.GetFiles(ctx, tt.event)
@@ -1557,32 +1384,15 @@ func TestGetFiles(t *testing.T) {
 				}
 			}
 
-			var rm metricdata.ResourceMetrics
-			err = reader.Collect(ctx, &rm)
-			assert.NilError(t, err, "error collecting metrics")
-
-			assert.Equal(t, len(rm.ScopeMetrics), 1)
-			assert.Equal(t, len(rm.ScopeMetrics[0].Metrics), 1)
-			assert.Equal(t, rm.ScopeMetrics[0].Metrics[0].Name, "pipelines_as_code_git_provider_api_request_count")
-			count, ok := rm.ScopeMetrics[0].Metrics[0].Data.(metricdata.Sum[int64])
-			assert.Assert(t, ok)
-			assert.Equal(t, count.DataPoints[0].Value, int64(tt.apiCallCount))
-
+			// Check caching
+			metricstest.CheckCountData(t, "pipelines_as_code_git_provider_api_request_count", metricsTags, 1)
 			_, _ = providerInfo.GetFiles(ctx, tt.event)
-
-			// recollect the metrics after the second call
-			err = reader.Collect(ctx, &rm)
-			assert.NilError(t, err, "error collecting metrics")
 			if tt.wantError {
 				// No caching on error
-				count, ok = rm.ScopeMetrics[0].Metrics[0].Data.(metricdata.Sum[int64])
-				assert.Assert(t, ok)
-				assert.Equal(t, count.DataPoints[0].Value, int64(tt.apiCallCount*2))
+				metricstest.CheckCountData(t, "pipelines_as_code_git_provider_api_request_count", metricsTags, 2)
 			} else {
 				// Cache API results on success
-				count, ok = rm.ScopeMetrics[0].Metrics[0].Data.(metricdata.Sum[int64])
-				assert.Assert(t, ok)
-				assert.Equal(t, count.DataPoints[0].Value, int64(tt.apiCallCount))
+				metricstest.CheckCountData(t, "pipelines_as_code_git_provider_api_request_count", metricsTags, 1)
 			}
 		})
 	}
@@ -1614,26 +1424,14 @@ func TestGetFilesPaging(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx, _ := rtesting.SetupFakeContext(t)
+			metricsutils.ResetMetrics()
 			fakeclient, mux, teardown := thelp.Setup(t)
 			defer teardown()
 
-			changeCount := 5
-			apiCallCount := changeCount
 			if tt.event.TriggerTarget == "pull_request" {
-				// Extra request made to check the diff API limit
-				apiCallCount++
-			}
-
-			if tt.event.TriggerTarget == "pull_request" {
-				mux.HandleFunc(fmt.Sprintf("/projects/0/merge_requests/%d",
-					tt.event.PullRequestNumber), func(rw http.ResponseWriter, _ *http.Request) {
-					jeez, err := json.Marshal(gitlab.MergeRequest{ChangesCount: strconv.Itoa(changeCount)})
-					assert.NilError(t, err)
-					_, _ = rw.Write(jeez)
-				})
 				mux.HandleFunc(fmt.Sprintf("/projects/0/merge_requests/%d/diffs",
 					tt.event.PullRequestNumber), func(rw http.ResponseWriter, req *http.Request) {
-					pageCount := thelp.SetPagingHeader(t, rw, req, changeCount)
+					pageCount := thelp.SetPagingHeader(t, rw, req, 5)
 					jeez, err := json.Marshal([]*gitlab.MergeRequestDiff{{NewPath: fmt.Sprintf("change-%d.txt", pageCount)}})
 					assert.NilError(t, err)
 					_, _ = rw.Write(jeez)
@@ -1642,45 +1440,26 @@ func TestGetFilesPaging(t *testing.T) {
 			if tt.event.TriggerTarget == "push" {
 				mux.HandleFunc(fmt.Sprintf("/projects/0/repository/commits/%s/diff",
 					tt.event.SHA), func(rw http.ResponseWriter, req *http.Request) {
-					pageCount := thelp.SetPagingHeader(t, rw, req, changeCount)
+					pageCount := thelp.SetPagingHeader(t, rw, req, 5)
 					jeez, err := json.Marshal([]*gitlab.Diff{{NewPath: fmt.Sprintf("change-%d.txt", pageCount)}})
 					assert.NilError(t, err)
 					_, _ = rw.Write(jeez)
 				})
 			}
 
-			prmetrics.ResetRecorder()
-			reader := sdkmetric.NewManualReader()
-			metricProvider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
-			otel.SetMeterProvider(metricProvider)
+			metricsTags := map[string]string{"provider": "api.gitlab.com", "event-type": string(tt.event.TriggerTarget)}
+			metricstest.CheckStatsNotReported(t, "pipelines_as_code_git_provider_api_request_count")
 
 			providerInfo := &Provider{gitlabClient: fakeclient, sourceProjectID: 0, targetProjectID: 0, triggerEvent: string(tt.event.TriggerTarget), apiURL: "api.gitlab.com"}
 			changedFiles, err := providerInfo.GetFiles(ctx, tt.event)
 			assert.NilError(t, err, nil)
 			assert.DeepEqual(t, changedFiles.All, []string{"change-1.txt", "change-2.txt", "change-3.txt", "change-4.txt", "change-5.txt"})
-			assert.Equal(t, len(changedFiles.Modified), changeCount)
+			assert.Equal(t, len(changedFiles.Modified), 5)
 
 			// Check caching
-			var rm metricdata.ResourceMetrics
-			err = reader.Collect(ctx, &rm)
-			assert.NilError(t, err, "error collecting metrics")
-
-			assert.Equal(t, len(rm.ScopeMetrics), 1)
-			assert.Equal(t, len(rm.ScopeMetrics[0].Metrics), 1)
-			assert.Equal(t, rm.ScopeMetrics[0].Metrics[0].Name, "pipelines_as_code_git_provider_api_request_count")
-			count, ok := rm.ScopeMetrics[0].Metrics[0].Data.(metricdata.Sum[int64])
-			assert.Assert(t, ok)
-			assert.Equal(t, count.DataPoints[0].Value, int64(apiCallCount))
-
+			metricstest.CheckCountData(t, "pipelines_as_code_git_provider_api_request_count", metricsTags, 5)
 			_, _ = providerInfo.GetFiles(ctx, tt.event)
-
-			// recollect the metrics after the second call
-			err = reader.Collect(ctx, &rm)
-			assert.NilError(t, err, "error collecting metrics")
-
-			count, ok = rm.ScopeMetrics[0].Metrics[0].Data.(metricdata.Sum[int64])
-			assert.Assert(t, ok)
-			assert.Equal(t, count.DataPoints[0].Value, int64(apiCallCount))
+			metricstest.CheckCountData(t, "pipelines_as_code_git_provider_api_request_count", metricsTags, 5)
 		})
 	}
 }
@@ -1797,12 +1576,9 @@ func TestGitLabCreateComment(t *testing.T) {
 			commit:       "Updated Comment",
 			updateMarker: "MARKER",
 			mockResponses: map[string]func(rw http.ResponseWriter, _ *http.Request){
-				"/user": func(rw http.ResponseWriter, _ *http.Request) {
-					fmt.Fprint(rw, `{"id": 100}`)
-				},
 				"/projects/666/merge_requests/123/notes": func(rw http.ResponseWriter, r *http.Request) {
 					if r.Method == http.MethodGet {
-						fmt.Fprint(rw, `[{"id": 555, "body": "MARKER", "author": {"id": 100}}]`)
+						fmt.Fprint(rw, `[{"id": 555, "body": "MARKER"}]`)
 						return
 					}
 				},
@@ -1819,41 +1595,14 @@ func TestGitLabCreateComment(t *testing.T) {
 			commit:       "New Comment",
 			updateMarker: "MARKER",
 			mockResponses: map[string]func(rw http.ResponseWriter, _ *http.Request){
-				"/user": func(rw http.ResponseWriter, _ *http.Request) {
-					fmt.Fprint(rw, `{"id": 100}`)
-				},
 				"/projects/666/merge_requests/123/notes": func(rw http.ResponseWriter, r *http.Request) {
 					if r.Method == http.MethodGet {
-						fmt.Fprint(rw, `[{"id": 555, "body": "NO_MATCH", "author": {"id": 200}}]`)
+						fmt.Fprint(rw, `[{"id": 555, "body": "NO_MATCH"}]`)
 						return
 					}
 					assert.Equal(t, r.Method, http.MethodPost)
 					rw.WriteHeader(http.StatusCreated)
 					fmt.Fprint(rw, `{}`)
-				},
-			},
-		},
-		{
-			name:         "skip comment from different user and create new",
-			event:        &info.Event{PullRequestNumber: 123, TargetProjectID: 666},
-			commit:       "Updated Comment",
-			updateMarker: "MARKER",
-			mockResponses: map[string]func(rw http.ResponseWriter, _ *http.Request){
-				"/user": func(rw http.ResponseWriter, _ *http.Request) {
-					fmt.Fprint(rw, `{"id": 100}`)
-				},
-				"/projects/666/merge_requests/123/notes": func(rw http.ResponseWriter, r *http.Request) {
-					if r.Method == http.MethodGet {
-						fmt.Fprint(rw, `[{"id": 555, "body": "Old MARKER", "author": {"id": 999}}]`)
-						return
-					}
-					assert.Equal(t, r.Method, http.MethodPost)
-					rw.WriteHeader(http.StatusCreated)
-					fmt.Fprint(rw, `{}`)
-				},
-				"/projects/666/merge_requests/123/notes/555": func(rw http.ResponseWriter, _ *http.Request) {
-					t.Error("edit endpoint should not be called for comment from different user")
-					rw.WriteHeader(http.StatusOK)
 				},
 			},
 		},
@@ -1883,7 +1632,6 @@ func TestGitLabCreateComment(t *testing.T) {
 			p := &Provider{
 				sourceProjectID: 666,
 				gitlabClient:    fakeclient,
-				Logger:          logger,
 			}
 			err := p.CreateComment(context.Background(), tt.event, tt.commit, tt.updateMarker)
 			if tt.wantErr != "" {
@@ -1901,9 +1649,6 @@ func TestGitLabCreateCommentPaging(t *testing.T) {
 	commit := "Updated Comment"
 	updateMarker := "MARKER"
 	mockResponses := map[string]func(rw http.ResponseWriter, _ *http.Request){
-		"/user": func(rw http.ResponseWriter, _ *http.Request) {
-			fmt.Fprint(rw, `{"id": 100}`)
-		},
 		"/projects/666/merge_requests/123/notes": func(rw http.ResponseWriter, r *http.Request) {
 			if r.Method == http.MethodGet {
 				page := thelp.SetPagingHeader(t, rw, r, 100)
@@ -1913,7 +1658,7 @@ func TestGitLabCreateCommentPaging(t *testing.T) {
 				} else if page > 10 {
 					t.Error("notes shouldn't be queries past the expected ID")
 				}
-				fmt.Fprintf(rw, `[{"id": %d, "body": "%s", "author": {"id": 100}}]`, page, note)
+				fmt.Fprintf(rw, `[{"id": %d, "body": "%s"}]`, page, note)
 			}
 		},
 		"/projects/666/merge_requests/123/notes/{id}": func(rw http.ResponseWriter, r *http.Request) {
@@ -1931,8 +1676,6 @@ func TestGitLabCreateCommentPaging(t *testing.T) {
 
 	fakeclient, mux, teardown := thelp.Setup(t)
 	defer teardown()
-	observer, _ := zapobserver.New(zap.InfoLevel)
-	logger := zap.New(observer).Sugar()
 
 	for endpoint, handler := range mockResponses {
 		mux.HandleFunc(endpoint, handler)
@@ -1941,7 +1684,6 @@ func TestGitLabCreateCommentPaging(t *testing.T) {
 	p := &Provider{
 		sourceProjectID: 666,
 		gitlabClient:    fakeclient,
-		Logger:          logger,
 	}
 	err := p.CreateComment(context.Background(), event, commit, updateMarker)
 	assert.NilError(t, err)

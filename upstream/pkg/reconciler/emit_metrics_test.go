@@ -1,41 +1,21 @@
 package reconciler
 
 import (
-	"context"
 	"testing"
 	"time"
 
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	prmetrics "github.com/openshift-pipelines/pipelines-as-code/pkg/pipelinerunmetrics"
+	metricsutils "github.com/openshift-pipelines/pipelines-as-code/pkg/test/metricstest"
 	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
-	"go.opentelemetry.io/otel"
-	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
-	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"knative.dev/pkg/apis"
 	duckv1 "knative.dev/pkg/apis/duck/v1"
+	"knative.dev/pkg/metrics/metricstest"
+	_ "knative.dev/pkg/metrics/testing"
 )
-
-func attributesToMap[N int64 | float64](point metricdata.DataPoint[N]) map[string]string {
-	attrs := make(map[string]string, point.Attributes.Len())
-	for _, kv := range point.Attributes.ToSlice() {
-		attrs[string(kv.Key)] = kv.Value.AsString()
-	}
-	return attrs
-}
-
-func assertAttributesContain[N int64 | float64](t *testing.T, point metricdata.DataPoint[N], want map[string]string) {
-	t.Helper()
-
-	attrs := attributesToMap(point)
-	for key, value := range want {
-		got, ok := attrs[key]
-		assert.Assert(t, ok)
-		assert.Equal(t, got, value)
-	}
-}
 
 // TestCountPipelineRun tests pipelinerun count metric.
 func TestCountPipelineRun(t *testing.T) {
@@ -119,11 +99,7 @@ func TestCountPipelineRun(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			prmetrics.ResetRecorder()
-			ctx := context.Background()
-			reader := sdkmetric.NewManualReader()
-			provider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
-			otel.SetMeterProvider(provider)
+			metricsutils.ResetMetrics()
 			m, err := prmetrics.NewRecorder()
 			assert.NilError(t, err)
 			r := &Reconciler{
@@ -134,26 +110,16 @@ func TestCountPipelineRun(t *testing.T) {
 					Annotations: tt.annotations,
 				},
 			}
+			// checks that metric is unregistered successfully and there is no metric
+			// before emitting new pr count metric.
+			metricstest.AssertNoMetric(t, "pipelines_as_code_pipelinerun_count")
 
-			err = r.countPipelineRun(ctx, pr)
-			if tt.wantErr {
-				assert.Assert(t, err != nil)
-				return
+			if err = r.countPipelineRun(pr); (err != nil) != tt.wantErr {
+				t.Errorf("countPipelineRun() error = %v, wantErr %v. error: %v", err != nil, tt.wantErr, err)
 			}
-			assert.NilError(t, err)
-
-			var rm metricdata.ResourceMetrics
-			err = reader.Collect(ctx, &rm)
-			assert.NilError(t, err, "error collecting metrics")
 
 			if !tt.wantErr {
-				assert.Equal(t, len(rm.ScopeMetrics), 1)
-				assert.Equal(t, len(rm.ScopeMetrics[0].Metrics), 1)
-				assert.Equal(t, rm.ScopeMetrics[0].Metrics[0].Name, "pipelines_as_code_pipelinerun_count")
-				count, ok := rm.ScopeMetrics[0].Metrics[0].Data.(metricdata.Sum[int64])
-				assert.Assert(t, ok)
-				assert.Equal(t, count.DataPoints[0].Value, int64(1))
-				assertAttributesContain(t, count.DataPoints[0], tt.tags)
+				metricstest.CheckCountData(t, "pipelines_as_code_pipelinerun_count", tt.tags, 1)
 			}
 		})
 	}
@@ -271,11 +237,7 @@ func TestCalculatePipelineRunDuration(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			prmetrics.ResetRecorder()
-			ctx := context.Background()
-			reader := sdkmetric.NewManualReader()
-			provider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
-			otel.SetMeterProvider(provider)
+			metricsutils.ResetMetrics()
 			m, err := prmetrics.NewRecorder()
 			assert.NilError(t, err)
 			r := &Reconciler{
@@ -300,23 +262,60 @@ func TestCalculatePipelineRunDuration(t *testing.T) {
 					},
 				},
 			}
+			// checks that metric is unregistered successfully and there is no metric
+			// before emitting new pr duration metric.
+			metricstest.AssertNoMetric(t, "pipelines_as_code_pipelinerun_duration_seconds_sum")
 
-			err = r.calculatePRDuration(ctx, pr)
-			assert.NilError(t, err)
+			if err = r.calculatePRDuration(pr); err != nil {
+				t.Errorf("calculatePRDuration() error = %v", err)
+			}
 
 			duration := tt.completionTime.Sub(startTime.Time)
-
-			var rm metricdata.ResourceMetrics
-			err = reader.Collect(ctx, &rm)
-			assert.NilError(t, err, "error collecting metrics")
-
-			assert.Equal(t, len(rm.ScopeMetrics), 1)
-			assert.Equal(t, len(rm.ScopeMetrics[0].Metrics), 1)
-			assert.Equal(t, rm.ScopeMetrics[0].Metrics[0].Name, "pipelines_as_code_pipelinerun_duration_seconds_sum")
-			durationMetric, ok := rm.ScopeMetrics[0].Metrics[0].Data.(metricdata.Sum[float64])
-			assert.Assert(t, ok)
-			assert.Equal(t, durationMetric.DataPoints[0].Value, duration.Seconds())
-			assertAttributesContain(t, durationMetric.DataPoints[0], tt.tags)
+			metricstest.CheckSumData(t, "pipelines_as_code_pipelinerun_duration_seconds_sum", tt.tags, duration.Seconds())
 		})
 	}
+}
+
+func TestCountRunningPRs(t *testing.T) {
+	annotations := map[string]string{
+		keys.GitProvider: "github",
+		keys.EventType:   "pull_request",
+		keys.Repository:  "pac-repo",
+	}
+	var prl []*tektonv1.PipelineRun
+	pr := &tektonv1.PipelineRun{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace:   "pac-ns",
+			Annotations: annotations,
+		},
+		Status: tektonv1.PipelineRunStatus{
+			Status: duckv1.Status{Conditions: []apis.Condition{
+				{
+					Type:   apis.ConditionReady,
+					Status: corev1.ConditionTrue,
+					Reason: tektonv1.PipelineRunReasonRunning.String(),
+				},
+			}},
+		},
+	}
+
+	numberOfRunningPRs := 10
+	for i := 0; i < numberOfRunningPRs; i++ {
+		prl = append(prl, pr)
+	}
+
+	metricsutils.ResetMetrics()
+	m, err := prmetrics.NewRecorder()
+	assert.NilError(t, err)
+	r := &Reconciler{
+		metrics: m,
+	}
+
+	err = r.metrics.EmitRunningPRsMetrics(prl)
+	assert.NilError(t, err)
+	tags := map[string]string{
+		"namespace":  "pac-ns",
+		"repository": "pac-repo",
+	}
+	metricstest.CheckLastValueData(t, "pipelines_as_code_running_pipelineruns_count", tags, float64(numberOfRunningPRs))
 }

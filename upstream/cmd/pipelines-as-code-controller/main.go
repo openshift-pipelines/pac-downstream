@@ -38,13 +38,9 @@ func main() {
 
 	loggerConfiguratorOpt := evadapter.WithLoggerConfiguratorConfigMapName(logging.ConfigMapName())
 	loggerConfigurator := evadapter.NewLoggerConfiguratorFromConfigMap(PACControllerLogKey, loggerConfiguratorOpt)
-	copts := []evadapter.ConfiguratorOption{
-		evadapter.WithLoggerConfigurator(loggerConfigurator),
-		evadapter.WithObservabilityConfigurator(evadapter.NewObservabilityConfiguratorFromConfigMap()),
-		evadapter.WithCloudEventsStatusReporterConfigurator(evadapter.NewCloudEventsReporterConfiguratorFromConfigMap()),
-	}
+	copt := evadapter.WithLoggerConfigurator(loggerConfigurator)
 	// put logger configurator to ctx
-	ctx = evadapter.WithConfiguratorOptions(ctx, copts)
+	ctx = evadapter.WithConfiguratorOptions(ctx, []evadapter.ConfiguratorOption{copt})
 
 	ctx = info.StoreNS(ctx, system.Namespace())
 	ctx = info.StoreCurrentControllerName(ctx, run.Info.Controller.Name)

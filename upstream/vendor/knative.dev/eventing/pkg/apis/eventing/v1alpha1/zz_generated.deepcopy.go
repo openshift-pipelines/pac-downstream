@@ -521,6 +521,11 @@ func (in *RequestReplySpec) DeepCopyInto(out *RequestReplySpec) {
 		*out = new(apisduckv1.DeliverySpec)
 		(*in).DeepCopyInto(*out)
 	}
+	if in.Secrets != nil {
+		in, out := &in.Secrets, &out.Secrets
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
 	return
 }
 
@@ -540,16 +545,6 @@ func (in *RequestReplyStatus) DeepCopyInto(out *RequestReplyStatus) {
 	in.Status.DeepCopyInto(&out.Status)
 	in.AddressStatus.DeepCopyInto(&out.AddressStatus)
 	in.AppliedEventPoliciesStatus.DeepCopyInto(&out.AppliedEventPoliciesStatus)
-	if in.DesiredReplicas != nil {
-		in, out := &in.DesiredReplicas, &out.DesiredReplicas
-		*out = new(int32)
-		**out = **in
-	}
-	if in.ReadyReplicas != nil {
-		in, out := &in.ReadyReplicas, &out.ReadyReplicas
-		*out = new(int32)
-		**out = **in
-	}
 	return
 }
 

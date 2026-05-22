@@ -70,7 +70,7 @@ const (
 
 	// DefaultRequestReplyTimeout is a value for RequestReplyDefaultTimeout that indicates to timeout
 	// a RequestReply resource after 30 seconds by default.
-	DefaultRequestReplyTimeout Flag = "PT30S"
+	DefaultRequestReplyTimeout Flag = "30s"
 )
 
 // Flags is a map containing all the enabled/disabled flags for the experimental features.
@@ -148,7 +148,6 @@ func (e Flags) OIDCDiscoveryBaseURL() string {
 		return string(DefaultOIDCDiscoveryBaseURL)
 	}
 
-	//nolint:staticcheck
 	discoveryUrl, ok := e[OIDCDiscoveryBaseURL]
 	if !ok {
 		return string(DefaultOIDCDiscoveryBaseURL)

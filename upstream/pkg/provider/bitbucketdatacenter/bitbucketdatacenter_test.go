@@ -20,17 +20,16 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/settings"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
 	bbtest "github.com/openshift-pipelines/pipelines-as-code/pkg/provider/bitbucketdatacenter/test"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/status"
-	"go.opentelemetry.io/otel"
+	metricsutils "github.com/openshift-pipelines/pipelines-as-code/pkg/test/metricstest"
 
 	"github.com/jenkins-x/go-scm/scm"
-	prmetrics "github.com/openshift-pipelines/pipelines-as-code/pkg/pipelinerunmetrics"
-	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
-	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 	"go.uber.org/zap"
 	zapobserver "go.uber.org/zap/zaptest/observer"
 	"gotest.tools/v3/assert"
+	"knative.dev/pkg/metrics/metricstest"
+	_ "knative.dev/pkg/metrics/testing"
 	rtesting "knative.dev/pkg/reconciler/testing"
 )
 
@@ -115,7 +114,7 @@ func TestCreateStatus(t *testing.T) {
 
 	tests := []struct {
 		name                  string
-		status                status.StatusOpts
+		status                provider.StatusOpts
 		expectedCommentSubstr string
 		pacOpts               info.PacOpts
 		nilClient             bool
@@ -128,7 +127,7 @@ func TestCreateStatus(t *testing.T) {
 		},
 		{
 			name: "good/skipped",
-			status: status.StatusOpts{
+			status: provider.StatusOpts{
 				Conclusion: "skipped",
 				Text:       "Skipping",
 			},
@@ -137,7 +136,7 @@ func TestCreateStatus(t *testing.T) {
 		},
 		{
 			name: "good/neutral",
-			status: status.StatusOpts{
+			status: provider.StatusOpts{
 				Conclusion: "neutral",
 				Text:       "stopped",
 			},
@@ -146,7 +145,7 @@ func TestCreateStatus(t *testing.T) {
 		},
 		{
 			name: "good/completed with comment",
-			status: status.StatusOpts{
+			status: provider.StatusOpts{
 				Conclusion: "success",
 				Status:     "completed",
 				Text:       "validated",
@@ -157,7 +156,7 @@ func TestCreateStatus(t *testing.T) {
 		},
 		{
 			name: "good/failed",
-			status: status.StatusOpts{
+			status: provider.StatusOpts{
 				Conclusion: "failure",
 				Text:       "Failed",
 			},
@@ -166,7 +165,7 @@ func TestCreateStatus(t *testing.T) {
 		},
 		{
 			name: "good/details url",
-			status: status.StatusOpts{
+			status: provider.StatusOpts{
 				Conclusion: "failure",
 				DetailsURL: "http://fail.com",
 				Text:       "Failed",
@@ -176,7 +175,7 @@ func TestCreateStatus(t *testing.T) {
 		},
 		{
 			name: "good/pending",
-			status: status.StatusOpts{
+			status: provider.StatusOpts{
 				Conclusion: "pending",
 				Text:       "started",
 			},
@@ -185,7 +184,7 @@ func TestCreateStatus(t *testing.T) {
 		},
 		{
 			name: "good/success",
-			status: status.StatusOpts{
+			status: provider.StatusOpts{
 				Conclusion: "success",
 				Text:       "validated",
 			},
@@ -194,7 +193,7 @@ func TestCreateStatus(t *testing.T) {
 		},
 		{
 			name: "good/completed",
-			status: status.StatusOpts{
+			status: provider.StatusOpts{
 				Conclusion: "completed",
 				Text:       "Completed",
 			},
@@ -203,7 +202,7 @@ func TestCreateStatus(t *testing.T) {
 		},
 		{
 			name: "good/pending",
-			status: status.StatusOpts{
+			status: provider.StatusOpts{
 				Conclusion: "pending",
 				Status:     "queued",
 				Text:       "Pending approval, waiting for an /ok-to-test",
@@ -800,6 +799,7 @@ func TestGetFiles(t *testing.T) {
 			ctx, _ := rtesting.SetupFakeContext(t)
 			client, mux, tearDown, tURL := bbtest.SetupBBDataCenterClient()
 			defer tearDown()
+			metricsutils.ResetMetrics()
 
 			stats := &bbtest.DiffStats{
 				Values: tt.changeFiles,
@@ -826,10 +826,8 @@ func TestGetFiles(t *testing.T) {
 				})
 			}
 
-			prmetrics.ResetRecorder()
-			reader := sdkmetric.NewManualReader()
-			provider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
-			otel.SetMeterProvider(provider)
+			metricsTags := map[string]string{"provider": "bitbucket-datacenter", "event-type": string(tt.event.TriggerTarget)}
+			metricstest.CheckStatsNotReported(t, "pipelines_as_code_git_provider_api_request_count")
 
 			v := &Provider{client: client, baseURL: tURL, triggerEvent: string(tt.event.TriggerTarget)}
 			changedFiles, err := v.GetFiles(ctx, tt.event)
@@ -855,33 +853,15 @@ func TestGetFiles(t *testing.T) {
 				}
 			}
 
-			var rm metricdata.ResourceMetrics
-			err = reader.Collect(ctx, &rm)
-			assert.NilError(t, err, "error collecting metrics")
-
-			assert.Equal(t, len(rm.ScopeMetrics), 1)
-			assert.Equal(t, len(rm.ScopeMetrics[0].Metrics), 1)
-			assert.Equal(t, rm.ScopeMetrics[0].Metrics[0].Name, "pipelines_as_code_git_provider_api_request_count")
-			count, ok := rm.ScopeMetrics[0].Metrics[0].Data.(metricdata.Sum[int64])
-			assert.Assert(t, ok)
-			assert.Equal(t, count.DataPoints[0].Value, int64(1))
-
+			// Check caching
+			metricstest.CheckCountData(t, "pipelines_as_code_git_provider_api_request_count", metricsTags, 1)
 			_, _ = v.GetFiles(ctx, tt.event)
-			// recollect the metrics af
-			err = reader.Collect(ctx, &rm)
-			assert.NilError(t, err, "error collecting metrics")
-
-			assert.Equal(t, len(rm.ScopeMetrics), 1)
-			assert.Equal(t, len(rm.ScopeMetrics[0].Metrics), 1)
-			assert.Equal(t, rm.ScopeMetrics[0].Metrics[0].Name, "pipelines_as_code_git_provider_api_request_count")
-			count, ok = rm.ScopeMetrics[0].Metrics[0].Data.(metricdata.Sum[int64])
-			assert.Assert(t, ok)
 			if tt.wantError {
-				// no caching on error so we expect 2 metrics
-				assert.Equal(t, count.DataPoints[0].Value, int64(2))
+				// No caching on error
+				metricstest.CheckCountData(t, "pipelines_as_code_git_provider_api_request_count", metricsTags, 2)
 			} else {
-				// caching on success so we expect 1 metric
-				assert.Equal(t, count.DataPoints[0].Value, int64(1))
+				// Cache API results on success
+				metricstest.CheckCountData(t, "pipelines_as_code_git_provider_api_request_count", metricsTags, 1)
 			}
 		})
 	}

@@ -155,7 +155,7 @@ func createTestKintMock(secrets map[string]string) *kitesthelper.KinterfaceTest 
 }
 
 // TestSetupAuthenticatedClient_GitHubApp tests GitHub App authentication path.
-func TestSetupAuthenticatedClientGitHubApp(t *testing.T) {
+func TestSetupAuthenticatedClient_GitHubApp(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -215,7 +215,7 @@ func TestSetupAuthenticatedClientGitHubApp(t *testing.T) {
 }
 
 // TestSetupAuthenticatedClient_NonGitHubApp tests non-GitHub App authentication path.
-func TestSetupAuthenticatedClientNonGitHubApp(t *testing.T) {
+func TestSetupAuthenticatedClient_NonGitHubApp(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -277,7 +277,7 @@ func TestSetupAuthenticatedClientNonGitHubApp(t *testing.T) {
 }
 
 // TestSetupAuthenticatedClient_RepositoryConfig tests repository-level configuration.
-func TestSetupAuthenticatedClientRepositoryConfig(t *testing.T) {
+func TestSetupAuthenticatedClient_RepositoryConfig(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -340,7 +340,7 @@ func TestSetupAuthenticatedClientRepositoryConfig(t *testing.T) {
 }
 
 // TestSetupAuthenticatedClient_WebhookValidation tests webhook secret validation.
-func TestSetupAuthenticatedClientWebhookValidation(t *testing.T) {
+func TestSetupAuthenticatedClient_WebhookValidation(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -410,7 +410,7 @@ func TestSetupAuthenticatedClientWebhookValidation(t *testing.T) {
 }
 
 // TestSetupAuthenticatedClient_Idempotent tests that the function is safe to call multiple times.
-func TestSetupAuthenticatedClientIdempotent(t *testing.T) {
+func TestSetupAuthenticatedClient_Idempotent(t *testing.T) {
 	t.Parallel()
 
 	ctx, log := setupTestContext(t)
@@ -442,7 +442,7 @@ func TestSetupAuthenticatedClientIdempotent(t *testing.T) {
 
 // TestSetupAuthenticatedClient_EventTypes verifies that client setup works
 // correctly for all major event types across different providers.
-func TestSetupAuthenticatedClientEventTypes(t *testing.T) {
+func TestSetupAuthenticatedClient_EventTypes(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -553,7 +553,7 @@ func TestSetupAuthenticatedClientEventTypes(t *testing.T) {
 
 // TestSetupAuthenticatedClient_ProviderSpecificEvents tests event types
 // specific to different Git providers (GitLab, Gitea, Bitbucket).
-func TestSetupAuthenticatedClientProviderSpecificEvents(t *testing.T) {
+func TestSetupAuthenticatedClient_ProviderSpecificEvents(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -649,7 +649,7 @@ func TestSetupAuthenticatedClientProviderSpecificEvents(t *testing.T) {
 
 // TestSetupAuthenticatedClient_CommentEventTypes specifically tests
 // GitOps comment commands to ensure they work correctly.
-func TestSetupAuthenticatedClientCommentEventTypes(t *testing.T) {
+func TestSetupAuthenticatedClient_CommentEventTypes(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {

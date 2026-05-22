@@ -19,7 +19,6 @@ package sort
 import (
 	"testing"
 
-	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -42,23 +41,31 @@ func createPodSpecResource(t *testing.T, memReq, memLimit, cpuReq, cpuLimit stri
 	req := podSpec.Containers[0].Resources.Requests
 	if memReq != "" {
 		memReq, err := resource.ParseQuantity(memReq)
-		assert.NilError(t, err, "memory request string is not a valid quantity")
+		if err != nil {
+			t.Errorf("memory request string is not a valid quantity")
+		}
 		req["memory"] = memReq
 	}
 	if cpuReq != "" {
 		cpuReq, err := resource.ParseQuantity(cpuReq)
-		assert.NilError(t, err, "cpu request string is not a valid quantity")
+		if err != nil {
+			t.Errorf("cpu request string is not a valid quantity")
+		}
 		req["cpu"] = cpuReq
 	}
 	limit := podSpec.Containers[0].Resources.Limits
 	if memLimit != "" {
 		memLimit, err := resource.ParseQuantity(memLimit)
-		assert.NilError(t, err, "memory limit string is not a valid quantity")
+		if err != nil {
+			t.Errorf("memory limit string is not a valid quantity")
+		}
 		limit["memory"] = memLimit
 	}
 	if cpuLimit != "" {
 		cpuLimit, err := resource.ParseQuantity(cpuLimit)
-		assert.NilError(t, err, "cpu limit string is not a valid quantity")
+		if err != nil {
+			t.Errorf("cpu limit string is not a valid quantity")
+		}
 		limit["cpu"] = cpuLimit
 	}
 
@@ -90,7 +97,9 @@ func TestRuntimeSortLess(t *testing.T) {
 	}
 
 	testobjs, err := meta.ExtractList(testobj)
-	assert.NilError(t, err)
+	if err != nil {
+		t.Fatalf("ExtractList testobj got unexpected error: %v", err)
+	}
 
 	testfieldName := "{.metadata.name}"
 	testruntimeSortName := NewRuntimeSort(testfieldName, testobjs)
@@ -174,10 +183,12 @@ func TestRuntimeSortLess(t *testing.T) {
 		},
 	}
 
-	for _, test := range tests {
+	for i, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			result := test.runtimeSort.Less(test.i, test.j)
-			assert.Equal(t, test.expectResult, result)
+			if result != test.expectResult {
+				t.Errorf("case[%d]:%s Expected result: %v, Got result: %v", i, test.name, test.expectResult, result)
+			}
 		})
 	}
 }

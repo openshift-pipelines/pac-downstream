@@ -6,12 +6,10 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/google/go-github/v84/github"
+	"github.com/google/go-github/v81/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/acl"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/opscomments"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/policy"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
 )
 
 // CheckPolicyAllowing check that policy is allowing the event to be processed
@@ -81,10 +79,8 @@ func (v *Provider) IsAllowed(ctx context.Context, event *info.Event) (bool, erro
 		Logger:       v.Logger,
 	}
 
-	prefix := provider.GetGitOpsCommentPrefix(v.repo)
-
 	// Try to detect a policy rule allowing this
-	tType, _ := v.detectTriggerTypeFromPayload("", event.Event, prefix)
+	tType, _ := v.detectTriggerTypeFromPayload("", event.Event)
 	policyAllowed, policyReason := aclPolicy.IsAllowed(ctx, tType)
 
 	switch policyAllowed {
@@ -154,7 +150,7 @@ func (v *Provider) aclAllowedOkToTestFromAnOwner(ctx context.Context, event *inf
 		return false, nil
 	}
 
-	comments, err := v.GetStringPullRequestComment(ctx, revent)
+	comments, err := v.GetStringPullRequestComment(ctx, revent, acl.OKToTestCommentRegexp)
 	if err != nil {
 		return false, err
 	}
@@ -181,10 +177,7 @@ func (v *Provider) aclAllowedOkToTestCurrentComment(ctx context.Context, revent 
 	if err != nil {
 		return false, err
 	}
-
-	gitOpsCommentPrefix := provider.GetGitOpsCommentPrefix(v.repo)
-
-	if opscomments.IsOkToTestComment(comment.GetBody(), gitOpsCommentPrefix) {
+	if acl.MatchRegexp(acl.OKToTestCommentRegexp, comment.GetBody()) {
 		revent.Sender = comment.User.GetLogin()
 		allowed, err := v.aclCheckAll(ctx, revent)
 		if err != nil {
@@ -317,9 +310,9 @@ func (v *Provider) getFileFromDefaultBranch(ctx context.Context, path string, ru
 	return tektonyaml, err
 }
 
-// GetStringPullRequestComment return the comment if we find an /ok-to-test comment in one of
+// GetStringPullRequestComment return the comment if we find a regexp in one of
 // the comments text of a pull request.
-func (v *Provider) GetStringPullRequestComment(ctx context.Context, runevent *info.Event) ([]*github.IssueComment, error) {
+func (v *Provider) GetStringPullRequestComment(ctx context.Context, runevent *info.Event, reg string) ([]*github.IssueComment, error) {
 	var ret []*github.IssueComment
 	prNumber, err := convertPullRequestURLtoNumber(runevent.URL)
 	if err != nil {
@@ -329,9 +322,6 @@ func (v *Provider) GetStringPullRequestComment(ctx context.Context, runevent *in
 	opt := &github.IssueListCommentsOptions{
 		ListOptions: github.ListOptions{PerPage: v.PaginedNumber},
 	}
-
-	gitOpsCommentPrefix := provider.GetGitOpsCommentPrefix(v.repo)
-
 	for {
 		comments, resp, err := wrapAPI(v, "list_issue_comments", func() ([]*github.IssueComment, *github.Response, error) {
 			return v.Client().Issues.ListComments(ctx, runevent.Organization, runevent.Repository,
@@ -341,7 +331,7 @@ func (v *Provider) GetStringPullRequestComment(ctx context.Context, runevent *in
 			return nil, err
 		}
 		for _, v := range comments {
-			if opscomments.IsOkToTestComment(v.GetBody(), gitOpsCommentPrefix) {
+			if acl.MatchRegexp(reg, v.GetBody()) {
 				ret = append(ret, v)
 			}
 		}

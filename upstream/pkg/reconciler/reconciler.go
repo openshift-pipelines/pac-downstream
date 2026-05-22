@@ -10,6 +10,7 @@ import (
 	pipelinerunreconciler "github.com/tektoncd/pipeline/pkg/client/injection/reconciler/pipeline/v1/pipelinerun"
 	tektonv1lister "github.com/tektoncd/pipeline/pkg/client/listers/pipeline/v1"
 	"go.uber.org/zap"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"knative.dev/pkg/logging"
 	pkgreconciler "knative.dev/pkg/reconciler"
@@ -30,7 +31,6 @@ import (
 	pac "github.com/openshift-pipelines/pipelines-as-code/pkg/pipelineascode"
 	prmetrics "github.com/openshift-pipelines/pipelines-as-code/pkg/pipelinerunmetrics"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
-	providerstatus "github.com/openshift-pipelines/pipelines-as-code/pkg/provider/status"
 	queuepkg "github.com/openshift-pipelines/pipelines-as-code/pkg/queue"
 )
 
@@ -238,13 +238,14 @@ func (r *Reconciler) reportFinalStatus(ctx context.Context, logger *zap.SugaredL
 		finalState = kubeinteraction.StateFailed
 	}
 
-	// LLM Analysis orchestrator checks if it is enabled and if the CEL condition
-	// is matched for the defined roles, defaults to failed PipelineRuns only if
-	// no CEL expression is defined.
-	if err := r.performLLMAnalysis(ctx, logger, repo, newPr, event, provider); err != nil {
-		logger.Warnf("LLM analysis failed (non-blocking): %v", err)
-		r.eventEmitter.EmitMessage(repo, zap.WarnLevel, "LLMAnalysisFailed",
-			fmt.Sprintf("AI/LLM analysis failed for repository %s/%s and pipeline run %s: %v", repo.Namespace, repo.Name, newPr.Name, err))
+	// Perform LLM analysis only for failed pipeline runs (best-effort, non-blocking)
+	// Users can use CEL expressions in role configurations for more fine-grained control
+	if len(newPr.Status.Conditions) > 0 && newPr.Status.Conditions[0].Status == corev1.ConditionFalse {
+		if err := r.performLLMAnalysis(ctx, logger, repo, newPr, event, provider); err != nil {
+			logger.Warnf("LLM analysis failed (non-blocking): %v", err)
+			r.eventEmitter.EmitMessage(repo, zap.WarnLevel, "LLMAnalysisFailed",
+				fmt.Sprintf("AI/LLM analysis failed for repository %s/%s and pipeline run %s: %v", repo.Namespace, repo.Name, newPr.Name, err))
+		}
 	}
 
 	if err := r.updateRepoRunStatus(ctx, logger, newPr, repo, event); err != nil {
@@ -255,7 +256,7 @@ func (r *Reconciler) reportFinalStatus(ctx context.Context, logger *zap.SugaredL
 		return repo, fmt.Errorf("cannot update state: %w", err)
 	}
 
-	if err := r.emitMetrics(ctx, pr); err != nil {
+	if err := r.emitMetrics(pr); err != nil {
 		logger.Error("failed to emit metrics: ", err)
 	}
 
@@ -312,9 +313,9 @@ func (r *Reconciler) updatePipelineRunToInProgress(ctx context.Context, logger *
 	if err != nil {
 		return fmt.Errorf("cannot create message template: %w", err)
 	}
-	status := providerstatus.StatusOpts{
+	status := provider.StatusOpts{
 		Status:                  "in_progress",
-		Conclusion:              providerstatus.ConclusionPending,
+		Conclusion:              "pending",
 		Text:                    msg,
 		DetailsURL:              consoleURL,
 		PipelineRunName:         pr.GetName(),

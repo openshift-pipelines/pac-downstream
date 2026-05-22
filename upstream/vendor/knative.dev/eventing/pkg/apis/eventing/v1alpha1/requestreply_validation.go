@@ -53,13 +53,14 @@ func (rrs *RequestReplySpec) Validate(ctx context.Context) *apis.FieldError {
 
 	if rrs.Timeout != nil {
 		timeout, err := period.Parse(*rrs.Timeout)
-		if err != nil {
-			errs = errs.Also(apis.ErrInvalidValue(*rrs.Timeout, "timeout", err.Error()))
-		} else if timeout.IsNegative() || timeout.IsZero() {
-			errs = errs.Also(apis.ErrInvalidValue(*rrs.Timeout, "timeout", "timeout must be a positive duration"))
+		if err != nil || timeout.IsZero() || timeout.IsNegative() {
+			errs = errs.Also(apis.ErrInvalidValue(*rrs.Timeout, "timeout"))
 		}
-	} else {
-		errs = errs.Also(apis.ErrMissingField("timeout"))
+
+	}
+
+	if len(rrs.Secrets) == 0 {
+		errs = errs.Also(apis.ErrInvalidValue(rrs.Secrets, "secrets", "one or more secrets must be provided"))
 	}
 
 	if rrs.CorrelationAttribute == "" ||

@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/go-github/v84/github"
+	"github.com/google/go-github/v81/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
 	tgithub "github.com/openshift-pipelines/pipelines-as-code/test/pkg/github"
@@ -23,25 +23,28 @@ import (
 // 1. A CEL error comment is posted for a PLR
 // 2. After fixing the CEL error with a new commit, the same comment is updated with success status
 // 3. Only one comment exists.
-func TestGithubGHEWebhookCommentStrategyUpdateCELErrorReplacement(t *testing.T) {
+func TestGithubCommentStrategyUpdateCELErrorReplacement(t *testing.T) {
+	if os.Getenv("TEST_GITHUB_REPO_OWNER_WEBHOOK") == "" {
+		t.Skip("TEST_GITHUB_REPO_OWNER_WEBHOOK is not set")
+	}
+
 	ctx := context.Background()
 	g := &tgithub.PRTest{
 		Label:         "Github Comment Strategy CEL Error",
 		YamlFiles:     []string{"testdata/failures/pipelinerun-invalid-cel.yaml"},
-		GHE:           true,
 		Webhook:       true,
 		NoStatusCheck: true,
 	}
 
-	commentStrategy := &v1alpha1.Settings{
+	commentStrategy := v1alpha1.Settings{
 		Github: &v1alpha1.GithubSettings{
 			CommentStrategy: provider.UpdateCommentStrategy,
 		},
 	}
 	g.Options.Settings = commentStrategy
 
-	defer g.TearDown(ctx, t)
 	g.RunPullRequest(ctx, t)
+	defer g.TearDown(ctx, t)
 
 	g.Cnx.Clients.Log.Infof("Waiting for CEL error comment to be created")
 	time.Sleep(15 * time.Second)
@@ -142,24 +145,27 @@ func TestGithubGHEWebhookCommentStrategyUpdateCELErrorReplacement(t *testing.T) 
 // 1. Multiple PLRs in one PR each create their own comment
 // 2. Each PLR only updates its own comment (no cross-updates)
 // 3. Comments are correctly identified by their unique markers.
-func TestGithubGHEWebhookCommentStrategyUpdateMultiplePLRs(t *testing.T) {
+func TestGithubCommentStrategyUpdateMultiplePLRs(t *testing.T) {
+	if os.Getenv("TEST_GITHUB_REPO_OWNER_WEBHOOK") == "" {
+		t.Skip("TEST_GITHUB_REPO_OWNER_WEBHOOK is not set")
+	}
+
 	ctx := context.Background()
 	g := &tgithub.PRTest{
 		Label:     "Github Comment Strategy Multiple PLRs",
 		YamlFiles: []string{"testdata/pipelinerun.yaml", "testdata/pipelinerun-clone.yaml"},
-		GHE:       true,
 		Webhook:   true,
 	}
 
-	commentStrategy := &v1alpha1.Settings{
+	commentStrategy := v1alpha1.Settings{
 		Github: &v1alpha1.GithubSettings{
 			CommentStrategy: provider.UpdateCommentStrategy,
 		},
 	}
 	g.Options.Settings = commentStrategy
 
-	defer g.TearDown(ctx, t)
 	g.RunPullRequest(ctx, t)
+	defer g.TearDown(ctx, t)
 
 	sopt := twait.SuccessOpt{
 		Title:           g.CommitTitle,
@@ -244,30 +250,33 @@ func TestGithubGHEWebhookCommentStrategyUpdateMultiplePLRs(t *testing.T) {
 }
 
 // TestGithubCommentStrategyUpdateMarkerMatchingWithRegexChars tests:
-// 1. PLR names containing regex-relevant characters are handled correctly
+// 1. PLR names containing regex-relevant characters (dots, brackets, etc.) are handled correctly
 // 2. Marker matching remains exact even with special characters
 // 3. No cross-contamination between PLRs with similar names.
-func TestGithubGHEWebhookCommentStrategyUpdateMarkerMatchingWithRegexChars(t *testing.T) {
+func TestGithubCommentStrategyUpdateMarkerMatchingWithRegexChars(t *testing.T) {
+	if os.Getenv("TEST_GITHUB_REPO_OWNER_WEBHOOK") == "" {
+		t.Skip("TEST_GITHUB_REPO_OWNER_WEBHOOK is not set")
+	}
+
 	ctx := context.Background()
 	g := &tgithub.PRTest{
 		Label: "Github Comment Strategy Regex Chars",
 		YamlFiles: []string{
-			"testdata/pipelinerun-regex-name.yaml",
-			"testdata/pipelinerun2-regex-name.yaml",
+			"testdata/pipelinerun-regex-chars-dots.yaml",
+			"testdata/pipelinerun-regex-chars-brackets.yaml",
 		},
-		GHE:     true,
 		Webhook: true,
 	}
 
-	commentStrategy := &v1alpha1.Settings{
+	commentStrategy := v1alpha1.Settings{
 		Github: &v1alpha1.GithubSettings{
 			CommentStrategy: provider.UpdateCommentStrategy,
 		},
 	}
 	g.Options.Settings = commentStrategy
 
-	defer g.TearDown(ctx, t)
 	g.RunPullRequest(ctx, t)
+	defer g.TearDown(ctx, t)
 
 	sopt := twait.SuccessOpt{
 		Title:           g.CommitTitle,
@@ -339,7 +348,7 @@ func TestGithubGHEWebhookCommentStrategyUpdateMarkerMatchingWithRegexChars(t *te
 	assert.NilError(t, err)
 	g.Cnx.Clients.Log.Infof("Pushed dummy commit: %s", sha)
 
-	sopt.NumberofPRMatch = 2
+	sopt.NumberofPRMatch = 4
 	sopt.SHA = sha
 	sopt.Title = "test: trigger comment update"
 	twait.Succeeded(ctx, t, g.Cnx, g.Options, sopt)

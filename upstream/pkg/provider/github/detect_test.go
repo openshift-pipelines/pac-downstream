@@ -6,12 +6,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/google/go-github/v84/github"
+	"github.com/google/go-github/v81/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/test/logger"
 	"gotest.tools/v3/assert"
 )
 
-func TestProviderDetect(t *testing.T) {
+func TestProvider_Detect(t *testing.T) {
 	idd := int64(123)
 	tests := []struct {
 		name          string

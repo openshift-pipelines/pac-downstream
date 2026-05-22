@@ -5,8 +5,7 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/google/go-github/v84/github"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/opscomments"
+	"github.com/google/go-github/v81/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
 	"go.uber.org/zap"
@@ -46,9 +45,7 @@ func (v *Provider) Detect(req *http.Request, payload string, logger *zap.Sugared
 	}
 
 	_ = json.Unmarshal([]byte(payload), &eventInt)
-	// at this moment we don't any info about repository CR so passing "/" as gitOpsCommentPrefix
-	// if its valid event then that will be done in ParsePayload function ahead.
-	eType, errReason := v.detectTriggerTypeFromPayload(eventType, eventInt, "/")
+	eType, errReason := v.detectTriggerTypeFromPayload(eventType, eventInt)
 	if eType != "" {
 		return setLoggerAndProceed(true, "", nil)
 	}
@@ -59,7 +56,7 @@ func (v *Provider) Detect(req *http.Request, payload string, logger *zap.Sugared
 // detectTriggerTypeFromPayload will detect the event type from the payload,
 // filtering out the events that are not supported.
 // first arg will get the event type and the second one will get an error string explaining why it's not supported.
-func (v *Provider) detectTriggerTypeFromPayload(ghEventType string, eventInt any, gitOpsCommentPrefix string) (triggertype.Trigger, string) {
+func (v *Provider) detectTriggerTypeFromPayload(ghEventType string, eventInt any) (triggertype.Trigger, string) {
 	switch event := eventInt.(type) {
 	case *github.PushEvent:
 		if event.GetPusher() != nil {
@@ -79,13 +76,13 @@ func (v *Provider) detectTriggerTypeFromPayload(ghEventType string, eventInt any
 		if event.GetAction() == "created" &&
 			event.GetIssue().IsPullRequest() &&
 			event.GetIssue().GetState() == "open" {
-			if opscomments.IsTestRetestComment(event.GetComment().GetBody(), gitOpsCommentPrefix) {
+			if provider.IsTestRetestComment(event.GetComment().GetBody()) {
 				return triggertype.Retest, ""
 			}
-			if opscomments.IsOkToTestComment(event.GetComment().GetBody(), gitOpsCommentPrefix) {
+			if provider.IsOkToTestComment(event.GetComment().GetBody()) {
 				return triggertype.OkToTest, ""
 			}
-			if opscomments.IsCancelComment(event.GetComment().GetBody(), gitOpsCommentPrefix) {
+			if provider.IsCancelComment(event.GetComment().GetBody()) {
 				return triggertype.Cancel, ""
 			}
 		}
@@ -102,10 +99,10 @@ func (v *Provider) detectTriggerTypeFromPayload(ghEventType string, eventInt any
 		return "", fmt.Sprintf("check_run: unsupported action \"%s\"", event.GetAction())
 	case *github.CommitCommentEvent:
 		if event.GetAction() == "created" {
-			if opscomments.IsTestRetestComment(event.GetComment().GetBody(), gitOpsCommentPrefix) {
+			if provider.IsTestRetestComment(event.GetComment().GetBody()) {
 				return triggertype.Retest, ""
 			}
-			if opscomments.IsCancelComment(event.GetComment().GetBody(), gitOpsCommentPrefix) {
+			if provider.IsCancelComment(event.GetComment().GetBody()) {
 				return triggertype.Cancel, ""
 			}
 			// Here, the `/ok-to-test` command is ignored because it is intended for pull requests.

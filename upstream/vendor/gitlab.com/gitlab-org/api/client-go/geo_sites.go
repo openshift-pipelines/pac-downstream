@@ -21,45 +21,13 @@ import (
 
 type (
 	GeoSitesServiceInterface interface {
-		// CreateGeoSite creates a new Geo Site.
-		//
-		// GitLab API docs:
-		// https://docs.gitlab.com/api/geo_sites/#create-a-new-geo-site
 		CreateGeoSite(*CreateGeoSitesOptions, ...RequestOptionFunc) (*GeoSite, *Response, error)
-		// ListGeoSites gets a list of geo sites.
-		//
-		// GitLab API docs:
-		// https://docs.gitlab.com/api/geo_sites/#retrieve-configuration-about-all-geo-sites
 		ListGeoSites(*ListGeoSitesOptions, ...RequestOptionFunc) ([]*GeoSite, *Response, error)
-		// GetGeoSite gets a specific geo site.
-		//
-		// GitLab API docs:
-		// https://docs.gitlab.com/api/geo_sites/#retrieve-configuration-about-a-specific-geo-site
 		GetGeoSite(int64, ...RequestOptionFunc) (*GeoSite, *Response, error)
-		// EditGeoSite updates settings of an existing Geo site.
-		//
-		// GitLab API docs:
-		// https://docs.gitlab.com/api/geo_sites/#edit-a-geo-site
 		EditGeoSite(int64, *EditGeoSiteOptions, ...RequestOptionFunc) (*GeoSite, *Response, error)
-		// DeleteGeoSite removes the Geo site.
-		//
-		// GitLab API docs:
-		// https://docs.gitlab.com/api/geo_sites/#delete-a-geo-site
 		DeleteGeoSite(int64, ...RequestOptionFunc) (*Response, error)
-		// RepairGeoSite to repair the OAuth authentication of a Geo site.
-		//
-		// GitLab API docs:
-		// https://docs.gitlab.com/api/geo_sites/#repair-a-geo-site
 		RepairGeoSite(int64, ...RequestOptionFunc) (*GeoSite, *Response, error)
-		// ListStatusOfAllGeoSites get the list of status of all Geo Sites.
-		//
-		// GitLab API docs:
-		// https://docs.gitlab.com/api/geo_sites/#retrieve-status-about-all-geo-sites
 		ListStatusOfAllGeoSites(*ListStatusOfAllGeoSitesOptions, ...RequestOptionFunc) ([]*GeoSiteStatus, *Response, error)
-		// GetStatusOfGeoSite gets the status of a specific Geo Site.
-		//
-		// GitLab API docs:
-		// https://docs.gitlab.com/api/geo_sites/#retrieve-status-about-a-specific-geo-site
 		GetStatusOfGeoSite(int64, ...RequestOptionFunc) (*GeoSiteStatus, *Response, error)
 	}
 
@@ -111,7 +79,7 @@ type GeoSiteLinks struct {
 // CreateGeoSitesOptions represents the available CreateGeoSite() options.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/api/geo_sites/#create-a-geo-site
+// https://docs.gitlab.com/api/geo_sites/#create-a-new-geo-site
 type CreateGeoSitesOptions struct {
 	Primary                          *bool     `url:"primary,omitempty" json:"primary,omitempty"`
 	Enabled                          *bool     `url:"enabled,omitempty" json:"enabled,omitempty"`
@@ -129,6 +97,10 @@ type CreateGeoSitesOptions struct {
 	MinimumReverificationInterval    *int64    `url:"minimum_reverification_interval,omitempty" json:"minimum_reverification_interval,omitempty"`
 }
 
+// CreateGeoSite creates a new Geo Site.
+//
+// GitLab API docs:
+// https://docs.gitlab.com/api/geo_sites/#create-a-new-geo-site
 func (s *GeoSitesService) CreateGeoSite(opt *CreateGeoSitesOptions, options ...RequestOptionFunc) (*GeoSite, *Response, error) {
 	return do[*GeoSite](s.client,
 		withMethod(http.MethodPost),
@@ -141,11 +113,15 @@ func (s *GeoSitesService) CreateGeoSite(opt *CreateGeoSitesOptions, options ...R
 // ListGeoSitesOptions represents the available ListGeoSites() options.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/api/geo_sites/#list-all-geo-sites
+// https://docs.gitlab.com/api/geo_sites/#retrieve-configuration-about-all-geo-sites
 type ListGeoSitesOptions struct {
 	ListOptions
 }
 
+// ListGeoSites gets a list of geo sites.
+//
+// GitLab API docs:
+// https://docs.gitlab.com/api/geo_sites/#retrieve-configuration-about-all-geo-sites
 func (s *GeoSitesService) ListGeoSites(opt *ListGeoSitesOptions, options ...RequestOptionFunc) ([]*GeoSite, *Response, error) {
 	return do[[]*GeoSite](s.client,
 		withPath("geo_sites"),
@@ -154,6 +130,10 @@ func (s *GeoSitesService) ListGeoSites(opt *ListGeoSitesOptions, options ...Requ
 	)
 }
 
+// GetGeoSite gets a specific geo site.
+//
+// GitLab API docs:
+// https://docs.gitlab.com/api/geo_sites/#retrieve-configuration-about-a-specific-geo-site
 func (s *GeoSitesService) GetGeoSite(id int64, options ...RequestOptionFunc) (*GeoSite, *Response, error) {
 	return do[*GeoSite](s.client,
 		withPath("geo_sites/%d", id),
@@ -164,7 +144,7 @@ func (s *GeoSitesService) GetGeoSite(id int64, options ...RequestOptionFunc) (*G
 // EditGeoSiteOptions represents the available EditGeoSite() options.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/api/geo_sites/#update-a-geo-site
+// https://docs.gitlab.com/api/geo_sites/#edit-a-geo-site
 type EditGeoSiteOptions struct {
 	Enabled                          *bool     `url:"enabled,omitempty" json:"enabled,omitempty"`
 	Name                             *string   `url:"name,omitempty" json:"name,omitempty"`
@@ -180,6 +160,10 @@ type EditGeoSiteOptions struct {
 	MinimumReverificationInterval    *int64    `url:"minimum_reverification_interval,omitempty" json:"minimum_reverification_interval,omitempty"`
 }
 
+// EditGeoSite updates settings of an existing Geo site.
+//
+// GitLab API docs:
+// https://docs.gitlab.com/api/geo_sites/#edit-a-geo-site
 func (s *GeoSitesService) EditGeoSite(id int64, opt *EditGeoSiteOptions, options ...RequestOptionFunc) (*GeoSite, *Response, error) {
 	return do[*GeoSite](s.client,
 		withMethod(http.MethodPut),
@@ -189,6 +173,10 @@ func (s *GeoSitesService) EditGeoSite(id int64, opt *EditGeoSiteOptions, options
 	)
 }
 
+// DeleteGeoSite removes the Geo site.
+//
+// GitLab API docs:
+// https://docs.gitlab.com/api/geo_sites/#delete-a-geo-site
 func (s *GeoSitesService) DeleteGeoSite(id int64, options ...RequestOptionFunc) (*Response, error) {
 	_, resp, err := do[none](s.client,
 		withMethod(http.MethodDelete),
@@ -198,6 +186,10 @@ func (s *GeoSitesService) DeleteGeoSite(id int64, options ...RequestOptionFunc) 
 	return resp, err
 }
 
+// RepairGeoSite to repair the OAuth authentication of a Geo site.
+//
+// GitLab API docs:
+// https://docs.gitlab.com/api/geo_sites/#repair-a-geo-site
 func (s *GeoSitesService) RepairGeoSite(id int64, options ...RequestOptionFunc) (*GeoSite, *Response, error) {
 	return do[*GeoSite](s.client,
 		withMethod(http.MethodPost),
@@ -209,7 +201,7 @@ func (s *GeoSitesService) RepairGeoSite(id int64, options ...RequestOptionFunc) 
 // GeoSiteStatus represents the status of Geo Site.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/api/geo_sites/#list-all-geo-site-statuses
+// https://docs.gitlab.com/api/geo_sites/#retrieve-status-about-all-geo-sites
 type GeoSiteStatus struct {
 	GeoNodeID                                       int64             `json:"geo_node_id"`
 	ProjectsCount                                   int64             `json:"projects_count"`
@@ -427,7 +419,7 @@ type GeoSiteStatus struct {
 // GeoSiteStatusLink represents the links for a GitLab Geo Site status.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/api/geo_sites/#list-all-geo-site-statuses
+// https://docs.gitlab.com/api/geo_sites/#retrieve-status-about-all-geo-sites
 type GeoSiteStatusLink struct {
 	Self string `json:"self"`
 	Site string `json:"site"`
@@ -436,11 +428,15 @@ type GeoSiteStatusLink struct {
 // ListStatusOfAllGeoSitesOptions represents the available ListStatusOfAllGeoSites() options.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/api/geo_sites/#list-all-geo-site-statuses
+// https://docs.gitlab.com/api/geo_sites/#retrieve-status-about-all-geo-sites
 type ListStatusOfAllGeoSitesOptions struct {
 	ListOptions
 }
 
+// ListStatusOfAllGeoSites get the list of status of all Geo Sites.
+//
+// GitLab API docs:
+// https://docs.gitlab.com/api/geo_sites/#retrieve-status-about-all-geo-sites
 func (s *GeoSitesService) ListStatusOfAllGeoSites(opt *ListStatusOfAllGeoSitesOptions, options ...RequestOptionFunc) ([]*GeoSiteStatus, *Response, error) {
 	return do[[]*GeoSiteStatus](s.client,
 		withPath("geo_sites/status"),
@@ -449,6 +445,10 @@ func (s *GeoSitesService) ListStatusOfAllGeoSites(opt *ListStatusOfAllGeoSitesOp
 	)
 }
 
+// GetStatusOfGeoSite get the of status of a specific Geo Sites.
+//
+// GitLab API docs:
+// https://docs.gitlab.com/api/geo_sites/#retrieve-status-about-a-specific-geo-site
 func (s *GeoSitesService) GetStatusOfGeoSite(id int64, options ...RequestOptionFunc) (*GeoSiteStatus, *Response, error) {
 	return do[*GeoSiteStatus](s.client,
 		withPath("geo_sites/%d/status", id),

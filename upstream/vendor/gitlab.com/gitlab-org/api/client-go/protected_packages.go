@@ -1,6 +1,7 @@
 package gitlab
 
 import (
+	"fmt"
 	"net/http"
 )
 
@@ -85,36 +86,80 @@ type UpdatePackageProtectionRulesOptions struct {
 }
 
 func (s *ProtectedPackagesService) ListPackageProtectionRules(pid any, opts *ListPackageProtectionRulesOptions, options ...RequestOptionFunc) ([]*PackageProtectionRule, *Response, error) {
-	return do[[]*PackageProtectionRule](s.client,
-		withPath("projects/%s/packages/protection/rules", ProjectID{pid}),
-		withAPIOpts(opts),
-		withRequestOpts(options...),
-	)
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	u := fmt.Sprintf("projects/%s/packages/protection/rules", PathEscape(project))
+
+	req, err := s.client.NewRequest(http.MethodGet, u, opts, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var b []*PackageProtectionRule
+	resp, err := s.client.Do(req, &b)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return b, resp, nil
 }
 
 func (s *ProtectedPackagesService) CreatePackageProtectionRules(pid any, opt *CreatePackageProtectionRulesOptions, options ...RequestOptionFunc) (*PackageProtectionRule, *Response, error) {
-	return do[*PackageProtectionRule](s.client,
-		withMethod(http.MethodPost),
-		withPath("projects/%s/packages/protection/rules", ProjectID{pid}),
-		withAPIOpts(opt),
-		withRequestOpts(options...),
-	)
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, nil, err
+	}
+	u := fmt.Sprintf("projects/%s/packages/protection/rules", PathEscape(project))
+
+	req, err := s.client.NewRequest(http.MethodPost, u, opt, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	p := new(PackageProtectionRule)
+	resp, err := s.client.Do(req, p)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return p, resp, nil
 }
 
 func (s *ProtectedPackagesService) DeletePackageProtectionRules(pid any, packageProtectionRule int64, options ...RequestOptionFunc) (*Response, error) {
-	_, resp, err := do[none](s.client,
-		withMethod(http.MethodDelete),
-		withPath("projects/%s/packages/protection/rules/%d", ProjectID{pid}, packageProtectionRule),
-		withRequestOpts(options...),
-	)
-	return resp, err
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, err
+	}
+	u := fmt.Sprintf("projects/%s/packages/protection/rules/%d", PathEscape(project), packageProtectionRule)
+
+	req, err := s.client.NewRequest(http.MethodDelete, u, nil, options)
+	if err != nil {
+		return nil, err
+	}
+
+	return s.client.Do(req, nil)
 }
 
 func (s *ProtectedPackagesService) UpdatePackageProtectionRules(pid any, packageProtectionRule int64, opt *UpdatePackageProtectionRulesOptions, options ...RequestOptionFunc) (*PackageProtectionRule, *Response, error) {
-	return do[*PackageProtectionRule](s.client,
-		withMethod(http.MethodPatch),
-		withPath("projects/%s/packages/protection/rules/%d", ProjectID{pid}, packageProtectionRule),
-		withAPIOpts(opt),
-		withRequestOpts(options...),
-	)
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, nil, err
+	}
+	u := fmt.Sprintf("projects/%s/packages/protection/rules/%d", PathEscape(project), packageProtectionRule)
+
+	req, err := s.client.NewRequest(http.MethodPatch, u, opt, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	p := new(PackageProtectionRule)
+	resp, err := s.client.Do(req, p)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return p, resp, nil
 }
