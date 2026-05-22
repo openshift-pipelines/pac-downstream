@@ -2,6 +2,7 @@ package gitlab
 
 import (
 	"bytes"
+	"fmt"
 	"net/http"
 	"time"
 )
@@ -80,31 +81,65 @@ type (
 var _ GroupRelationsExportServiceInterface = (*GroupRelationsExportService)(nil)
 
 func (s *GroupRelationsExportService) ScheduleExport(gid any, opt *GroupRelationsScheduleExportOptions, options ...RequestOptionFunc) (*Response, error) {
-	_, resp, err := do[none](s.client,
-		withMethod(http.MethodPost),
-		withPath("groups/%s/export_relations", GroupID{gid}),
-		withAPIOpts(opt),
-		withRequestOpts(options...),
+	group, err := parseID(gid)
+	if err != nil {
+		return nil, err
+	}
+
+	u := fmt.Sprintf("groups/%s/export_relations",
+		PathEscape(group),
 	)
-	return resp, err
+
+	req, err := s.client.NewRequest(http.MethodPost, u, opt, options)
+	if err != nil {
+		return nil, err
+	}
+
+	return s.client.Do(req, nil)
 }
 
 func (s *GroupRelationsExportService) ListExportStatus(gid any, opt *ListGroupRelationsStatusOptions, options ...RequestOptionFunc) ([]*GroupRelationStatus, *Response, error) {
-	return do[[]*GroupRelationStatus](s.client,
-		withPath("groups/%s/export_relations/status", GroupID{gid}),
-		withAPIOpts(opt),
-		withRequestOpts(options...),
-	)
-}
+	group, err := parseID(gid)
+	if err != nil {
+		return nil, nil, err
+	}
 
-func (s *GroupRelationsExportService) ExportDownload(gid any, opt *GroupRelationsDownloadOptions, options ...RequestOptionFunc) (*bytes.Reader, *Response, error) {
-	buf, resp, err := do[bytes.Buffer](s.client,
-		withPath("groups/%s/export_relations/download", GroupID{gid}),
-		withAPIOpts(opt),
-		withRequestOpts(options...),
-	)
+	u := fmt.Sprintf("groups/%s/export_relations/status", PathEscape(group))
+
+	req, err := s.client.NewRequest(http.MethodGet, u, opt, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var groups []*GroupRelationStatus
+	resp, err := s.client.Do(req, &groups)
 	if err != nil {
 		return nil, resp, err
 	}
-	return bytes.NewReader(buf.Bytes()), resp, nil
+
+	return groups, resp, nil
+}
+
+func (s *GroupRelationsExportService) ExportDownload(gid any, opt *GroupRelationsDownloadOptions, options ...RequestOptionFunc) (*bytes.Reader, *Response, error) {
+	group, err := parseID(gid)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	u := fmt.Sprintf("groups/%s/export_relations/download",
+		PathEscape(group),
+	)
+
+	req, err := s.client.NewRequest(http.MethodGet, u, opt, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	groupRelationsExportDownload := new(bytes.Buffer)
+	resp, err := s.client.Do(req, groupRelationsExportDownload)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return bytes.NewReader(groupRelationsExportDownload.Bytes()), resp, err
 }

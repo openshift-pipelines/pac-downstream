@@ -17,6 +17,7 @@
 package gitlab
 
 import (
+	"fmt"
 	"net/http"
 	"time"
 )
@@ -160,11 +161,24 @@ type ListIssueNotesOptions struct {
 // GitLab API docs:
 // https://docs.gitlab.com/api/notes/#list-project-issue-notes
 func (s *NotesService) ListIssueNotes(pid any, issue int64, opt *ListIssueNotesOptions, options ...RequestOptionFunc) ([]*Note, *Response, error) {
-	return do[[]*Note](s.client,
-		withPath("projects/%s/issues/%d/notes", ProjectID{pid}, issue),
-		withAPIOpts(opt),
-		withRequestOpts(options...),
-	)
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, nil, err
+	}
+	u := fmt.Sprintf("projects/%s/issues/%d/notes", PathEscape(project), issue)
+
+	req, err := s.client.NewRequest(http.MethodGet, u, opt, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var n []*Note
+	resp, err := s.client.Do(req, &n)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return n, resp, nil
 }
 
 // GetIssueNote returns a single note for a specific project issue.
@@ -172,10 +186,24 @@ func (s *NotesService) ListIssueNotes(pid any, issue int64, opt *ListIssueNotesO
 // GitLab API docs:
 // https://docs.gitlab.com/api/notes/#get-single-issue-note
 func (s *NotesService) GetIssueNote(pid any, issue, note int64, options ...RequestOptionFunc) (*Note, *Response, error) {
-	return do[*Note](s.client,
-		withPath("projects/%s/issues/%d/notes/%d", ProjectID{pid}, issue, note),
-		withRequestOpts(options...),
-	)
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, nil, err
+	}
+	u := fmt.Sprintf("projects/%s/issues/%d/notes/%d", PathEscape(project), issue, note)
+
+	req, err := s.client.NewRequest(http.MethodGet, u, nil, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	n := new(Note)
+	resp, err := s.client.Do(req, n)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return n, resp, nil
 }
 
 // CreateIssueNoteOptions represents the available CreateIssueNote()
@@ -194,12 +222,24 @@ type CreateIssueNoteOptions struct {
 // GitLab API docs:
 // https://docs.gitlab.com/api/notes/#create-new-issue-note
 func (s *NotesService) CreateIssueNote(pid any, issue int64, opt *CreateIssueNoteOptions, options ...RequestOptionFunc) (*Note, *Response, error) {
-	return do[*Note](s.client,
-		withMethod(http.MethodPost),
-		withPath("projects/%s/issues/%d/notes", ProjectID{pid}, issue),
-		withAPIOpts(opt),
-		withRequestOpts(options...),
-	)
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, nil, err
+	}
+	u := fmt.Sprintf("projects/%s/issues/%d/notes", PathEscape(project), issue)
+
+	req, err := s.client.NewRequest(http.MethodPost, u, opt, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	n := new(Note)
+	resp, err := s.client.Do(req, n)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return n, resp, nil
 }
 
 // UpdateIssueNoteOptions represents the available UpdateIssueNote()
@@ -216,12 +256,24 @@ type UpdateIssueNoteOptions struct {
 // GitLab API docs:
 // https://docs.gitlab.com/api/notes/#modify-existing-issue-note
 func (s *NotesService) UpdateIssueNote(pid any, issue, note int64, opt *UpdateIssueNoteOptions, options ...RequestOptionFunc) (*Note, *Response, error) {
-	return do[*Note](s.client,
-		withMethod(http.MethodPut),
-		withPath("projects/%s/issues/%d/notes/%d", ProjectID{pid}, issue, note),
-		withAPIOpts(opt),
-		withRequestOpts(options...),
-	)
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, nil, err
+	}
+	u := fmt.Sprintf("projects/%s/issues/%d/notes/%d", PathEscape(project), issue, note)
+
+	req, err := s.client.NewRequest(http.MethodPut, u, opt, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	n := new(Note)
+	resp, err := s.client.Do(req, n)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return n, resp, nil
 }
 
 // DeleteIssueNote deletes an existing note of an issue.
@@ -229,12 +281,18 @@ func (s *NotesService) UpdateIssueNote(pid any, issue, note int64, opt *UpdateIs
 // GitLab API docs:
 // https://docs.gitlab.com/api/notes/#delete-an-issue-note
 func (s *NotesService) DeleteIssueNote(pid any, issue, note int64, options ...RequestOptionFunc) (*Response, error) {
-	_, resp, err := do[none](s.client,
-		withMethod(http.MethodDelete),
-		withPath("projects/%s/issues/%d/notes/%d", ProjectID{pid}, issue, note),
-		withRequestOpts(options...),
-	)
-	return resp, err
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, err
+	}
+	u := fmt.Sprintf("projects/%s/issues/%d/notes/%d", PathEscape(project), issue, note)
+
+	req, err := s.client.NewRequest(http.MethodDelete, u, nil, options)
+	if err != nil {
+		return nil, err
+	}
+
+	return s.client.Do(req, nil)
 }
 
 // ListSnippetNotesOptions represents the available ListSnippetNotes() options.
@@ -253,11 +311,24 @@ type ListSnippetNotesOptions struct {
 // GitLab API docs:
 // https://docs.gitlab.com/api/notes/#list-all-snippet-notes
 func (s *NotesService) ListSnippetNotes(pid any, snippet int64, opt *ListSnippetNotesOptions, options ...RequestOptionFunc) ([]*Note, *Response, error) {
-	return do[[]*Note](s.client,
-		withPath("projects/%s/snippets/%d/notes", ProjectID{pid}, snippet),
-		withAPIOpts(opt),
-		withRequestOpts(options...),
-	)
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, nil, err
+	}
+	u := fmt.Sprintf("projects/%s/snippets/%d/notes", PathEscape(project), snippet)
+
+	req, err := s.client.NewRequest(http.MethodGet, u, opt, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var n []*Note
+	resp, err := s.client.Do(req, &n)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return n, resp, nil
 }
 
 // GetSnippetNote returns a single note for a given snippet.
@@ -265,10 +336,24 @@ func (s *NotesService) ListSnippetNotes(pid any, snippet int64, opt *ListSnippet
 // GitLab API docs:
 // https://docs.gitlab.com/api/notes/#get-single-snippet-note
 func (s *NotesService) GetSnippetNote(pid any, snippet, note int64, options ...RequestOptionFunc) (*Note, *Response, error) {
-	return do[*Note](s.client,
-		withPath("projects/%s/snippets/%d/notes/%d", ProjectID{pid}, snippet, note),
-		withRequestOpts(options...),
-	)
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, nil, err
+	}
+	u := fmt.Sprintf("projects/%s/snippets/%d/notes/%d", PathEscape(project), snippet, note)
+
+	req, err := s.client.NewRequest(http.MethodGet, u, nil, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	n := new(Note)
+	resp, err := s.client.Do(req, n)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return n, resp, nil
 }
 
 // CreateSnippetNoteOptions represents the available CreateSnippetNote()
@@ -287,12 +372,24 @@ type CreateSnippetNoteOptions struct {
 // GitLab API docs:
 // https://docs.gitlab.com/api/notes/#create-new-snippet-note
 func (s *NotesService) CreateSnippetNote(pid any, snippet int64, opt *CreateSnippetNoteOptions, options ...RequestOptionFunc) (*Note, *Response, error) {
-	return do[*Note](s.client,
-		withMethod(http.MethodPost),
-		withPath("projects/%s/snippets/%d/notes", ProjectID{pid}, snippet),
-		withAPIOpts(opt),
-		withRequestOpts(options...),
-	)
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, nil, err
+	}
+	u := fmt.Sprintf("projects/%s/snippets/%d/notes", PathEscape(project), snippet)
+
+	req, err := s.client.NewRequest(http.MethodPost, u, opt, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	n := new(Note)
+	resp, err := s.client.Do(req, n)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return n, resp, nil
 }
 
 // UpdateSnippetNoteOptions represents the available UpdateSnippetNote()
@@ -309,12 +406,24 @@ type UpdateSnippetNoteOptions struct {
 // GitLab API docs:
 // https://docs.gitlab.com/api/notes/#modify-existing-snippet-note
 func (s *NotesService) UpdateSnippetNote(pid any, snippet, note int64, opt *UpdateSnippetNoteOptions, options ...RequestOptionFunc) (*Note, *Response, error) {
-	return do[*Note](s.client,
-		withMethod(http.MethodPut),
-		withPath("projects/%s/snippets/%d/notes/%d", ProjectID{pid}, snippet, note),
-		withAPIOpts(opt),
-		withRequestOpts(options...),
-	)
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, nil, err
+	}
+	u := fmt.Sprintf("projects/%s/snippets/%d/notes/%d", PathEscape(project), snippet, note)
+
+	req, err := s.client.NewRequest(http.MethodPut, u, opt, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	n := new(Note)
+	resp, err := s.client.Do(req, n)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return n, resp, nil
 }
 
 // DeleteSnippetNote deletes an existing note of a snippet.
@@ -322,12 +431,18 @@ func (s *NotesService) UpdateSnippetNote(pid any, snippet, note int64, opt *Upda
 // GitLab API docs:
 // https://docs.gitlab.com/api/notes/#delete-a-snippet-note
 func (s *NotesService) DeleteSnippetNote(pid any, snippet, note int64, options ...RequestOptionFunc) (*Response, error) {
-	_, resp, err := do[none](s.client,
-		withMethod(http.MethodDelete),
-		withPath("projects/%s/snippets/%d/notes/%d", ProjectID{pid}, snippet, note),
-		withRequestOpts(options...),
-	)
-	return resp, err
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, err
+	}
+	u := fmt.Sprintf("projects/%s/snippets/%d/notes/%d", PathEscape(project), snippet, note)
+
+	req, err := s.client.NewRequest(http.MethodDelete, u, nil, options)
+	if err != nil {
+		return nil, err
+	}
+
+	return s.client.Do(req, nil)
 }
 
 // ListMergeRequestNotesOptions represents the available ListMergeRequestNotes()
@@ -346,11 +461,24 @@ type ListMergeRequestNotesOptions struct {
 // GitLab API docs:
 // https://docs.gitlab.com/api/notes/#list-all-merge-request-notes
 func (s *NotesService) ListMergeRequestNotes(pid any, mergeRequest int64, opt *ListMergeRequestNotesOptions, options ...RequestOptionFunc) ([]*Note, *Response, error) {
-	return do[[]*Note](s.client,
-		withPath("projects/%s/merge_requests/%d/notes", ProjectID{pid}, mergeRequest),
-		withAPIOpts(opt),
-		withRequestOpts(options...),
-	)
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, nil, err
+	}
+	u := fmt.Sprintf("projects/%s/merge_requests/%d/notes", PathEscape(project), mergeRequest)
+
+	req, err := s.client.NewRequest(http.MethodGet, u, opt, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var n []*Note
+	resp, err := s.client.Do(req, &n)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return n, resp, nil
 }
 
 // GetMergeRequestNote returns a single note for a given merge request.
@@ -358,10 +486,24 @@ func (s *NotesService) ListMergeRequestNotes(pid any, mergeRequest int64, opt *L
 // GitLab API docs:
 // https://docs.gitlab.com/api/notes/#get-single-merge-request-note
 func (s *NotesService) GetMergeRequestNote(pid any, mergeRequest, note int64, options ...RequestOptionFunc) (*Note, *Response, error) {
-	return do[*Note](s.client,
-		withPath("projects/%s/merge_requests/%d/notes/%d", ProjectID{pid}, mergeRequest, note),
-		withRequestOpts(options...),
-	)
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, nil, err
+	}
+	u := fmt.Sprintf("projects/%s/merge_requests/%d/notes/%d", PathEscape(project), mergeRequest, note)
+
+	req, err := s.client.NewRequest(http.MethodGet, u, nil, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	n := new(Note)
+	resp, err := s.client.Do(req, n)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return n, resp, nil
 }
 
 // CreateMergeRequestNoteOptions represents the available
@@ -381,12 +523,24 @@ type CreateMergeRequestNoteOptions struct {
 // GitLab API docs:
 // https://docs.gitlab.com/api/notes/#create-new-merge-request-note
 func (s *NotesService) CreateMergeRequestNote(pid any, mergeRequest int64, opt *CreateMergeRequestNoteOptions, options ...RequestOptionFunc) (*Note, *Response, error) {
-	return do[*Note](s.client,
-		withMethod(http.MethodPost),
-		withPath("projects/%s/merge_requests/%d/notes", ProjectID{pid}, mergeRequest),
-		withAPIOpts(opt),
-		withRequestOpts(options...),
-	)
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, nil, err
+	}
+	u := fmt.Sprintf("projects/%s/merge_requests/%d/notes", PathEscape(project), mergeRequest)
+
+	req, err := s.client.NewRequest(http.MethodPost, u, opt, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	n := new(Note)
+	resp, err := s.client.Do(req, n)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return n, resp, nil
 }
 
 // UpdateMergeRequestNoteOptions represents the available
@@ -403,12 +557,24 @@ type UpdateMergeRequestNoteOptions struct {
 // GitLab API docs:
 // https://docs.gitlab.com/api/notes/#modify-existing-merge-request-note
 func (s *NotesService) UpdateMergeRequestNote(pid any, mergeRequest, note int64, opt *UpdateMergeRequestNoteOptions, options ...RequestOptionFunc) (*Note, *Response, error) {
-	return do[*Note](s.client,
-		withMethod(http.MethodPut),
-		withPath("projects/%s/merge_requests/%d/notes/%d", ProjectID{pid}, mergeRequest, note),
-		withAPIOpts(opt),
-		withRequestOpts(options...),
-	)
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, nil, err
+	}
+	u := fmt.Sprintf(
+		"projects/%s/merge_requests/%d/notes/%d", PathEscape(project), mergeRequest, note)
+	req, err := s.client.NewRequest(http.MethodPut, u, opt, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	n := new(Note)
+	resp, err := s.client.Do(req, n)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return n, resp, nil
 }
 
 // DeleteMergeRequestNote deletes an existing note of a merge request.
@@ -416,12 +582,19 @@ func (s *NotesService) UpdateMergeRequestNote(pid any, mergeRequest, note int64,
 // GitLab API docs:
 // https://docs.gitlab.com/api/notes/#delete-a-merge-request-note
 func (s *NotesService) DeleteMergeRequestNote(pid any, mergeRequest, note int64, options ...RequestOptionFunc) (*Response, error) {
-	_, resp, err := do[none](s.client,
-		withMethod(http.MethodDelete),
-		withPath("projects/%s/merge_requests/%d/notes/%d", ProjectID{pid}, mergeRequest, note),
-		withRequestOpts(options...),
-	)
-	return resp, err
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, err
+	}
+	u := fmt.Sprintf(
+		"projects/%s/merge_requests/%d/notes/%d", PathEscape(project), mergeRequest, note)
+
+	req, err := s.client.NewRequest(http.MethodDelete, u, nil, options)
+	if err != nil {
+		return nil, err
+	}
+
+	return s.client.Do(req, nil)
 }
 
 // ListEpicNotesOptions represents the available ListEpicNotes() options.
@@ -441,11 +614,24 @@ type ListEpicNotesOptions struct {
 // GitLab API docs:
 // https://docs.gitlab.com/api/notes/#list-all-epic-notes
 func (s *NotesService) ListEpicNotes(gid any, epic int64, opt *ListEpicNotesOptions, options ...RequestOptionFunc) ([]*Note, *Response, error) {
-	return do[[]*Note](s.client,
-		withPath("groups/%s/epics/%d/notes", GroupID{gid}, epic),
-		withAPIOpts(opt),
-		withRequestOpts(options...),
-	)
+	group, err := parseID(gid)
+	if err != nil {
+		return nil, nil, err
+	}
+	u := fmt.Sprintf("groups/%s/epics/%d/notes", PathEscape(group), epic)
+
+	req, err := s.client.NewRequest(http.MethodGet, u, opt, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var n []*Note
+	resp, err := s.client.Do(req, &n)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return n, resp, nil
 }
 
 // GetEpicNote returns a single note for an epic.
@@ -454,10 +640,24 @@ func (s *NotesService) ListEpicNotes(gid any, epic int64, opt *ListEpicNotesOpti
 // GitLab API docs:
 // https://docs.gitlab.com/api/notes/#get-single-epic-note
 func (s *NotesService) GetEpicNote(gid any, epic, note int64, options ...RequestOptionFunc) (*Note, *Response, error) {
-	return do[*Note](s.client,
-		withPath("groups/%s/epics/%d/notes/%d", GroupID{gid}, epic, note),
-		withRequestOpts(options...),
-	)
+	group, err := parseID(gid)
+	if err != nil {
+		return nil, nil, err
+	}
+	u := fmt.Sprintf("groups/%s/epics/%d/notes/%d", PathEscape(group), epic, note)
+
+	req, err := s.client.NewRequest(http.MethodGet, u, nil, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	n := new(Note)
+	resp, err := s.client.Do(req, n)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return n, resp, nil
 }
 
 // CreateEpicNoteOptions represents the available CreateEpicNote() options.
@@ -475,12 +675,24 @@ type CreateEpicNoteOptions struct {
 // GitLab API docs:
 // https://docs.gitlab.com/api/notes/#create-new-epic-note
 func (s *NotesService) CreateEpicNote(gid any, epic int64, opt *CreateEpicNoteOptions, options ...RequestOptionFunc) (*Note, *Response, error) {
-	return do[*Note](s.client,
-		withMethod(http.MethodPost),
-		withPath("groups/%s/epics/%d/notes", GroupID{gid}, epic),
-		withAPIOpts(opt),
-		withRequestOpts(options...),
-	)
+	group, err := parseID(gid)
+	if err != nil {
+		return nil, nil, err
+	}
+	u := fmt.Sprintf("groups/%s/epics/%d/notes", PathEscape(group), epic)
+
+	req, err := s.client.NewRequest(http.MethodPost, u, opt, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	n := new(Note)
+	resp, err := s.client.Do(req, n)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return n, resp, nil
 }
 
 // UpdateEpicNoteOptions represents the available UpdateEpicNote() options.
@@ -497,12 +709,24 @@ type UpdateEpicNoteOptions struct {
 //
 // https://docs.gitlab.com/api/notes/#modify-existing-epic-note
 func (s *NotesService) UpdateEpicNote(gid any, epic, note int64, opt *UpdateEpicNoteOptions, options ...RequestOptionFunc) (*Note, *Response, error) {
-	return do[*Note](s.client,
-		withMethod(http.MethodPut),
-		withPath("groups/%s/epics/%d/notes/%d", GroupID{gid}, epic, note),
-		withAPIOpts(opt),
-		withRequestOpts(options...),
-	)
+	group, err := parseID(gid)
+	if err != nil {
+		return nil, nil, err
+	}
+	u := fmt.Sprintf("groups/%s/epics/%d/notes/%d", PathEscape(group), epic, note)
+
+	req, err := s.client.NewRequest(http.MethodPut, u, opt, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	n := new(Note)
+	resp, err := s.client.Do(req, n)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return n, resp, nil
 }
 
 // DeleteEpicNote deletes an existing note of a merge request.
@@ -510,10 +734,16 @@ func (s *NotesService) UpdateEpicNote(gid any, epic, note int64, opt *UpdateEpic
 //
 // https://docs.gitlab.com/api/notes/#delete-an-epic-note
 func (s *NotesService) DeleteEpicNote(gid any, epic, note int64, options ...RequestOptionFunc) (*Response, error) {
-	_, resp, err := do[none](s.client,
-		withMethod(http.MethodDelete),
-		withPath("groups/%s/epics/%d/notes/%d", GroupID{gid}, epic, note),
-		withRequestOpts(options...),
-	)
-	return resp, err
+	group, err := parseID(gid)
+	if err != nil {
+		return nil, err
+	}
+	u := fmt.Sprintf("groups/%s/epics/%d/notes/%d", PathEscape(group), epic, note)
+
+	req, err := s.client.NewRequest(http.MethodDelete, u, nil, options)
+	if err != nil {
+		return nil, err
+	}
+
+	return s.client.Do(req, nil)
 }

@@ -288,7 +288,7 @@ func TestAnalyzePromptBuildError(t *testing.T) {
 	assert.Assert(t, response == nil)
 }
 
-func TestAnalyzeErrors(t *testing.T) {
+func TestAnalyze_Errors(t *testing.T) {
 	tests := []struct {
 		name            string
 		httpResponse    *http.Response
@@ -339,7 +339,7 @@ func TestAnalyzeErrors(t *testing.T) {
 	}
 }
 
-func TestAnalyzeAPIError(t *testing.T) {
+func TestAnalyze_APIError(t *testing.T) {
 	tests := []struct {
 		name            string
 		mockResponse    openaiResponse
@@ -580,7 +580,7 @@ func TestRequestMarshaling(t *testing.T) {
 			assert.Equal(t, reqBody.Model, "gpt-4")
 			assert.Equal(t, len(reqBody.Messages), 1)
 			assert.Equal(t, reqBody.Messages[0].Role, "user")
-			assert.Equal(t, reqBody.MaxCompletionTokens, 100)
+			assert.Equal(t, reqBody.MaxTokens, 100)
 
 			resp := openaiResponse{
 				Choices: []openaiChoice{

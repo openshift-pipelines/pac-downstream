@@ -7,6 +7,7 @@ import (
 	"io"
 	"io/ioutil"
 	"net/url"
+	"path"
 	"strconv"
 	"strings"
 	"time"
@@ -309,19 +310,19 @@ func (r *Repository) Get(ro *RepositoryOptions) (*Repository, error) {
 }
 
 func (r *Repository) buildContentsURL(ro *RepositoryFilesOptions) (string, error) {
-	urlPath := "/repositories/%s/%s/src/%s/%s"
+	filePath := path.Join("/repositories", ro.Owner, ro.RepoSlug, "src", ro.Ref, ro.Path) + "/"
 
-	urlStr := r.c.requestUrl(urlPath, ro.Owner, ro.RepoSlug, ro.Ref, ro.Path)
-	parsedUrl, err := url.Parse(urlStr)
+	urlStr := r.c.requestUrl(filePath)
+	url, err := url.Parse(urlStr)
 	if err != nil {
 		return "", err
 	}
 
-	query := parsedUrl.Query()
+	query := url.Query()
 	r.c.addMaxDepthParam(&query, &ro.MaxDepth)
-	parsedUrl.RawQuery = query.Encode()
+	url.RawQuery = query.Encode()
 
-	return parsedUrl.String(), nil
+	return url.String(), nil
 }
 
 func (r *Repository) GetFileContent(ro *RepositoryFilesOptions) ([]byte, error) {
@@ -354,8 +355,8 @@ func (r *Repository) ListFiles(ro *RepositoryFilesOptions) ([]RepositoryFile, er
 }
 
 func (r *Repository) GetFileBlob(ro *RepositoryBlobOptions) (*RepositoryBlob, error) {
-	urlPath := "/repositories/%s/%s/src/%s/%s"
-	urlStr := r.c.requestUrl(urlPath, ro.Owner, ro.RepoSlug, ro.Ref, ro.Path)
+	filePath := path.Join("/repositories", ro.Owner, ro.RepoSlug, "src", ro.Ref, ro.Path)
+	urlStr := r.c.requestUrl(filePath)
 	response, err := r.c.executeRaw("GET", urlStr, "")
 	if err != nil {
 		return nil, err

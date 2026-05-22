@@ -25,14 +25,9 @@ import (
 	"net/url"
 	"time"
 
-	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
-	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/metric"
-	"go.opentelemetry.io/otel/trace"
 	"k8s.io/apimachinery/pkg/types"
 	corev1listers "k8s.io/client-go/listers/core/v1"
 	"knative.dev/pkg/network"
-	"knative.dev/pkg/observability/tracing"
 
 	"knative.dev/eventing/pkg/auth"
 
@@ -41,13 +36,16 @@ import (
 	"github.com/cloudevents/sdk-go/v2/event"
 	"github.com/cloudevents/sdk-go/v2/protocol"
 	"github.com/cloudevents/sdk-go/v2/protocol/http"
+	"go.opencensus.io/plugin/ochttp"
+	"go.opencensus.io/plugin/ochttp/propagation/tracecontext"
 	duckv1 "knative.dev/pkg/apis/duck/v1"
+	"knative.dev/pkg/tracing/propagation/tracecontextb3"
 
-	obsclient "github.com/cloudevents/sdk-go/observability/opentelemetry/v2/client"
 	"knative.dev/eventing/pkg/adapter/v2/util/crstatusevent"
 	"knative.dev/eventing/pkg/apis"
 	"knative.dev/eventing/pkg/eventingtls"
 	"knative.dev/eventing/pkg/metrics/source"
+	obsclient "knative.dev/eventing/pkg/observability/client"
 )
 
 type closeIdler interface {
@@ -63,23 +61,13 @@ var newClientHTTPObserved = NewClientHTTPObserved
 
 func NewClientHTTPObserved(topt []http.Option, copt []ceclient.Option) (Client, error) {
 	t, err := http.New(append(topt,
-		http.WithMiddleware(
-			otelhttp.NewMiddleware(
-				"receive",
-				otelhttp.WithPropagators(tracing.DefaultTextMapPropagator()),
-			),
-		),
+		http.WithMiddleware(tracecontextMiddleware),
 	)...)
 	if err != nil {
 		return nil, err
 	}
 
-	copt = append(
-		copt,
-		ceclient.WithTimeNow(),
-		ceclient.WithUUIDs(),
-		ceclient.WithObservabilityService(obsclient.NewOTelObservabilityService()),
-	)
+	copt = append(copt, ceclient.WithTimeNow(), ceclient.WithUUIDs(), ceclient.WithObservabilityService(obsclient.New()))
 
 	c, err := ceclient.New(t, copt...)
 	if err != nil {
@@ -130,8 +118,6 @@ type ClientConfig struct {
 	CrStatusEventClient *crstatusevent.CRStatusEventClient
 	Options             []http.Option
 	TokenProvider       *auth.OIDCTokenProvider
-	MeterProvider       metric.MeterProvider
-	TraceProvider       trace.TracerProvider
 
 	TrustBundleConfigMapLister corev1listers.ConfigMapNamespaceLister
 }
@@ -151,7 +137,10 @@ func GetClientConfig(ctx context.Context) ClientConfig {
 }
 
 func NewClient(cfg ClientConfig) (Client, error) {
-	base := nethttp.DefaultTransport.(*nethttp.Transport).Clone()
+	transport := &ochttp.Transport{
+		Base:        nethttp.DefaultTransport.(*nethttp.Transport),
+		Propagation: tracecontextb3.TraceContextEgress,
+	}
 
 	pOpts := make([]http.Option, 0)
 
@@ -169,12 +158,19 @@ func NewClient(cfg ClientConfig) (Client, error) {
 			clientConfig.CACerts = cfg.Env.GetCACerts()
 			clientConfig.TrustBundleConfigMapLister = cfg.TrustBundleConfigMapLister
 
-			base.DialTLSContext = func(ctx context.Context, net, addr string) (net.Conn, error) {
+			httpsTransport := transport.Base.(*nethttp.Transport).Clone()
+
+			httpsTransport.DialTLSContext = func(ctx context.Context, net, addr string) (net.Conn, error) {
 				tlsConfig, err := eventingtls.GetTLSClientConfig(clientConfig)
 				if err != nil {
 					return nil, err
 				}
 				return network.DialTLSWithBackOff(ctx, net, addr, tlsConfig)
+			}
+
+			transport = &ochttp.Transport{
+				Base:        httpsTransport,
+				Propagation: tracecontextb3.TraceContextEgress,
 			}
 		}
 
@@ -189,25 +185,7 @@ func NewClient(cfg ClientConfig) (Client, error) {
 		pOpts = append(pOpts, http.WithHeader(apis.KnNamespaceHeader, cfg.Env.GetNamespace()))
 	}
 
-	mp := cfg.MeterProvider
-	if mp == nil {
-		mp = otel.GetMeterProvider()
-	}
-
-	tp := cfg.TraceProvider
-	if tp == nil {
-		tp = otel.GetTracerProvider()
-	}
-
-	transport := otelhttp.NewTransport(
-		base,
-		otelhttp.WithPropagators(tracing.DefaultTextMapPropagator()),
-		otelhttp.WithMeterProvider(mp),
-		otelhttp.WithTracerProvider(tp),
-		otelhttp.WithSpanNameFormatter(formatSpanName),
-	)
-
-	httpClient := nethttp.Client{Transport: transport}
+	httpClient := nethttp.Client{Transport: roundTripperDecorator(transport)}
 
 	// Important: prepend HTTP client option to make sure that other options are applied to this
 	// client and not to the default client.
@@ -227,7 +205,7 @@ func NewClient(cfg ClientConfig) (Client, error) {
 
 	client := &client{
 		ceClient:            ceClient,
-		closeIdler:          base,
+		closeIdler:          transport.Base.(*nethttp.Transport),
 		ceOverrides:         ceOverrides,
 		reporter:            cfg.Reporter,
 		crStatusEventClient: cfg.CrStatusEventClient,
@@ -418,8 +396,24 @@ func MetricTagFromContext(ctx context.Context) *MetricTag {
 	}
 }
 
-func formatSpanName(operation string, r *nethttp.Request) string {
+func roundTripperDecorator(roundTripper nethttp.RoundTripper) nethttp.RoundTripper {
+	return &ochttp.Transport{
+		Propagation:    &tracecontext.HTTPFormat{},
+		Base:           roundTripper,
+		FormatSpanName: formatSpanName,
+	}
+}
+
+func formatSpanName(r *nethttp.Request) string {
 	return "cloudevents.http." + r.URL.Path
+}
+
+func tracecontextMiddleware(h nethttp.Handler) nethttp.Handler {
+	return &ochttp.Handler{
+		Propagation:    &tracecontext.HTTPFormat{},
+		Handler:        h,
+		FormatSpanName: formatSpanName,
+	}
 }
 
 // When OIDC is enabled, withAuthHeader will request the JWT token from the tokenProvider and append it to every request

@@ -25,7 +25,7 @@ import (
 // with "Core" support:
 //
 // * Gateway (Gateway conformance profile)
-// * Service (Mesh conformance profile, ClusterIP Services only)
+// * Service (Mesh conformance profile, experimental, ClusterIP Services only)
 //
 // This API may be extended in the future to support additional kinds of parent
 // resources.
@@ -49,7 +49,7 @@ type ParentReference struct {
 	// There are two kinds of parent resources with "Core" support:
 	//
 	// * Gateway (Gateway conformance profile)
-	// * Service (Mesh conformance profile, ClusterIP Services only)
+	// * Service (Mesh conformance profile, experimental, ClusterIP Services only)
 	//
 	// Support for other resources is Implementation-Specific.
 	//
@@ -86,18 +86,19 @@ type ParentReference struct {
 	// Name is the name of the referent.
 	//
 	// Support: Core
-	// +required
 	Name ObjectName `json:"name"`
 
 	// SectionName is the name of a section within the target resource. In the
 	// following resources, SectionName is interpreted as the following:
 	//
-	// * Gateway: Listener name. When both Port (experimental) and SectionName
+	// * Gateway: Listener Name. When both Port (experimental) and SectionName
 	// are specified, the name and port of the selected listener must match
 	// both specified values.
-	// * Service: Port name. When both Port (experimental) and SectionName
+	// * Service: Port Name. When both Port (experimental) and SectionName
 	// are specified, the name and port of the selected listener must match
-	// both specified values.
+	// both specified values. Note that attaching Routes to Services as Parents
+	// is part of experimental Mesh support and is not supported for any other
+	// purpose.
 	//
 	// Implementations MAY choose to support attaching Routes to other resources.
 	// If that is the case, they MUST clearly document how SectionName is
@@ -149,30 +150,9 @@ type ParentReference struct {
 	// Support: Extended
 	//
 	// +optional
-	//
-	// +kubebuilder:validation:Minimum=1
-	// +kubebuilder:validation:Maximum=65535
+	// <gateway:experimental>
 	Port *PortNumber `json:"port,omitempty"`
 }
-
-// GatewayDefaultScope defines the set of default scopes that a Gateway
-// can claim, for use in any Route type. At present the only supported
-// scopes are "All" and "None". "None" is a special scope which
-// explicitly means that the Route MUST NOT attached to any default
-// Gateway.
-//
-// +kubebuilder:validation:Enum=All;None
-type GatewayDefaultScope string
-
-const (
-	// GatewayDefaultScopeAll indicates that a Gateway can claim absolutely
-	// any Route asking for a default Gateway.
-	GatewayDefaultScopeAll GatewayDefaultScope = "All"
-
-	// GatewayDefaultScopeNone indicates that a Gateway MUST NOT claim
-	// any Route asking for a default Gateway.
-	GatewayDefaultScopeNone GatewayDefaultScope = "None"
-)
 
 // CommonRouteSpec defines the common attributes that all Routes MUST include
 // within their spec.
@@ -191,8 +171,9 @@ type CommonRouteSpec struct {
 	// There are two kinds of parent resources with "Core" support:
 	//
 	// * Gateway (Gateway conformance profile)
-	// * Service (Mesh conformance profile, ClusterIP Services only)
-	//
+	// <gateway:experimental:description>
+	// * Service (Mesh conformance profile, experimental, ClusterIP Services only)
+	// </gateway:experimental:description>
 	// This API may be extended in the future to support additional kinds of parent
 	// resources.
 	//
@@ -241,34 +222,19 @@ type CommonRouteSpec struct {
 	// </gateway:experimental:description>
 	//
 	// +optional
-	// +listType=atomic
 	// +kubebuilder:validation:MaxItems=32
 	// <gateway:standard:validation:XValidation:message="sectionName must be specified when parentRefs includes 2 or more references to the same parent",rule="self.all(p1, self.all(p2, p1.group == p2.group && p1.kind == p2.kind && p1.name == p2.name && (((!has(p1.__namespace__) || p1.__namespace__ == '') && (!has(p2.__namespace__) || p2.__namespace__ == '')) || (has(p1.__namespace__) && has(p2.__namespace__) && p1.__namespace__ == p2.__namespace__ )) ? ((!has(p1.sectionName) || p1.sectionName == '') == (!has(p2.sectionName) || p2.sectionName == '')) : true))">
 	// <gateway:standard:validation:XValidation:message="sectionName must be unique when parentRefs includes 2 or more references to the same parent",rule="self.all(p1, self.exists_one(p2, p1.group == p2.group && p1.kind == p2.kind && p1.name == p2.name && (((!has(p1.__namespace__) || p1.__namespace__ == '') && (!has(p2.__namespace__) || p2.__namespace__ == '')) || (has(p1.__namespace__) && has(p2.__namespace__) && p1.__namespace__ == p2.__namespace__ )) && (((!has(p1.sectionName) || p1.sectionName == '') && (!has(p2.sectionName) || p2.sectionName == '')) || (has(p1.sectionName) && has(p2.sectionName) && p1.sectionName == p2.sectionName))))">
 	// <gateway:experimental:validation:XValidation:message="sectionName or port must be specified when parentRefs includes 2 or more references to the same parent",rule="self.all(p1, self.all(p2, p1.group == p2.group && p1.kind == p2.kind && p1.name == p2.name && (((!has(p1.__namespace__) || p1.__namespace__ == '') && (!has(p2.__namespace__) || p2.__namespace__ == '')) || (has(p1.__namespace__) && has(p2.__namespace__) && p1.__namespace__ == p2.__namespace__)) ? ((!has(p1.sectionName) || p1.sectionName == '') == (!has(p2.sectionName) || p2.sectionName == '') && (!has(p1.port) || p1.port == 0) == (!has(p2.port) || p2.port == 0)): true))">
 	// <gateway:experimental:validation:XValidation:message="sectionName or port must be unique when parentRefs includes 2 or more references to the same parent",rule="self.all(p1, self.exists_one(p2, p1.group == p2.group && p1.kind == p2.kind && p1.name == p2.name && (((!has(p1.__namespace__) || p1.__namespace__ == '') && (!has(p2.__namespace__) || p2.__namespace__ == '')) || (has(p1.__namespace__) && has(p2.__namespace__) && p1.__namespace__ == p2.__namespace__ )) && (((!has(p1.sectionName) || p1.sectionName == '') && (!has(p2.sectionName) || p2.sectionName == '')) || ( has(p1.sectionName) && has(p2.sectionName) && p1.sectionName == p2.sectionName)) && (((!has(p1.port) || p1.port == 0) && (!has(p2.port) || p2.port == 0)) || (has(p1.port) && has(p2.port) && p1.port == p2.port))))">
 	ParentRefs []ParentReference `json:"parentRefs,omitempty"`
-
-	// UseDefaultGateways indicates the default Gateway scope to use for this
-	// Route. If unset (the default) or set to None, the Route will not be
-	// attached to any default Gateway; if set, it will be attached to any
-	// default Gateway supporting the named scope, subject to the usual rules
-	// about which Routes a Gateway is allowed to claim.
-	//
-	// Think carefully before using this functionality! The set of default
-	// Gateways supporting the requested scope can change over time without
-	// any notice to the Route author, and in many situations it will not be
-	// appropriate to request a default Gateway for a given Route -- for
-	// example, a Route with specific security requirements should almost
-	// certainly not use a default Gateway.
-	//
-	// +optional
-	// <gateway:experimental>
-	UseDefaultGateways GatewayDefaultScope `json:"useDefaultGateways,omitempty"`
 }
 
 // PortNumber defines a network port.
-type PortNumber = int32
+//
+// +kubebuilder:validation:Minimum=1
+// +kubebuilder:validation:Maximum=65535
+type PortNumber int32
 
 // BackendRef defines how a Route should forward a request to a Kubernetes
 // resource.
@@ -474,7 +440,6 @@ const (
 type RouteParentStatus struct {
 	// ParentRef corresponds with a ParentRef in the spec that this
 	// RouteParentStatus struct describes the status of.
-	// +required
 	ParentRef ParentReference `json:"parentRef"`
 
 	// ControllerName is a domain/path string that indicates the name of the
@@ -490,7 +455,6 @@ type RouteParentStatus struct {
 	// Controllers MUST populate this field when writing status. Controllers should ensure that
 	// entries to status populated with their ControllerName are cleaned up when they are no
 	// longer necessary.
-	// +required
 	ControllerName GatewayController `json:"controllerName"`
 
 	// Conditions describes the status of the route with respect to the Gateway.
@@ -509,45 +473,14 @@ type RouteParentStatus struct {
 	// There are a number of cases where the "Accepted" condition may not be set
 	// due to lack of controller visibility, that includes when:
 	//
-	// * The Route refers to a nonexistent parent.
+	// * The Route refers to a non-existent parent.
 	// * The Route is of a type that the controller does not support.
-	// * The Route is in a namespace to which the controller does not have access.
-	//
-	// <gateway:util:excludeFromCRD>
-	//
-	// Notes for implementors:
-	//
-	// Conditions are a listType `map`, which means that they function like a
-	// map with a key of the `type` field _in the k8s apiserver_.
-	//
-	// This means that implementations must obey some rules when updating this
-	// section.
-	//
-	// * Implementations MUST perform a read-modify-write cycle on this field
-	//   before modifying it. That is, when modifying this field, implementations
-	//   must be confident they have fetched the most recent version of this field,
-	//   and ensure that changes they make are on that recent version.
-	// * Implementations MUST NOT remove or reorder Conditions that they are not
-	//   directly responsible for. For example, if an implementation sees a Condition
-	//   with type `special.io/SomeField`, it MUST NOT remove, change or update that
-	//   Condition.
-	// * Implementations MUST always _merge_ changes into Conditions of the same Type,
-	//   rather than creating more than one Condition of the same Type.
-	// * Implementations MUST always update the `observedGeneration` field of the
-	//   Condition to the `metadata.generation` of the Gateway at the time of update creation.
-	// * If the `observedGeneration` of a Condition is _greater than_ the value the
-	//   implementation knows about, then it MUST NOT perform the update on that Condition,
-	//   but must wait for a future reconciliation and status update. (The assumption is that
-	//   the implementation's copy of the object is stale and an update will be re-triggered
-	//   if relevant.)
-	//
-	// </gateway:util:excludeFromCRD>
+	// * The Route is in a namespace the controller does not have access to.
 	//
 	// +listType=map
 	// +listMapKey=type
 	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:MaxItems=8
-	// +required
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
 
@@ -569,31 +502,6 @@ type RouteStatus struct {
 	// A maximum of 32 Gateways will be represented in this list. An empty list
 	// means the route has not been attached to any Gateway.
 	//
-	// <gateway:util:excludeFromCRD>
-	// Notes for implementors:
-	//
-	// While parents is not a listType `map`, this is due to the fact that the
-	// list key is not scalar, and Kubernetes is unable to represent this.
-	//
-	// Parent status MUST be considered to be namespaced by the combination of
-	// the parentRef and controllerName fields, and implementations should keep
-	// the following rules in mind when updating this status:
-	//
-	// * Implementations MUST update only entries that have a matching value of
-	//   `controllerName` for that implementation.
-	// * Implementations MUST NOT update entries with non-matching `controllerName`
-	//   fields.
-	// * Implementations MUST treat each `parentRef`` in the Route separately and
-	//   update its status based on the relationship with that parent.
-	// * Implementations MUST perform a read-modify-write cycle on this field
-	//   before modifying it. That is, when modifying this field, implementations
-	//   must be confident they have fetched the most recent version of this field,
-	//   and ensure that changes they make are on that recent version.
-	//
-	// </gateway:util:excludeFromCRD>
-	//
-	// +required
-	// +listType=atomic
 	// +kubebuilder:validation:MaxItems=32
 	Parents []RouteParentStatus `json:"parents"`
 }
@@ -630,29 +538,6 @@ type Hostname string
 // +kubebuilder:validation:MaxLength=253
 // +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$`
 type PreciseHostname string
-
-// AbsoluteURI represents a Uniform Resource Identifier (URI) as defined by RFC3986.
-
-// The AbsoluteURI MUST NOT be a relative URI, and it MUST follow the URI syntax and
-// encoding rules specified in RFC3986.  The AbsoluteURI MUST include both a
-// scheme (e.g., "http" or "spiffe") and a scheme-specific-part.  URIs that
-// include an authority MUST include a fully qualified domain name or
-// IP address as the host.
-// <gateway:util:excludeFromCRD> The below regex is taken from the regex section in RFC 3986 with a slight modification to enforce a full URI and not relative. </gateway:util:excludeFromCRD>
-// +kubebuilder:validation:MinLength=1
-// +kubebuilder:validation:MaxLength=253
-// +kubebuilder:validation:Pattern=`^(([^:/?#]+):)(//([^/?#]*))([^?#]*)(\?([^#]*))?(#(.*))?`
-type AbsoluteURI string
-
-// The CORSOrigin MUST NOT be a relative URI, and it MUST follow the URI syntax and
-// encoding rules specified in RFC3986.  The CORSOrigin MUST include both a
-// scheme ("http" or "https") and a scheme-specific-part, or it should be a single '*' character.
-// URIs that include an authority MUST include a fully qualified domain name or
-// IP address as the host.
-// +kubebuilder:validation:MinLength=1
-// +kubebuilder:validation:MaxLength=253
-// +kubebuilder:validation:Pattern=`(^\*$)|(^(http(s)?):\/\/(((\*\.)?([a-zA-Z0-9\-]+\.)*[a-zA-Z0-9-]+|\*)(:([0-9]{1,5}))?)$)`
-type CORSOrigin string
 
 // Group refers to a Kubernetes Group. It must either be an empty string or a
 // RFC 1123 subdomain.
@@ -691,7 +576,7 @@ type Group string
 type Kind string
 
 // ObjectName refers to the name of a Kubernetes object.
-// Object names can have a variety of forms, including RFC 1123 subdomains,
+// Object names can have a variety of forms, including RFC1123 subdomains,
 // RFC 1123 labels, or RFC 1035 labels.
 //
 // +kubebuilder:validation:MinLength=1
@@ -721,22 +606,11 @@ type Namespace string
 
 // SectionName is the name of a section in a Kubernetes resource.
 //
-// In the following resources, SectionName is interpreted as the following:
-//
-// * Gateway: Listener name
-// * HTTPRoute: HTTPRouteRule name
-// * Service: Port name
-//
-// Section names can have a variety of forms, including RFC 1123 subdomains,
-// RFC 1123 labels, or RFC 1035 labels.
-//
 // This validation is based off of the corresponding Kubernetes validation:
 // https://github.com/kubernetes/apimachinery/blob/02cfb53916346d085a6c6c7c66f882e3c6b0eca6/pkg/util/validation/validation.go#L208
 //
 // Valid values include:
 //
-// * "example"
-// * "foo-example"
 // * "example.com"
 // * "foo.example.com"
 //
@@ -781,11 +655,11 @@ type GatewayController string
 // Invalid values include:
 //
 // * example~ - "~" is an invalid character
-// * example.com. - cannot start or end with "."
+// * example.com. - can not start or end with "."
 //
 // +kubebuilder:validation:MinLength=1
 // +kubebuilder:validation:MaxLength=253
-// +kubebuilder:validation:Pattern=`^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?([A-Za-z0-9][-A-Za-z0-9_.]{0,61})?[A-Za-z0-9]$`
+// +kubebuilder:validation:Pattern=`^(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9]/?)*$`
 type AnnotationKey string
 
 // AnnotationValue is the value of an annotation in Gateway API. This is used
@@ -796,45 +670,6 @@ type AnnotationKey string
 // +kubebuilder:validation:MinLength=0
 // +kubebuilder:validation:MaxLength=4096
 type AnnotationValue string
-
-// LabelKey is the key of a label in the Gateway API. This is used for validation
-// of maps such as Gateway infrastructure labels. This matches the Kubernetes
-// "qualified name" validation that is used for labels.
-//
-// Valid values include:
-//
-// * example
-// * example.com
-// * example.com/path
-// * example.com/path.html
-//
-// Invalid values include:
-//
-// * example~ - "~" is an invalid character
-// * example.com. - cannot start or end with "."
-//
-// +kubebuilder:validation:MinLength=1
-// +kubebuilder:validation:MaxLength=253
-// +kubebuilder:validation:Pattern=`^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?([A-Za-z0-9][-A-Za-z0-9_.]{0,61})?[A-Za-z0-9]$`
-type LabelKey string
-
-// LabelValue is the value of a label in the Gateway API. This is used for validation
-// of maps such as Gateway infrastructure labels. This matches the Kubernetes
-// label validation rules:
-// * must be 63 characters or less (can be empty),
-// * unless empty, must begin and end with an alphanumeric character ([a-z0-9A-Z]),
-// * could contain dashes (-), underscores (_), dots (.), and alphanumerics between.
-//
-// Valid values include:
-//
-// * MyValue
-// * my.name
-// * 123-my-value
-//
-// +kubebuilder:validation:MinLength=0
-// +kubebuilder:validation:MaxLength=63
-// +kubebuilder:validation:Pattern=`^(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])?$`
-type LabelValue string
 
 // AddressType defines how a network address is represented as a text string.
 // This may take two possible forms:
@@ -877,7 +712,7 @@ const (
 	// (see [RFC 5952](https://tools.ietf.org/html/rfc5952)).
 	//
 	// This type is intended for specific addresses. Address ranges are not
-	// supported (e.g. you cannot use a CIDR range like 127.0.0.0/24 as an
+	// supported (e.g. you can not use a CIDR range like 127.0.0.0/24 as an
 	// IPAddress).
 	//
 	// Support: Extended
@@ -901,157 +736,3 @@ const (
 	// Support: Implementation-specific
 	NamedAddressType AddressType = "NamedAddress"
 )
-
-// SessionPersistence defines the desired state of SessionPersistence.
-// +kubebuilder:validation:XValidation:message="AbsoluteTimeout must be specified when cookie lifetimeType is Permanent",rule="!has(self.cookieConfig) || !has(self.cookieConfig.lifetimeType) || self.cookieConfig.lifetimeType != 'Permanent' || has(self.absoluteTimeout)"
-// +kubebuilder:validation:XValidation:message="cookieConfig can only be set with type Cookie",rule="!has(self.cookieConfig) || self.type == 'Cookie'"
-type SessionPersistence struct {
-	// SessionName defines the name of the persistent session token
-	// which may be reflected in the cookie or the header. Users
-	// should avoid reusing session names to prevent unintended
-	// consequences, such as rejection or unpredictable behavior.
-	//
-	// Support: Implementation-specific
-	//
-	// +optional
-	// +kubebuilder:validation:MaxLength=128
-	SessionName *string `json:"sessionName,omitempty"`
-
-	// AbsoluteTimeout defines the absolute timeout of the persistent
-	// session. Once the AbsoluteTimeout duration has elapsed, the
-	// session becomes invalid.
-	//
-	// Support: Extended
-	//
-	// +optional
-	AbsoluteTimeout *Duration `json:"absoluteTimeout,omitempty"`
-
-	// IdleTimeout defines the idle timeout of the persistent session.
-	// Once the session has been idle for more than the specified
-	// IdleTimeout duration, the session becomes invalid.
-	//
-	// Support: Extended
-	//
-	// +optional
-	IdleTimeout *Duration `json:"idleTimeout,omitempty"`
-
-	// Type defines the type of session persistence such as through
-	// the use of a header or cookie. Defaults to cookie based session
-	// persistence.
-	//
-	// Support: Core for "Cookie" type
-	//
-	// Support: Extended for "Header" type
-	//
-	// +optional
-	// +kubebuilder:default=Cookie
-	Type *SessionPersistenceType `json:"type,omitempty"`
-
-	// CookieConfig provides configuration settings that are specific
-	// to cookie-based session persistence.
-	//
-	// Support: Core
-	//
-	// +optional
-	CookieConfig *CookieConfig `json:"cookieConfig,omitempty"`
-}
-
-// +kubebuilder:validation:Enum=Cookie;Header
-type SessionPersistenceType string
-
-const (
-	// CookieBasedSessionPersistence specifies cookie-based session
-	// persistence.
-	//
-	// Support: Core
-	CookieBasedSessionPersistence SessionPersistenceType = "Cookie"
-
-	// HeaderBasedSessionPersistence specifies header-based session
-	// persistence.
-	//
-	// Support: Extended
-	HeaderBasedSessionPersistence SessionPersistenceType = "Header"
-)
-
-// CookieConfig defines the configuration for cookie-based session persistence.
-type CookieConfig struct {
-	// LifetimeType specifies whether the cookie has a permanent or
-	// session-based lifetime. A permanent cookie persists until its
-	// specified expiry time, defined by the Expires or Max-Age cookie
-	// attributes, while a session cookie is deleted when the current
-	// session ends.
-	//
-	// When set to "Permanent", AbsoluteTimeout indicates the
-	// cookie's lifetime via the Expires or Max-Age cookie attributes
-	// and is required.
-	//
-	// When set to "Session", AbsoluteTimeout indicates the
-	// absolute lifetime of the cookie tracked by the gateway and
-	// is optional.
-	//
-	// Defaults to "Session".
-	//
-	// Support: Core for "Session" type
-	//
-	// Support: Extended for "Permanent" type
-	//
-	// +optional
-	// +kubebuilder:default=Session
-	LifetimeType *CookieLifetimeType `json:"lifetimeType,omitempty"`
-}
-
-// +kubebuilder:validation:Enum=Permanent;Session
-type CookieLifetimeType string
-
-const (
-	// SessionCookieLifetimeType specifies the type for a session
-	// cookie.
-	//
-	// Support: Core
-	SessionCookieLifetimeType CookieLifetimeType = "Session"
-
-	// PermanentCookieLifetimeType specifies the type for a permanent
-	// cookie.
-	//
-	// Support: Extended
-	PermanentCookieLifetimeType CookieLifetimeType = "Permanent"
-)
-
-// +kubebuilder:validation:XValidation:message="numerator must be less than or equal to denominator",rule="self.numerator <= self.denominator"
-type Fraction struct {
-	// +kubebuilder:validation:Minimum=0
-	// +required
-	Numerator int32 `json:"numerator"`
-
-	// +optional
-	// +kubebuilder:default=100
-	// +kubebuilder:validation:Minimum=1
-	Denominator *int32 `json:"denominator,omitempty"`
-}
-
-// ParentGatewayReference identifies an API object including its namespace,
-// defaulting to Gateway.
-type ParentGatewayReference struct {
-	// Group is the group of the referent.
-	//
-	// +optional
-	// +kubebuilder:default="gateway.networking.k8s.io"
-	Group *Group `json:"group,omitempty"`
-
-	// Kind is kind of the referent. For example "Gateway".
-	//
-	// +optional
-	// +kubebuilder:default=Gateway
-	Kind *Kind `json:"kind,omitempty"`
-
-	// Name is the name of the referent.
-	// +required
-	Name ObjectName `json:"name"`
-
-	// Namespace is the namespace of the referent.  If not present,
-	// the namespace of the referent is assumed to be the same as
-	// the namespace of the referring object.
-	//
-	// +optional
-	Namespace *Namespace `json:"namespace,omitempty"`
-}

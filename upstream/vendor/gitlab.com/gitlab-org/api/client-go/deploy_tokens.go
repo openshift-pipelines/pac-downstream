@@ -17,6 +17,7 @@
 package gitlab
 
 import (
+	"fmt"
 	"net/http"
 	"time"
 )
@@ -113,10 +114,18 @@ func (k DeployToken) String() string {
 }
 
 func (s *DeployTokensService) ListAllDeployTokens(options ...RequestOptionFunc) ([]*DeployToken, *Response, error) {
-	return do[[]*DeployToken](s.client,
-		withPath("deploy_tokens"),
-		withRequestOpts(options...),
-	)
+	req, err := s.client.NewRequest(http.MethodGet, "deploy_tokens", nil, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var ts []*DeployToken
+	resp, err := s.client.Do(req, &ts)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return ts, resp, nil
 }
 
 // ListProjectDeployTokensOptions represents the available ListProjectDeployTokens()
@@ -129,18 +138,45 @@ type ListProjectDeployTokensOptions struct {
 }
 
 func (s *DeployTokensService) ListProjectDeployTokens(pid any, opt *ListProjectDeployTokensOptions, options ...RequestOptionFunc) ([]*DeployToken, *Response, error) {
-	return do[[]*DeployToken](s.client,
-		withPath("projects/%s/deploy_tokens", ProjectID{pid}),
-		withAPIOpts(opt),
-		withRequestOpts(options...),
-	)
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, nil, err
+	}
+	u := fmt.Sprintf("projects/%s/deploy_tokens", PathEscape(project))
+
+	req, err := s.client.NewRequest(http.MethodGet, u, opt, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var ts []*DeployToken
+	resp, err := s.client.Do(req, &ts)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return ts, resp, nil
 }
 
 func (s *DeployTokensService) GetProjectDeployToken(pid any, deployToken int64, options ...RequestOptionFunc) (*DeployToken, *Response, error) {
-	return do[*DeployToken](s.client,
-		withPath("projects/%s/deploy_tokens/%d", ProjectID{pid}, deployToken),
-		withRequestOpts(options...),
-	)
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, nil, err
+	}
+	u := fmt.Sprintf("projects/%s/deploy_tokens/%d", PathEscape(project), deployToken)
+
+	req, err := s.client.NewRequest(http.MethodGet, u, nil, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	t := new(DeployToken)
+	resp, err := s.client.Do(req, t)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return t, resp, nil
 }
 
 // CreateProjectDeployTokenOptions represents the available CreateProjectDeployToken() options.
@@ -155,21 +191,39 @@ type CreateProjectDeployTokenOptions struct {
 }
 
 func (s *DeployTokensService) CreateProjectDeployToken(pid any, opt *CreateProjectDeployTokenOptions, options ...RequestOptionFunc) (*DeployToken, *Response, error) {
-	return do[*DeployToken](s.client,
-		withMethod(http.MethodPost),
-		withPath("projects/%s/deploy_tokens", ProjectID{pid}),
-		withAPIOpts(opt),
-		withRequestOpts(options...),
-	)
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, nil, err
+	}
+	u := fmt.Sprintf("projects/%s/deploy_tokens", PathEscape(project))
+
+	req, err := s.client.NewRequest(http.MethodPost, u, opt, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	t := new(DeployToken)
+	resp, err := s.client.Do(req, t)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return t, resp, nil
 }
 
 func (s *DeployTokensService) DeleteProjectDeployToken(pid any, deployToken int64, options ...RequestOptionFunc) (*Response, error) {
-	_, resp, err := do[none](s.client,
-		withMethod(http.MethodDelete),
-		withPath("projects/%s/deploy_tokens/%d", ProjectID{pid}, deployToken),
-		withRequestOpts(options...),
-	)
-	return resp, err
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, err
+	}
+	u := fmt.Sprintf("projects/%s/deploy_tokens/%d", PathEscape(project), deployToken)
+
+	req, err := s.client.NewRequest(http.MethodDelete, u, nil, options)
+	if err != nil {
+		return nil, err
+	}
+
+	return s.client.Do(req, nil)
 }
 
 // ListGroupDeployTokensOptions represents the available ListGroupDeployTokens()
@@ -182,18 +236,45 @@ type ListGroupDeployTokensOptions struct {
 }
 
 func (s *DeployTokensService) ListGroupDeployTokens(gid any, opt *ListGroupDeployTokensOptions, options ...RequestOptionFunc) ([]*DeployToken, *Response, error) {
-	return do[[]*DeployToken](s.client,
-		withPath("groups/%s/deploy_tokens", GroupID{gid}),
-		withAPIOpts(opt),
-		withRequestOpts(options...),
-	)
+	group, err := parseID(gid)
+	if err != nil {
+		return nil, nil, err
+	}
+	u := fmt.Sprintf("groups/%s/deploy_tokens", PathEscape(group))
+
+	req, err := s.client.NewRequest(http.MethodGet, u, opt, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var ts []*DeployToken
+	resp, err := s.client.Do(req, &ts)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return ts, resp, nil
 }
 
 func (s *DeployTokensService) GetGroupDeployToken(gid any, deployToken int64, options ...RequestOptionFunc) (*DeployToken, *Response, error) {
-	return do[*DeployToken](s.client,
-		withPath("groups/%s/deploy_tokens/%d", GroupID{gid}, deployToken),
-		withRequestOpts(options...),
-	)
+	group, err := parseID(gid)
+	if err != nil {
+		return nil, nil, err
+	}
+	u := fmt.Sprintf("groups/%s/deploy_tokens/%d", PathEscape(group), deployToken)
+
+	req, err := s.client.NewRequest(http.MethodGet, u, nil, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	t := new(DeployToken)
+	resp, err := s.client.Do(req, t)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return t, resp, nil
 }
 
 // CreateGroupDeployTokenOptions represents the available CreateGroupDeployToken() options.
@@ -208,19 +289,37 @@ type CreateGroupDeployTokenOptions struct {
 }
 
 func (s *DeployTokensService) CreateGroupDeployToken(gid any, opt *CreateGroupDeployTokenOptions, options ...RequestOptionFunc) (*DeployToken, *Response, error) {
-	return do[*DeployToken](s.client,
-		withMethod(http.MethodPost),
-		withPath("groups/%s/deploy_tokens", GroupID{gid}),
-		withAPIOpts(opt),
-		withRequestOpts(options...),
-	)
+	group, err := parseID(gid)
+	if err != nil {
+		return nil, nil, err
+	}
+	u := fmt.Sprintf("groups/%s/deploy_tokens", PathEscape(group))
+
+	req, err := s.client.NewRequest(http.MethodPost, u, opt, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	t := new(DeployToken)
+	resp, err := s.client.Do(req, t)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return t, resp, nil
 }
 
 func (s *DeployTokensService) DeleteGroupDeployToken(gid any, deployToken int64, options ...RequestOptionFunc) (*Response, error) {
-	_, resp, err := do[none](s.client,
-		withMethod(http.MethodDelete),
-		withPath("groups/%s/deploy_tokens/%d", GroupID{gid}, deployToken),
-		withRequestOpts(options...),
-	)
-	return resp, err
+	group, err := parseID(gid)
+	if err != nil {
+		return nil, err
+	}
+	u := fmt.Sprintf("groups/%s/deploy_tokens/%d", PathEscape(group), deployToken)
+
+	req, err := s.client.NewRequest(http.MethodDelete, u, nil, options)
+	if err != nil {
+		return nil, err
+	}
+
+	return s.client.Do(req, nil)
 }

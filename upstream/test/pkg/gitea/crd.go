@@ -2,10 +2,9 @@ package gitea
 
 import (
 	"context"
-	"fmt"
 	"os"
 
-	"codeberg.org/mvdkleijn/forgejo-sdk/forgejo/v3"
+	"codeberg.org/mvdkleijn/forgejo-sdk/forgejo/v2"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	pacrepo "github.com/openshift-pipelines/pipelines-as-code/test/pkg/repository"
@@ -16,14 +15,8 @@ import (
 const webhookSecretName = "webhook-secret"
 
 // CreateToken creates gitea token with all scopes.
-// It creates the token for the authenticated admin user rather than the org,
-// because Forgejo 13+ doesn't allow org tokens to list org teams.
 func CreateToken(topts *TestOpts) (string, error) {
-	userInfo, _, err := topts.GiteaCNX.Client().GetMyUserInfo()
-	if err != nil {
-		return "", fmt.Errorf("failed to get current user info: %w", err)
-	}
-	token, _, err := topts.GiteaCNX.Client().CreateAccessToken(userInfo.UserName, forgejo.CreateAccessTokenOption{
+	token, _, err := topts.GiteaCNX.Client().CreateAccessToken(forgejo.CreateAccessTokenOption{
 		Name:   topts.TargetNS,
 		Scopes: []forgejo.AccessTokenScope{forgejo.AccessTokenScopeAll},
 	})

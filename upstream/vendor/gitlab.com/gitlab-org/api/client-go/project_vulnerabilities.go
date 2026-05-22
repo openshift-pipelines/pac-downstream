@@ -17,6 +17,7 @@
 package gitlab
 
 import (
+	"fmt"
 	"net/http"
 	"time"
 )
@@ -112,11 +113,24 @@ type ListProjectVulnerabilitiesOptions struct {
 // GitLab API docs:
 // https://docs.gitlab.com/api/project_vulnerabilities/#list-project-vulnerabilities
 func (s *ProjectVulnerabilitiesService) ListProjectVulnerabilities(pid any, opt *ListProjectVulnerabilitiesOptions, options ...RequestOptionFunc) ([]*ProjectVulnerability, *Response, error) {
-	return do[[]*ProjectVulnerability](s.client,
-		withPath("projects/%s/vulnerabilities", ProjectID{pid}),
-		withAPIOpts(opt),
-		withRequestOpts(options...),
-	)
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, nil, err
+	}
+	u := fmt.Sprintf("projects/%s/vulnerabilities", PathEscape(project))
+
+	req, err := s.client.NewRequest(http.MethodGet, u, opt, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var p []*ProjectVulnerability
+	resp, err := s.client.Do(req, &p)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return p, resp, nil
 }
 
 // CreateVulnerabilityOptions represents the available CreateVulnerability()
@@ -135,10 +149,22 @@ type CreateVulnerabilityOptions struct {
 // GitLab API docs:
 // https://docs.gitlab.com/api/project_vulnerabilities/#new-vulnerability
 func (s *ProjectVulnerabilitiesService) CreateVulnerability(pid any, opt *CreateVulnerabilityOptions, options ...RequestOptionFunc) (*ProjectVulnerability, *Response, error) {
-	return do[*ProjectVulnerability](s.client,
-		withMethod(http.MethodPost),
-		withPath("projects/%s/vulnerabilities", ProjectID{pid}),
-		withAPIOpts(opt),
-		withRequestOpts(options...),
-	)
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, nil, err
+	}
+	u := fmt.Sprintf("projects/%s/vulnerabilities", PathEscape(project))
+
+	req, err := s.client.NewRequest(http.MethodPost, u, opt, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	p := new(ProjectVulnerability)
+	resp, err := s.client.Do(req, p)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return p, resp, nil
 }

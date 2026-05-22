@@ -17,6 +17,7 @@
 package gitlab
 
 import (
+	"fmt"
 	"net/http"
 	"time"
 )
@@ -75,10 +76,26 @@ type UpdateSubmoduleOptions struct {
 // GitLab API docs:
 // https://docs.gitlab.com/api/repository_submodules/#update-existing-submodule-reference-in-repository
 func (s *RepositorySubmodulesService) UpdateSubmodule(pid any, submodule string, opt *UpdateSubmoduleOptions, options ...RequestOptionFunc) (*SubmoduleCommit, *Response, error) {
-	return do[*SubmoduleCommit](s.client,
-		withMethod(http.MethodPut),
-		withPath("projects/%s/repository/submodules/%s", ProjectID{pid}, submodule),
-		withAPIOpts(opt),
-		withRequestOpts(options...),
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, nil, err
+	}
+	u := fmt.Sprintf(
+		"projects/%s/repository/submodules/%s",
+		PathEscape(project),
+		PathEscape(submodule),
 	)
+
+	req, err := s.client.NewRequest(http.MethodPut, u, opt, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	sc := new(SubmoduleCommit)
+	resp, err := s.client.Do(req, sc)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return sc, resp, nil
 }

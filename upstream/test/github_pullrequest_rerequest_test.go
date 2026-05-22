@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/google/go-github/v84/github"
+	"github.com/google/go-github/v81/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	tgithub "github.com/openshift-pipelines/pipelines-as-code/test/pkg/github"
 	"github.com/openshift-pipelines/pipelines-as-code/test/pkg/payload"
@@ -21,12 +21,14 @@ import (
 
 // TestGithubPullRerequest is a test that will create a pull request and check
 // if we can rerequest a specific check or the full check suite.
-func TestGithubGHEPullRerequest(t *testing.T) {
+func TestGithubPullRerequest(t *testing.T) {
+	if os.Getenv("NIGHTLY_E2E_TEST") != "true" {
+		t.Skip("Skipping test since only enabled for nightly")
+	}
 	ctx := context.TODO()
 	g := &tgithub.PRTest{
 		Label:     "Github Rerequest",
 		YamlFiles: []string{"testdata/pipelinerun.yaml"},
-		GHE:       true,
 	}
 	g.RunPullRequest(ctx, t)
 	defer g.TearDown(ctx, t)
@@ -47,7 +49,7 @@ func TestGithubGHEPullRerequest(t *testing.T) {
 		Sender:        g.Options.Organization,
 	}
 
-	installID, err := strconv.ParseInt(os.Getenv("TEST_GITHUB_SECOND_REPO_INSTALLATION_ID"), 10, 64)
+	installID, err := strconv.ParseInt(os.Getenv("TEST_GITHUB_REPO_INSTALLATION_ID"), 10, 64)
 	assert.NilError(t, err)
 	event := github.CheckRunEvent{
 		Action: github.Ptr("rerequested"),
@@ -78,10 +80,10 @@ func TestGithubGHEPullRerequest(t *testing.T) {
 
 	err = payload.Send(ctx,
 		g.Cnx,
-		os.Getenv("TEST_GITHUB_SECOND_EL_URL"),
-		os.Getenv("TEST_GITHUB_SECOND_WEBHOOK_SECRET"),
-		os.Getenv("TEST_GITHUB_SECOND_API_URL"),
-		os.Getenv("TEST_GITHUB_SECOND_REPO_INSTALLATION_ID"),
+		os.Getenv("TEST_EL_URL"),
+		os.Getenv("TEST_EL_WEBHOOK_SECRET"),
+		os.Getenv("TEST_GITHUB_API_URL"),
+		os.Getenv("TEST_GITHUB_REPO_INSTALLATION_ID"),
 		event,
 		"check_run",
 	)
@@ -128,10 +130,10 @@ func TestGithubGHEPullRerequest(t *testing.T) {
 
 	err = payload.Send(ctx,
 		g.Cnx,
-		os.Getenv("TEST_GITHUB_SECOND_EL_URL"),
-		os.Getenv("TEST_GITHUB_SECOND_WEBHOOK_SECRET"),
-		os.Getenv("TEST_GITHUB_SECOND_API_URL"),
-		os.Getenv("TEST_GITHUB_SECOND_APPLICATION_ID"),
+		os.Getenv("TEST_EL_URL"),
+		os.Getenv("TEST_EL_WEBHOOK_SECRET"),
+		os.Getenv("TEST_GITHUB_API_URL"),
+		os.Getenv("TEST_GITHUB_REPO_INSTALLATION_ID"),
 		csEvent,
 		"check_suite",
 	)

@@ -2,7 +2,9 @@ package gitlab
 
 import (
 	"context"
+	"fmt"
 	"os"
+	"strconv"
 	"testing"
 
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
@@ -12,21 +14,27 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/test/pkg/repository"
 	"github.com/openshift-pipelines/pipelines-as-code/test/pkg/setup"
 	gitlab2 "gitlab.com/gitlab-org/api/client-go"
+	"gotest.tools/v3/assert"
 )
 
 func Setup(ctx context.Context) (*params.Run, options.E2E, gitlab.Provider, error) {
 	if err := setup.RequireEnvs(
 		"TEST_GITLAB_API_URL",
 		"TEST_GITLAB_TOKEN",
-		"TEST_GITLAB_GROUP",
+		"TEST_GITLAB_PROJECT_ID",
 		"TEST_EL_WEBHOOK_SECRET",
 		"TEST_EL_URL",
-		"TEST_GITLAB_SMEEURL",
 	); err != nil {
 		return nil, options.E2E{}, gitlab.Provider{}, err
 	}
 	gitlabURL := os.Getenv("TEST_GITLAB_API_URL")
 	gitlabToken := os.Getenv("TEST_GITLAB_TOKEN")
+	sgitlabPid := os.Getenv("TEST_GITLAB_PROJECT_ID")
+	gitlabPid, err := strconv.Atoi(sgitlabPid)
+	if err != nil {
+		return nil, options.E2E{}, gitlab.Provider{}, fmt.Errorf("TEST_GITLAB_PROJECT_ID env variable must be an integer, found '%v': %w", gitlabPid, err)
+	}
+
 	controllerURL := os.Getenv("TEST_EL_URL")
 
 	run := params.New()
@@ -35,12 +43,13 @@ func Setup(ctx context.Context) (*params.Run, options.E2E, gitlab.Provider, erro
 	}
 
 	e2eoptions := options.E2E{
+		ProjectID:     gitlabPid,
 		ControllerURL: controllerURL,
-		UserName:      "oauth2",
+		UserName:      "git",
 		Password:      gitlabToken,
 	}
 	glprovider := gitlab.Provider{}
-	err := glprovider.SetClient(ctx, run, &info.Event{
+	err = glprovider.SetClient(ctx, run, &info.Event{
 		Provider: &info.Provider{
 			Token: gitlabToken,
 			URL:   gitlabURL,
@@ -52,72 +61,25 @@ func Setup(ctx context.Context) (*params.Run, options.E2E, gitlab.Provider, erro
 	return run, e2eoptions, glprovider, nil
 }
 
-func HasSecondIdentity() bool {
-	token, ok := os.LookupEnv("TEST_GITLAB_SECOND_TOKEN")
-	return ok && token != ""
-}
-
-func SetupSecond(ctx context.Context, run *params.Run) (options.E2E, gitlab.Provider, error) {
-	if err := setup.RequireEnvs(
-		"TEST_GITLAB_API_URL",
-		"TEST_GITLAB_SECOND_TOKEN",
-	); err != nil {
-		return options.E2E{}, gitlab.Provider{}, err
-	}
-
-	gitlabURL := os.Getenv("TEST_GITLAB_API_URL")
-	gitlabToken := os.Getenv("TEST_GITLAB_SECOND_TOKEN")
-	controllerURL := os.Getenv("TEST_EL_URL")
-
-	if run == nil {
-		run = params.New()
-		if err := run.Clients.NewClients(ctx, &run.Info); err != nil {
-			return options.E2E{}, gitlab.Provider{}, err
-		}
-	}
-
-	e2eoptions := options.E2E{
-		ControllerURL: controllerURL,
-		UserName:      "oauth2",
-		Password:      gitlabToken,
-	}
-	glprovider := gitlab.Provider{}
-	err := glprovider.SetClient(ctx, run, &info.Event{
-		Provider: &info.Provider{
-			Token: gitlabToken,
-			URL:   gitlabURL,
-		},
-	}, nil, nil)
-	if err != nil {
-		return options.E2E{}, gitlab.Provider{}, err
-	}
-
-	return e2eoptions, glprovider, nil
-}
-
-func TearDown(ctx context.Context, t *testing.T, topts *TestOpts) {
+func TearDown(ctx context.Context, t *testing.T, runcnx *params.Run, glprovider gitlab.Provider, mrNumber int, ref, targetNS string, projectid int) {
 	if os.Getenv("TEST_NOCLEANUP") == "true" {
-		topts.ParamsRun.Clients.Log.Infof("Not cleaning up and closing PR since TEST_NOCLEANUP is set")
+		runcnx.Clients.Log.Infof("Not cleaning up and closing PR since TEST_NOCLEANUP is set")
 		return
 	}
 
-	if topts.MRNumber > 0 {
-		topts.ParamsRun.Clients.Log.Infof("Closing MR %d", topts.MRNumber)
-		_, _, err := topts.GLProvider.Client().MergeRequests.UpdateMergeRequest(topts.ProjectID, int64(topts.MRNumber),
+	if mrNumber != -1 {
+		runcnx.Clients.Log.Infof("Closing PR %d", mrNumber)
+		_, _, err := glprovider.Client().MergeRequests.UpdateMergeRequest(projectid, int64(mrNumber),
 			&gitlab2.UpdateMergeRequestOptions{StateEvent: gitlab2.Ptr("close")})
 		if err != nil {
-			t.Logf("Error closing MR %d: %v", topts.MRNumber, err)
+			t.Fatal(err)
 		}
 	}
-
-	repository.NSTearDown(ctx, t, topts.ParamsRun, topts.TargetNS)
-
-	if topts.ProjectID != 0 {
-		topts.ParamsRun.Clients.Log.Infof("Deleting GitLab project %d", topts.ProjectID)
-		_, err := topts.GLProvider.Client().Projects.DeleteProject(topts.ProjectID, nil)
-		if err != nil {
-			t.Logf("Error deleting GitLab project %d: %v", topts.ProjectID, err)
-		}
+	repository.NSTearDown(ctx, t, runcnx, targetNS)
+	if ref != "" {
+		runcnx.Clients.Log.Infof("Deleting Ref %s", ref)
+		_, err := glprovider.Client().Branches.DeleteBranch(projectid, ref)
+		assert.NilError(t, err)
 	}
 }
 

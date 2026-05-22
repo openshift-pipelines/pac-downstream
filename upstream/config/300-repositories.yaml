@@ -448,28 +448,6 @@ spec:
                         - roles
                         - secret_ref
                       type: object
-                    forgejo:
-                      description: Forgejo contains Forgejo/Gitea-specific settings.
-                      properties:
-                        comment_strategy:
-                          description: |-
-                            CommentStrategy defines how Forgejo/Gitea comments are handled for pipeline results.
-                            Options:
-                            - 'disable_all': Disables all comments on pull requests
-                            - 'update': Updates a single comment per PipelineRun on every trigger.
-                          enum:
-                            - ""
-                            - disable_all
-                            - update
-                          type: string
-                        user_agent:
-                          description: |-
-                            UserAgent sets the User-Agent header on API requests to the Gitea/Forgejo instance.
-                            This is useful when the instance is behind an AI scraping protection proxy (e.g. Anubis)
-                            that blocks requests without a recognized User-Agent.
-                            Defaults to "pipelines-as-code/<version>" when left empty.
-                          type: string
-                      type: object
                     github:
                       properties:
                         comment_strategy:
@@ -507,11 +485,6 @@ spec:
                             - update
                           type: string
                       type: object
-                    gitops_command_prefix:
-                      description: |-
-                        GitOpsCommandPrefix configures the prefix for the GitOps command.
-                        This is used to identify the GitOps command in the PipelineRun.
-                      type: string
                     pipelinerun_provenance:
                       description: |-
                         PipelineRunProvenance configures how PipelineRun definitions are fetched.

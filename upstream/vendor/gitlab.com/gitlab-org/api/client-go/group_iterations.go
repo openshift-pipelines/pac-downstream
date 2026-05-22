@@ -16,7 +16,11 @@
 
 package gitlab
 
-import "time"
+import (
+	"fmt"
+	"net/http"
+	"time"
+)
 
 type (
 	GroupIterationsServiceInterface interface {
@@ -73,9 +77,22 @@ type ListGroupIterationsOptions struct {
 // GitLab API docs:
 // https://docs.gitlab.com/api/group_iterations/#list-group-iterations
 func (s *GroupIterationsService) ListGroupIterations(gid any, opt *ListGroupIterationsOptions, options ...RequestOptionFunc) ([]*GroupIteration, *Response, error) {
-	return do[[]*GroupIteration](s.client,
-		withPath("groups/%s/iterations", GroupID{gid}),
-		withAPIOpts(opt),
-		withRequestOpts(options...),
-	)
+	group, err := parseID(gid)
+	if err != nil {
+		return nil, nil, err
+	}
+	u := fmt.Sprintf("groups/%s/iterations", PathEscape(group))
+
+	req, err := s.client.NewRequest(http.MethodGet, u, opt, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var gis []*GroupIteration
+	resp, err := s.client.Do(req, &gis)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return gis, resp, nil
 }

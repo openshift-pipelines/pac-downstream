@@ -58,20 +58,34 @@ type ServicePingData struct {
 }
 
 func (s *UsageDataService) GetServicePing(options ...RequestOptionFunc) (*ServicePingData, *Response, error) {
-	return do[*ServicePingData](s.client,
-		withPath("usage_data/service_ping"),
-		withRequestOpts(options...),
-	)
-}
+	req, err := s.client.NewRequest(http.MethodGet, "usage_data/service_ping", nil, options)
+	if err != nil {
+		return nil, nil, err
+	}
 
-func (s *UsageDataService) GetMetricDefinitionsAsYAML(options ...RequestOptionFunc) (io.Reader, *Response, error) {
-	buf, resp, err := do[bytes.Buffer](s.client,
-		withPath("usage_data/metric_definitions"),
-		withRequestOpts(append([]RequestOptionFunc{WithHeader("Accept", "text/yaml")}, options...)...),
-	)
+	sp := new(ServicePingData)
+	resp, err := s.client.Do(req, sp)
 	if err != nil {
 		return nil, resp, err
 	}
+
+	return sp, resp, nil
+}
+
+func (s *UsageDataService) GetMetricDefinitionsAsYAML(options ...RequestOptionFunc) (io.Reader, *Response, error) {
+	req, err := s.client.NewRequest(http.MethodGet, "usage_data/metric_definitions", nil, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	req.Header.Set("Accept", "text/yaml")
+
+	var buf bytes.Buffer
+	resp, err := s.client.Do(req, &buf)
+	if err != nil {
+		return nil, resp, err
+	}
+
 	return &buf, resp, nil
 }
 
@@ -102,10 +116,18 @@ type ServicePingQueries struct {
 }
 
 func (s *UsageDataService) GetQueries(options ...RequestOptionFunc) (*ServicePingQueries, *Response, error) {
-	return do[*ServicePingQueries](s.client,
-		withPath("usage_data/queries"),
-		withRequestOpts(options...),
-	)
+	req, err := s.client.NewRequest(http.MethodGet, "usage_data/queries", nil, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	sq := new(ServicePingQueries)
+	resp, err := s.client.Do(req, sq)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return sq, resp, nil
 }
 
 // ServicePingNonSQLMetrics represents the non-SQL metrics used in service ping.
@@ -134,10 +156,18 @@ type ServicePingNonSQLMetrics struct {
 }
 
 func (s *UsageDataService) GetNonSQLMetrics(options ...RequestOptionFunc) (*ServicePingNonSQLMetrics, *Response, error) {
-	return do[*ServicePingNonSQLMetrics](s.client,
-		withPath("usage_data/non_sql_metrics"),
-		withRequestOpts(options...),
-	)
+	req, err := s.client.NewRequest(http.MethodGet, "usage_data/non_sql_metrics", nil, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	nsm := new(ServicePingNonSQLMetrics)
+	resp, err := s.client.Do(req, nsm)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return nsm, resp, nil
 }
 
 // TrackEventOptions represents the available options for tracking events.
@@ -150,13 +180,12 @@ type TrackEventOptions struct {
 }
 
 func (s *UsageDataService) TrackEvent(opt *TrackEventOptions, options ...RequestOptionFunc) (*Response, error) {
-	_, resp, err := do[none](s.client,
-		withMethod(http.MethodPost),
-		withPath("usage_data/track_event"),
-		withAPIOpts(opt),
-		withRequestOpts(options...),
-	)
-	return resp, err
+	req, err := s.client.NewRequest(http.MethodPost, "usage_data/track_event", opt, options)
+	if err != nil {
+		return nil, err
+	}
+
+	return s.client.Do(req, nil)
 }
 
 // TrackEventsOptions represents the available options for tracking multiple events.
@@ -165,11 +194,10 @@ type TrackEventsOptions struct {
 }
 
 func (s *UsageDataService) TrackEvents(opt *TrackEventsOptions, options ...RequestOptionFunc) (*Response, error) {
-	_, resp, err := do[none](s.client,
-		withMethod(http.MethodPost),
-		withPath("usage_data/track_events"),
-		withAPIOpts(opt),
-		withRequestOpts(options...),
-	)
-	return resp, err
+	req, err := s.client.NewRequest(http.MethodPost, "usage_data/track_events", opt, options)
+	if err != nil {
+		return nil, err
+	}
+
+	return s.client.Do(req, nil)
 }

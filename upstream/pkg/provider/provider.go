@@ -8,9 +8,7 @@ import (
 
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/formatting"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/opscomments"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
-	providerstatus "github.com/openshift-pipelines/pipelines-as-code/pkg/provider/status"
 	"gopkg.in/yaml.v2"
 )
 
@@ -110,22 +108,15 @@ func getNameFromComment(typeOfComment, comment string) string {
 	return strings.TrimSpace(getFirstLine[0])
 }
 
-func GetPipelineRunAndBranchOrTagNameFromTestComment(comment, prefix string) (string, string, string, error) {
-	commentType := opscomments.CommentEventType(comment, prefix)
-	typeOfComment := ""
-	if commentType == opscomments.TestSingleCommentEventType || commentType == opscomments.TestAllCommentEventType {
-		typeOfComment = prefix + "test"
-	} else {
-		// if type of comment is not test single, it is retest single because we've checked the type before
-		// calling this function.
-		typeOfComment = prefix + "retest"
+func GetPipelineRunAndBranchOrTagNameFromTestComment(comment string) (string, string, string, error) {
+	if strings.Contains(comment, testComment) {
+		return getPipelineRunAndBranchOrTagNameFromComment(testComment, comment)
 	}
-	return getPipelineRunAndBranchOrTagNameFromComment(typeOfComment, comment)
+	return getPipelineRunAndBranchOrTagNameFromComment(retestComment, comment)
 }
 
-func GetPipelineRunAndBranchOrTagNameFromCancelComment(comment, prefix string) (string, string, string, error) {
-	typeOfComment := prefix + "cancel"
-	return getPipelineRunAndBranchOrTagNameFromComment(typeOfComment, comment)
+func GetPipelineRunAndBranchOrTagNameFromCancelComment(comment string) (string, string, string, error) {
+	return getPipelineRunAndBranchOrTagNameFromComment(cancelComment, comment)
 }
 
 // getPipelineRunAndBranchOrTagNameFromComment function will take GitOps comment and split the comment
@@ -147,7 +138,7 @@ func getPipelineRunAndBranchOrTagNameFromComment(typeOfComment, comment string) 
 			return prName, branchName, tagName, fmt.Errorf("the GitOps comment `%s` does not contain a branch or tag word", comment)
 		}
 
-		if strings.Contains(splitText[1], "tag:") {
+		if strings.Contains(splitText[1], "tag") {
 			tagName = getBranchOrTagNameFromComment(splitText[1], "tag")
 		} else {
 			branchName = getBranchOrTagNameFromComment(splitText[1], "branch")
@@ -211,7 +202,7 @@ func ValidateYaml(content []byte, filename string) error {
 // Otherwise, the OriginalPipelineRunName will be used.
 // If the OriginalPipelineRunName is not set, an empty string will be returned.
 // The check name will be in the format "ApplicationName / OriginalPipelineRunName".
-func GetCheckName(status providerstatus.StatusOpts, pacopts *info.PacOpts) string {
+func GetCheckName(status StatusOpts, pacopts *info.PacOpts) string {
 	if pacopts.ApplicationName != "" {
 		if status.OriginalPipelineRunName == "" {
 			return pacopts.ApplicationName
@@ -250,22 +241,12 @@ const (
 func IsCommentStrategyUpdate(repo *v1alpha1.Repository) bool {
 	var commentStrategy string
 	if repo != nil && repo.Spec.Settings != nil {
-		switch {
-		case repo.Spec.Settings.Gitlab != nil:
+		if repo.Spec.Settings.Gitlab != nil {
 			commentStrategy = repo.Spec.Settings.Gitlab.CommentStrategy
-		case repo.Spec.Settings.Github != nil:
+		} else if repo.Spec.Settings.Github != nil {
 			commentStrategy = repo.Spec.Settings.Github.CommentStrategy
-		case repo.Spec.Settings.Forgejo != nil:
-			commentStrategy = repo.Spec.Settings.Forgejo.CommentStrategy
 		}
 	}
 
 	return commentStrategy == UpdateCommentStrategy
-}
-
-func GetGitOpsCommentPrefix(repo *v1alpha1.Repository) string {
-	if repo.Spec.Settings != nil && repo.Spec.Settings.GitOpsCommandPrefix != "" {
-		return fmt.Sprintf(`/%s `, regexp.QuoteMeta(repo.Spec.Settings.GitOpsCommandPrefix))
-	}
-	return "/"
 }

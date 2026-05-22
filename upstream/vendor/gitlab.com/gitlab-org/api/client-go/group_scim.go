@@ -14,6 +14,7 @@
 package gitlab
 
 import (
+	"fmt"
 	"net/http"
 )
 
@@ -50,10 +51,23 @@ type GroupSCIMIdentity struct {
 // GitLab API docs:
 // https://docs.gitlab.com/api/scim/#get-scim-identities-for-a-group
 func (s *GroupSCIMService) GetSCIMIdentitiesForGroup(gid any, options ...RequestOptionFunc) ([]*GroupSCIMIdentity, *Response, error) {
-	return do[[]*GroupSCIMIdentity](s.client,
-		withPath("groups/%s/scim/identities", GroupID{gid}),
-		withRequestOpts(options...),
-	)
+	group, err := parseID(gid)
+	if err != nil {
+		return nil, nil, err
+	}
+	u := fmt.Sprintf("groups/%s/scim/identities", PathEscape(group))
+
+	req, err := s.client.NewRequest(http.MethodGet, u, nil, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var identities []*GroupSCIMIdentity
+	resp, err := s.client.Do(req, &identities)
+	if err != nil {
+		return nil, resp, err
+	}
+	return identities, resp, nil
 }
 
 // GetSCIMIdentity gets a SCIM identity for a group.
@@ -61,10 +75,23 @@ func (s *GroupSCIMService) GetSCIMIdentitiesForGroup(gid any, options ...Request
 // GitLab API docs:
 // https://docs.gitlab.com/api/scim/#get-a-single-scim-identity
 func (s *GroupSCIMService) GetSCIMIdentity(gid any, uid string, options ...RequestOptionFunc) (*GroupSCIMIdentity, *Response, error) {
-	return do[*GroupSCIMIdentity](s.client,
-		withPath("groups/%s/scim/%s", GroupID{gid}, uid),
-		withRequestOpts(options...),
-	)
+	group, err := parseID(gid)
+	if err != nil {
+		return nil, nil, err
+	}
+	u := fmt.Sprintf("groups/%s/scim/%s", PathEscape(group), uid)
+
+	req, err := s.client.NewRequest(http.MethodGet, u, nil, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	identity := new(GroupSCIMIdentity)
+	resp, err := s.client.Do(req, identity)
+	if err != nil {
+		return nil, resp, err
+	}
+	return identity, resp, nil
 }
 
 // UpdateSCIMIdentityOptions represent the request options for
@@ -81,13 +108,18 @@ type UpdateSCIMIdentityOptions struct {
 // GitLab API docs:
 // https://docs.gitlab.com/api/scim/#update-extern_uid-field-for-a-scim-identity
 func (s *GroupSCIMService) UpdateSCIMIdentity(gid any, uid string, opt *UpdateSCIMIdentityOptions, options ...RequestOptionFunc) (*Response, error) {
-	_, resp, err := do[none](s.client,
-		withMethod(http.MethodPatch),
-		withPath("groups/%s/scim/%s", GroupID{gid}, uid),
-		withAPIOpts(opt),
-		withRequestOpts(options...),
-	)
-	return resp, err
+	group, err := parseID(gid)
+	if err != nil {
+		return nil, err
+	}
+	u := fmt.Sprintf("groups/%s/scim/%s", PathEscape(group), uid)
+
+	req, err := s.client.NewRequest(http.MethodPatch, u, opt, options)
+	if err != nil {
+		return nil, err
+	}
+
+	return s.client.Do(req, nil)
 }
 
 // DeleteSCIMIdentity deletes a SCIM identity.
@@ -95,10 +127,16 @@ func (s *GroupSCIMService) UpdateSCIMIdentity(gid any, uid string, opt *UpdateSC
 // GitLab API docs:
 // https://docs.gitlab.com/api/scim/#delete-a-single-scim-identity
 func (s *GroupSCIMService) DeleteSCIMIdentity(gid any, uid string, options ...RequestOptionFunc) (*Response, error) {
-	_, resp, err := do[none](s.client,
-		withMethod(http.MethodDelete),
-		withPath("groups/%s/scim/%s", GroupID{gid}, uid),
-		withRequestOpts(options...),
-	)
-	return resp, err
+	group, err := parseID(gid)
+	if err != nil {
+		return nil, err
+	}
+	u := fmt.Sprintf("groups/%s/scim/%s", PathEscape(group), uid)
+
+	req, err := s.client.NewRequest(http.MethodDelete, u, nil, options)
+	if err != nil {
+		return nil, err
+	}
+
+	return s.client.Do(req, nil)
 }

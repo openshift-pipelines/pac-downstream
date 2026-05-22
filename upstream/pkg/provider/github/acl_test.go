@@ -7,13 +7,11 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/google/go-github/v84/github"
+	"github.com/google/go-github/v81/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/clients"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/settings"
-	testclient "github.com/openshift-pipelines/pipelines-as-code/pkg/test/clients"
 	ghtesthelper "github.com/openshift-pipelines/pipelines-as-code/pkg/test/github"
 	"go.uber.org/zap"
 	zapobserver "go.uber.org/zap/zaptest/observer"
@@ -106,13 +104,12 @@ func TestCheckPolicyAllowing(t *testing.T) {
 
 func TestOkToTestComment(t *testing.T) {
 	tests := []struct {
-		name                string
-		commentsReply       string
-		runevent            info.Event
-		allowed             bool
-		wantErr             bool
-		rememberOkToTest    bool
-		gitOpsCommentPrefix string
+		name             string
+		commentsReply    string
+		runevent         info.Event
+		allowed          bool
+		wantErr          bool
+		rememberOkToTest bool
 	}{
 		{
 			name:          "good issue comment event",
@@ -296,26 +293,6 @@ func TestOkToTestComment(t *testing.T) {
 			wantErr:          false,
 			rememberOkToTest: false,
 		},
-		{
-			name:                "good issue comment event with custom prefix",
-			commentsReply:       `[{"body": "/pac ok-to-test", "user": {"login": "owner"}}]`,
-			gitOpsCommentPrefix: "pac",
-			runevent: info.Event{
-				Organization: "owner",
-				Sender:       "nonowner",
-				EventType:    "issue_comment",
-				Event: &github.IssueCommentEvent{
-					Issue: &github.Issue{
-						PullRequestLinks: &github.PullRequestLinks{
-							HTMLURL: github.Ptr("http://url.com/owner/repo/1"),
-						},
-					},
-				},
-			},
-			allowed:          true,
-			wantErr:          false,
-			rememberOkToTest: true,
-		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -341,9 +318,7 @@ func TestOkToTestComment(t *testing.T) {
 			observer, _ := zapobserver.New(zap.InfoLevel)
 			logger := zap.New(observer).Sugar()
 			repo := &v1alpha1.Repository{Spec: v1alpha1.RepositorySpec{
-				Settings: &v1alpha1.Settings{
-					GitOpsCommandPrefix: tt.gitOpsCommentPrefix,
-				},
+				Settings: &v1alpha1.Settings{},
 			}}
 			pacopts := &info.PacOpts{
 				Settings: settings.Settings{
@@ -382,13 +357,12 @@ func TestOkToTestCommentSHA(t *testing.T) {
 		requireOkToTestSHA     bool
 		pullRequestReply       string
 		pullRequestListComment string
-		gitOpsCommentPrefix    string
 	}{
 		{
 			name:               "good issue comment event with sha",
 			commentsReply:      `[{"body": "/ok-to-test ABCDEF1", "user": {"login": "owner"}}]`,
 			commentBody:        "/ok-to-test ABCDEF1",
-			pullRequestReply:   `{"head": {"sha": "abcdef1234567890"}, "base": {"repo": {"html_url": "http://url.com/owner/repo/1"}}}`,
+			pullRequestReply:   `{"head": {"sha": "abcdef1234567890"}}`,
 			requireOkToTestSHA: true,
 			runevent: info.Event{
 				Organization: "owner",
@@ -409,7 +383,7 @@ func TestOkToTestCommentSHA(t *testing.T) {
 			name:               "bad issue comment event with sha",
 			commentsReply:      `[{"body": "/ok-to-test 1234567", "user": {"login": "owner"}}]`,
 			commentBody:        "/ok-to-test 1234567",
-			pullRequestReply:   `{"head": {"sha": "7654321"}, "base": {"repo": {"html_url": "http://url.com/owner/repo/1"}}}`,
+			pullRequestReply:   `{"head": {"sha": "7654321"}}`,
 			requireOkToTestSHA: true,
 			runevent: info.Event{
 				Organization: "owner",
@@ -430,7 +404,7 @@ func TestOkToTestCommentSHA(t *testing.T) {
 			name:               "good issue comment event without sha",
 			commentsReply:      `[{"body": "/ok-to-test", "user": {"login": "owner"}}]`,
 			commentBody:        "/ok-to-test",
-			pullRequestReply:   `{"head": {"sha": "1234567890"}, "base": {"repo": {"html_url": "http://url.com/owner/repo/1"}}}`,
+			pullRequestReply:   `{"head": {"sha": "1234567890"}}`,
 			requireOkToTestSHA: false,
 			runevent: info.Event{
 				Organization: "owner",
@@ -451,7 +425,7 @@ func TestOkToTestCommentSHA(t *testing.T) {
 			name:               "bad issue comment event without sha when required",
 			commentsReply:      `[{"body": "/ok-to-test", "user": {"login": "owner"}}]`,
 			commentBody:        "/ok-to-test",
-			pullRequestReply:   `{"head": {"sha": "1234567890"}, "base": {"repo": {"html_url": "http://url.com/owner/repo/1"}}}`,
+			pullRequestReply:   `{"head": {"sha": "1234567890"}}`,
 			requireOkToTestSHA: true,
 			runevent: info.Event{
 				Organization: "owner",
@@ -467,28 +441,6 @@ func TestOkToTestCommentSHA(t *testing.T) {
 			},
 			allowed: false,
 			wantErr: true,
-		},
-		{
-			name:                "good issue comment event with sha and custom prefix",
-			commentsReply:       `[{"body": "/pac ok-to-test ABCDEF1", "user": {"login": "owner"}}]`,
-			commentBody:         "/pac ok-to-test ABCDEF1",
-			gitOpsCommentPrefix: "pac ",
-			pullRequestReply:    `{"head": {"sha": "abcdef1234567890"}, "base": {"repo": {"html_url": "http://url.com/owner/repo/1"}}}`,
-			requireOkToTestSHA:  true,
-			runevent: info.Event{
-				Organization: "owner",
-				Sender:       "nonowner",
-				EventType:    "issue_comment",
-				Event: &github.IssueCommentEvent{
-					Issue: &github.Issue{
-						PullRequestLinks: &github.PullRequestLinks{
-							HTMLURL: github.Ptr("http://url.com/owner/repo/1"),
-						},
-					},
-				},
-			},
-			allowed: true,
-			wantErr: false,
 		},
 	}
 	for _, tt := range tests {
@@ -517,26 +469,20 @@ func TestOkToTestCommentSHA(t *testing.T) {
 			ctx, _ := rtesting.SetupFakeContext(t)
 			observer, _ := zapobserver.New(zap.InfoLevel)
 			logger := zap.New(observer).Sugar()
-			tdata := testclient.Data{}
 			repo := &v1alpha1.Repository{Spec: v1alpha1.RepositorySpec{
-				URL: "http://url.com/owner/repo/1",
-				Settings: &v1alpha1.Settings{
-					GitOpsCommandPrefix: tt.gitOpsCommentPrefix,
-				},
+				Settings: &v1alpha1.Settings{},
 			}}
-			tdata.Repositories = []*v1alpha1.Repository{repo}
 			pacopts := &info.PacOpts{
 				Settings: settings.Settings{
 					RequireOkToTestSHA: tt.requireOkToTestSHA,
 				},
 			}
-			stdata, _ := testclient.SeedTestData(t, ctx, tdata)
 			gprovider := Provider{
 				ghClient:      fakeclient,
 				repo:          repo,
 				Logger:        logger,
 				PaginedNumber: 1,
-				Run:           &params.Run{Clients: clients.Clients{PipelineAsCode: stdata.PipelineAsCode}},
+				Run:           &params.Run{},
 				pacInfo:       pacopts,
 			}
 

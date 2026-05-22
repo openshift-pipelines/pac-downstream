@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"codeberg.org/mvdkleijn/forgejo-sdk/forgejo/v3"
+	"codeberg.org/mvdkleijn/forgejo-sdk/forgejo/v2"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
@@ -131,7 +131,7 @@ func TestPR(t *testing.T, topts *TestOpts) (context.Context, func()) {
 	hookURL := os.Getenv("TEST_GITEA_SMEEURL")
 	topts.InternalGiteaURL = os.Getenv("TEST_GITEA_INTERNAL_URL")
 	if topts.InternalGiteaURL == "" {
-		topts.InternalGiteaURL = "http://forgejo-http.forgejo:3000"
+		topts.InternalGiteaURL = "http://forgejo.forgejo:3000"
 	}
 	if topts.ExtraArgs == nil {
 		topts.ExtraArgs = map[string]string{}
@@ -310,7 +310,7 @@ func NewPR(t *testing.T, topts *TestOpts) func() {
 	topts.GiteaPassword = giteaPassword
 	topts.InternalGiteaURL = os.Getenv("TEST_GITEA_INTERNAL_URL")
 	if topts.InternalGiteaURL == "" {
-		topts.InternalGiteaURL = "http://forgejo-http.forgejo:3000"
+		topts.InternalGiteaURL = "http://forgejo.forgejo:3000"
 	}
 	if topts.ExtraArgs == nil {
 		topts.ExtraArgs = map[string]string{}
@@ -635,7 +635,7 @@ func GetStandardParams(t *testing.T, topts *TestOpts, eventType string) (repoURL
 		topts.ParamsRun.Clients.Kube.CoreV1(),
 		topts.TargetNS, fmt.Sprintf("tekton.dev/pipelineRun=%s",
 			prs.Items[0].Name), "step-test-standard-params-value",
-		&numLines, nil)
+		&numLines)
 	assert.NilError(t, err)
 	assert.Assert(t, out != "")
 	out = strings.TrimSpace(out)

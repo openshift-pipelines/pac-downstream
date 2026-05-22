@@ -27,12 +27,6 @@ import (
 func (rr *RequestReply) SetDefaults(ctx context.Context) {
 	ctx = apis.WithinParent(ctx, rr.ObjectMeta)
 	rr.Spec.SetDefaults(ctx)
-
-	if rr.Labels == nil {
-		rr.Labels = make(map[string]string)
-	}
-
-	rr.Labels["eventing.knative.dev/broker"] = rr.Spec.BrokerRef.Name
 }
 
 func (rrs *RequestReplySpec) SetDefaults(ctx context.Context) {
@@ -47,5 +41,4 @@ func (rrs *RequestReplySpec) SetDefaults(ctx context.Context) {
 	if rrs.ReplyAttribute == "" {
 		rrs.ReplyAttribute = "replyid"
 	}
-
 }

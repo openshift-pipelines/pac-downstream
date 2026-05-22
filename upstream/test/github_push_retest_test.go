@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/go-github/v84/github"
+	"github.com/google/go-github/v81/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/opscomments"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
@@ -84,8 +84,7 @@ func TestGithubGHEPushRequestGitOpsCommentOnComment(t *testing.T) {
 		"step-task",
 		*regexp.MustCompile(opsComment),
 		"",
-		2,
-		nil)
+		2)
 
 	assert.NilError(t, err)
 }
@@ -203,7 +202,7 @@ func TestGithubGHEPushRequestGitOpsCommentCancel(t *testing.T) {
 	if err != nil {
 		numLines := int64(1000)
 		reg := regexp.MustCompile(".*cancel-in-progress:.*pipelinerun.*on-push.*")
-		logErr := twait.RegexpMatchingInControllerLog(ctx, g.Cnx, *reg, 10, "ghe-controller", &numLines, nil)
+		logErr := twait.RegexpMatchingInControllerLog(ctx, g.Cnx, *reg, 10, "ghe-controller", &numLines)
 		if logErr != nil {
 			t.Errorf("neither a cancelled pipelinerun in repo status or a cancellation request in the controller log was found: status wait error: %s, log wait error: %s", err.Error(), logErr.Error())
 		}
@@ -225,10 +224,10 @@ func TestGithubGHEPushRequestGitOpsCommentCancel(t *testing.T) {
 	assert.Assert(t, cancelled, "No cancelled pipeline run found")
 }
 
-func TestGithubGHEPullRequestRetestPullRequestNumberSubstitution(t *testing.T) {
+func TestGithubPullRequestRetestPullRequestNumberSubstitution(t *testing.T) {
 	targetNS := names.SimpleNameGenerator.RestrictLengthWithRandomSuffix("pac-e2e-ns")
 	ctx := context.Background()
-	g := &tgithub.PRTest{GHE: true}
+	g := &tgithub.PRTest{}
 
 	ctx, runcnx, opts, ghcnx, err := tgithub.Setup(ctx, g.GHE, g.Webhook)
 	assert.NilError(t, err)
@@ -243,10 +242,10 @@ func TestGithubGHEPullRequestRetestPullRequestNumberSubstitution(t *testing.T) {
 		t.Errorf("Repository %s not found in %s", opts.Organization, opts.Repo)
 	}
 
-	if g.Options.Settings != nil && g.Options.Settings.Github != nil {
+	if g.Options.Settings.Github != nil {
 		opts.Settings = g.Options.Settings
 	}
-	err = tgithub.CreateCRD(ctx, t, repoinfo, runcnx, opts, ghcnx, targetNS)
+	err = tgithub.CreateCRD(ctx, t, repoinfo, runcnx, opts, targetNS)
 	assert.NilError(t, err)
 
 	tempBaseBranch := names.SimpleNameGenerator.RestrictLengthWithRandomSuffix("temp-base-branch")
@@ -330,6 +329,6 @@ func TestGithubGHEPullRequestRetestPullRequestNumberSubstitution(t *testing.T) {
 	err = twait.RegexpMatchingInPodLog(ctx, g.Cnx, g.TargetNamespace,
 		fmt.Sprintf("pipelinesascode.tekton.dev/event-type=%s",
 			opscomments.RetestSingleCommentEventType.String()),
-		"step-task", *regex, "", 2, nil)
+		"step-task", *regex, "", 2)
 	assert.NilError(t, err)
 }

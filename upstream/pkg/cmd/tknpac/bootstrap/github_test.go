@@ -7,7 +7,7 @@ import (
 	"gotest.tools/v3/assert"
 )
 
-func TestGenerateManifest(t *testing.T) {
+func Test_generateManifest(t *testing.T) {
 	type args struct {
 		opts *bootstrapOpts
 	}
@@ -39,7 +39,7 @@ func TestGenerateManifest(t *testing.T) {
 	}
 }
 
-func TestGetGHClient(t *testing.T) {
+func Test_getGHClient(t *testing.T) {
 	tests := []struct {
 		name    string
 		URL     string

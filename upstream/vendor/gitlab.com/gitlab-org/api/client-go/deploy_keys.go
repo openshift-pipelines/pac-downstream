@@ -59,8 +59,10 @@ type (
 
 		// ListUserProjectDeployKeys gets a list of a user's deploy keys.
 		//
-		// uid can be either a user ID (int) or a username (string). If a username
-		// is provided with a leading "@" (e.g., "@johndoe"), it will be trimmed.
+		// GitLab API docs:
+		// https://docs.gitlab.com/api/deploy_keys/#list-project-deploy-keys-for-user
+
+		// ListUserProjectDeployKeys gets a list of a user's deploy keys.
 		//
 		// GitLab API docs:
 		// https://docs.gitlab.com/api/deploy_keys/#list-project-deploy-keys-for-user
@@ -223,13 +225,6 @@ type ListUserProjectDeployKeysOptions struct {
 	ListOptions
 }
 
-// ListUserProjectDeployKeys gets a list of a user's deploy keys.
-//
-// uid can be either a user ID (int) or a username (string). If a username
-// is provided with a leading "@" (e.g., "@johndoe"), it will be trimmed.
-//
-// GitLab API docs:
-// https://docs.gitlab.com/api/deploy_keys/#list-project-deploy-keys-for-user
 func (s *DeployKeysService) ListUserProjectDeployKeys(uid any, opt *ListUserProjectDeployKeysOptions, options ...RequestOptionFunc) ([]*ProjectDeployKey, *Response, error) {
 	return do[[]*ProjectDeployKey](s.client,
 		withPath("users/%s/project_deploy_keys", UserID{uid}),

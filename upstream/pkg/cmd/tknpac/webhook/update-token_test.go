@@ -3,6 +3,7 @@ package webhook
 import (
 	"testing"
 
+	"github.com/google/go-cmp/cmp"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/cli"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/cli/prompt"
@@ -10,7 +11,6 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/clients"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	testclient "github.com/openshift-pipelines/pipelines-as-code/pkg/test/clients"
-	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
 	apiErrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -176,20 +176,27 @@ func TestWebhookUpdateToken(t *testing.T) {
 				Info: info.Info{Kube: &info.KubeOpts{Namespace: tt.opts.Namespace}},
 			}
 			io, out := newIOStream()
-			err := update(ctx, tt.opts, cs, io, tt.repoName)
-			if tt.wantErr {
-				assert.Assert(t, err != nil)
+			if err := update(ctx, tt.opts, cs, io,
+				tt.repoName); (err != nil) != tt.wantErr {
+				t.Errorf("update() error = %v, wantErr %v", err, tt.wantErr)
 			} else {
-				assert.NilError(t, err)
-				assert.Equal(t, tt.wantMsg, out.String())
+				if res := cmp.Diff(out.String(), tt.wantMsg); res != "" {
+					t.Errorf("Diff %s:", res)
+				}
 			}
 			secretData, err := cs.Clients.Kube.CoreV1().Secrets(tt.opts.Namespace).Get(ctx, tt.secretName, metav1.GetOptions{})
 			if err != nil {
-				assert.Assert(t, apiErrors.IsNotFound(err), "unexpected error: %v", err)
+				if !apiErrors.IsNotFound(err) {
+					t.Error(err)
+				}
 			} else {
 				tokenData, ok := secretData.Data[tt.repositories[0].Spec.GitProvider.Secret.Key]
-				assert.Assert(t, ok, "Failed to update token")
-				assert.Equal(t, string(tokenData), "Yzg5NzhlYmNkNTQwNzYzN2E2ZGExYzhkMTc4NjU0MjY3ZmQ2NmNeZg==")
+				if !ok {
+					t.Errorf("Failed to update token")
+				}
+				if string(tokenData) != "Yzg5NzhlYmNkNTQwNzYzN2E2ZGExYzhkMTc4NjU0MjY3ZmQ2NmNeZg==" {
+					t.Errorf("provider token has not been updated")
+				}
 			}
 		})
 	}

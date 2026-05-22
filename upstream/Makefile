@@ -1,6 +1,5 @@
 TARGET_NAMESPACE=pipelines-as-code
-HUGO_VERSION=0.146.0
-HTMLTEST_VERSION=0.17.0
+HUGO_VERSION=0.96.0
 GOLANGCI_LINT=golangci-lint
 GOFUMPT=gofumpt
 TKN_BINARY_NAME := tkn
@@ -17,16 +16,15 @@ SHELL := bash
 TOPDIR := $(shell git rev-parse --show-toplevel)
 TMPDIR := $(TOPDIR)/tmp
 HUGO_BIN := $(TMPDIR)/hugo/hugo
-HTMLTEST_BIN := $(TMPDIR)/htmltest/htmltest
 
 # Safe file list helpers using null-delimited output
 # Usage: $(call GIT_LS_FILES,<patterns>,<command>)
 GIT_LS_FILES = git ls-files -z -- $(1) | xargs -0 -r $(2)
 PY_PATTERNS := '*.py' ':!vendor/*'
 SH_PATTERNS := 'hack/*.sh' ':!vendor/*'
-YAML_PATTERNS := '*.yml' '*.yaml' ':!.vale/*' ':!docs/themes/*' ':!vendor/*' ':!.claude/skills/*'
-MD_PATTERNS := '*.md' ':!docs/themes/*' ':!.vale/*' ':!vendor/*' ':!.claude/skills/*'
-MD_YAML_PATTERNS := '*.md' '*.yml' '*.yaml' ':!docs/themes/*' ':!.vale/*' ':!vendor/*' ':!tmp/*' ':!.claude/skills/*'
+YAML_PATTERNS := '*.yml' '*.yaml' ':!.vale/*' ':!docs/themes/*' ':!vendor/*'
+MD_PATTERNS := '*.md' ':!docs/themes/*' ':!.vale/*' ':!vendor/*'
+MD_YAML_PATTERNS := '*.md' '*.yml' '*.yaml' ':!docs/themes/*' ':!.vale/*' ':!vendor/*' ':!tmp/*'
 
 ifeq ($(PAC_VERSION),)
 	PAC_VERSION="$(shell git describe --tags --exact-match 2>/dev/null || echo nightly-`date +'%Y%m%d'`-`git rev-parse --short HEAD`)"
@@ -136,7 +134,7 @@ pre-commit: ## Run pre-commit hooks script manually
 
 ##@ Linters Fixing
 .PHONY: fix-linters
-fix-linters: fix-golangci-lint fix-python-errors fix-markdownlint fix-trailing-spaces fumpt fix-links ## fix all linters issues we can automatically fix
+fix-linters: fix-golangci-lint fix-python-errors fix-markdownlint fix-trailing-spaces fumpt ## run all linters fixes
 
 .PHONY: fix-markdownlint
 fix-markdownlint: ## run markdownlint and fix on all markdown file
@@ -199,21 +197,6 @@ generated: update-golden fumpt ## generate all files that needs to be generated
 .PHONY: download-hugo
 download-hugo: ## Download hugo software
 	./hack/download-hugo.sh $(HUGO_VERSION) $(TMPDIR)/hugo
-
-.PHONY: download-htmltest
-download-htmltest: ## Download htmltest binary
-	./hack/download-htmltest.sh $(HTMLTEST_VERSION) $(TMPDIR)/htmltest
-
-.PHONY: check-links
-check-links: ## Check documentation links (set CHECK_EXTERNAL=false to skip external URLs)
-	@echo "Checking README links..."
-	@grep -oP 'https://[^\s)>]+' README.md | xargs -I{} -P5 sh -c 'code=$$(curl -s -o /dev/null -w "%{http_code}" -L --max-time 5 "{}"); printf "%s  %s\n" "$$code" "{}"; case "$$code" in 2*) exit 0;; *) exit 1;; esac'
-	@echo "Checking documentation links..."
-	./hack/check-links.sh
-
-.PHONY: fix-links
-fix-links: ## Auto-fix bare relative links to use relref shortcode
-	./hack/check-links.sh --fix
 
 .PHONY: dev-docs
 dev-docs: download-hugo ## preview live your docs with hugo

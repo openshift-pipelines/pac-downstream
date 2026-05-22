@@ -17,6 +17,7 @@
 package gitlab
 
 import (
+	"fmt"
 	"net/http"
 	"time"
 )
@@ -68,11 +69,24 @@ type ListPendingInvitationsOptions struct {
 // GitLab API docs:
 // https://docs.gitlab.com/api/invitations/#list-all-invitations-pending-for-a-group-or-project
 func (s *InvitesService) ListPendingGroupInvitations(gid any, opt *ListPendingInvitationsOptions, options ...RequestOptionFunc) ([]*PendingInvite, *Response, error) {
-	return do[[]*PendingInvite](s.client,
-		withPath("groups/%s/invitations", GroupID{gid}),
-		withAPIOpts(opt),
-		withRequestOpts(options...),
-	)
+	group, err := parseID(gid)
+	if err != nil {
+		return nil, nil, err
+	}
+	u := fmt.Sprintf("groups/%s/invitations", PathEscape(group))
+
+	req, err := s.client.NewRequest(http.MethodGet, u, opt, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var pis []*PendingInvite
+	resp, err := s.client.Do(req, &pis)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return pis, resp, nil
 }
 
 // ListPendingProjectInvitations gets a list of invited project members.
@@ -80,11 +94,24 @@ func (s *InvitesService) ListPendingGroupInvitations(gid any, opt *ListPendingIn
 // GitLab API docs:
 // https://docs.gitlab.com/api/invitations/#list-all-invitations-pending-for-a-group-or-project
 func (s *InvitesService) ListPendingProjectInvitations(pid any, opt *ListPendingInvitationsOptions, options ...RequestOptionFunc) ([]*PendingInvite, *Response, error) {
-	return do[[]*PendingInvite](s.client,
-		withPath("projects/%s/invitations", ProjectID{pid}),
-		withAPIOpts(opt),
-		withRequestOpts(options...),
-	)
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, nil, err
+	}
+	u := fmt.Sprintf("projects/%s/invitations", PathEscape(project))
+
+	req, err := s.client.NewRequest(http.MethodGet, u, opt, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var pis []*PendingInvite
+	resp, err := s.client.Do(req, &pis)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return pis, resp, nil
 }
 
 // InvitesOptions represents the available GroupInvites() and ProjectInvites()
@@ -114,12 +141,24 @@ type InvitesResult struct {
 // GitLab API docs:
 // https://docs.gitlab.com/api/invitations/#add-a-member-to-a-group-or-project
 func (s *InvitesService) GroupInvites(gid any, opt *InvitesOptions, options ...RequestOptionFunc) (*InvitesResult, *Response, error) {
-	return do[*InvitesResult](s.client,
-		withMethod(http.MethodPost),
-		withPath("groups/%s/invitations", GroupID{gid}),
-		withAPIOpts(opt),
-		withRequestOpts(options...),
-	)
+	group, err := parseID(gid)
+	if err != nil {
+		return nil, nil, err
+	}
+	u := fmt.Sprintf("groups/%s/invitations", PathEscape(group))
+
+	req, err := s.client.NewRequest(http.MethodPost, u, opt, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	ir := new(InvitesResult)
+	resp, err := s.client.Do(req, ir)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return ir, resp, nil
 }
 
 // ProjectInvites invites new users by email to join a project.
@@ -127,10 +166,22 @@ func (s *InvitesService) GroupInvites(gid any, opt *InvitesOptions, options ...R
 // GitLab API docs:
 // https://docs.gitlab.com/api/invitations/#add-a-member-to-a-group-or-project
 func (s *InvitesService) ProjectInvites(pid any, opt *InvitesOptions, options ...RequestOptionFunc) (*InvitesResult, *Response, error) {
-	return do[*InvitesResult](s.client,
-		withMethod(http.MethodPost),
-		withPath("projects/%s/invitations", ProjectID{pid}),
-		withAPIOpts(opt),
-		withRequestOpts(options...),
-	)
+	project, err := parseID(pid)
+	if err != nil {
+		return nil, nil, err
+	}
+	u := fmt.Sprintf("projects/%s/invitations", PathEscape(project))
+
+	req, err := s.client.NewRequest(http.MethodPost, u, opt, options)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	ir := new(InvitesResult)
+	resp, err := s.client.Do(req, ir)
+	if err != nil {
+		return nil, resp, err
+	}
+
+	return ir, resp, nil
 }

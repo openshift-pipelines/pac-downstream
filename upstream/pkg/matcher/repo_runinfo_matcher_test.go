@@ -25,7 +25,7 @@ const (
 	targetURL             = "https//nowhere.togo"
 )
 
-func TestGetRepoByCR(t *testing.T) {
+func Test_getRepoByCR(t *testing.T) {
 	cw := clockwork.NewFakeClock()
 	type args struct {
 		data     testclient.Data

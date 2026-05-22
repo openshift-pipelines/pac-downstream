@@ -18,17 +18,18 @@ package adapter
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"net/http"
 
-	"go.opentelemetry.io/otel/metric"
-	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
+	"knative.dev/pkg/tracing"
 
 	"knative.dev/pkg/logging"
-	k8sruntime "knative.dev/pkg/observability/runtime/k8s"
+	"knative.dev/pkg/metrics"
+	"knative.dev/pkg/profiling"
 
 	"knative.dev/eventing/pkg/adapter/v2/util/crstatusevent"
-	"knative.dev/eventing/pkg/observability"
-	"knative.dev/eventing/pkg/observability/otel"
 )
 
 // loggerConfiguratorFromEnvironment configures
@@ -49,6 +50,58 @@ func (c *loggerConfiguratorFromEnvironment) CreateLogger(ctx context.Context) *z
 	return c.env.GetLogger()
 }
 
+// metricsExporterConfiguratorFromEnvironment configures
+// a metrics exporter using environment variables.
+type metricsExporterConfiguratorFromEnvironment struct {
+	env EnvConfigAccessor
+}
+
+// NewMetricsExporterConfiguratorFromEnvironment returns an environment based metrics exporter configurator.
+func NewMetricsExporterConfiguratorFromEnvironment(env EnvConfigAccessor) MetricsExporterConfigurator {
+	return &metricsExporterConfiguratorFromEnvironment{
+		env: env,
+	}
+}
+
+// SetupMetricsExporter based on environment variables.
+func (c *metricsExporterConfiguratorFromEnvironment) SetupMetricsExporter(ctx context.Context) {
+	logger := logging.FromContext(ctx)
+	mc, err := getMetricsConfigFromEnvironment(c.env)
+	if err != nil {
+		logger.Warn("metrics exporter not configured", zap.Error(err))
+		return
+	}
+
+	if err = metrics.UpdateExporter(ctx, *mc, logger); err != nil {
+		logger.Errorw("failed to create the metrics exporter", zap.Error(err))
+	}
+}
+
+// tracingConfiguratorFromEnvironment configures tracing using
+// environment variables.
+type tracingConfiguratorFromEnvironment struct {
+	env EnvConfigAccessor
+}
+
+// NewTracingConfiguratorFromEnvironment returns an environment based tracing configurator.
+func NewTracingConfiguratorFromEnvironment(env EnvConfigAccessor) TracingConfigurator {
+	return &tracingConfiguratorFromEnvironment{
+		env: env,
+	}
+}
+
+// SetupTracing based on environment variables.
+func (c *tracingConfiguratorFromEnvironment) SetupTracing(ctx context.Context, _ *TracingConfiguration) tracing.Tracer {
+	logger := logging.FromContext(ctx)
+	tracer, err := c.env.SetupTracing(logger)
+	if err != nil {
+		// If tracing doesn't work, we will log an error, but allow the adapter
+		// to continue to start.
+		logger.Errorw("Error setting up trace publishing", zap.Error(err))
+	}
+	return tracer
+}
+
 // cloudEventsStatusReporterConfiguratorFromEnvironment configures
 // the CloudEvents status reporter using environment variables.
 type cloudEventsStatusReporterConfiguratorFromEnvironment struct {
@@ -67,33 +120,58 @@ func NewCloudEventsStatusReporterConfiguratorFromEnvironment(env EnvConfigAccess
 // The reporter object is returned.
 func (c *cloudEventsStatusReporterConfiguratorFromEnvironment) CreateCloudEventsStatusReporter(ctx context.Context) *crstatusevent.CRStatusEventClient {
 	logger := logging.FromContext(ctx)
-	cfg, err := c.env.GetObservabilityConfig()
+	mc, err := getMetricsConfigFromEnvironment(c.env)
 	if err != nil {
 		logger.Warn("CloudEvents client reporter not configured", zap.Error(err))
 		return nil
 	}
 
-	return crstatusevent.NewCRStatusEventClient(cfg)
+	return crstatusevent.NewCRStatusEventClient(mc.ConfigMap)
 }
 
-type observabilityConfiguratorFromEnvironment struct {
+// profilerConfiguratorFromEnvironment configures
+// the profiler using environment variables.
+type profilerConfiguratorFromEnvironment struct {
 	env EnvConfigAccessor
 }
 
-func NewObservabilityConfiguratorFromEnvironment(env EnvConfigAccessor) ObservabilityConfigurator {
-	return &observabilityConfiguratorFromEnvironment{
+// NewProfilerConfiguratorFromEnvironment returns an environment based profiler configurator.
+func NewProfilerConfiguratorFromEnvironment(env EnvConfigAccessor) ProfilerConfigurator {
+	return &profilerConfiguratorFromEnvironment{
 		env: env,
 	}
 }
 
-func (o *observabilityConfiguratorFromEnvironment) SetupObservabilityOrDie(ctx context.Context, component string, logger *zap.SugaredLogger, pprof *k8sruntime.ProfilingServer) (metric.MeterProvider, trace.TracerProvider) {
-	cfg, err := o.env.GetObservabilityConfig()
+// CreateProfilingServer creates and return a profiling server when profiling is enabled,
+// nil when it is not.
+func (c *profilerConfiguratorFromEnvironment) CreateProfilingServer(ctx context.Context) *http.Server {
+	logger := logging.FromContext(ctx)
+	mc, err := getMetricsConfigFromEnvironment(c.env)
 	if err != nil {
-		logger.Warnw("failed to parse observability config from env, falling back to defaults", zap.Error(err))
+		logger.Warn("profiler not configured", zap.Error(err))
+		return nil
 	}
 
-	cfg = observability.MergeWithDefaults(cfg)
+	// Configure profiler using environment varibles.
+	enabled, err := profiling.ReadProfilingFlag(mc.ConfigMap)
+	switch {
+	case err != nil:
+		logger.Errorw("wrong profiler configuration", zap.Error(err))
+		return nil
+	case !enabled:
+		return nil
+	}
 
-	ctx = observability.WithConfig(ctx, cfg)
-	return otel.SetupObservabilityOrDie(ctx, component, logger, pprof)
+	return profiling.NewServer(profiling.NewHandler(logger, true))
+}
+
+func getMetricsConfigFromEnvironment(env EnvConfigAccessor) (*metrics.ExporterOptions, error) {
+	metricsConfig, err := env.GetMetricsConfig()
+	switch {
+	case err != nil:
+		return nil, fmt.Errorf("failed to process metrics options from environment: %w", err)
+	case metricsConfig == nil || metricsConfig.ConfigMap == nil:
+		return nil, errors.New("environment metrics options not provided")
+	}
+	return metricsConfig, nil
 }

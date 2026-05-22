@@ -16,7 +16,6 @@ type RepoTestcreationOpts struct {
 	SecretName        string
 	WebhookSecretName string
 	ProviderURL       string
-	GitProviderType   string
 	CreateTime        metav1.Time
 	RepoStatus        []v1alpha1.RepositoryRunStatus
 	ConcurrencyLimit  int
@@ -79,7 +78,7 @@ func NewRepo(opts RepoTestcreationOpts) *v1alpha1.Repository {
 		repo.Spec.ConcurrencyLimit = &opts.ConcurrencyLimit
 	}
 
-	if opts.SecretName != "" || opts.ProviderURL != "" || opts.WebhookSecretName != "" || opts.GitProviderType != "" {
+	if opts.SecretName != "" || opts.ProviderURL != "" || opts.WebhookSecretName != "" {
 		repo.Spec.GitProvider = &v1alpha1.GitProvider{
 			Secret: &v1alpha1.Secret{},
 		}
@@ -98,10 +97,6 @@ func NewRepo(opts RepoTestcreationOpts) *v1alpha1.Repository {
 		repo.Spec.GitProvider.WebhookSecret = &v1alpha1.Secret{
 			Name: opts.WebhookSecretName,
 		}
-	}
-
-	if opts.GitProviderType != "" {
-		repo.Spec.GitProvider.Type = opts.GitProviderType
 	}
 
 	if opts.Params != nil {

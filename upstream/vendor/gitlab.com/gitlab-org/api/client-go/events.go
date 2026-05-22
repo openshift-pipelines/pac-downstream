@@ -72,7 +72,7 @@ type ContributionEvent struct {
 // ContributionEventPushData represents a user's contribution push data.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/api/events/#get-contribution-events-for-a-user
+// https://docs.gitlab.com/api/events/#get-user-contribution-events
 type ContributionEventPushData struct {
 	CommitCount int64  `json:"commit_count"`
 	Action      string `json:"action"`
@@ -94,7 +94,6 @@ type ListContributionEventsOptions struct {
 	Before     *ISOTime              `url:"before,omitempty" json:"before,omitempty"`
 	After      *ISOTime              `url:"after,omitempty" json:"after,omitempty"`
 	Sort       *string               `url:"sort,omitempty" json:"sort,omitempty"`
-	Scope      *string               `url:"scope,omitempty" json:"scope,omitempty"`
 }
 
 func (s *UsersService) ListUserContributionEvents(uid any, opt *ListContributionEventsOptions, options ...RequestOptionFunc) ([]*ContributionEvent, *Response, error) {
@@ -121,7 +120,7 @@ func (s *EventsService) ListCurrentUserContributionEvents(opt *ListContributionE
 // ProjectEvent represents a GitLab project event.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/api/events/#list-all-visible-events-for-a-project
+// https://docs.gitlab.com/api/events/#list-a-projects-visible-events
 type ProjectEvent struct {
 	ID             int64                `json:"id"`
 	Title          string               `json:"title"`
@@ -147,7 +146,7 @@ func (s ProjectEvent) String() string {
 // ProjectEventData represents the GitLab project event data.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/api/events/#list-all-visible-events-for-a-project
+// https://docs.gitlab.com/api/events/#list-a-projects-visible-events
 type ProjectEventData struct {
 	Before            string      `json:"before"`
 	After             string      `json:"after"`
@@ -166,7 +165,7 @@ func (d ProjectEventData) String() string {
 // ProjectEventNote represents a GitLab project event note.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/api/events/#list-all-visible-events-for-a-project
+// https://docs.gitlab.com/api/events/#list-a-projects-visible-events
 type ProjectEventNote struct {
 	ID           int64                  `json:"id"`
 	Body         string                 `json:"body"`
@@ -186,7 +185,7 @@ func (n ProjectEventNote) String() string {
 // ProjectEventNoteAuthor represents a GitLab project event note author.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/api/events/#list-all-visible-events-for-a-project
+// https://docs.gitlab.com/api/events/#list-a-projects-visible-events
 type ProjectEventNoteAuthor struct {
 	ID        int64  `json:"id"`
 	Username  string `json:"username"`
@@ -204,7 +203,7 @@ func (a ProjectEventNoteAuthor) String() string {
 // ProjectEventPushData represents a GitLab project event push data.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/api/events/#list-all-visible-events-for-a-project
+// https://docs.gitlab.com/api/events/#list-a-projects-visible-events
 type ProjectEventPushData struct {
 	CommitCount int64  `json:"commit_count"`
 	Action      string `json:"action"`
@@ -223,7 +222,7 @@ func (d ProjectEventPushData) String() string {
 // ListProjectVisibleEvents() options.
 //
 // GitLab API docs:
-// https://docs.gitlab.com/api/events/#list-all-visible-events-for-a-project
+// https://docs.gitlab.com/api/events/#list-a-projects-visible-events
 type ListProjectVisibleEventsOptions struct {
 	ListOptions
 	Action     *EventTypeValue       `url:"action,omitempty" json:"action,omitempty"`

@@ -11,7 +11,6 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
-	providerstatus "github.com/openshift-pipelines/pipelines-as-code/pkg/provider/status"
 	"go.uber.org/zap"
 )
 
@@ -34,7 +33,6 @@ type TestProviderImp struct {
 	FailGetCommitInfo      bool
 	CommitInfoErrorMsg     string
 	pacInfo                *info.PacOpts
-	CommitStatuses         []provider.CommitStatusInfo
 }
 
 func (v *TestProviderImp) SetPacInfo(pacInfo *info.PacOpts) {
@@ -105,7 +103,7 @@ func (v *TestProviderImp) GetTaskURI(_ context.Context, _ *info.Event, _ string)
 	return v.WantProviderRemoteTask, "", nil
 }
 
-func (v *TestProviderImp) CreateStatus(_ context.Context, _ *info.Event, _ providerstatus.StatusOpts) error {
+func (v *TestProviderImp) CreateStatus(_ context.Context, _ *info.Event, _ provider.StatusOpts) error {
 	if v.CreateStatusErorring {
 		return fmt.Errorf("some provider error occurred while reporting status")
 	}
@@ -142,8 +140,4 @@ func (v *TestProviderImp) CreateToken(_ context.Context, _ []string, _ *info.Eve
 
 func (v *TestProviderImp) GetTemplate(commentType provider.CommentType) string {
 	return provider.GetHTMLTemplate(commentType)
-}
-
-func (v *TestProviderImp) GetCommitStatuses(_ context.Context, _ *info.Event) ([]provider.CommitStatusInfo, error) {
-	return v.CommitStatuses, nil
 }

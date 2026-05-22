@@ -123,7 +123,7 @@ const (
 	runningInEnvWithInjectedSidecarsKey = "running-in-environment-with-injected-sidecars"
 	awaitSidecarReadinessKey            = "await-sidecar-readiness"
 	requireGitSSHSecretKnownHostsKey    = "require-git-ssh-secret-known-hosts" //nolint:gosec
-	EnableTektonOCIBundles              = "enable-tekton-oci-bundles"
+	// enableTektonOCIBundles              = "enable-tekton-oci-bundles"
 
 	enableAPIFields                             = "enable-api-fields"
 	sendCloudEventsForRuns                      = "send-cloudevents-for-runs"
@@ -175,13 +175,6 @@ var (
 		Stability: AlphaAPIFields,
 		Enabled:   DefaultAlphaFeatureEnabled,
 	}
-
-	DefaultEnableTektonOCIBundles = PerFeatureFlag{
-		Name:       EnableTektonOCIBundles,
-		Stability:  AlphaAPIFields,
-		Enabled:    DefaultAlphaFeatureEnabled,
-		Deprecated: true,
-	}
 )
 
 // FeatureFlags holds the features configurations
@@ -217,12 +210,6 @@ type FeatureFlags struct {
 	EnableConciseResolverSyntax  bool   `json:"enableConciseResolverSyntax,omitempty"`
 	EnableKubernetesSidecar      bool   `json:"enableKubernetesSidecar,omitempty"`
 	EnableWaitExponentialBackoff bool   `json:"enableWaitExponentialBackoff,omitempty"`
-	// DeprecatedEnableTektonOCIBundles is maintained for backward compatibility
-	// to allow deletion of PipelineRuns created before v0.62.x.
-	// This field is not used and can be removed in a future release
-	// once we're confident old PipelineRuns have been cleaned up.
-	// See issue #8359 for context.
-	DeprecatedEnableTektonOCIBundles *bool `json:"enableTektonOCIBundles,omitempty" yaml:"enableTektonOCIBundles,omitempty"`
 }
 
 // GetFeatureFlagsConfigName returns the name of the configmap containing all

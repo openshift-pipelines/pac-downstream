@@ -16,7 +16,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/go-github/v84/github"
+	"github.com/google/go-github/v81/github"
 	"github.com/jonboulle/clockwork"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
@@ -25,19 +25,18 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/settings"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
-	prmetrics "github.com/openshift-pipelines/pipelines-as-code/pkg/pipelinerunmetrics"
 	testclient "github.com/openshift-pipelines/pipelines-as-code/pkg/test/clients"
 	ghtesthelper "github.com/openshift-pipelines/pipelines-as-code/pkg/test/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/test/logger"
+	metricsutils "github.com/openshift-pipelines/pipelines-as-code/pkg/test/metricstest"
 
-	"go.opentelemetry.io/otel"
-	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
-	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 	"go.uber.org/zap"
 	zapobserver "go.uber.org/zap/zaptest/observer"
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"knative.dev/pkg/metrics/metricstest"
+	_ "knative.dev/pkg/metrics/testing"
 	"knative.dev/pkg/ptr"
 	rtesting "knative.dev/pkg/reconciler/testing"
 )
@@ -349,11 +348,7 @@ func TestGetTektonDir(t *testing.T) {
 	}
 	for _, tt := range testGetTektonDir {
 		t.Run(tt.name, func(t *testing.T) {
-			prmetrics.ResetRecorder()
-			reader := sdkmetric.NewManualReader()
-			provider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
-			otel.SetMeterProvider(provider)
-
+			metricsutils.ResetMetrics()
 			observer, exporter := zapobserver.New(zap.InfoLevel)
 			fakelogger := zap.New(observer).Sugar()
 			ctx, _ := rtesting.SetupFakeContext(t)
@@ -364,6 +359,17 @@ func TestGetTektonDir(t *testing.T) {
 				providerName: "github",
 				Logger:       fakelogger,
 			}
+
+			defer func() {
+				if !t.Failed() {
+					metricstest.CheckCountData(
+						t,
+						"pipelines_as_code_git_provider_api_request_count",
+						map[string]string{"provider": "github"},
+						tt.expectedGHApiCalls,
+					)
+				}
+			}()
 
 			if tt.provenance == "default_branch" {
 				tt.event.SHA = tt.event.DefaultBranch
@@ -380,17 +386,6 @@ func TestGetTektonDir(t *testing.T) {
 				return
 			}
 			assert.NilError(t, err)
-
-			var rm metricdata.ResourceMetrics
-			err = reader.Collect(ctx, &rm)
-			assert.NilError(t, err, "error collecting metrics")
-
-			assert.Equal(t, len(rm.ScopeMetrics), 1)
-			assert.Equal(t, len(rm.ScopeMetrics[0].Metrics), 1)
-			assert.Equal(t, rm.ScopeMetrics[0].Metrics[0].Name, "pipelines_as_code_git_provider_api_request_count")
-			count, ok := rm.ScopeMetrics[0].Metrics[0].Data.(metricdata.Sum[int64])
-			assert.Assert(t, ok)
-			assert.Equal(t, count.DataPoints[0].Value, int64(tt.expectedGHApiCalls))
 
 			var gotMatch bool
 			if tt.expectedString == "" {
@@ -552,6 +547,7 @@ func TestCheckSenderOrgMembership(t *testing.T) {
 }
 
 func TestGetStringPullRequestComment(t *testing.T) {
+	regexp := `(^|\n)/retest(\r\n|$)`
 	tests := []struct {
 		name, apiReturn string
 		wantErr         bool
@@ -561,7 +557,7 @@ func TestGetStringPullRequestComment(t *testing.T) {
 		{
 			name:      "Get String from comments",
 			runevent:  info.Event{URL: "http://1"},
-			apiReturn: `[{"body": "/ok-to-test"}]`,
+			apiReturn: `[{"body": "/retest"}]`,
 			wantRet:   true,
 		},
 		{
@@ -576,20 +572,14 @@ func TestGetStringPullRequestComment(t *testing.T) {
 			fakeclient, mux, _, teardown := ghtesthelper.SetupGH()
 			defer teardown()
 			ctx, _ := rtesting.SetupFakeContext(t)
-			repo := &v1alpha1.Repository{
-				Spec: v1alpha1.RepositorySpec{
-					Settings: &v1alpha1.Settings{},
-				},
-			}
 			gprovider := Provider{
 				ghClient: fakeclient,
-				repo:     repo,
 			}
 			mux.HandleFunc(fmt.Sprintf("/repos/issues/%s/comments", filepath.Base(tt.runevent.URL)), func(rw http.ResponseWriter, _ *http.Request) {
 				fmt.Fprint(rw, tt.apiReturn)
 			})
 
-			ret, err := gprovider.GetStringPullRequestComment(ctx, &tt.runevent)
+			ret, err := gprovider.GetStringPullRequestComment(ctx, &tt.runevent, regexp)
 			if tt.wantErr && err == nil {
 				t.Error("We didn't get an error when we wanted one")
 			}
@@ -1027,10 +1017,7 @@ func TestGetFiles(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			fakeclient, mux, _, teardown := ghtesthelper.SetupGH()
 			defer teardown()
-			prmetrics.ResetRecorder()
-			reader := sdkmetric.NewManualReader()
-			metricProvider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
-			otel.SetMeterProvider(metricProvider)
+			metricsutils.ResetMetrics()
 
 			if tt.event.TriggerTarget == "pull_request" {
 				mux.HandleFunc(fmt.Sprintf("/repos/%s/%s/pulls/%d/files",
@@ -1054,6 +1041,9 @@ func TestGetFiles(t *testing.T) {
 					fmt.Fprint(rw, string(b))
 				})
 			}
+
+			metricsTags := map[string]string{"provider": "github", "event-type": string(tt.event.TriggerTarget)}
+			metricstest.CheckStatsNotReported(t, "pipelines_as_code_git_provider_api_request_count")
 
 			log, _ := logger.GetLogger()
 			ctx, _ := rtesting.SetupFakeContext(t)
@@ -1085,24 +1075,9 @@ func TestGetFiles(t *testing.T) {
 			}
 
 			// Check caching
-			var rm metricdata.ResourceMetrics
-			err = reader.Collect(ctx, &rm)
-			assert.NilError(t, err, "error collecting metrics")
-
-			assert.Equal(t, len(rm.ScopeMetrics), 1)
-			assert.Equal(t, len(rm.ScopeMetrics[0].Metrics), 1)
-			assert.Equal(t, rm.ScopeMetrics[0].Metrics[0].Name, "pipelines_as_code_git_provider_api_request_count")
-			count, ok := rm.ScopeMetrics[0].Metrics[0].Data.(metricdata.Sum[int64])
-			assert.Assert(t, ok)
-			assert.Equal(t, count.DataPoints[0].Value, int64(tt.wantAPIRequestCount))
-
+			metricstest.CheckCountData(t, "pipelines_as_code_git_provider_api_request_count", metricsTags, tt.wantAPIRequestCount)
 			_, _ = provider.GetFiles(ctx, tt.event)
-			// recollect the metrics after the second call
-			err = reader.Collect(ctx, &rm)
-			assert.NilError(t, err, "error collecting metrics")
-			count, ok = rm.ScopeMetrics[0].Metrics[0].Data.(metricdata.Sum[int64])
-			assert.Assert(t, ok)
-			assert.Equal(t, count.DataPoints[0].Value, int64(tt.wantAPIRequestCount))
+			metricstest.CheckCountData(t, "pipelines_as_code_git_provider_api_request_count", metricsTags, tt.wantAPIRequestCount)
 		})
 	}
 }
@@ -1113,7 +1088,7 @@ func (f roundTripperFunc) RoundTrip(r *http.Request) (*http.Response, error) {
 	return f(r)
 }
 
-func TestProviderCheckWebhookSecretValidity(t *testing.T) {
+func TestProvider_checkWebhookSecretValidity(t *testing.T) {
 	t1 := time.Date(1999, time.February, 3, 4, 5, 6, 7, time.UTC)
 	cw := clockwork.NewFakeClockAt(t1)
 	tests := []struct {
@@ -1493,13 +1468,9 @@ func TestCreateComment(t *testing.T) {
 			updateMarker: "MARKER",
 			setup: func(t *testing.T, mux *http.ServeMux) func(t *testing.T) {
 				t.Helper()
-				mux.HandleFunc("/user", func(rw http.ResponseWriter, _ *http.Request) {
-					fmt.Fprint(rw, `{"id": 100, "login": "pac-user"}`)
-				},
-				)
 				mux.HandleFunc("/repos/org/repo/issues/123/comments", func(rw http.ResponseWriter, r *http.Request) {
 					if r.Method == http.MethodGet {
-						fmt.Fprint(rw, `[{"id": 555, "body": "MARKER", "user": {"id": 100, "login": "pac-user"}}]`)
+						fmt.Fprint(rw, `[{"id": 555, "body": "MARKER"}]`)
 						return
 					}
 				})
@@ -1516,9 +1487,6 @@ func TestCreateComment(t *testing.T) {
 			updateMarker: "MARKER",
 			setup: func(t *testing.T, mux *http.ServeMux) func(t *testing.T) {
 				t.Helper()
-				mux.HandleFunc("/user", func(rw http.ResponseWriter, _ *http.Request) {
-					fmt.Fprint(rw, `{"id": 100, "login": "pac-user"}`)
-				})
 				mux.HandleFunc("/repos/org/repo/issues/123/comments", func(rw http.ResponseWriter, r *http.Request) {
 					if r.Method == http.MethodGet {
 						fmt.Fprint(rw, `[{"id": 555, "body": "NO_MATCH"}]`)
@@ -1531,36 +1499,67 @@ func TestCreateComment(t *testing.T) {
 			},
 		},
 		{
-			name:         "skip comment from different user and create new",
+			name:         "deduplicates existing marker comments",
 			event:        &info.Event{Organization: "org", Repository: "repo", PullRequestNumber: 123},
 			updateMarker: "MARKER",
-			commentBody:  "New Comment MARKER",
+			commentBody:  "new body MARKER",
 			setup: func(t *testing.T, mux *http.ServeMux) func(t *testing.T) {
 				t.Helper()
-				editEndpointCalled := false
-				commentCreated := false
-				mux.HandleFunc("/user", func(rw http.ResponseWriter, _ *http.Request) {
-					fmt.Fprint(rw, `{"id": 100, "login": "pac-user"}`)
-				})
+				editedPrimary := false
+				deletedDuplicate := false
 				mux.HandleFunc("/repos/org/repo/issues/123/comments", func(rw http.ResponseWriter, r *http.Request) {
-					if r.Method == http.MethodGet {
-						fmt.Fprint(rw, `[{"id": 555, "body": "Old MARKER", "user": {"id": 999, "login": "other-user"}}]`)
-						return
-					}
-					assert.Equal(t, r.Method, http.MethodPost)
-					commentCreated = true
-					rw.WriteHeader(http.StatusCreated)
-					fmt.Fprint(rw, `{"id": 556}`)
+					assert.Equal(t, r.Method, http.MethodGet)
+					fmt.Fprint(rw, `[{"id": 111, "body": "MARKER old"}, {"id": 222, "body": "MARKER old"}]`)
 				})
-				mux.HandleFunc("/repos/org/repo/issues/comments/555", func(rw http.ResponseWriter, _ *http.Request) {
-					editEndpointCalled = true
-					t.Error("should not edit comment from different user")
+				mux.HandleFunc("/repos/org/repo/issues/comments/111", func(rw http.ResponseWriter, r *http.Request) {
+					assert.Equal(t, r.Method, http.MethodPatch)
+					editedPrimary = true
 					rw.WriteHeader(http.StatusOK)
+				})
+				mux.HandleFunc("/repos/org/repo/issues/comments/222", func(rw http.ResponseWriter, r *http.Request) {
+					assert.Equal(t, r.Method, http.MethodDelete)
+					deletedDuplicate = true
+					rw.WriteHeader(http.StatusNoContent)
 				})
 				return func(t *testing.T) {
 					t.Helper()
-					assert.Assert(t, !editEndpointCalled, "edit endpoint should not be called for comment from different user")
-					assert.Assert(t, commentCreated, "new comment should be created")
+					assert.Assert(t, editedPrimary)
+					assert.Assert(t, deletedDuplicate)
+				}
+			},
+		},
+		{
+			name:         "deduplicates post-create marker comments",
+			event:        &info.Event{Organization: "org", Repository: "repo", PullRequestNumber: 123},
+			updateMarker: "MARKER",
+			commentBody:  "body MARKER",
+			setup: func(t *testing.T, mux *http.ServeMux) func(t *testing.T) {
+				t.Helper()
+				listCalls := 0
+				deletedDuplicate := false
+				mux.HandleFunc("/repos/org/repo/issues/123/comments", func(rw http.ResponseWriter, r *http.Request) {
+					switch r.Method {
+					case http.MethodGet:
+						listCalls++
+						if listCalls <= 2 {
+							fmt.Fprint(rw, `[]`)
+							return
+						}
+						fmt.Fprint(rw, `[{"id": 111, "body": "body MARKER"}, {"id": 222, "body": "body MARKER"}]`)
+					case http.MethodPost:
+						rw.WriteHeader(http.StatusCreated)
+					default:
+						t.Fatalf("unexpected method: %s", r.Method)
+					}
+				})
+				mux.HandleFunc("/repos/org/repo/issues/comments/222", func(rw http.ResponseWriter, r *http.Request) {
+					assert.Equal(t, r.Method, http.MethodDelete)
+					deletedDuplicate = true
+					rw.WriteHeader(http.StatusNoContent)
+				})
+				return func(t *testing.T) {
+					t.Helper()
+					assert.Assert(t, deletedDuplicate)
 				}
 			},
 		},
@@ -1569,15 +1568,13 @@ func TestCreateComment(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx, _ := rtesting.SetupFakeContext(t)
-			observer, _ := zapobserver.New(zap.InfoLevel)
-			fakelogger := zap.New(observer).Sugar()
 
 			var provider *Provider
 			var postAssert func(t *testing.T)
 			if !tt.clientNil {
 				fakeclient, mux, _, teardown := ghtesthelper.SetupGH()
 				defer teardown()
-				provider = &Provider{ghClient: fakeclient, Logger: fakelogger}
+				provider = &Provider{ghClient: fakeclient}
 
 				if tt.setup != nil {
 					postAssert = tt.setup(t, mux)
@@ -1609,21 +1606,26 @@ func TestCreateCommentDedupLogging(t *testing.T) {
 	tests := []struct {
 		name            string
 		commitBody      string
-		updateMarker    string
 		setup           func(t *testing.T, mux *http.ServeMux)
 		expectedPhases  []string
 		unexpectedPhase []string
 	}{
 		{
-			name:         "logs full create flow when marker comment does not exist",
-			commitBody:   "new body MARKER",
-			updateMarker: "MARKER",
+			name:       "logs full create flow when marker comment does not exist",
+			commitBody: "new body MARKER",
 			setup: func(t *testing.T, mux *http.ServeMux) {
 				t.Helper()
+				listCalls := 0
 				mux.HandleFunc("/repos/org/repo/issues/123/comments", func(rw http.ResponseWriter, r *http.Request) {
 					switch r.Method {
 					case http.MethodGet:
-						fmt.Fprint(rw, `[]`)
+						listCalls++
+						switch listCalls {
+						case 1, 2:
+							fmt.Fprint(rw, `[]`)
+						default:
+							fmt.Fprint(rw, `[{"id": 333, "body": "new body MARKER", "created_at": "2024-01-01T00:00:00Z"}]`)
+						}
 					case http.MethodPost:
 						rw.WriteHeader(http.StatusCreated)
 						fmt.Fprint(rw, `{"id": 333, "body": "new body MARKER"}`)
@@ -1634,23 +1636,25 @@ func TestCreateCommentDedupLogging(t *testing.T) {
 			},
 			expectedPhases: []string{
 				"initial_list",
+				"jitter_wait",
+				"post_jitter_list",
+				"pre_create_race_window",
 				"create_comment_start",
 				"create_comment_done",
+				"post_create_list",
+				"dedup_select_primary",
+				"dedup_complete",
 			},
-			unexpectedPhase: []string{"no_marker", "jitter_wait", "post_jitter_list", "pre_create_race_window", "post_create_list", "dedup_select_primary", "dedup_complete", "dedup_delete_attempt"},
+			unexpectedPhase: []string{"dedup_delete_attempt"},
 		},
 		{
-			name:         "logs edit flow for one existing marker comment",
-			commitBody:   "new body MARKER",
-			updateMarker: "MARKER",
+			name:       "logs dedup select without delete for one existing marker comment",
+			commitBody: "new body MARKER",
 			setup: func(t *testing.T, mux *http.ServeMux) {
 				t.Helper()
-				mux.HandleFunc("/user", func(rw http.ResponseWriter, _ *http.Request) {
-					fmt.Fprint(rw, `{"id": 100, "login": "pac-user"}`)
-				})
 				mux.HandleFunc("/repos/org/repo/issues/123/comments", func(rw http.ResponseWriter, r *http.Request) {
 					assert.Equal(t, r.Method, http.MethodGet)
-					fmt.Fprint(rw, `[{"id": 111, "body": "MARKER old", "created_at": "2024-01-01T00:00:00Z", "user": {"id": 100, "login": "pac-user"}}]`)
+					fmt.Fprint(rw, `[{"id": 111, "body": "MARKER old", "created_at": "2024-01-01T00:00:00Z"}]`)
 				})
 				mux.HandleFunc("/repos/org/repo/issues/comments/111", func(rw http.ResponseWriter, r *http.Request) {
 					assert.Equal(t, r.Method, http.MethodPatch)
@@ -1659,57 +1663,38 @@ func TestCreateCommentDedupLogging(t *testing.T) {
 			},
 			expectedPhases: []string{
 				"initial_list",
-				"edit_comment",
+				"dedup_select_primary",
+				"dedup_complete",
 			},
-			unexpectedPhase: []string{"create_comment_start", "dedup_select_primary", "dedup_complete", "dedup_delete_attempt"},
+			unexpectedPhase: []string{"create_comment_start", "dedup_delete_attempt"},
 		},
 		{
-			name:         "logs duplicate detection for multiple markers and edits first",
-			commitBody:   "new body MARKER",
-			updateMarker: "MARKER",
+			name:       "logs duplicate detection and delete phases for multiple markers",
+			commitBody: "new body MARKER",
 			setup: func(t *testing.T, mux *http.ServeMux) {
 				t.Helper()
-				mux.HandleFunc("/user", func(rw http.ResponseWriter, _ *http.Request) {
-					fmt.Fprint(rw, `{"id": 100, "login": "pac-user"}`)
-				})
 				mux.HandleFunc("/repos/org/repo/issues/123/comments", func(rw http.ResponseWriter, r *http.Request) {
 					assert.Equal(t, r.Method, http.MethodGet)
-					fmt.Fprint(rw, `[{"id": 111, "body": "MARKER old", "created_at": "2024-01-01T00:00:00Z", "user": {"id": 100, "login": "pac-user"}}, {"id": 222, "body": "MARKER old", "created_at": "2024-01-01T00:01:00Z", "user": {"id": 100, "login": "pac-user"}}]`)
+					fmt.Fprint(rw, `[{"id": 111, "body": "MARKER old", "created_at": "2024-01-01T00:00:00Z"}, {"id": 222, "body": "MARKER old", "created_at": "2024-01-01T00:01:00Z"}]`)
 				})
 				mux.HandleFunc("/repos/org/repo/issues/comments/111", func(rw http.ResponseWriter, r *http.Request) {
 					assert.Equal(t, r.Method, http.MethodPatch)
 					rw.WriteHeader(http.StatusOK)
+				})
+				mux.HandleFunc("/repos/org/repo/issues/comments/222", func(rw http.ResponseWriter, r *http.Request) {
+					assert.Equal(t, r.Method, http.MethodDelete)
+					rw.WriteHeader(http.StatusNoContent)
 				})
 			},
 			expectedPhases: []string{
 				"initial_list",
 				"duplicate_detected",
-				"edit_comment",
+				"dedup_select_primary",
+				"dedup_delete_attempt",
+				"dedup_delete_done",
+				"dedup_complete",
 			},
-			unexpectedPhase: []string{"create_comment_start", "dedup_select_primary", "dedup_delete_attempt", "dedup_delete_done", "dedup_complete"},
-		},
-		{
-			name:         "logs no_marker phase when updateMarker is empty",
-			commitBody:   "body without marker",
-			updateMarker: "",
-			setup: func(t *testing.T, mux *http.ServeMux) {
-				t.Helper()
-				mux.HandleFunc("/repos/org/repo/issues/123/comments", func(rw http.ResponseWriter, r *http.Request) {
-					switch r.Method {
-					case http.MethodPost:
-						rw.WriteHeader(http.StatusCreated)
-						fmt.Fprint(rw, `{"id": 444, "body": "body without marker"}`)
-					default:
-						t.Fatalf("unexpected method %s", r.Method)
-					}
-				})
-			},
-			expectedPhases: []string{
-				"no_marker",
-				"create_comment_start",
-				"create_comment_done",
-			},
-			unexpectedPhase: []string{"initial_list", "edit_comment", "duplicate_detected"},
+			unexpectedPhase: []string{"create_comment_start"},
 		},
 	}
 
@@ -1738,7 +1723,7 @@ func TestCreateCommentDedupLogging(t *testing.T) {
 				},
 			}
 
-			err := provider.CreateComment(ctx, event, tt.commitBody, tt.updateMarker)
+			err := provider.CreateComment(ctx, event, tt.commitBody, "MARKER")
 			assert.NilError(t, err)
 
 			logEntries := observedLogs.FilterMessage("github comment dedup flow").All()
@@ -1764,20 +1749,9 @@ func TestCreateCommentDedupLogging(t *testing.T) {
 				assert.Equal(t, "123", fmt.Sprint(fields["pr"]))
 				assert.Equal(t, "controller-test", fmt.Sprint(fields["controller_label"]))
 
-				if phase == "initial_list" {
+				if phase == "initial_list" || phase == "post_jitter_list" || phase == "post_create_list" {
 					_, hasMatchedCount := fields["matched_count"]
 					assert.Assert(t, hasMatchedCount, "phase=%s should include matched_count fields=%+v", phase, fields)
-				}
-
-				bodyHashPhases := map[string]bool{
-					"create_comment_start": true,
-					"edit_comment":         true,
-					"no_edit_needed":       true,
-					"no_marker":            true,
-				}
-				if bodyHashPhases[phase] {
-					_, hasBodyHash := fields["body_hash"]
-					assert.Assert(t, hasBodyHash, "phase=%s should include body_hash field=%+v", phase, fields)
 				}
 			}
 
@@ -1976,138 +1950,6 @@ func TestSkipPushEventForPRCommits(t *testing.T) {
 				}
 				assert.Assert(t, found, "Expected warning log containing: %s", tt.skipWarnLogContains)
 			}
-		})
-	}
-}
-
-func TestFetchAppSlug(t *testing.T) {
-	testAppID := int64(12345)
-	validSlug := "my-github-app"
-
-	tests := []struct {
-		name             string
-		privateKey       []byte
-		applicationID    int64
-		setupMux         func(mux *http.ServeMux)
-		wantSlug         string
-		wantErrSubstring string
-	}{
-		{
-			name:          "success fetch app slug",
-			privateKey:    []byte(fakePrivateKey),
-			applicationID: testAppID,
-			setupMux: func(mux *http.ServeMux) {
-				mux.HandleFunc("/app", func(w http.ResponseWriter, _ *http.Request) {
-					_, _ = fmt.Fprintf(w, `{"slug": "%s", "name": "My GitHub App"}`, validSlug)
-				})
-			},
-			wantSlug: validSlug,
-		},
-		{
-			name:          "app endpoint returns 404",
-			privateKey:    []byte(fakePrivateKey),
-			applicationID: testAppID,
-			setupMux: func(mux *http.ServeMux) {
-				mux.HandleFunc("/app", func(w http.ResponseWriter, _ *http.Request) {
-					w.WriteHeader(http.StatusNotFound)
-					_, _ = fmt.Fprint(w, `{"message": "Not Found"}`)
-				})
-			},
-			wantErrSubstring: "failed to get app info",
-		},
-		{
-			name:             "invalid private key",
-			privateKey:       []byte("invalid-key"),
-			applicationID:    testAppID,
-			setupMux:         func(_ *http.ServeMux) {},
-			wantErrSubstring: "failed to parse private key",
-		},
-		{
-			name:          "app returns empty slug",
-			privateKey:    []byte(fakePrivateKey),
-			applicationID: testAppID,
-			setupMux: func(mux *http.ServeMux) {
-				mux.HandleFunc("/app", func(w http.ResponseWriter, _ *http.Request) {
-					_, _ = fmt.Fprint(w, `{"slug": "", "name": "My GitHub App"}`)
-				})
-			},
-			wantSlug: "",
-		},
-		{
-			name:          "app endpoint returns malformed JSON",
-			privateKey:    []byte(fakePrivateKey),
-			applicationID: testAppID,
-			setupMux: func(mux *http.ServeMux) {
-				mux.HandleFunc("/app", func(w http.ResponseWriter, _ *http.Request) {
-					_, _ = fmt.Fprint(w, `{invalid json`)
-				})
-			},
-			wantErrSubstring: "failed to get app info",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			_, mux, serverURL, teardown := ghtesthelper.SetupGH()
-			defer teardown()
-
-			if tt.setupMux != nil {
-				tt.setupMux(mux)
-			}
-
-			// Set up context with namespace
-			ctx, _ := rtesting.SetupFakeContext(t)
-			testNamespace := &corev1.Namespace{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "test-namespace",
-				},
-			}
-			ctx = info.StoreNS(ctx, testNamespace.GetName())
-
-			// Create a secret with the test application ID and private key
-			appIDBytes := make([]byte, 0, 20)
-			appIDBytes = fmt.Appendf(appIDBytes, "%d", tt.applicationID)
-			testSecret := &corev1.Secret{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "pac-secret",
-					Namespace: testNamespace.GetName(),
-				},
-				Data: map[string][]byte{
-					"github-application-id": appIDBytes,
-					"github-private-key":    tt.privateKey,
-				},
-			}
-
-			// Set up test data with kubernetes client
-			tdata := testclient.Data{
-				Namespaces: []*corev1.Namespace{testNamespace},
-				Secret:     []*corev1.Secret{testSecret},
-			}
-			stdata, _ := testclient.SeedTestData(t, ctx, tdata)
-
-			// Create a provider with mocked kubernetes client
-			provider := &Provider{}
-			provider.Run = &params.Run{
-				Clients: clients.Clients{
-					Kube: stdata.Kube,
-				},
-				Info: info.Info{
-					Controller: &info.ControllerInfo{
-						Secret: testSecret.GetName(),
-					},
-				},
-			}
-
-			slug, err := provider.fetchAppSlug(ctx, serverURL)
-
-			if tt.wantErrSubstring != "" {
-				assert.Assert(t, err != nil, "expected error but got none")
-				assert.ErrorContains(t, err, tt.wantErrSubstring)
-				return
-			}
-
-			assert.NilError(t, err)
-			assert.Equal(t, slug, tt.wantSlug)
 		})
 	}
 }

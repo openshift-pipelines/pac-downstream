@@ -31,11 +31,11 @@ type RepositoriesRes struct {
 }
 
 func (r *Repositories) ListForAccount(ro *RepositoriesOptions) (*RepositoriesRes, error) {
-	if ro.Owner == "" {
-		return nil, fmt.Errorf("owner / workspace name not passed in")
+	urlPath := "/repositories"
+	if ro.Owner != "" {
+		urlPath += fmt.Sprintf("/%s", ro.Owner)
 	}
-	urlPath := "/repositories/%s"
-	urlStr := r.c.requestUrl(urlPath, ro.Owner)
+	urlStr := r.c.requestUrl(urlPath)
 	urlAsUrl, err := url.Parse(urlStr)
 	if err != nil {
 		return nil, err
