@@ -30,12 +30,12 @@ spec:
   - name: revision
     value: '{{revision}}'
   - name: output-image
-    value: quay.io/redhat-user-workloads/tekton-ecosystem-tenant/pipelines-pipelines-as-code-cli-rhel9:{{revision}}
+    value: quay.io/redhat-user-workloads/tekton-ecosystem-tenant/pipelines-pipelines-as-code-cli-rhel10:{{revision}}
   - name: dockerfile
     value: .konflux/dockerfiles/cli.Dockerfile
   - name: additional-tags
     value:
-      - "latest"
+      - "nightly"
   - name: prefetch-input
     value: |
       {"type": "rpm", "path": ".konflux/rpms"}
