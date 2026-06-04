@@ -67,7 +67,7 @@ hub-url: "https://artifacthub.io/api/v1"
 {{< /param >}}
 
 {{< param name="hub-catalog-type" type="string" default="artifacthub" id="param-hub-catalog-type" >}}
-Sets the default hub catalog type. Supported values: `artifacthub`, `tektonhub`.
+Sets the default hub catalog type. Supported values: `artifacthub`, `tektonhub`. **Note:** The `tektonhub` type is deprecated and will be removed in a future release. Please migrate to `artifacthub`.
 
 ```yaml
 hub-catalog-type: "artifacthub"
@@ -93,7 +93,7 @@ URL of the catalog API endpoint.
 {{< /param >}}
 
 {{< param name="catalog-{N}-type" type="string" id="param-catalog-n-type" >}}
-Type of catalog (`tektonhub` or `artifacthub`).
+Type of catalog (`tektonhub` or `artifacthub`). **Note:** The `tektonhub` type is deprecated and will be removed in a future release.
 {{< /param >}}
 
 {{< /param-group >}}
