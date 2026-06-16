@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/google/go-github/v81/github"
+	"github.com/google/go-github/v85/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	tgithub "github.com/openshift-pipelines/pipelines-as-code/test/pkg/github"
 	"github.com/openshift-pipelines/pipelines-as-code/test/pkg/payload"
@@ -21,14 +21,12 @@ import (
 
 // TestGithubPullRerequest is a test that will create a pull request and check
 // if we can rerequest a specific check or the full check suite.
-func TestGithubPullRerequest(t *testing.T) {
-	if os.Getenv("NIGHTLY_E2E_TEST") != "true" {
-		t.Skip("Skipping test since only enabled for nightly")
-	}
+func TestGithubGHEPullRerequest(t *testing.T) {
 	ctx := context.TODO()
 	g := &tgithub.PRTest{
 		Label:     "Github Rerequest",
 		YamlFiles: []string{"testdata/pipelinerun.yaml"},
+		GHE:       true,
 	}
 	g.RunPullRequest(ctx, t)
 	defer g.TearDown(ctx, t)
@@ -49,7 +47,7 @@ func TestGithubPullRerequest(t *testing.T) {
 		Sender:        g.Options.Organization,
 	}
 
-	installID, err := strconv.ParseInt(os.Getenv("TEST_GITHUB_REPO_INSTALLATION_ID"), 10, 64)
+	installID, err := strconv.ParseInt(os.Getenv("TEST_GITHUB_SECOND_REPO_INSTALLATION_ID"), 10, 64)
 	assert.NilError(t, err)
 	event := github.CheckRunEvent{
 		Action: github.Ptr("rerequested"),
@@ -80,10 +78,10 @@ func TestGithubPullRerequest(t *testing.T) {
 
 	err = payload.Send(ctx,
 		g.Cnx,
-		os.Getenv("TEST_EL_URL"),
-		os.Getenv("TEST_EL_WEBHOOK_SECRET"),
-		os.Getenv("TEST_GITHUB_API_URL"),
-		os.Getenv("TEST_GITHUB_REPO_INSTALLATION_ID"),
+		os.Getenv("TEST_GITHUB_SECOND_EL_URL"),
+		os.Getenv("TEST_GITHUB_SECOND_WEBHOOK_SECRET"),
+		os.Getenv("TEST_GITHUB_SECOND_API_URL"),
+		os.Getenv("TEST_GITHUB_SECOND_REPO_INSTALLATION_ID"),
 		event,
 		"check_run",
 	)
@@ -130,10 +128,10 @@ func TestGithubPullRerequest(t *testing.T) {
 
 	err = payload.Send(ctx,
 		g.Cnx,
-		os.Getenv("TEST_EL_URL"),
-		os.Getenv("TEST_EL_WEBHOOK_SECRET"),
-		os.Getenv("TEST_GITHUB_API_URL"),
-		os.Getenv("TEST_GITHUB_REPO_INSTALLATION_ID"),
+		os.Getenv("TEST_GITHUB_SECOND_EL_URL"),
+		os.Getenv("TEST_GITHUB_SECOND_WEBHOOK_SECRET"),
+		os.Getenv("TEST_GITHUB_SECOND_API_URL"),
+		os.Getenv("TEST_GITHUB_SECOND_APPLICATION_ID"),
 		csEvent,
 		"check_suite",
 	)
@@ -148,4 +146,54 @@ func TestGithubPullRerequest(t *testing.T) {
 		TargetSHA:       g.SHA,
 	})
 	assert.NilError(t, err)
+
+	// Third rerequest: null head_branch, empty pull_requests — resolved from SHA
+	g.Cnx.Clients.Log.Infof("Sending check_run rerequest with null head_branch (resolve PR from SHA)")
+	nullBranchEvent := github.CheckRunEvent{
+		Action: github.Ptr("rerequested"),
+		Installation: &github.Installation{
+			ID: &installID,
+		},
+		CheckRun: &github.CheckRun{
+			CheckSuite: &github.CheckSuite{
+				HeadSHA:      &runinfo.SHA,
+				PullRequests: []*github.PullRequest{},
+			},
+		},
+		Repo: &github.Repository{
+			DefaultBranch: &runinfo.DefaultBranch,
+			HTMLURL:       &runinfo.URL,
+			Name:          &runinfo.Repository,
+			Owner:         &github.User{Login: &runinfo.Organization},
+		},
+		Sender: &github.User{
+			Login: &runinfo.Sender,
+		},
+	}
+
+	err = payload.Send(ctx,
+		g.Cnx,
+		os.Getenv("TEST_GITHUB_SECOND_EL_URL"),
+		os.Getenv("TEST_GITHUB_SECOND_WEBHOOK_SECRET"),
+		os.Getenv("TEST_GITHUB_SECOND_API_URL"),
+		os.Getenv("TEST_GITHUB_SECOND_REPO_INSTALLATION_ID"),
+		nullBranchEvent,
+		"check_run",
+	)
+	assert.NilError(t, err)
+
+	g.Cnx.Clients.Log.Infof("Wait for the third repository update (null head_branch resolved from SHA)")
+	_, err = twait.UntilRepositoryUpdated(ctx, g.Cnx.Clients, twait.Opts{
+		RepoName:        g.TargetNamespace,
+		Namespace:       g.TargetNamespace,
+		MinNumberStatus: 3,
+		PollTimeout:     twait.DefaultTimeout,
+		TargetSHA:       g.SHA,
+	})
+	assert.NilError(t, err)
+
+	g.Cnx.Clients.Log.Infof("Check if the third run succeeded (null head_branch case)")
+	repo, err = g.Cnx.Clients.PipelineAsCode.PipelinesascodeV1alpha1().Repositories(g.TargetNamespace).Get(ctx, g.TargetNamespace, metav1.GetOptions{})
+	assert.NilError(t, err)
+	assert.Assert(t, repo.Status[len(repo.Status)-1].Conditions[0].Status == corev1.ConditionTrue)
 }

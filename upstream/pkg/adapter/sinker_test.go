@@ -85,7 +85,7 @@ func setupTestData(t *testing.T, repos []*v1alpha1.Repository) *params.Run {
 }
 
 // TestSetupClient_GitHubAppVsOther tests the different code paths for GitHub Apps vs other providers.
-func TestSetupClient_GitHubAppVsOther(t *testing.T) {
+func TestSetupClientGitHubAppVsOther(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -104,18 +104,6 @@ func TestSetupClient_GitHubAppVsOther(t *testing.T) {
 			extraReposConfigured:   false,
 			wantErr:                false,
 			wantRepositoryIDsCount: 0, // No extra repos
-		},
-		{
-			name:                 "GitHub App with extra repos - IDs should be populated",
-			installationID:       12345,
-			hasGitProvider:       false,
-			extraReposConfigured: true,
-			extraRepoInstallIDs: map[string]int64{
-				"another/one":    789,
-				"andanother/two": 10112,
-			},
-			wantErr:                false,
-			wantRepositoryIDsCount: 2, // Should have 2 extra repo IDs
 		},
 		{
 			name:                   "Non-GitHub App requires git_provider",
@@ -162,37 +150,11 @@ func TestSetupClient_GitHubAppVsOther(t *testing.T) {
 				}
 			}
 
-			// Setup extra repos if configured
-			extraRepos := []*v1alpha1.Repository{}
-			if tt.extraReposConfigured {
-				repo.Spec.Settings = &v1alpha1.Settings{
-					GithubAppTokenScopeRepos: []string{},
-				}
-				for repoName := range tt.extraRepoInstallIDs {
-					repo.Spec.Settings.GithubAppTokenScopeRepos = append(
-						repo.Spec.Settings.GithubAppTokenScopeRepos,
-						repoName,
-					)
-					// Create matching repository CRs for extra repos
-					extraRepo := testnewrepo.NewRepo(testnewrepo.RepoTestcreationOpts{
-						Name:             repoName,
-						URL:              "https://github.com/" + repoName,
-						InstallNamespace: "default",
-					})
-					extraRepos = append(extraRepos, extraRepo)
-				}
-			}
-
-			// Create test data with all repositories
-			allRepos := append([]*v1alpha1.Repository{repo}, extraRepos...)
-			run := setupTestData(t, allRepos)
+			run := setupTestData(t, []*v1alpha1.Repository{repo})
 
 			// Create a tracking provider to verify behavior
 			trackingProvider := &trackingProviderImpl{
-				TestProviderImp:     testprovider.TestProviderImp{AllowIT: true},
-				createTokenCalled:   false,
-				repositoryIDs:       []int64{},
-				extraRepoInstallIDs: tt.extraRepoInstallIDs,
+				TestProviderImp: testprovider.TestProviderImp{AllowIT: true},
 			}
 			trackingProvider.SetLogger(log)
 
@@ -229,32 +191,6 @@ func TestSetupClient_GitHubAppVsOther(t *testing.T) {
 			} else {
 				assert.NilError(t, err, "unexpected error: %v", err)
 			}
-
-			// For GitHub Apps with extra repos, verify CreateToken was called
-			// and repository IDs were populated
-			if tt.extraReposConfigured && !tt.wantErr {
-				assert.Assert(t, trackingProvider.createTokenCalled,
-					"CreateToken should have been called for extra repos")
-
-				// Verify all expected repo IDs are present
-				for repoName, expectedID := range tt.extraRepoInstallIDs {
-					found := false
-					for _, id := range trackingProvider.repositoryIDs {
-						if id == expectedID {
-							found = true
-							break
-						}
-					}
-					assert.Assert(t, found,
-						"Repository ID %d for %s not found in provider.RepositoryIDs: %v",
-						expectedID, repoName, trackingProvider.repositoryIDs)
-				}
-
-				assert.Equal(t, len(trackingProvider.repositoryIDs), tt.wantRepositoryIDsCount,
-					"Expected %d repository IDs, got %d: %v",
-					tt.wantRepositoryIDsCount, len(trackingProvider.repositoryIDs),
-					trackingProvider.repositoryIDs)
-			}
 		})
 	}
 }
@@ -262,19 +198,9 @@ func TestSetupClient_GitHubAppVsOther(t *testing.T) {
 // trackingProviderImpl wraps TestProviderImp to track CreateToken calls and repository IDs.
 type trackingProviderImpl struct {
 	testprovider.TestProviderImp
-	createTokenCalled   bool
-	repositoryIDs       []int64
-	extraRepoInstallIDs map[string]int64
 }
 
-func (t *trackingProviderImpl) CreateToken(_ context.Context, repositories []string, _ *info.Event) (string, error) {
-	t.createTokenCalled = true
-	// Simulate adding repository IDs like the real CreateToken does
-	for _, repo := range repositories {
-		if id, ok := t.extraRepoInstallIDs[repo]; ok {
-			t.repositoryIDs = append(t.repositoryIDs, id)
-		}
-	}
+func (t *trackingProviderImpl) CreateToken(_ context.Context, _ []string, _ *info.Event) (string, error) {
 	return "fake-token", nil
 }
 
@@ -407,10 +333,10 @@ func TestFindMatchingRepository(t *testing.T) {
 	}
 }
 
-// TestProcessEvent_SkipCI_PushEvent tests the skip-CI logic for push events.
+// TestProcessEventSkipCIPushEvent tests the skip-CI logic for push events.
 // This tests that the SkipCI check works correctly for push events where the
 // commit message is available directly in the webhook payload (event.SHATitle).
-func TestProcessEvent_SkipCI_PushEvent(t *testing.T) {
+func TestProcessEventSkipCIPushEvent(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -473,10 +399,10 @@ func TestProcessEvent_SkipCI_PushEvent(t *testing.T) {
 	}
 }
 
-// TestGetCommitInfo_SetsHasSkipCommand tests that GetCommitInfo correctly sets
+// TestGetCommitInfoSetsHasSkipCommand tests that GetCommitInfo correctly sets
 // HasSkipCommand when the commit message contains skip-CI commands.
 // This tests the full flow that processEvent uses for PR events.
-func TestGetCommitInfo_SetsHasSkipCommand(t *testing.T) {
+func TestGetCommitInfoSetsHasSkipCommand(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -554,10 +480,10 @@ func TestGetCommitInfo_SetsHasSkipCommand(t *testing.T) {
 	}
 }
 
-// TestProcessEvent_SkipCI_Integration documents the skip-CI flow integration.
+// TestProcessEventSkipCIIntegration documents the skip-CI flow integration.
 // This is a documentation test that verifies the skip-CI decision logic
 // matches what's implemented in sinker.go processEvent().
-func TestProcessEvent_SkipCI_Integration(t *testing.T) {
+func TestProcessEventSkipCIIntegration(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {

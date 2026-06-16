@@ -5,6 +5,7 @@ set -exufo pipefail
 
 export PAC_API_INSTRUMENTATION_DIR=/tmp/api-instrumentation
 export TEST_GITLAB_API_URL=https://gitlab.pipelinesascode.com
+export TEST_GITLAB_GROUP=pac-e2e-tests
 
 create_pac_github_app_secret() {
   # Read from environment variables instead of arguments
@@ -85,8 +86,13 @@ get_tests() {
     gitea_tests=("${filtered_tests[@]}")
   fi
 
+  local -a ghe_tests=()
+  if [[ "${target}" == github_ghe* ]]; then
+    mapfile -t ghe_tests < <(echo "${all_tests}" | grep -iP 'GithubGHE' 2>/dev/null | grep -ivP 'Concurrency' 2>/dev/null | sort 2>/dev/null)
+  fi
+
   local -a github_tests=()
-  if [[ "${target}" == *"github"* ]] && [[ "${target}" != "github_ghe" ]] && [[ "${target}" != "github_second_controller" ]]; then
+  if [[ "${target}" == *"github"* ]] && [[ "${target}" != github_ghe* ]] && [[ "${target}" != "github_second_controller" ]]; then
     mapfile -t github_tests < <(echo "${all_tests}" | grep -iP '^TestGithub' 2>/dev/null | grep -ivP 'Concurrency|GithubGHE' 2>/dev/null | sort 2>/dev/null)
   fi
 
@@ -97,13 +103,20 @@ get_tests() {
     remainder=$((${#gitea_tests[@]} % 3))
   fi
 
+  # Calculate chunk sizes for splitting GHE tests into 3 parts
+  local ghe_chunk_size ghe_remainder
+  if [[ ${#ghe_tests[@]} -gt 0 ]]; then
+    ghe_chunk_size=$((${#ghe_tests[@]} / 3))
+    ghe_remainder=$((${#ghe_tests[@]} % 3))
+  fi
+
   # TODO: revert once the new workflow matrix lands on main.
   # Backward compat: github_1/github_2 chunking for pull_request_target
   # which runs the workflow YAML from main (old target names).
   local github_chunk_size github_remainder
   if [[ ${#github_tests[@]} -gt 0 ]]; then
-    github_chunk_size=$(( ${#github_tests[@]} / 2 ))
-    github_remainder=$(( ${#github_tests[@]} % 2 ))
+    github_chunk_size=$((${#github_tests[@]} / 2))
+    github_remainder=$((${#github_tests[@]} % 2))
   fi
 
   case "${target}" in
@@ -135,11 +148,28 @@ get_tests() {
       printf '%s\n' "${github_tests[@]:$((github_chunk_size + github_remainder))}"
     fi
     ;;
-  github_second_controller)
+  # TODO: revert - remove github_second_controller, github_ghe aliases
+  # once the new workflow matrix lands on main. These exist because
+  # pull_request_target runs the workflow YAML from main which still sends old
+  # target names.
+  github_second_controller | github_ghe)
     printf '%s\n' "${all_tests}" | grep -iP 'GithubGHE' | grep -ivP 'Concurrency'
     ;;
-  github_ghe | github_ghe_1 | github_ghe_2 | github_ghe_3)
-    printf '%s\n' "${all_tests}" | grep -iP 'GithubGHE' | grep -ivP 'Concurrency'
+  github_ghe_1)
+    if [[ ${#ghe_tests[@]} -gt 0 ]]; then
+      printf '%s\n' "${ghe_tests[@]:0:${ghe_chunk_size}}"
+    fi
+    ;;
+  github_ghe_2)
+    if [[ ${#ghe_tests[@]} -gt 0 ]]; then
+      printf '%s\n' "${ghe_tests[@]:${ghe_chunk_size}:${ghe_chunk_size}}"
+    fi
+    ;;
+  github_ghe_3)
+    if [[ ${#ghe_tests[@]} -gt 0 ]]; then
+      local start_idx=$((ghe_chunk_size * 2))
+      printf '%s\n' "${ghe_tests[@]:${start_idx}:$((ghe_chunk_size + ghe_remainder))}"
+    fi
     ;;
   gitlab_bitbucket)
     printf '%s\n' "${all_tests}" | grep -iP 'Gitlab|Bitbucket' | grep -ivP 'Concurrency'
@@ -162,8 +192,8 @@ get_tests() {
     ;;
   *)
     echo "Invalid target: ${target}"
-    echo "supported targets: github_public, github_ghe, gitlab_bitbucket, gitea_1, gitea_2, gitea_3, concurrency, flaky"
-    echo "backward compat aliases: github_1, github_2, github_second_controller"
+    echo "supported targets: github_public, github_ghe_1, github_ghe_2, github_ghe_3, gitlab_bitbucket, gitea_1, gitea_2, gitea_3, concurrency, flaky"
+    echo "backward compat aliases: github_1, github_2, github_second_controller, github_ghe"
     ;;
   esac
 }
@@ -183,9 +213,20 @@ run_e2e_tests() {
 
   mkdir -p /tmp/logs
 
+  local test_pattern
+  local test_status=0
+  local raw_output=/tmp/logs/e2e-test-output.json
+
   # shellcheck disable=SC2001
-  make test-e2e GO_TEST_FLAGS="-v -run \"$(echo "${tests[*]}" | sed 's/ /|/g')\"" 2>&1 | tee -a /tmp/logs/e2e-test-output.log
-  return "${PIPESTATUS[0]}"
+  test_pattern="$(echo "${tests[*]}" | sed 's/ /|/g')"
+  ./hack/install-gotestsum.sh 1.13.0 "${HOME}/go/bin"
+  env GODEBUG=asynctimerchan=1 \
+    gotestsum --format standard-verbose --jsonfile "${raw_output}" -- \
+    -race -failfast -timeout 45m -count=1 -tags=e2e -run "${test_pattern}" ./test || test_status=$?
+  if ! TESTRR_RUN_LABEL="${TESTRR_RUN_LABEL:-gha-e2e-${target}}" ./hack/upload-testrr.sh "${raw_output}"; then
+    echo "::warning::testrr upload failed; continuing without failing GitHub Actions"
+  fi
+  return "${test_status}"
 }
 
 output_logs() {
@@ -202,6 +243,7 @@ collect_logs() {
   # Read from environment variables (use default empty value for optional vars)
   local test_gitea_smee_url="${TEST_GITEA_SMEEURL:-}"
   local github_ghe_smee_url="${TEST_GITHUB_SECOND_SMEE_URL:-}"
+  local test_gitlab_smee_url="${TEST_GITLAB_SMEEURL:-}"
 
   mkdir -p /tmp/logs
   # Output logs to stdout so we can see via the web interface directly
@@ -215,6 +257,8 @@ collect_logs() {
   [[ -d /tmp/gosmee-replay-ghe ]] && cp -a /tmp/gosmee-replay-ghe /tmp/logs/gosmee/replay-ghe
   [[ -f /tmp/gosmee-main.log ]] && cp /tmp/gosmee-main.log /tmp/logs/gosmee/main.log
   [[ -f /tmp/gosmee-ghe.log ]] && cp /tmp/gosmee-ghe.log /tmp/logs/gosmee/ghe.log
+  [[ -d /tmp/gosmee-replay-gitlab ]] && cp -a /tmp/gosmee-replay-gitlab /tmp/logs/gosmee/replay-gitlab
+  [[ -f /tmp/gosmee-gitlab.log ]] && cp /tmp/gosmee-gitlab.log /tmp/logs/gosmee/gitlab.log
 
   kubectl get pipelineruns -A -o yaml >/tmp/logs/pac-pipelineruns.yaml
   kubectl get repositories.pipelinesascode.tekton.dev -A -o yaml >/tmp/logs/pac-repositories.yaml
@@ -235,12 +279,29 @@ collect_logs() {
     cp -a ${PAC_API_INSTRUMENTATION_DIR} /tmp/logs/$(basename ${PAC_API_INSTRUMENTATION_DIR})
   fi
 
-  for url in "${test_gitea_smee_url}" "${github_ghe_smee_url}"; do
+  for url in "${test_gitea_smee_url}" "${github_ghe_smee_url}" "${test_gitlab_smee_url}"; do
     [[ -z "${url}" ]] && continue
     find /tmp/logs -type f -exec grep -l "${url}" {} \; | xargs -r sed -i "s|${url}|SMEE_URL|g"
   done
 
   detect_panic
+}
+
+generate_github_summary() {
+  local raw_output="/tmp/logs/e2e-test-output.json"
+  local target="${TEST_PROVIDER:-unknown}"
+
+  if [[ -z "${GITHUB_STEP_SUMMARY:-}" ]]; then
+    echo "GITHUB_STEP_SUMMARY not set, skipping summary generation"
+    return 0
+  fi
+
+  if [[ ! -f "${raw_output}" ]]; then
+    echo "No test output found at ${raw_output}, skipping summary generation"
+    return 0
+  fi
+
+  python3 ./hack/generate_github_summary.py "${raw_output}" "${target}" >>"${GITHUB_STEP_SUMMARY}"
 }
 
 detect_panic() {
@@ -284,6 +345,10 @@ help() {
     Will output logs using snazzy formatting when available or otherwise through a simple
     python formatter. This makes debugging easier from the GitHub Actions interface.
 
+  generate_github_summary
+    Parse gotestsum JSON output and write a markdown summary to GITHUB_STEP_SUMMARY.
+    Required env vars: TEST_PROVIDER, GITHUB_STEP_SUMMARY
+
   print_tests
     Print the list of tests that would be run for each provider target.
 
@@ -307,11 +372,11 @@ output_logs)
   output_logs
   ;;
 generate_github_summary)
-  echo "generate_github_summary: skipped on backport branch"
+  generate_github_summary
   ;;
 print_tests)
   set +x
-  for target in github_public github_ghe gitlab_bitbucket gitea_1 gitea_2 gitea_3 concurrency flaky; do
+  for target in github_public github_ghe_1 github_ghe_2 github_ghe_3 gitlab_bitbucket gitea_1 gitea_2 gitea_3 concurrency flaky; do
     mapfile -t tests < <(get_tests "${target}")
     echo "Tests for target: ${target} Total: ${#tests[@]}"
     printf '%s\n' "${tests[@]}"

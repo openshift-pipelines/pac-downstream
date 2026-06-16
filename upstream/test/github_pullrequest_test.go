@@ -4,10 +4,7 @@ package test
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
-	"os"
 	"regexp"
 	"strings"
 	"testing"
@@ -25,37 +22,21 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/test/pkg/options"
 	twait "github.com/openshift-pipelines/pipelines-as-code/test/pkg/wait"
 
-	"github.com/google/go-github/v81/github"
+	"github.com/google/go-github/v85/github"
 	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 	"github.com/tektoncd/pipeline/pkg/names"
 	"gotest.tools/v3/assert"
 	"gotest.tools/v3/assert/cmp"
-	"gotest.tools/v3/golden"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"knative.dev/pkg/apis"
 )
 
-func compactCommentTimestamp(ts github.Timestamp) string {
-	if ts.IsZero() {
-		return "unknown"
-	}
-	return ts.UTC().Format(time.RFC3339)
-}
-
-func commentBodyHash(body string) string {
-	sum := sha256.Sum256([]byte(body))
-	digest := hex.EncodeToString(sum[:])
-	if len(digest) > 12 {
-		return digest[:12]
-	}
-	return digest
-}
-
-func TestGithubPullRequest(t *testing.T) {
+func TestGithubGHEPullRequestBasic(t *testing.T) {
 	ctx := context.Background()
 	g := &tgithub.PRTest{
 		Label:     "Github PullRequest",
 		YamlFiles: []string{"testdata/pipelinerun.yaml"},
+		GHE:       true,
 	}
 	g.RunPullRequest(ctx, t)
 	defer g.TearDown(ctx, t)
@@ -73,9 +54,6 @@ func TestGithubGHEPullRequest(t *testing.T) {
 }
 
 func TestGithubGHEPullRequestMultiples(t *testing.T) {
-	if os.Getenv("NIGHTLY_E2E_TEST") != "true" {
-		t.Skip("Skipping test since only enabled for nightly")
-	}
 	ctx := context.Background()
 	g := &tgithub.PRTest{
 		Label:     "Github multiple PullRequest",
@@ -87,9 +65,6 @@ func TestGithubGHEPullRequestMultiples(t *testing.T) {
 }
 
 func TestGithubGHEPullRequestMatchOnCEL(t *testing.T) {
-	if os.Getenv("NIGHTLY_E2E_TEST") != "true" {
-		t.Skip("Skipping test since only enabled for nightly")
-	}
 	ctx := context.Background()
 	g := &tgithub.PRTest{
 		Label:     "Github CEL Match",
@@ -168,95 +143,17 @@ func TestGithubGHEPullRequestCELMatchOnTitle(t *testing.T) {
 	defer g.TearDown(ctx, t)
 }
 
-func TestGithubPullRequestWebhook(t *testing.T) {
-	if os.Getenv("NIGHTLY_E2E_TEST") != "true" {
-		t.Skip("Skipping test since only enabled for nightly")
-	}
-	if os.Getenv("TEST_GITHUB_REPO_OWNER_WEBHOOK") == "" {
-		t.Skip("TEST_GITHUB_REPO_OWNER_WEBHOOK is not set")
-		return
-	}
+func TestGithubGHEWebhookPullRequest(t *testing.T) {
 	ctx := context.Background()
 
 	g := &tgithub.PRTest{
-		Label:     "Github PullRequest onWebhook",
+		Label:     "Github GHE PullRequest onWebhook",
 		YamlFiles: []string{"testdata/pipelinerun.yaml"},
+		GHE:       true,
 		Webhook:   true,
 	}
-	g.RunPullRequest(ctx, t)
 	defer g.TearDown(ctx, t)
-}
-
-func TestGithubGHEPullRequestBadYaml(t *testing.T) {
-	ctx := context.Background()
-	g := &tgithub.PRTest{
-		Label:         "Github PullRequest Bad Yaml",
-		YamlFiles:     []string{"testdata/failures/bad-yaml.yaml"},
-		GHE:           true,
-		NoStatusCheck: true,
-	}
 	g.RunPullRequest(ctx, t)
-	defer g.TearDown(ctx, t)
-
-	maxLoop := 10
-	for i := 0; i < maxLoop; i++ {
-		comments, _, err := g.Provider.Client().Issues.ListComments(
-			ctx, g.Options.Organization, g.Options.Repo, g.PRNumber,
-			&github.IssueListCommentsOptions{})
-		assert.NilError(t, err)
-
-		if len(comments) > 0 {
-			if len(comments) > 1 {
-				for _, comment := range comments {
-					g.Cnx.Clients.Log.Infof("duplicate comment diagnostic: comment_id=%d created_at=%s updated_at=%s author_login=%s body_hash=%s body_len=%d",
-						comment.GetID(),
-						compactCommentTimestamp(comment.GetCreatedAt()),
-						compactCommentTimestamp(comment.GetUpdatedAt()),
-						comment.GetUser().GetLogin(),
-						commentBodyHash(comment.GetBody()),
-						len(comment.GetBody()))
-				}
-
-				const recheckAttempts = 5
-				for attempt := 1; attempt <= recheckAttempts && len(comments) > 1; attempt++ {
-					g.Cnx.Clients.Log.Infof("recheck duplicate comments attempt=%d/%d current_count=%d", attempt, recheckAttempts, len(comments))
-					time.Sleep(2 * time.Second)
-					comments, _, err = g.Provider.Client().Issues.ListComments(
-						ctx, g.Options.Organization, g.Options.Repo, g.PRNumber,
-						&github.IssueListCommentsOptions{})
-					assert.NilError(t, err)
-				}
-
-				if len(comments) > 1 {
-					commentSummaries := make([]string, 0, len(comments))
-					for _, comment := range comments {
-						commentSummaries = append(commentSummaries,
-							fmt.Sprintf("%d(created=%s updated=%s)",
-								comment.GetID(),
-								compactCommentTimestamp(comment.GetCreatedAt()),
-								compactCommentTimestamp(comment.GetUpdatedAt())))
-					}
-					assert.Assert(t, len(comments) == 1,
-						"Should have only one comment created after rechecks, count=%d comments=%s",
-						len(comments), strings.Join(commentSummaries, ", "))
-				}
-			}
-
-			if len(comments) == 0 {
-				g.Cnx.Clients.Log.Infof("No comments after duplicate recheck, continuing wait loop %d/%d", i, maxLoop)
-				time.Sleep(6 * time.Second)
-				continue
-			}
-
-			golden.Assert(t, comments[0].GetBody(), strings.ReplaceAll(fmt.Sprintf("%s.golden", t.Name()), "/", "-"))
-			return
-		}
-
-		g.Cnx.Clients.Log.Infof("Looping %d/%d waiting for a comment to appear", i, maxLoop)
-		time.Sleep(6 * time.Second)
-	}
-
-	t.Fatal("No comments with the pipelinerun error found on the pull request")
 }
 
 func TestGithubGHEInvalidCELExpressionReportingOnPR(t *testing.T) {
@@ -642,22 +539,23 @@ func TestGithubGHEPullRequestNoPipelineRunCancelledOnPRClosed(t *testing.T) {
 	assert.Equal(t, false, isCancelled, fmt.Sprintf("PipelineRun got cancelled while we wanted it `Running`, last reason: %v", prReason))
 }
 
-func TestGithubCancelInProgressSettingFromConfigMapOnPR(t *testing.T) {
+func TestGithubGHECancelInProgressSettingFromConfigMapOnPR(t *testing.T) {
 	ctx := context.Background()
-	ctx, runcnx, _, _, err := tgithub.Setup(ctx, false, false)
+	ctx, runcnx, _, _, err := tgithub.Setup(ctx, true, false)
 	assert.NilError(t, err)
 
 	patchData := map[string]string{
 		"enable-cancel-in-progress-on-pull-requests": "true",
 	}
 
-	configMapTearDown := configmap.ChangeGlobalConfig(ctx, t, runcnx, patchData)
+	configMapTearDown := configmap.ChangeGlobalConfig(ctx, t, runcnx, "ghe-configmap", patchData)
 	defer configMapTearDown()
 
 	g := &tgithub.PRTest{
 		Label:         "Github PullRequest",
 		YamlFiles:     []string{"testdata/pipelinerun-gitops.yaml"},
 		NoStatusCheck: true,
+		GHE:           true,
 	}
 	g.RunPullRequest(ctx, t)
 	defer g.TearDown(ctx, t)
@@ -687,22 +585,23 @@ func TestGithubCancelInProgressSettingFromConfigMapOnPR(t *testing.T) {
 	assert.NilError(t, err)
 }
 
-func TestGithubCancelInProgressSettingFromConfigMapOnPush(t *testing.T) {
+func TestGithubGHECancelInProgressSettingFromConfigMapOnPush(t *testing.T) {
 	ctx := context.Background()
-	ctx, runcnx, _, _, err := tgithub.Setup(ctx, false, false)
+	ctx, runcnx, _, _, err := tgithub.Setup(ctx, true, false)
 	assert.NilError(t, err)
 
 	patchData := map[string]string{
 		"enable-cancel-in-progress-on-push": "true",
 	}
 
-	configMapTearDown := configmap.ChangeGlobalConfig(ctx, t, runcnx, patchData)
+	configMapTearDown := configmap.ChangeGlobalConfig(ctx, t, runcnx, "ghe-configmap", patchData)
 	defer configMapTearDown()
 
 	g := &tgithub.PRTest{
 		Label:         "Github PullRequest",
 		YamlFiles:     []string{"testdata/pipelinerun-gitops.yaml"},
 		NoStatusCheck: true,
+		GHE:           true,
 	}
 	g.RunPushRequest(ctx, t)
 	defer g.TearDown(ctx, t)
@@ -749,32 +648,29 @@ func TestGithubGHEPullandPushMatchTriggerOnlyPull(t *testing.T) {
 
 	reg := regexp.MustCompile(fmt.Sprintf("Skipping push event for commit.*as it belongs to pull request #%d", g.PRNumber))
 	maxLines := int64(1000)
-	err = twait.RegexpMatchingInControllerLog(ctx, g.Cnx, *reg, 20, "ghe-controller", &maxLines)
+	err = twait.RegexpMatchingInControllerLog(ctx, g.Cnx, *reg, 20, "ghe-controller", &maxLines, nil)
 	assert.NilError(t, err)
 }
 
-func TestGithubDisableCommentsOnPR(t *testing.T) {
-	if os.Getenv("TEST_GITHUB_REPO_OWNER_WEBHOOK") == "" {
-		t.Skip("TEST_GITHUB_REPO_OWNER_WEBHOOK is not set")
-		return
-	}
+func TestGithubGHEWebhookDisableCommentsOnPR(t *testing.T) {
 	ctx := context.Background()
 
 	g := &tgithub.PRTest{
-		Label:     "Github PullRequest onWebhook",
+		Label:     "Github GHE PullRequest onWebhook",
 		YamlFiles: []string{"testdata/pipelinerun.yaml"},
+		GHE:       true,
 		Webhook:   true,
 	}
 
-	commentStrategy := v1alpha1.Settings{
+	commentStrategy := &v1alpha1.Settings{
 		Github: &v1alpha1.GithubSettings{
 			CommentStrategy: "disable_all",
 		},
 	}
 
 	g.Options.Settings = commentStrategy
-	g.RunPullRequest(ctx, t)
 	defer g.TearDown(ctx, t)
+	g.RunPullRequest(ctx, t)
 
 	comments, _, _ := g.Provider.Client().Issues.ListComments(ctx, g.Options.Organization, g.Options.Repo, g.PRNumber, nil)
 	commentRegexp := regexp.MustCompile(`.*Pipelines as Code CI/*`)
@@ -810,7 +706,7 @@ func TestGithubGHEIgnoreTagPushCommitsFromSkipPushEventsSetting(t *testing.T) {
 
 	reg := regexp.MustCompile(fmt.Sprintf("Processing tag push event for commit %s despite skip-push-events-for-pr-commits being enabled.*", g.SHA))
 	maxLines := int64(1000)
-	err = twait.RegexpMatchingInControllerLog(ctx, g.Cnx, *reg, 20, "ghe-controller", &maxLines)
+	err = twait.RegexpMatchingInControllerLog(ctx, g.Cnx, *reg, 20, "ghe-controller", &maxLines, nil)
 	assert.NilError(t, err)
 
 	g.Cnx.Clients.Log.Infof("Deleting tag %s", tag)
@@ -864,6 +760,35 @@ func TestGithubGHEPullRequestCelPrefix(t *testing.T) {
 		regexp.Regexp{},
 		t.Name(),
 		2,
+		nil,
+	)
+	assert.NilError(t, err)
+}
+
+func TestGithubGHEPullRequestCELJoin(t *testing.T) {
+	ctx := context.Background()
+	g := &tgithub.PRTest{
+		Label:     "Github CEL String Join",
+		YamlFiles: []string{"testdata/pipelinerun-cel-string-join.yaml"},
+		GHE:       true,
+	}
+	g.RunPullRequest(ctx, t)
+	defer g.TearDown(ctx, t)
+
+	prs, err := g.Cnx.Clients.Tekton.TektonV1().PipelineRuns(g.TargetNamespace).List(ctx, metav1.ListOptions{})
+	assert.NilError(t, err)
+	assert.Assert(t, len(prs.Items) >= 1, "Expected at least one PipelineRun")
+
+	err = twait.RegexpMatchingInPodLog(
+		ctx,
+		g.Cnx,
+		g.TargetNamespace,
+		fmt.Sprintf("tekton.dev/pipelineRun=%s,tekton.dev/pipelineTask=cel-string-join-test", prs.Items[0].Name),
+		"step-test-cel-string-join-values",
+		*regexp.MustCompile(".*tekton/pipelinerun-cel-string-join.yaml"),
+		"",
+		2,
+		nil,
 	)
 	assert.NilError(t, err)
 }

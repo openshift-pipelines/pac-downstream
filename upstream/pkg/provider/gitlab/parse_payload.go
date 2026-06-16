@@ -13,8 +13,8 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/pipelineascode"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/secrets"
 
 	gitlab "gitlab.com/gitlab-org/api/client-go"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -83,7 +83,7 @@ func (v *Provider) ParsePayload(ctx context.Context, run *params.Run, request *h
 		// GitLab sends same event for both Tag creation and deletion i.e. "Tag Push Hook".
 		// if gitEvent.After is containing all zeros and gitEvent.CheckoutSHA is empty
 		// it is Delete "Tag Push Hook".
-		if isZeroSHA(gitEvent.After) && gitEvent.CheckoutSHA == "" {
+		if provider.IsZeroSHA(gitEvent.After) && gitEvent.CheckoutSHA == "" {
 			return nil, fmt.Errorf("event Delete %s is not supported", event)
 		}
 
@@ -149,7 +149,7 @@ func (v *Provider) ParsePayload(ctx context.Context, run *params.Run, request *h
 		processedEvent.BaseURL = gitEvent.MergeRequest.Target.WebURL
 		processedEvent.HeadURL = gitEvent.MergeRequest.Source.WebURL
 
-		opscomments.SetEventTypeAndTargetPR(processedEvent, gitEvent.ObjectAttributes.Note)
+		opscomments.SetEventTypeAndTargetPR(processedEvent, gitEvent.ObjectAttributes.Note, "/")
 		v.pathWithNamespace = gitEvent.Project.PathWithNamespace
 		processedEvent.Organization, processedEvent.Repository = getOrgRepo(v.pathWithNamespace)
 		processedEvent.TriggerTarget = triggertype.PullRequest
@@ -205,7 +205,7 @@ func (v *Provider) initGitLabClient(ctx context.Context, event *info.Event) (*in
 		return event, err
 	}
 
-	scm := pipelineascode.SecretFromRepository{
+	scm := secrets.SecretFromRepository{
 		K8int:       kubeInterface,
 		Config:      v.GetConfig(),
 		Event:       event,
@@ -246,7 +246,7 @@ func (v *Provider) handleCommitCommentEvent(ctx context.Context, event *gitlab.C
 	processedEvent.HeadURL = processedEvent.URL
 	processedEvent.BaseURL = processedEvent.URL
 	processedEvent.TriggerTarget = triggertype.Push
-	opscomments.SetEventTypeAndTargetPR(processedEvent, event.ObjectAttributes.Note)
+	opscomments.SetEventTypeAndTargetPR(processedEvent, event.ObjectAttributes.Note, "/")
 	// Set Head and Base branch to default_branch of the repo as this comment is made on
 	// a pushed commit.
 	defaultBranch := event.Project.DefaultBranch
@@ -269,7 +269,7 @@ func (v *Provider) handleCommitCommentEvent(ctx context.Context, event *gitlab.C
 
 	// get PipelineRun name from comment if it does contain e.g. `/test pr7`
 	if provider.IsTestRetestComment(event.ObjectAttributes.Note) {
-		prName, branchName, tagName, err = provider.GetPipelineRunAndBranchOrTagNameFromTestComment(event.ObjectAttributes.Note)
+		prName, branchName, tagName, err = provider.GetPipelineRunAndBranchOrTagNameFromTestComment(event.ObjectAttributes.Note, "/")
 		if err != nil {
 			return processedEvent, err
 		}
@@ -278,7 +278,7 @@ func (v *Provider) handleCommitCommentEvent(ctx context.Context, event *gitlab.C
 
 	if provider.IsCancelComment(event.ObjectAttributes.Note) {
 		action = "cancellation"
-		prName, branchName, tagName, err = provider.GetPipelineRunAndBranchOrTagNameFromCancelComment(event.ObjectAttributes.Note)
+		prName, branchName, tagName, err = provider.GetPipelineRunAndBranchOrTagNameFromCancelComment(event.ObjectAttributes.Note, "/")
 		if err != nil {
 			return processedEvent, err
 		}
@@ -318,8 +318,4 @@ func (v *Provider) handleCommitCommentEvent(ctx context.Context, event *gitlab.C
 	processedEvent.BaseBranch = branchName
 	v.Logger.Infof("gitlab commit_comment: pipelinerun %s has been requested on %s/%s#%s", action, processedEvent.Organization, processedEvent.Repository, processedEvent.SHA)
 	return processedEvent, nil
-}
-
-func isZeroSHA(sha string) bool {
-	return sha == "0000000000000000000000000000000000000000"
 }

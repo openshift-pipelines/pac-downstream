@@ -183,7 +183,7 @@ func TestBuildCELContext(t *testing.T) {
 	}
 }
 
-func TestBuildCELContext_ExcludedFields(t *testing.T) {
+func TestBuildCELContextExcludedFields(t *testing.T) {
 	logger, _ := logger.GetLogger()
 	run := &params.Run{}
 	kinteract := &kubeinteraction.Interaction{}
@@ -246,7 +246,7 @@ func TestBuildCELContext_ExcludedFields(t *testing.T) {
 	}
 }
 
-func TestBuildCELContext_NilEvent(t *testing.T) {
+func TestBuildCELContextNilEvent(t *testing.T) {
 	logger, _ := logger.GetLogger()
 	run := &params.Run{}
 	kinteract := &kubeinteraction.Interaction{}
@@ -276,7 +276,7 @@ func TestBuildCELContext_NilEvent(t *testing.T) {
 	assert.Assert(t, !exists, "event should not exist when nil event is passed")
 }
 
-func TestBuildCELContext_ConditionalFields(t *testing.T) {
+func TestBuildCELContextConditionalFields(t *testing.T) {
 	logger, _ := logger.GetLogger()
 	run := &params.Run{}
 	kinteract := &kubeinteraction.Interaction{}

@@ -7,12 +7,17 @@ import (
 	"net/http"
 
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/gitclient"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/kubeinteraction"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/matcher"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/pipelineascode"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/status"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/tracing"
+	semconv "go.opentelemetry.io/otel/semconv/v1.40.0"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 )
 
@@ -111,6 +116,10 @@ func (s *sinker) processEvent(ctx context.Context, request *http.Request) error 
 		}
 	}
 
+	// Enrich span with VCS attributes — for incoming events these are
+	// pre-populated; for webhook events ParsePayload filled them in.
+	setVCSSpanAttributes(ctx, s.event)
+
 	p := pipelineascode.NewPacs(s.event, s.vcx, s.run, s.pacInfo, s.kint, s.logger, s.globalRepo)
 	return p.Run(ctx)
 }
@@ -136,7 +145,7 @@ func (s *sinker) findMatchingRepository(ctx context.Context) (*v1alpha1.Reposito
 // Centralizing this here ensures consistent behavior across all events and enables early
 // optimizations like skip-CI detection before expensive processing.
 func (s *sinker) setupClient(ctx context.Context, repo *v1alpha1.Repository) error {
-	return pipelineascode.SetupAuthenticatedClient(
+	return gitclient.SetupAuthenticatedClient(
 		ctx,
 		s.vcx,
 		s.kint,
@@ -151,9 +160,9 @@ func (s *sinker) setupClient(ctx context.Context, repo *v1alpha1.Repository) err
 
 // createSkipCIStatus creates a neutral status check on the git provider when CI is skipped.
 func (s *sinker) createSkipCIStatus(ctx context.Context) error {
-	statusOpts := provider.StatusOpts{
+	statusOpts := status.StatusOpts{
 		Status:     "completed",
-		Conclusion: "skipped",
+		Conclusion: status.ConclusionSkipped,
 		Title:      "CI Skipped",
 		Summary:    fmt.Sprintf("%s - CI has been skipped", s.pacInfo.ApplicationName),
 		Text:       "Commit contains a skip CI command. Use /test or /retest to manually trigger CI if needed.",
@@ -167,4 +176,18 @@ func (s *sinker) createSkipCIStatus(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+func setVCSSpanAttributes(ctx context.Context, event *info.Event) {
+	span := trace.SpanFromContext(ctx)
+	if !span.IsRecording() {
+		return
+	}
+	span.SetAttributes(tracing.PACEventTypeKey.String(event.EventType))
+	if event.URL != "" {
+		span.SetAttributes(semconv.VCSRepositoryURLFullKey.String(event.URL))
+	}
+	if event.SHA != "" {
+		span.SetAttributes(semconv.VCSRefHeadRevisionKey.String(event.SHA))
+	}
 }

@@ -30,7 +30,7 @@ func TestExecutionOrder(t *testing.T) {
 	assert.Equal(t, len(runs), 4)
 }
 
-func TestExecutionOrder_SinglePRun(t *testing.T) {
+func TestExecutionOrderSinglePRun(t *testing.T) {
 	cm := NewConcurrencyManager()
 
 	testNs := "test"

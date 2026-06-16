@@ -16,7 +16,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/go-github/v81/github"
+	"github.com/google/go-github/v85/github"
 	"github.com/jonboulle/clockwork"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
@@ -25,18 +25,19 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/settings"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
+	prmetrics "github.com/openshift-pipelines/pipelines-as-code/pkg/pipelinerunmetrics"
 	testclient "github.com/openshift-pipelines/pipelines-as-code/pkg/test/clients"
 	ghtesthelper "github.com/openshift-pipelines/pipelines-as-code/pkg/test/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/test/logger"
-	metricsutils "github.com/openshift-pipelines/pipelines-as-code/pkg/test/metricstest"
 
+	"go.opentelemetry.io/otel"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 	"go.uber.org/zap"
 	zapobserver "go.uber.org/zap/zaptest/observer"
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"knative.dev/pkg/metrics/metricstest"
-	_ "knative.dev/pkg/metrics/testing"
 	"knative.dev/pkg/ptr"
 	rtesting "knative.dev/pkg/reconciler/testing"
 )
@@ -253,8 +254,8 @@ func TestGetTektonDir(t *testing.T) {
 			filterMessageSnippet: "Using PipelineRun definition from source pull_request tekton/cat#0",
 			// 1. Get Repo root objects
 			// 2. Get Tekton Dir objects
-			// 3/4. Get object content for each object (pipelinerun.yaml, pipeline.yaml)
-			expectedGHApiCalls: 4,
+			// 3. GraphQL batch fetch for 2 files (replaces 2 REST calls)
+			expectedGHApiCalls: 3,
 		},
 		{
 			name: "test no subtree on push",
@@ -269,8 +270,8 @@ func TestGetTektonDir(t *testing.T) {
 			filterMessageSnippet: "Using PipelineRun definition from source push",
 			// 1. Get Repo root objects
 			// 2. Get Tekton Dir objects
-			// 3/4. Get object content for each object (pipelinerun.yaml, pipeline.yaml)
-			expectedGHApiCalls: 4,
+			// 3. GraphQL batch fetch for 2 files (replaces 2 REST calls)
+			expectedGHApiCalls: 3,
 		},
 		{
 			name: "test provenance default_branch ",
@@ -283,9 +284,10 @@ func TestGetTektonDir(t *testing.T) {
 			treepath:             "testdata/tree/defaultbranch",
 			provenance:           "default_branch",
 			filterMessageSnippet: "Using PipelineRun definition from default_branch: main",
-			// 1. Get Repo root objects
-			// 2. Get Tekton Dir objects
-			// 3/4. Get object content for each object (pipelinerun.yaml, pipeline.yaml)
+			// 1. Resolve default branch to a commit SHA
+			// 2. Get Repo root objects
+			// 3. Get Tekton Dir objects
+			// 4. GraphQL batch fetch for 2 files
 			expectedGHApiCalls: 4,
 		},
 		{
@@ -348,7 +350,11 @@ func TestGetTektonDir(t *testing.T) {
 	}
 	for _, tt := range testGetTektonDir {
 		t.Run(tt.name, func(t *testing.T) {
-			metricsutils.ResetMetrics()
+			prmetrics.ResetRecorder()
+			reader := sdkmetric.NewManualReader()
+			provider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+			otel.SetMeterProvider(provider)
+
 			observer, exporter := zapobserver.New(zap.InfoLevel)
 			fakelogger := zap.New(observer).Sugar()
 			ctx, _ := rtesting.SetupFakeContext(t)
@@ -360,22 +366,21 @@ func TestGetTektonDir(t *testing.T) {
 				Logger:       fakelogger,
 			}
 
-			defer func() {
-				if !t.Failed() {
-					metricstest.CheckCountData(
-						t,
-						"pipelines_as_code_git_provider_api_request_count",
-						map[string]string{"provider": "github"},
-						tt.expectedGHApiCalls,
-					)
-				}
-			}()
-
+			shaDir := fmt.Sprintf("%x", sha256.Sum256([]byte(tt.treepath)))
+			tt.event.SHA = shaDir
 			if tt.provenance == "default_branch" {
-				tt.event.SHA = tt.event.DefaultBranch
-			} else {
-				shaDir := fmt.Sprintf("%x", sha256.Sum256([]byte(tt.treepath)))
-				tt.event.SHA = shaDir
+				mux.HandleFunc(fmt.Sprintf("/repos/%s/%s/branches/%s",
+					tt.event.Organization, tt.event.Repository, tt.event.DefaultBranch),
+					func(rw http.ResponseWriter, _ *http.Request) {
+						branch := &github.Branch{
+							Name: github.Ptr(tt.event.DefaultBranch),
+							Commit: &github.RepositoryCommit{
+								SHA: github.Ptr(shaDir),
+							},
+						}
+						b, _ := json.Marshal(branch)
+						fmt.Fprint(rw, string(b))
+					})
 			}
 			ghtesthelper.SetupGitTree(t, mux, tt.treepath, tt.event, false)
 
@@ -386,6 +391,17 @@ func TestGetTektonDir(t *testing.T) {
 				return
 			}
 			assert.NilError(t, err)
+
+			var rm metricdata.ResourceMetrics
+			err = reader.Collect(ctx, &rm)
+			assert.NilError(t, err, "error collecting metrics")
+
+			assert.Equal(t, len(rm.ScopeMetrics), 1)
+			assert.Equal(t, len(rm.ScopeMetrics[0].Metrics), 1)
+			assert.Equal(t, rm.ScopeMetrics[0].Metrics[0].Name, "pipelines_as_code_git_provider_api_request_count")
+			count, ok := rm.ScopeMetrics[0].Metrics[0].Data.(metricdata.Sum[int64])
+			assert.Assert(t, ok)
+			assert.Equal(t, count.DataPoints[0].Value, int64(tt.expectedGHApiCalls))
 
 			var gotMatch bool
 			if tt.expectedString == "" {
@@ -399,6 +415,232 @@ func TestGetTektonDir(t *testing.T) {
 				gotcha := exporter.FilterMessageSnippet(tt.filterMessageSnippet)
 				assert.Assert(t, gotcha.Len() > 0, "expected to find %s in logs, found %v", tt.filterMessageSnippet, exporter.All())
 			}
+		})
+	}
+}
+
+func TestGetTektonDirGraphQL(t *testing.T) {
+	tests := []struct {
+		name             string
+		event            *info.Event
+		treepath         string
+		provenance       string
+		setup            func(t *testing.T, mux *http.ServeMux, event *info.Event)
+		wantErr          string
+		wantLogSnippet   string
+		expectedAPICount int64
+		skipSetupGitTree bool
+	}{
+		{
+			name: "graphql batch fetch reduces api calls",
+			event: &info.Event{
+				Organization:  "tekton",
+				Repository:    "cat",
+				TriggerTarget: triggertype.PullRequest,
+			},
+			treepath:         "testdata/tree/simple",
+			wantLogSnippet:   "GraphQL batch fetch",
+			expectedAPICount: 3,
+		},
+		{
+			name: "graphql error handling",
+			event: &info.Event{
+				Organization:  "tekton",
+				Repository:    "cat",
+				TriggerTarget: triggertype.PullRequest,
+			},
+			skipSetupGitTree: true,
+			setup: func(t *testing.T, mux *http.ServeMux, event *info.Event) {
+				t.Helper()
+				shaDir := fmt.Sprintf("%x", sha256.Sum256([]byte("testdata/tree/simple")))
+				event.SHA = shaDir
+
+				// Setup tree endpoints manually
+				mux.HandleFunc(fmt.Sprintf("/repos/%v/%v/git/trees/%v", event.Organization, event.Repository, event.SHA),
+					func(rw http.ResponseWriter, _ *http.Request) {
+						tree := &github.Tree{
+							SHA: &event.SHA,
+							Entries: []*github.TreeEntry{
+								{
+									Path: github.Ptr(".tekton"),
+									Type: github.Ptr("tree"),
+									SHA:  github.Ptr("tektondirsha"),
+								},
+							},
+						}
+						b, _ := json.Marshal(tree)
+						fmt.Fprint(rw, string(b))
+					})
+
+				// Set up .tekton directory tree
+				tektonDirSha := "tektondirsha"
+				mux.HandleFunc(fmt.Sprintf("/repos/%v/%v/git/trees/%v", event.Organization, event.Repository, tektonDirSha),
+					func(rw http.ResponseWriter, _ *http.Request) {
+						tree := &github.Tree{
+							SHA: &tektonDirSha,
+							Entries: []*github.TreeEntry{
+								{
+									Path: github.Ptr("pipeline.yaml"),
+									Type: github.Ptr("blob"),
+									SHA:  github.Ptr("pipelinesha"),
+								},
+								{
+									Path: github.Ptr("pipelinerun.yaml"),
+									Type: github.Ptr("blob"),
+									SHA:  github.Ptr("pipelinerunsha"),
+								},
+							},
+						}
+						b, _ := json.Marshal(tree)
+						fmt.Fprint(rw, string(b))
+					})
+
+				// Error handler for /api/graphql
+				mux.HandleFunc("/api/graphql", func(w http.ResponseWriter, _ *http.Request) {
+					http.Error(w, "GraphQL endpoint not available", http.StatusNotFound)
+				})
+			},
+			wantErr: "failed to fetch .tekton files via GraphQL",
+		},
+		{
+			name: "default branch uses resolved sha for graphql",
+			event: &info.Event{
+				Organization:  "tekton",
+				Repository:    "cat",
+				DefaultBranch: "main",
+			},
+			provenance:       "default_branch",
+			skipSetupGitTree: true,
+			setup: func(t *testing.T, mux *http.ServeMux, _ *info.Event) {
+				t.Helper()
+				resolvedSHA := "resolved-default-branch-sha"
+				tektonDirSHA := "tektondirsha"
+
+				mux.HandleFunc("/repos/tekton/cat/branches/main", func(rw http.ResponseWriter, _ *http.Request) {
+					branch := &github.Branch{
+						Name: github.Ptr("main"),
+						Commit: &github.RepositoryCommit{
+							SHA: github.Ptr(resolvedSHA),
+						},
+					}
+					b, _ := json.Marshal(branch)
+					fmt.Fprint(rw, string(b))
+				})
+				mux.HandleFunc("/repos/tekton/cat/git/trees/"+resolvedSHA, func(rw http.ResponseWriter, _ *http.Request) {
+					tree := &github.Tree{
+						SHA: github.Ptr(resolvedSHA),
+						Entries: []*github.TreeEntry{
+							{
+								Path: github.Ptr(".tekton"),
+								Type: github.Ptr("tree"),
+								SHA:  github.Ptr(tektonDirSHA),
+							},
+						},
+					}
+					b, _ := json.Marshal(tree)
+					fmt.Fprint(rw, string(b))
+				})
+				mux.HandleFunc("/repos/tekton/cat/git/trees/"+tektonDirSHA, func(rw http.ResponseWriter, _ *http.Request) {
+					tree := &github.Tree{
+						SHA: github.Ptr(tektonDirSHA),
+						Entries: []*github.TreeEntry{
+							{
+								Path: github.Ptr("pipeline.yaml"),
+								Type: github.Ptr("blob"),
+								SHA:  github.Ptr("pipeline-sha"),
+							},
+							{
+								Path: github.Ptr("pipelinerun.yaml"),
+								Type: github.Ptr("blob"),
+								SHA:  github.Ptr("pipelinerun-sha"),
+							},
+						},
+					}
+					b, _ := json.Marshal(tree)
+					fmt.Fprint(rw, string(b))
+				})
+				mux.HandleFunc("/api/graphql", func(w http.ResponseWriter, r *http.Request) {
+					var graphQLReq struct {
+						Query string `json:"query"`
+					}
+					assert.NilError(t, json.NewDecoder(r.Body).Decode(&graphQLReq))
+					assert.Assert(t, strings.Contains(graphQLReq.Query, resolvedSHA+":.tekton/pipeline.yaml"), graphQLReq.Query)
+					assert.Assert(t, !strings.Contains(graphQLReq.Query, `main:.tekton/pipeline.yaml`), graphQLReq.Query)
+
+					_ = json.NewEncoder(w).Encode(map[string]any{
+						"data": map[string]any{
+							"repository": map[string]any{
+								"file0": map[string]any{"text": "kind: Pipeline\nmetadata:\n  name: pipeline\n"},
+								"file1": map[string]any{"text": "kind: PipelineRun\nmetadata:\n  name: run\n"},
+							},
+						},
+					})
+				})
+			},
+			expectedAPICount: 4,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Common setup
+			prmetrics.ResetRecorder()
+			reader := sdkmetric.NewManualReader()
+			provider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+			otel.SetMeterProvider(provider)
+
+			observer, exporter := zapobserver.New(zap.DebugLevel)
+			fakelogger := zap.New(observer).Sugar()
+			ctx, _ := rtesting.SetupFakeContext(t)
+			fakeclient, mux, _, teardown := ghtesthelper.SetupGH()
+			defer teardown()
+
+			gvcs := Provider{
+				ghClient:     fakeclient,
+				providerName: "github",
+				Logger:       fakelogger,
+			}
+
+			// Custom setup if provided
+			if tt.setup != nil {
+				tt.setup(t, mux, tt.event)
+			}
+
+			// Standard tree setup unless skipped
+			if !tt.skipSetupGitTree && tt.treepath != "" {
+				shaDir := fmt.Sprintf("%x", sha256.Sum256([]byte(tt.treepath)))
+				tt.event.SHA = shaDir
+				ghtesthelper.SetupGitTree(t, mux, tt.treepath, tt.event, false)
+			}
+
+			// Execute test
+			got, err := gvcs.GetTektonDir(ctx, tt.event, ".tekton", tt.provenance)
+
+			// Validate error
+			if tt.wantErr != "" {
+				assert.ErrorContains(t, err, tt.wantErr)
+				return
+			}
+			assert.NilError(t, err)
+
+			// Validate logs if specified
+			if tt.wantLogSnippet != "" {
+				logs := exporter.FilterMessageSnippet(tt.wantLogSnippet)
+				assert.Assert(t, logs.Len() > 0, "expected log message: %s", tt.wantLogSnippet)
+			}
+
+			// Validate metrics if specified
+			if tt.expectedAPICount > 0 {
+				var rm metricdata.ResourceMetrics
+				err = reader.Collect(ctx, &rm)
+				assert.NilError(t, err)
+				count, ok := rm.ScopeMetrics[0].Metrics[0].Data.(metricdata.Sum[int64])
+				assert.Assert(t, ok)
+				assert.Equal(t, count.DataPoints[0].Value, tt.expectedAPICount)
+			}
+
+			// Validate content
+			assert.Assert(t, len(got) > 0, "expected non-empty GetTektonDir output")
 		})
 	}
 }
@@ -486,6 +728,79 @@ func TestGetFileInsideRepo(t *testing.T) {
 	}
 }
 
+func TestGetFileInsideRepoRefSelection(t *testing.T) {
+	fileContent := base64.StdEncoding.EncodeToString([]byte("valid owners file"))
+	tests := []struct {
+		name        string
+		event       *info.Event
+		target      string
+		provenance  string
+		expectedRef string
+	}{
+		{
+			name: "uses SHA when target is empty",
+			event: &info.Event{
+				Organization:  "org",
+				Repository:    "repo",
+				SHA:           "sha123",
+				BaseBranch:    "main",
+				DefaultBranch: "main",
+			},
+			target:      "",
+			expectedRef: "sha123",
+		},
+		{
+			name: "uses target ref when target is provided",
+			event: &info.Event{
+				Organization:  "org",
+				Repository:    "repo",
+				SHA:           "sha123",
+				BaseBranch:    "main",
+				DefaultBranch: "main",
+			},
+			target:      "refs/heads/release-1.0",
+			expectedRef: "refs/heads/release-1.0",
+		},
+		{
+			name: "uses DefaultBranch when target is empty and provenance is default_branch",
+			event: &info.Event{
+				Organization:  "org",
+				Repository:    "repo",
+				SHA:           "sha123",
+				BaseBranch:    "develop",
+				DefaultBranch: "main",
+			},
+			target:      "",
+			provenance:  "default_branch",
+			expectedRef: "main",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, _ := rtesting.SetupFakeContext(t)
+			fakeclient, mux, _, teardown := ghtesthelper.SetupGH()
+			defer teardown()
+			gvcs := Provider{
+				ghClient:   fakeclient,
+				provenance: tt.provenance,
+			}
+
+			mux.HandleFunc("/repos/org/repo/contents/OWNERS", func(w http.ResponseWriter, r *http.Request) {
+				gotRef := r.URL.Query().Get("ref")
+				assert.Equal(t, gotRef, tt.expectedRef)
+				fmt.Fprintf(w, `{"name": "OWNERS", "path": "OWNERS", "sha": "ownersha"}`)
+			})
+			mux.HandleFunc("/repos/org/repo/git/blobs/ownersha", func(w http.ResponseWriter, _ *http.Request) {
+				fmt.Fprintf(w, `{"content": %q, "sha": "ownersha"}`, fileContent)
+			})
+
+			got, err := gvcs.GetFileInsideRepo(ctx, tt.event, "OWNERS", tt.target)
+			assert.NilError(t, err)
+			assert.Equal(t, got, "valid owners file")
+		})
+	}
+}
+
 func TestCheckSenderOrgMembership(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -547,7 +862,6 @@ func TestCheckSenderOrgMembership(t *testing.T) {
 }
 
 func TestGetStringPullRequestComment(t *testing.T) {
-	regexp := `(^|\n)/retest(\r\n|$)`
 	tests := []struct {
 		name, apiReturn string
 		wantErr         bool
@@ -556,13 +870,13 @@ func TestGetStringPullRequestComment(t *testing.T) {
 	}{
 		{
 			name:      "Get String from comments",
-			runevent:  info.Event{URL: "http://1"},
-			apiReturn: `[{"body": "/retest"}]`,
+			runevent:  info.Event{URL: "http://1", PullRequestNumber: 1},
+			apiReturn: `[{"body": "/ok-to-test"}]`,
 			wantRet:   true,
 		},
 		{
 			name:      "Not matching string in comments",
-			runevent:  info.Event{URL: "http://1"},
+			runevent:  info.Event{URL: "http://1", PullRequestNumber: 1},
 			apiReturn: `[{"body": ""}]`,
 			wantRet:   false,
 		},
@@ -572,14 +886,20 @@ func TestGetStringPullRequestComment(t *testing.T) {
 			fakeclient, mux, _, teardown := ghtesthelper.SetupGH()
 			defer teardown()
 			ctx, _ := rtesting.SetupFakeContext(t)
+			repo := &v1alpha1.Repository{
+				Spec: v1alpha1.RepositorySpec{
+					Settings: &v1alpha1.Settings{},
+				},
+			}
 			gprovider := Provider{
 				ghClient: fakeclient,
+				repo:     repo,
 			}
 			mux.HandleFunc(fmt.Sprintf("/repos/issues/%s/comments", filepath.Base(tt.runevent.URL)), func(rw http.ResponseWriter, _ *http.Request) {
 				fmt.Fprint(rw, tt.apiReturn)
 			})
 
-			ret, err := gprovider.GetStringPullRequestComment(ctx, &tt.runevent, regexp)
+			ret, err := gprovider.GetStringPullRequestComment(ctx, &tt.runevent)
 			if tt.wantErr && err == nil {
 				t.Error("We didn't get an error when we wanted one")
 			}
@@ -686,6 +1006,31 @@ func TestGithubGetCommitInfo(t *testing.T) {
 			wantHasSkipCmd: true,
 		},
 		{
+			name: "incoming webhook populates DefaultBranch",
+			event: &info.Event{
+				Organization: "owner",
+				Repository:   "repository",
+				SHA:          "shacommitinfo",
+				EventType:    "incoming",
+			},
+			shaurl:   "https://git.provider/commit/info",
+			shatitle: "My beautiful pony",
+			message:  "My beautiful pony",
+		},
+		{
+			name: "DefaultBranch already set is preserved",
+			event: &info.Event{
+				Organization:  "owner",
+				Repository:    "repository",
+				SHA:           "shacommitinfo",
+				DefaultBranch: "develop",
+				EventType:     "incoming",
+			},
+			shaurl:   "https://git.provider/commit/info",
+			shatitle: "My beautiful pony",
+			message:  "My beautiful pony",
+		},
+		{
 			name: "error",
 			event: &info.Event{
 				Organization: "owner",
@@ -693,6 +1038,7 @@ func TestGithubGetCommitInfo(t *testing.T) {
 				SHA:          "shacommitinfo",
 			},
 			apiReply: "hello moto",
+			wantErr:  "invalid character",
 		},
 		{
 			name:     "noclient",
@@ -705,6 +1051,12 @@ func TestGithubGetCommitInfo(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			fakeclient, mux, _, teardown := ghtesthelper.SetupGH()
 			defer teardown()
+			// Mock the repo endpoint so GetCommitInfo can resolve DefaultBranch
+			// when it is not already set on the event (e.g. incoming webhooks).
+			mux.HandleFunc(fmt.Sprintf("/repos/%s/%s",
+				tt.event.Organization, tt.event.Repository), func(rw http.ResponseWriter, _ *http.Request) {
+				fmt.Fprint(rw, `{"default_branch": "main"}`)
+			})
 			mux.HandleFunc(fmt.Sprintf("/repos/%s/%s/git/commits/%s",
 				tt.event.Organization, tt.event.Repository, tt.event.SHA), func(rw http.ResponseWriter, _ *http.Request) {
 				if tt.apiReply != "" {
@@ -775,6 +1127,7 @@ func TestGithubGetCommitInfo(t *testing.T) {
 				assert.ErrorContains(t, err, tt.wantErr)
 				return
 			}
+			assert.NilError(t, err)
 			assert.Equal(t, tt.shatitle, tt.event.SHATitle)
 			assert.Equal(t, tt.shaurl, tt.event.SHAURL)
 
@@ -793,6 +1146,16 @@ func TestGithubGetCommitInfo(t *testing.T) {
 				assert.DeepEqual(t, expectedCommitterDate, tt.event.SHACommitterDate)
 			}
 			assert.Equal(t, tt.wantHasSkipCmd, tt.event.HasSkipCommand)
+
+			// For incoming events, verify DefaultBranch is populated
+			if tt.event.EventType == "incoming" {
+				if tt.event.DefaultBranch == "develop" {
+					// If it was already set, it should be preserved
+					assert.Equal(t, "develop", tt.event.DefaultBranch, "DefaultBranch should be preserved")
+				} else {
+					assert.Equal(t, "main", tt.event.DefaultBranch, "DefaultBranch should be populated from API")
+				}
+			}
 		})
 	}
 }
@@ -834,8 +1197,16 @@ func TestGithubSetClient(t *testing.T) {
 					Log: testLog,
 				},
 			}
-			v := Provider{}
-			err := v.SetClient(ctx, fakeRun, tt.event, nil, nil)
+			v := Provider{
+				Logger:  testLog,
+				pacInfo: &info.PacOpts{},
+			}
+			repo := &v1alpha1.Repository{
+				Spec: v1alpha1.RepositorySpec{
+					Settings: &v1alpha1.Settings{},
+				},
+			}
+			err := v.SetClient(ctx, fakeRun, tt.event, repo, nil)
 			assert.NilError(t, err)
 			assert.Equal(t, tt.expectedURL, *v.APIURL)
 			assert.Equal(t, "https", v.Client().BaseURL.Scheme)
@@ -871,6 +1242,96 @@ func TestGithubSetClient(t *testing.T) {
 			)
 
 			assert.Equal(t, fullExpected, logs[0].Message)
+		})
+	}
+}
+
+func TestSetClientFallbackScopesToken(t *testing.T) {
+	testNamespace := "pipelinesascode"
+	secretName := "pipelines-as-code-secret"
+
+	ctx, _ := rtesting.SetupFakeContext(t)
+	seedData, _ := testclient.SeedTestData(t, ctx, testclient.Data{
+		Secret: []*corev1.Secret{
+			{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      secretName,
+					Namespace: testNamespace,
+				},
+				Data: map[string][]byte{
+					"github-application-id": []byte("12345"),
+					"github-private-key":    []byte(fakePrivateKey),
+				},
+			},
+		},
+	})
+
+	tests := []struct {
+		name            string
+		repositoryIDs   []int64
+		repositoryNames []string
+	}{
+		{
+			name:          "scopes by RepositoryIDs",
+			repositoryIDs: []int64{42},
+		},
+		{
+			name:            "scopes by RepositoryNames",
+			repositoryNames: []string{"my-repo"},
+		},
+		{
+			name:            "scopes by both",
+			repositoryIDs:   []int64{42},
+			repositoryNames: []string{"my-repo"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, mux, serverURL, teardown := ghtesthelper.SetupGH()
+			defer teardown()
+
+			scopedToken := "ghs_scoped_token_value"
+			mux.HandleFunc(fmt.Sprintf("/app/installations/%d/access_tokens", testInstallationID), func(w http.ResponseWriter, _ *http.Request) {
+				fmt.Fprintf(w, `{"token":%q,"expires_at":"2099-01-01T00:00:00Z"}`, scopedToken)
+			})
+
+			ctx = info.StoreCurrentControllerName(ctx, "default")
+			ctx = info.StoreNS(ctx, testNamespace)
+
+			t.Setenv("PAC_GIT_PROVIDER_TOKEN_APIURL", serverURL+"/api/v3")
+
+			initialToken := "ghs_initial_unscoped_token"
+			event := info.NewEvent()
+			event.InstallationID = testInstallationID
+			event.Provider.Token = initialToken
+
+			testLog, _ := logger.GetLogger()
+			v := Provider{
+				Logger:          testLog,
+				RepositoryIDs:   tt.repositoryIDs,
+				RepositoryNames: tt.repositoryNames,
+				pacInfo:         &info.PacOpts{},
+			}
+
+			run := &params.Run{
+				Clients: clients.Clients{
+					Log:  testLog,
+					Kube: seedData.Kube,
+				},
+				Info: info.Info{
+					Controller: &info.ControllerInfo{Secret: secretName},
+				},
+			}
+
+			repo := &v1alpha1.Repository{
+				Spec: v1alpha1.RepositorySpec{
+					Settings: &v1alpha1.Settings{},
+				},
+			}
+
+			err := v.SetClient(ctx, run, event, repo, nil)
+			assert.NilError(t, err)
+			assert.Equal(t, scopedToken, event.Provider.Token)
 		})
 	}
 }
@@ -1017,7 +1478,10 @@ func TestGetFiles(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			fakeclient, mux, _, teardown := ghtesthelper.SetupGH()
 			defer teardown()
-			metricsutils.ResetMetrics()
+			prmetrics.ResetRecorder()
+			reader := sdkmetric.NewManualReader()
+			metricProvider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+			otel.SetMeterProvider(metricProvider)
 
 			if tt.event.TriggerTarget == "pull_request" {
 				mux.HandleFunc(fmt.Sprintf("/repos/%s/%s/pulls/%d/files",
@@ -1041,9 +1505,6 @@ func TestGetFiles(t *testing.T) {
 					fmt.Fprint(rw, string(b))
 				})
 			}
-
-			metricsTags := map[string]string{"provider": "github", "event-type": string(tt.event.TriggerTarget)}
-			metricstest.CheckStatsNotReported(t, "pipelines_as_code_git_provider_api_request_count")
 
 			log, _ := logger.GetLogger()
 			ctx, _ := rtesting.SetupFakeContext(t)
@@ -1075,9 +1536,24 @@ func TestGetFiles(t *testing.T) {
 			}
 
 			// Check caching
-			metricstest.CheckCountData(t, "pipelines_as_code_git_provider_api_request_count", metricsTags, tt.wantAPIRequestCount)
+			var rm metricdata.ResourceMetrics
+			err = reader.Collect(ctx, &rm)
+			assert.NilError(t, err, "error collecting metrics")
+
+			assert.Equal(t, len(rm.ScopeMetrics), 1)
+			assert.Equal(t, len(rm.ScopeMetrics[0].Metrics), 1)
+			assert.Equal(t, rm.ScopeMetrics[0].Metrics[0].Name, "pipelines_as_code_git_provider_api_request_count")
+			count, ok := rm.ScopeMetrics[0].Metrics[0].Data.(metricdata.Sum[int64])
+			assert.Assert(t, ok)
+			assert.Equal(t, count.DataPoints[0].Value, int64(tt.wantAPIRequestCount))
+
 			_, _ = provider.GetFiles(ctx, tt.event)
-			metricstest.CheckCountData(t, "pipelines_as_code_git_provider_api_request_count", metricsTags, tt.wantAPIRequestCount)
+			// recollect the metrics after the second call
+			err = reader.Collect(ctx, &rm)
+			assert.NilError(t, err, "error collecting metrics")
+			count, ok = rm.ScopeMetrics[0].Metrics[0].Data.(metricdata.Sum[int64])
+			assert.Assert(t, ok)
+			assert.Equal(t, count.DataPoints[0].Value, int64(tt.wantAPIRequestCount))
 		})
 	}
 }
@@ -1088,7 +1564,7 @@ func (f roundTripperFunc) RoundTrip(r *http.Request) (*http.Response, error) {
 	return f(r)
 }
 
-func TestProvider_checkWebhookSecretValidity(t *testing.T) {
+func TestProviderCheckWebhookSecretValidity(t *testing.T) {
 	t1 := time.Date(1999, time.February, 3, 4, 5, 6, 7, time.UTC)
 	cw := clockwork.NewFakeClockAt(t1)
 	tests := []struct {
@@ -1384,6 +1860,164 @@ func TestCreateToken(t *testing.T) {
 	}
 }
 
+func TestGetPullRequest(t *testing.T) {
+	const (
+		org   = "owner"
+		repo  = "repo"
+		prNum = 42
+	)
+	prJSON := `{
+		"number": 42,
+		"title": "very cool feature pr",
+		"html_url": "https://github.com/owner/repo/pull/42",
+		"user": {"login": "author"},
+		"head": {
+			"sha": "headsha123",
+			"ref": "feature-branch",
+			"repo": {"html_url": "https://github.com/author/repo"}
+		},
+		"base": {
+			"ref": "main",
+			"repo": {
+				"html_url": "https://github.com/owner/repo",
+				"default_branch": "main",
+				"id": 9876
+			}
+		},
+		"labels": [{"name": "bug"}, {"name": "enhancement"}]
+	}`
+
+	tests := []struct {
+		name              string
+		event             *info.Event
+		apiReturn         string
+		wantErr           bool
+		wantErrStr        string
+		wantSHA           string
+		wantSHAURL        string
+		wantURL           string
+		wantDefaultBranch string
+		wantHeadBranch    string
+		wantBaseBranch    string
+		wantHeadURL       string
+		wantBaseURL       string
+		wantTitle         string
+		wantSender        string
+		wantEventType     string
+		wantLabels        []string
+		wantRepoID        int64
+	}{
+		{
+			name: "populates all event fields from PR response",
+			event: &info.Event{
+				Organization:      org,
+				Repository:        repo,
+				PullRequestNumber: prNum,
+			},
+			apiReturn:         prJSON,
+			wantSHA:           "headsha123",
+			wantSHAURL:        "https://github.com/owner/repo/pull/42/commit/headsha123",
+			wantURL:           "https://github.com/owner/repo",
+			wantDefaultBranch: "main",
+			wantHeadBranch:    "feature-branch",
+			wantBaseBranch:    "main",
+			wantHeadURL:       "https://github.com/author/repo",
+			wantBaseURL:       "https://github.com/owner/repo",
+			wantTitle:         "very cool feature pr",
+			wantSender:        "author",
+			wantEventType:     triggertype.PullRequest.String(),
+			wantLabels:        []string{"bug", "enhancement"},
+			wantRepoID:        9876,
+		},
+		{
+			name: "returns error on API failure",
+			event: &info.Event{
+				Organization:      org,
+				Repository:        repo,
+				PullRequestNumber: prNum,
+			},
+			wantErr:    true,
+			wantErrStr: "404",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, _ := rtesting.SetupFakeContext(t)
+			fakeclient, mux, _, teardown := ghtesthelper.SetupGH()
+			defer teardown()
+
+			if tt.apiReturn != "" {
+				mux.HandleFunc(fmt.Sprintf("/repos/%s/%s/pulls/%d", org, repo, prNum),
+					func(rw http.ResponseWriter, _ *http.Request) {
+						fmt.Fprint(rw, tt.apiReturn)
+					})
+			}
+
+			provider := &Provider{ghClient: fakeclient}
+			got, err := provider.getPullRequest(ctx, tt.event)
+			if tt.wantErr {
+				assert.Assert(t, err != nil)
+				if tt.wantErrStr != "" {
+					assert.ErrorContains(t, err, tt.wantErrStr)
+				}
+				return
+			}
+			assert.NilError(t, err)
+
+			assert.Equal(t, tt.wantSHA, got.SHA)
+			assert.Equal(t, tt.wantSHAURL, got.SHAURL)
+			assert.Equal(t, tt.wantURL, got.URL)
+			assert.Equal(t, tt.wantDefaultBranch, got.DefaultBranch)
+			assert.Equal(t, tt.wantHeadBranch, got.HeadBranch)
+			assert.Equal(t, tt.wantBaseBranch, got.BaseBranch)
+			assert.Equal(t, tt.wantHeadURL, got.HeadURL)
+			assert.Equal(t, tt.wantBaseURL, got.BaseURL)
+			assert.Equal(t, tt.wantTitle, got.PullRequestTitle)
+			assert.Equal(t, tt.wantSender, got.Sender)
+			assert.Equal(t, tt.wantEventType, got.EventType)
+			assert.DeepEqual(t, tt.wantLabels, got.PullRequestLabel)
+			assert.Equal(t, 1, len(provider.RepositoryIDs))
+			assert.Equal(t, tt.wantRepoID, provider.RepositoryIDs[0])
+		})
+	}
+}
+
+func TestGetPullRequestCaching(t *testing.T) {
+	ctx, _ := rtesting.SetupFakeContext(t)
+	fakeclient, mux, _, teardown := ghtesthelper.SetupGH()
+	defer teardown()
+
+	callCount := 0
+	mux.HandleFunc("/repos/owner/repo/pulls/1", func(rw http.ResponseWriter, _ *http.Request) {
+		callCount++
+		fmt.Fprint(rw, `{
+			"number": 1,
+			"title": "cached pr",
+			"html_url": "https://github.com/owner/repo/pull/1",
+			"user": {"login": "author"},
+			"head": {"sha": "abc", "ref": "head", "repo": {"html_url": "https://github.com/author/repo"}},
+			"base": {"ref": "main", "repo": {"html_url": "https://github.com/owner/repo", "default_branch": "main", "id": 1}},
+			"labels": [{"name": "bug"}, {"name": "enhancement"}]
+		}`)
+	})
+
+	event := &info.Event{
+		Organization:      "owner",
+		Repository:        "repo",
+		PullRequestNumber: 1,
+	}
+	provider := &Provider{ghClient: fakeclient}
+
+	_, err := provider.getPullRequest(ctx, event)
+	assert.NilError(t, err)
+	assert.Equal(t, 1, callCount, "expected exactly one API call on first invocation")
+
+	_, err = provider.getPullRequest(ctx, event)
+	assert.NilError(t, err)
+	assert.Equal(t, 1, callCount, "expected no additional API call on second invocation (cache hit)")
+}
+
 func TestIsHeadCommitOfBranch(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -1468,9 +2102,13 @@ func TestCreateComment(t *testing.T) {
 			updateMarker: "MARKER",
 			setup: func(t *testing.T, mux *http.ServeMux) func(t *testing.T) {
 				t.Helper()
+				mux.HandleFunc("/user", func(rw http.ResponseWriter, _ *http.Request) {
+					fmt.Fprint(rw, `{"id": 100, "login": "pac-user"}`)
+				},
+				)
 				mux.HandleFunc("/repos/org/repo/issues/123/comments", func(rw http.ResponseWriter, r *http.Request) {
 					if r.Method == http.MethodGet {
-						fmt.Fprint(rw, `[{"id": 555, "body": "MARKER"}]`)
+						fmt.Fprint(rw, `[{"id": 555, "body": "MARKER", "user": {"id": 100, "login": "pac-user"}}]`)
 						return
 					}
 				})
@@ -1487,6 +2125,9 @@ func TestCreateComment(t *testing.T) {
 			updateMarker: "MARKER",
 			setup: func(t *testing.T, mux *http.ServeMux) func(t *testing.T) {
 				t.Helper()
+				mux.HandleFunc("/user", func(rw http.ResponseWriter, _ *http.Request) {
+					fmt.Fprint(rw, `{"id": 100, "login": "pac-user"}`)
+				})
 				mux.HandleFunc("/repos/org/repo/issues/123/comments", func(rw http.ResponseWriter, r *http.Request) {
 					if r.Method == http.MethodGet {
 						fmt.Fprint(rw, `[{"id": 555, "body": "NO_MATCH"}]`)
@@ -1499,67 +2140,36 @@ func TestCreateComment(t *testing.T) {
 			},
 		},
 		{
-			name:         "deduplicates existing marker comments",
+			name:         "skip comment from different user and create new",
 			event:        &info.Event{Organization: "org", Repository: "repo", PullRequestNumber: 123},
 			updateMarker: "MARKER",
-			commentBody:  "new body MARKER",
+			commentBody:  "New Comment MARKER",
 			setup: func(t *testing.T, mux *http.ServeMux) func(t *testing.T) {
 				t.Helper()
-				editedPrimary := false
-				deletedDuplicate := false
-				mux.HandleFunc("/repos/org/repo/issues/123/comments", func(rw http.ResponseWriter, r *http.Request) {
-					assert.Equal(t, r.Method, http.MethodGet)
-					fmt.Fprint(rw, `[{"id": 111, "body": "MARKER old"}, {"id": 222, "body": "MARKER old"}]`)
+				editEndpointCalled := false
+				commentCreated := false
+				mux.HandleFunc("/user", func(rw http.ResponseWriter, _ *http.Request) {
+					fmt.Fprint(rw, `{"id": 100, "login": "pac-user"}`)
 				})
-				mux.HandleFunc("/repos/org/repo/issues/comments/111", func(rw http.ResponseWriter, r *http.Request) {
-					assert.Equal(t, r.Method, http.MethodPatch)
-					editedPrimary = true
+				mux.HandleFunc("/repos/org/repo/issues/123/comments", func(rw http.ResponseWriter, r *http.Request) {
+					if r.Method == http.MethodGet {
+						fmt.Fprint(rw, `[{"id": 555, "body": "Old MARKER", "user": {"id": 999, "login": "other-user"}}]`)
+						return
+					}
+					assert.Equal(t, r.Method, http.MethodPost)
+					commentCreated = true
+					rw.WriteHeader(http.StatusCreated)
+					fmt.Fprint(rw, `{"id": 556}`)
+				})
+				mux.HandleFunc("/repos/org/repo/issues/comments/555", func(rw http.ResponseWriter, _ *http.Request) {
+					editEndpointCalled = true
+					t.Error("should not edit comment from different user")
 					rw.WriteHeader(http.StatusOK)
 				})
-				mux.HandleFunc("/repos/org/repo/issues/comments/222", func(rw http.ResponseWriter, r *http.Request) {
-					assert.Equal(t, r.Method, http.MethodDelete)
-					deletedDuplicate = true
-					rw.WriteHeader(http.StatusNoContent)
-				})
 				return func(t *testing.T) {
 					t.Helper()
-					assert.Assert(t, editedPrimary)
-					assert.Assert(t, deletedDuplicate)
-				}
-			},
-		},
-		{
-			name:         "deduplicates post-create marker comments",
-			event:        &info.Event{Organization: "org", Repository: "repo", PullRequestNumber: 123},
-			updateMarker: "MARKER",
-			commentBody:  "body MARKER",
-			setup: func(t *testing.T, mux *http.ServeMux) func(t *testing.T) {
-				t.Helper()
-				listCalls := 0
-				deletedDuplicate := false
-				mux.HandleFunc("/repos/org/repo/issues/123/comments", func(rw http.ResponseWriter, r *http.Request) {
-					switch r.Method {
-					case http.MethodGet:
-						listCalls++
-						if listCalls <= 2 {
-							fmt.Fprint(rw, `[]`)
-							return
-						}
-						fmt.Fprint(rw, `[{"id": 111, "body": "body MARKER"}, {"id": 222, "body": "body MARKER"}]`)
-					case http.MethodPost:
-						rw.WriteHeader(http.StatusCreated)
-					default:
-						t.Fatalf("unexpected method: %s", r.Method)
-					}
-				})
-				mux.HandleFunc("/repos/org/repo/issues/comments/222", func(rw http.ResponseWriter, r *http.Request) {
-					assert.Equal(t, r.Method, http.MethodDelete)
-					deletedDuplicate = true
-					rw.WriteHeader(http.StatusNoContent)
-				})
-				return func(t *testing.T) {
-					t.Helper()
-					assert.Assert(t, deletedDuplicate)
+					assert.Assert(t, !editEndpointCalled, "edit endpoint should not be called for comment from different user")
+					assert.Assert(t, commentCreated, "new comment should be created")
 				}
 			},
 		},
@@ -1568,13 +2178,15 @@ func TestCreateComment(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx, _ := rtesting.SetupFakeContext(t)
+			observer, _ := zapobserver.New(zap.InfoLevel)
+			fakelogger := zap.New(observer).Sugar()
 
 			var provider *Provider
 			var postAssert func(t *testing.T)
 			if !tt.clientNil {
 				fakeclient, mux, _, teardown := ghtesthelper.SetupGH()
 				defer teardown()
-				provider = &Provider{ghClient: fakeclient}
+				provider = &Provider{ghClient: fakeclient, Logger: fakelogger}
 
 				if tt.setup != nil {
 					postAssert = tt.setup(t, mux)
@@ -1606,26 +2218,21 @@ func TestCreateCommentDedupLogging(t *testing.T) {
 	tests := []struct {
 		name            string
 		commitBody      string
+		updateMarker    string
 		setup           func(t *testing.T, mux *http.ServeMux)
 		expectedPhases  []string
 		unexpectedPhase []string
 	}{
 		{
-			name:       "logs full create flow when marker comment does not exist",
-			commitBody: "new body MARKER",
+			name:         "logs full create flow when marker comment does not exist",
+			commitBody:   "new body MARKER",
+			updateMarker: "MARKER",
 			setup: func(t *testing.T, mux *http.ServeMux) {
 				t.Helper()
-				listCalls := 0
 				mux.HandleFunc("/repos/org/repo/issues/123/comments", func(rw http.ResponseWriter, r *http.Request) {
 					switch r.Method {
 					case http.MethodGet:
-						listCalls++
-						switch listCalls {
-						case 1, 2:
-							fmt.Fprint(rw, `[]`)
-						default:
-							fmt.Fprint(rw, `[{"id": 333, "body": "new body MARKER", "created_at": "2024-01-01T00:00:00Z"}]`)
-						}
+						fmt.Fprint(rw, `[]`)
 					case http.MethodPost:
 						rw.WriteHeader(http.StatusCreated)
 						fmt.Fprint(rw, `{"id": 333, "body": "new body MARKER"}`)
@@ -1636,25 +2243,23 @@ func TestCreateCommentDedupLogging(t *testing.T) {
 			},
 			expectedPhases: []string{
 				"initial_list",
-				"jitter_wait",
-				"post_jitter_list",
-				"pre_create_race_window",
 				"create_comment_start",
 				"create_comment_done",
-				"post_create_list",
-				"dedup_select_primary",
-				"dedup_complete",
 			},
-			unexpectedPhase: []string{"dedup_delete_attempt"},
+			unexpectedPhase: []string{"no_marker", "jitter_wait", "post_jitter_list", "pre_create_race_window", "post_create_list", "dedup_select_primary", "dedup_complete", "dedup_delete_attempt"},
 		},
 		{
-			name:       "logs dedup select without delete for one existing marker comment",
-			commitBody: "new body MARKER",
+			name:         "logs edit flow for one existing marker comment",
+			commitBody:   "new body MARKER",
+			updateMarker: "MARKER",
 			setup: func(t *testing.T, mux *http.ServeMux) {
 				t.Helper()
+				mux.HandleFunc("/user", func(rw http.ResponseWriter, _ *http.Request) {
+					fmt.Fprint(rw, `{"id": 100, "login": "pac-user"}`)
+				})
 				mux.HandleFunc("/repos/org/repo/issues/123/comments", func(rw http.ResponseWriter, r *http.Request) {
 					assert.Equal(t, r.Method, http.MethodGet)
-					fmt.Fprint(rw, `[{"id": 111, "body": "MARKER old", "created_at": "2024-01-01T00:00:00Z"}]`)
+					fmt.Fprint(rw, `[{"id": 111, "body": "MARKER old", "created_at": "2024-01-01T00:00:00Z", "user": {"id": 100, "login": "pac-user"}}]`)
 				})
 				mux.HandleFunc("/repos/org/repo/issues/comments/111", func(rw http.ResponseWriter, r *http.Request) {
 					assert.Equal(t, r.Method, http.MethodPatch)
@@ -1663,38 +2268,57 @@ func TestCreateCommentDedupLogging(t *testing.T) {
 			},
 			expectedPhases: []string{
 				"initial_list",
-				"dedup_select_primary",
-				"dedup_complete",
+				"edit_comment",
 			},
-			unexpectedPhase: []string{"create_comment_start", "dedup_delete_attempt"},
+			unexpectedPhase: []string{"create_comment_start", "dedup_select_primary", "dedup_complete", "dedup_delete_attempt"},
 		},
 		{
-			name:       "logs duplicate detection and delete phases for multiple markers",
-			commitBody: "new body MARKER",
+			name:         "logs duplicate detection for multiple markers and edits first",
+			commitBody:   "new body MARKER",
+			updateMarker: "MARKER",
 			setup: func(t *testing.T, mux *http.ServeMux) {
 				t.Helper()
+				mux.HandleFunc("/user", func(rw http.ResponseWriter, _ *http.Request) {
+					fmt.Fprint(rw, `{"id": 100, "login": "pac-user"}`)
+				})
 				mux.HandleFunc("/repos/org/repo/issues/123/comments", func(rw http.ResponseWriter, r *http.Request) {
 					assert.Equal(t, r.Method, http.MethodGet)
-					fmt.Fprint(rw, `[{"id": 111, "body": "MARKER old", "created_at": "2024-01-01T00:00:00Z"}, {"id": 222, "body": "MARKER old", "created_at": "2024-01-01T00:01:00Z"}]`)
+					fmt.Fprint(rw, `[{"id": 111, "body": "MARKER old", "created_at": "2024-01-01T00:00:00Z", "user": {"id": 100, "login": "pac-user"}}, {"id": 222, "body": "MARKER old", "created_at": "2024-01-01T00:01:00Z", "user": {"id": 100, "login": "pac-user"}}]`)
 				})
 				mux.HandleFunc("/repos/org/repo/issues/comments/111", func(rw http.ResponseWriter, r *http.Request) {
 					assert.Equal(t, r.Method, http.MethodPatch)
 					rw.WriteHeader(http.StatusOK)
-				})
-				mux.HandleFunc("/repos/org/repo/issues/comments/222", func(rw http.ResponseWriter, r *http.Request) {
-					assert.Equal(t, r.Method, http.MethodDelete)
-					rw.WriteHeader(http.StatusNoContent)
 				})
 			},
 			expectedPhases: []string{
 				"initial_list",
 				"duplicate_detected",
-				"dedup_select_primary",
-				"dedup_delete_attempt",
-				"dedup_delete_done",
-				"dedup_complete",
+				"edit_comment",
 			},
-			unexpectedPhase: []string{"create_comment_start"},
+			unexpectedPhase: []string{"create_comment_start", "dedup_select_primary", "dedup_delete_attempt", "dedup_delete_done", "dedup_complete"},
+		},
+		{
+			name:         "logs no_marker phase when updateMarker is empty",
+			commitBody:   "body without marker",
+			updateMarker: "",
+			setup: func(t *testing.T, mux *http.ServeMux) {
+				t.Helper()
+				mux.HandleFunc("/repos/org/repo/issues/123/comments", func(rw http.ResponseWriter, r *http.Request) {
+					switch r.Method {
+					case http.MethodPost:
+						rw.WriteHeader(http.StatusCreated)
+						fmt.Fprint(rw, `{"id": 444, "body": "body without marker"}`)
+					default:
+						t.Fatalf("unexpected method %s", r.Method)
+					}
+				})
+			},
+			expectedPhases: []string{
+				"no_marker",
+				"create_comment_start",
+				"create_comment_done",
+			},
+			unexpectedPhase: []string{"initial_list", "edit_comment", "duplicate_detected"},
 		},
 	}
 
@@ -1723,7 +2347,7 @@ func TestCreateCommentDedupLogging(t *testing.T) {
 				},
 			}
 
-			err := provider.CreateComment(ctx, event, tt.commitBody, "MARKER")
+			err := provider.CreateComment(ctx, event, tt.commitBody, tt.updateMarker)
 			assert.NilError(t, err)
 
 			logEntries := observedLogs.FilterMessage("github comment dedup flow").All()
@@ -1749,9 +2373,20 @@ func TestCreateCommentDedupLogging(t *testing.T) {
 				assert.Equal(t, "123", fmt.Sprint(fields["pr"]))
 				assert.Equal(t, "controller-test", fmt.Sprint(fields["controller_label"]))
 
-				if phase == "initial_list" || phase == "post_jitter_list" || phase == "post_create_list" {
+				if phase == "initial_list" {
 					_, hasMatchedCount := fields["matched_count"]
 					assert.Assert(t, hasMatchedCount, "phase=%s should include matched_count fields=%+v", phase, fields)
+				}
+
+				bodyHashPhases := map[string]bool{
+					"create_comment_start": true,
+					"edit_comment":         true,
+					"no_edit_needed":       true,
+					"no_marker":            true,
+				}
+				if bodyHashPhases[phase] {
+					_, hasBodyHash := fields["body_hash"]
+					assert.Assert(t, hasBodyHash, "phase=%s should include body_hash field=%+v", phase, fields)
 				}
 			}
 
@@ -1950,6 +2585,138 @@ func TestSkipPushEventForPRCommits(t *testing.T) {
 				}
 				assert.Assert(t, found, "Expected warning log containing: %s", tt.skipWarnLogContains)
 			}
+		})
+	}
+}
+
+func TestFetchAppSlug(t *testing.T) {
+	testAppID := int64(12345)
+	validSlug := "my-github-app"
+
+	tests := []struct {
+		name             string
+		privateKey       []byte
+		applicationID    int64
+		setupMux         func(mux *http.ServeMux)
+		wantSlug         string
+		wantErrSubstring string
+	}{
+		{
+			name:          "success fetch app slug",
+			privateKey:    []byte(fakePrivateKey),
+			applicationID: testAppID,
+			setupMux: func(mux *http.ServeMux) {
+				mux.HandleFunc("/app", func(w http.ResponseWriter, _ *http.Request) {
+					_, _ = fmt.Fprintf(w, `{"slug": "%s", "name": "My GitHub App"}`, validSlug)
+				})
+			},
+			wantSlug: validSlug,
+		},
+		{
+			name:          "app endpoint returns 404",
+			privateKey:    []byte(fakePrivateKey),
+			applicationID: testAppID,
+			setupMux: func(mux *http.ServeMux) {
+				mux.HandleFunc("/app", func(w http.ResponseWriter, _ *http.Request) {
+					w.WriteHeader(http.StatusNotFound)
+					_, _ = fmt.Fprint(w, `{"message": "Not Found"}`)
+				})
+			},
+			wantErrSubstring: "failed to get app info",
+		},
+		{
+			name:             "invalid private key",
+			privateKey:       []byte("invalid-key"),
+			applicationID:    testAppID,
+			setupMux:         func(_ *http.ServeMux) {},
+			wantErrSubstring: "failed to parse private key",
+		},
+		{
+			name:          "app returns empty slug",
+			privateKey:    []byte(fakePrivateKey),
+			applicationID: testAppID,
+			setupMux: func(mux *http.ServeMux) {
+				mux.HandleFunc("/app", func(w http.ResponseWriter, _ *http.Request) {
+					_, _ = fmt.Fprint(w, `{"slug": "", "name": "My GitHub App"}`)
+				})
+			},
+			wantSlug: "",
+		},
+		{
+			name:          "app endpoint returns malformed JSON",
+			privateKey:    []byte(fakePrivateKey),
+			applicationID: testAppID,
+			setupMux: func(mux *http.ServeMux) {
+				mux.HandleFunc("/app", func(w http.ResponseWriter, _ *http.Request) {
+					_, _ = fmt.Fprint(w, `{invalid json`)
+				})
+			},
+			wantErrSubstring: "failed to get app info",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, mux, serverURL, teardown := ghtesthelper.SetupGH()
+			defer teardown()
+
+			if tt.setupMux != nil {
+				tt.setupMux(mux)
+			}
+
+			// Set up context with namespace
+			ctx, _ := rtesting.SetupFakeContext(t)
+			testNamespace := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-namespace",
+				},
+			}
+			ctx = info.StoreNS(ctx, testNamespace.GetName())
+
+			// Create a secret with the test application ID and private key
+			appIDBytes := make([]byte, 0, 20)
+			appIDBytes = fmt.Appendf(appIDBytes, "%d", tt.applicationID)
+			testSecret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "pac-secret",
+					Namespace: testNamespace.GetName(),
+				},
+				Data: map[string][]byte{
+					"github-application-id": appIDBytes,
+					"github-private-key":    tt.privateKey,
+				},
+			}
+
+			// Set up test data with kubernetes client
+			tdata := testclient.Data{
+				Namespaces: []*corev1.Namespace{testNamespace},
+				Secret:     []*corev1.Secret{testSecret},
+			}
+			stdata, _ := testclient.SeedTestData(t, ctx, tdata)
+
+			// Create a provider with mocked kubernetes client
+			provider := &Provider{}
+			provider.Run = &params.Run{
+				Clients: clients.Clients{
+					Kube: stdata.Kube,
+				},
+				Info: info.Info{
+					Controller: &info.ControllerInfo{
+						Secret: testSecret.GetName(),
+					},
+				},
+			}
+
+			slug, err := provider.fetchAppSlug(ctx, serverURL)
+
+			if tt.wantErrSubstring != "" {
+				assert.Assert(t, err != nil, "expected error but got none")
+				assert.ErrorContains(t, err, tt.wantErrSubstring)
+				return
+			}
+
+			assert.NilError(t, err)
+			assert.Equal(t, slug, tt.wantSlug)
 		})
 	}
 }

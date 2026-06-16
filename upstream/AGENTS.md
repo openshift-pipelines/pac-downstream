@@ -28,10 +28,55 @@
 
 ## Testing
 
-- **Unit tests**: Use `gotest.tools/v3` (never testify)
+### Test Structure
+
+- **Use table-driven tests**: Anonymous struct pattern with `tests := []struct{...}{...}`
+- **No underscores in test names**: Use PascalCase like `TestGetTektonDir`, not `TestGetTektonDir_Something`
+- **Subtest naming**: Use descriptive `name` field for `t.Run(tt.name, ...)`
+- **Complex setup**: Add `setup func(t *testing.T, ...)` field to test struct instead of creating separate test functions
+- **Example**:
+
+  ```go
+  func TestGetTektonDir(t *testing.T) {
+      tests := []struct {
+          name  string
+          event *info.Event
+          setup func(t *testing.T, mux *http.ServeMux)
+      }{
+          {
+              name: "simple case",
+              event: &info.Event{...},
+              setup: func(t *testing.T, mux *http.ServeMux) {
+                  t.Helper()
+                  mux.HandleFunc("/repos/...", ...)
+              },
+          },
+      }
+      for _, tt := range tests {
+          t.Run(tt.name, func(t *testing.T) { ... })
+      }
+  }
+  ```
+
+### Assertions
+
+- **Use `gotest.tools/v3/assert`** (never testify or pkg/assert)
+  - `assert.NilError(t, err)` - verify no error
+  - `assert.Assert(t, condition, msg)` - general assertions
+  - `assert.Equal(t, expected, actual)` - equality checks
+  - `assert.ErrorContains(t, err, substring)` - error validation
+
+### Test Types
+
+- **Unit tests**: Fast, focused, use mocks from `pkg/test/github`
 - **E2E tests**: Require specific setup - always ask user to run and copy output
 - **Gitea tests**: Most comprehensive and self-contained
-- **Commands**: `make test-no-cache`, `make html-coverage`
+
+### Commands
+
+- `make test` - Run test suite
+- `make test-no-cache` - Run without cache
+- `make html-coverage` - Generate coverage report
 
 ## Dependencies
 

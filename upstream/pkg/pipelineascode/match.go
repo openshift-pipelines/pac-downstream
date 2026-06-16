@@ -3,6 +3,7 @@ package pipelineascode
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -10,10 +11,12 @@ import (
 	apipac "github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	pacerrors "github.com/openshift-pipelines/pipelines-as-code/pkg/errors"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/gitclient"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/matcher"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/opscomments"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
+	providerstatus "github.com/openshift-pipelines/pipelines-as-code/pkg/provider/status"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/resolve"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/secrets"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/templates"
@@ -73,7 +76,7 @@ func (p *PacRun) verifyRepoAndUser(ctx context.Context) (*v1alpha1.Repository, e
 	// but we call it here as a safety net for edge cases (e.g., tests calling Run() directly,
 	// or if the early setup in sinker failed/was skipped). The call is idempotent.
 	// SetupAuthenticatedClient will merge global repo settings after determining secret namespace.
-	err = SetupAuthenticatedClient(ctx, p.vcx, p.k8int, p.run, p.event, repo, p.globalRepo, p.pacInfo, p.logger)
+	err = gitclient.SetupAuthenticatedClient(ctx, p.vcx, p.k8int, p.run, p.event, repo, p.globalRepo, p.pacInfo, p.logger)
 	if err != nil {
 		return repo, err
 	}
@@ -92,10 +95,10 @@ func (p *PacRun) verifyRepoAndUser(ctx context.Context) (*v1alpha1.Repository, e
 	// trigger CI on the repository, as any user is able to comment on a pushed commit in open-source repositories.
 	if p.event.TriggerTarget == triggertype.Push && opscomments.IsAnyOpsEventType(p.event.EventType) {
 		p.debugf("verifyRepoAndUser: checking access for gitops comment on push")
-		status := provider.StatusOpts{
+		status := providerstatus.StatusOpts{
 			Status:       CompletedStatus,
 			Title:        "Permission denied",
-			Conclusion:   failureConclusion,
+			Conclusion:   providerstatus.ConclusionFailure,
 			DetailsURL:   p.event.URL,
 			AccessDenied: true,
 		}
@@ -109,10 +112,10 @@ func (p *PacRun) verifyRepoAndUser(ctx context.Context) (*v1alpha1.Repository, e
 	// on comment we skip it for now, we are going to check later on
 	if p.event.TriggerTarget != triggertype.Push && p.event.EventType != opscomments.NoOpsCommentEventType.String() {
 		p.debugf("verifyRepoAndUser: checking access for trigger target=%s event_type=%s", p.event.TriggerTarget, p.event.EventType)
-		status := provider.StatusOpts{
+		status := providerstatus.StatusOpts{
 			Status:       queuedStatus,
 			Title:        "Pending approval, waiting for an /ok-to-test",
-			Conclusion:   pendingConclusion,
+			Conclusion:   providerstatus.ConclusionPending,
 			DetailsURL:   p.event.URL,
 			AccessDenied: true,
 		}
@@ -121,11 +124,13 @@ func (p *PacRun) verifyRepoAndUser(ctx context.Context) (*v1alpha1.Repository, e
 		}
 		// When /ok-to-test is approved, update the parent "Pipelines as Code CI" status to success
 		// to indicate the approval was successful before pipelines start running.
-		if p.event.EventType == opscomments.OkToTestCommentEventType.String() {
-			approvalStatus := provider.StatusOpts{
+		// we only do this for all providers except github apps since github apps use the checkRun API to update the status
+		// checking installationID is <= 0 because sometime it's set to -1
+		if p.event.EventType == opscomments.OkToTestCommentEventType.String() && p.event.InstallationID <= 0 {
+			approvalStatus := providerstatus.StatusOpts{
 				Status:     CompletedStatus,
 				Title:      "Approved",
-				Conclusion: successConclusion,
+				Conclusion: providerstatus.ConclusionSuccess,
 				DetailsURL: p.event.URL,
 			}
 			if err := p.vcx.CreateStatus(ctx, p.event, approvalStatus); err != nil {
@@ -252,6 +257,12 @@ func (p *PacRun) getPipelineRunsFromRepo(ctx context.Context, repo *v1alpha1.Rep
 	p.debugf("getPipelineRunsFromRepo: pipelineRuns count=%d", len(pipelineRuns))
 	pipelineRuns, err = resolve.MetadataResolve(pipelineRuns)
 	if err != nil && len(pipelineRuns) == 0 {
+		// Don't report errors for no-ops comment events to avoid a webhook feedback loop:
+		// reporting creates a comment, which triggers another webhook, which hits the same error.
+		if p.event.EventType == opscomments.NoOpsCommentEventType.String() {
+			p.logger.Infof("skipping MetadataResolve error for no-ops comment event: %s", err)
+			return nil, nil
+		}
 		p.eventEmitter.EmitMessage(repo, zap.ErrorLevel, "FailedToResolvePipelineRunMetadata", err.Error())
 		return nil, err
 	}
@@ -261,6 +272,16 @@ func (p *PacRun) getPipelineRunsFromRepo(ctx context.Context, repo *v1alpha1.Rep
 	var matchedPRs []matcher.Match
 	if p.event.TargetTestPipelineRun == "" {
 		if matchedPRs, err = matcher.MatchPipelinerunByAnnotation(ctx, p.logger, pipelineRuns, p.run, p.event, p.vcx, p.eventEmitter, repo, true); err != nil {
+			prefix := provider.GetGitOpsCommentPrefix(repo)
+			// Check if all pipelines have already succeeded - post comment so user gets feedback
+			if errors.Is(err, matcher.NoFailedPipelineToRetestError(prefix)) {
+				p.logger.Infof("RepositoryAllPipelinesSucceeded: %s", err.Error())
+				p.eventEmitter.EmitMessage(nil, zap.InfoLevel, "RepositoryAllPipelinesSucceeded", err.Error())
+				if commentErr := p.vcx.CreateComment(ctx, p.event, err.Error(), ""); commentErr != nil {
+					return nil, fmt.Errorf("error adding no pipelineruns to rerun comment: %w", commentErr)
+				}
+				return nil, nil
+			}
 			// Don't fail when you don't have a match between pipeline and annotations
 			p.eventEmitter.EmitMessage(nil, zap.WarnLevel, "RepositoryNoMatch", err.Error())
 			// In a scenario where an external user submits a pull request and the repository owner uses the
@@ -282,10 +303,10 @@ func (p *PacRun) getPipelineRunsFromRepo(ctx context.Context, repo *v1alpha1.Rep
 	// if the event is a comment event, but we don't have any match from the keys.OnComment then do the ACL checks again
 	// we skipped previously so we can get the match from the event to the pipelineruns
 	if p.event.EventType == opscomments.NoOpsCommentEventType.String() || p.event.EventType == opscomments.OnCommentEventType.String() {
-		status := provider.StatusOpts{
+		status := providerstatus.StatusOpts{
 			Status:       queuedStatus,
 			Title:        "Pending approval, waiting for an /ok-to-test",
-			Conclusion:   pendingConclusion,
+			Conclusion:   providerstatus.ConclusionPending,
 			DetailsURL:   p.event.URL,
 			AccessDenied: true,
 		}
@@ -330,13 +351,17 @@ func (p *PacRun) getPipelineRunsFromRepo(ctx context.Context, repo *v1alpha1.Rep
 			}
 		}
 		p.debugf("getPipelineRunsFromRepo: resolving remote tasks for pipelineRuns=%d", len(types.PipelineRuns))
-		pipelineRuns, err = resolve.Resolve(ctx, p.run, p.logger, p.vcx, types, p.event, &resolve.Opts{
+		var deprecatedHubResources []string
+		pipelineRuns, deprecatedHubResources, err = resolve.Resolve(ctx, p.run, p.logger, p.vcx, types, p.event, &resolve.Opts{
 			GenerateName: true,
 			RemoteTasks:  true,
 		})
 		if err != nil {
 			p.eventEmitter.EmitMessage(repo, zap.ErrorLevel, "RepositoryFailedToMatch", fmt.Sprintf("failed to match pipelineRuns: %s", err.Error()))
 			return nil, err
+		}
+		if len(deprecatedHubResources) > 0 {
+			p.postTektonHubDeprecationNotice(ctx, repo, deprecatedHubResources)
 		}
 	}
 
@@ -470,6 +495,40 @@ func (p *PacRun) changePipelineRun(ctx context.Context, repo *v1alpha1.Repositor
 	return nil
 }
 
+const tektonHubDeprecationMarker = "<!-- pac-deprecation-tektonhub -->"
+
+func (p *PacRun) postTektonHubDeprecationNotice(ctx context.Context, repo *v1alpha1.Repository, deprecatedResources []string) {
+	// Emit Kubernetes Event on the Repository CR
+	deprecMsg := fmt.Sprintf("Tekton Hub integration is deprecated and will be removed in a future release. The following resources were resolved from a Tekton Hub catalog: %s. Please migrate to Artifact Hub or fetch tasks from a git repository.", strings.Join(deprecatedResources, ", "))
+	p.eventEmitter.EmitMessage(repo, zap.WarnLevel, "DeprecatedTektonHub", deprecMsg)
+
+	// Post a consolidated comment on the pull request (force-posted, ignores disable_all)
+	if p.event.PullRequestNumber > 0 {
+		commentBody := formatTektonHubDeprecationComment(deprecatedResources)
+		if commentErr := p.vcx.CreateComment(ctx, p.event, commentBody, tektonHubDeprecationMarker); commentErr != nil {
+			p.logger.Warnf("failed to post Tekton Hub deprecation comment on PR: %s", commentErr)
+		}
+	}
+}
+
+func formatTektonHubDeprecationComment(deprecatedResources []string) string {
+	var sb strings.Builder
+	sb.WriteString("> [!WARNING]\n")
+	sb.WriteString("> **Tekton Hub Deprecation Notice**\n")
+	sb.WriteString(">\n")
+	sb.WriteString("> The following resources were resolved from a Tekton Hub catalog, which is **deprecated** and will be **removed in a future release**:\n")
+	sb.WriteString(">\n")
+	for _, r := range deprecatedResources {
+		fmt.Fprintf(&sb, "> - %s\n", r)
+	}
+	sb.WriteString(">\n")
+	sb.WriteString("> Please migrate to [Artifact Hub](https://artifacthub.io) or fetch tasks directly from a git repository or remote URL.\n")
+	sb.WriteString("> See the [migration guide](https://pipelinesascode.com/docs/guides/pipeline-resolution/) for alternatives.\n")
+	sb.WriteString("\n")
+	sb.WriteString(tektonHubDeprecationMarker)
+	return sb.String()
+}
+
 // checkNeedUpdate checks if the template needs an update form the user, try to
 // match some patterns for some issues in a template to let the user know they need to
 // update.
@@ -484,11 +543,11 @@ func (p *PacRun) checkNeedUpdate(_ string) (string, bool) {
 
 func (p *PacRun) createNeutralStatus(ctx context.Context, title, text string) error {
 	p.debugf("createNeutralStatus: title=%s", title)
-	status := provider.StatusOpts{
+	status := providerstatus.StatusOpts{
 		Status:     CompletedStatus,
 		Title:      title,
 		Text:       text,
-		Conclusion: neutralConclusion,
+		Conclusion: providerstatus.ConclusionNeutral,
 		DetailsURL: p.event.URL,
 	}
 	if err := p.vcx.CreateStatus(ctx, p.event, status); err != nil {

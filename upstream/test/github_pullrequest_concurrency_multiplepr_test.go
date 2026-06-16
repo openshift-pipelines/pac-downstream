@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/go-github/v81/github"
+	"github.com/google/go-github/v85/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/random"
@@ -53,7 +53,7 @@ func TestGithubGHEPullRequestConcurrencyMultiplePR(t *testing.T) {
 	}
 	// set concurrency
 	opts.Concurrency = maxNumberOfConcurrentPipelineRuns
-	err = tgithub.CreateCRD(ctx, t, repoinfo, runcnx, opts, targetNS)
+	err = tgithub.CreateCRD(ctx, t, repoinfo, runcnx, opts, ghcnx, targetNS)
 	assert.NilError(t, err)
 
 	allPullRequests := []tgithub.PRTest{}

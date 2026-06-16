@@ -1,10 +1,13 @@
 package provider
 
 import (
+	"strings"
 	"testing"
 
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/settings"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/status"
 	"gotest.tools/v3/assert"
 )
 
@@ -213,6 +216,11 @@ func TestGetPipelineRunFromComment(t *testing.T) {
 			want:    "abc-01-pr",
 		},
 		{
+			name:    "test with key value is not a pipeline name",
+			comment: "/test custom1=value",
+			want:    "",
+		},
+		{
 			name:    "retest a pipeline",
 			comment: "/retest abc-01-pr",
 			want:    "abc-01-pr",
@@ -259,6 +267,11 @@ func TestGetPipelineRunFromCancelComment(t *testing.T) {
 			want:    "abc-01-pr",
 		},
 		{
+			name:    "cancel with key value is not a pipeline name",
+			comment: "/cancel custom1=value",
+			want:    "",
+		},
+		{
 			name:    "string before cancel command",
 			comment: "abc \n /cancel abc-01-pr",
 			want:    "abc-01-pr",
@@ -289,6 +302,7 @@ func TestGetPipelineRunAndBranchNameFromTestComment(t *testing.T) {
 		comment    string
 		branchName string
 		prName     string
+		prefix     string
 		wantError  bool
 	}{
 		{
@@ -333,6 +347,13 @@ func TestGetPipelineRunAndBranchNameFromTestComment(t *testing.T) {
 			wantError:  false,
 		},
 		{
+			name:       "branch name contains substring tag so not parsed as tag",
+			comment:    "/retest my-pipeline branch:feature-test-tagged-release",
+			prName:     "my-pipeline",
+			branchName: "feature-test-tagged-release",
+			wantError:  false,
+		},
+		{
 			name:      "different word other than branch for retest command",
 			comment:   "/retest invalidname:nightly",
 			wantError: true,
@@ -356,6 +377,19 @@ func TestGetPipelineRunAndBranchNameFromTestComment(t *testing.T) {
 			wantError:  false,
 		},
 		{
+			name:      "test with only key value is not a pipeline name",
+			comment:   "/test custom1=value",
+			prName:    "",
+			wantError: false,
+		},
+		{
+			name:       "test with key value and branch is not a pipeline name",
+			comment:    "/test custom1=value branch:nightly",
+			prName:     "",
+			branchName: "nightly",
+			wantError:  false,
+		},
+		{
 			name:      "string before retest command",
 			comment:   "abc \n /retest abc-01-pr",
 			prName:    "abc-01-pr",
@@ -373,11 +407,38 @@ func TestGetPipelineRunAndBranchNameFromTestComment(t *testing.T) {
 			prName:    "abc-01-pr",
 			wantError: false,
 		},
+		{
+			name:       "test a pipeline with prefix",
+			comment:    "/pac-test abc-01-pr",
+			prName:     "abc-01-pr",
+			branchName: "",
+			prefix:     "/pac-",
+			wantError:  false,
+		},
+		{
+			name:       "retest a pipeline with prefix",
+			comment:    "/pac-retest abc-01-pr",
+			prName:     "abc-01-pr",
+			branchName: "",
+			prefix:     "/pac-",
+			wantError:  false,
+		},
+		{
+			name:       "test a pipeline with prefix and key value",
+			comment:    "/pac-test abc-01-pr key=value",
+			prName:     "abc-01-pr",
+			branchName: "",
+			prefix:     "/pac-",
+			wantError:  false,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			prName, branchName, _, err := GetPipelineRunAndBranchOrTagNameFromTestComment(tt.comment)
+			if tt.prefix == "" {
+				tt.prefix = "/"
+			}
+			prName, branchName, _, err := GetPipelineRunAndBranchOrTagNameFromTestComment(tt.comment, tt.prefix)
 			assert.Equal(t, tt.wantError, err != nil)
 			assert.Equal(t, tt.branchName, branchName)
 			assert.Equal(t, tt.prName, prName)
@@ -391,6 +452,7 @@ func TestGetPipelineRunAndBranchNameFromCancelComment(t *testing.T) {
 		comment    string
 		branchName string
 		prName     string
+		prefix     string
 		wantError  bool
 	}{
 		{
@@ -461,11 +523,49 @@ func TestGetPipelineRunAndBranchNameFromCancelComment(t *testing.T) {
 			comment:   "/cancel invalidname:nightly",
 			wantError: true,
 		},
+		{
+			name:      "cancel all with prefix",
+			comment:   "/pac-cancel",
+			prefix:    "/pac-",
+			wantError: false,
+		},
+		{
+			name:      "cancel single with prefix",
+			comment:   "/pac-cancel abc-pr",
+			prName:    "abc-pr",
+			prefix:    "/pac-",
+			wantError: false,
+		},
+		{
+			name:       "cancel with branch and prefix",
+			comment:    "/pac-cancel branch:test",
+			branchName: "test",
+			prefix:     "/pac-",
+			wantError:  false,
+		},
+		{
+			name:       "cancel single with branch and prefix",
+			comment:    "/pac-cancel abc-pr branch:test",
+			prName:     "abc-pr",
+			branchName: "test",
+			prefix:     "/pac-",
+			wantError:  false,
+		},
+		{
+			name:      "different prefix cancel single",
+			comment:   "/myteam-cancel xyz-pr",
+			prName:    "xyz-pr",
+			prefix:    "/myteam-",
+			wantError: false,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			prName, branchName, _, err := GetPipelineRunAndBranchOrTagNameFromCancelComment(tt.comment)
+			if tt.prefix == "" {
+				tt.prefix = "/"
+			}
+			prName, branchName, _, err := GetPipelineRunAndBranchOrTagNameFromCancelComment(tt.comment, tt.prefix)
 			assert.Equal(t, tt.wantError, err != nil)
 			assert.Equal(t, tt.branchName, branchName)
 			assert.Equal(t, tt.prName, prName)
@@ -513,7 +613,7 @@ func TestCompareHostOfURLS(t *testing.T) {
 
 func TestGetCheckName(t *testing.T) {
 	type args struct {
-		status  StatusOpts
+		status  status.StatusOpts
 		pacopts *info.PacOpts
 	}
 	tests := []struct {
@@ -524,7 +624,7 @@ func TestGetCheckName(t *testing.T) {
 		{
 			name: "no application name",
 			args: args{
-				status: StatusOpts{
+				status: status.StatusOpts{
 					OriginalPipelineRunName: "HELLO",
 				},
 				pacopts: &info.PacOpts{Settings: settings.Settings{ApplicationName: ""}},
@@ -534,7 +634,7 @@ func TestGetCheckName(t *testing.T) {
 		{
 			name: "application and pipelinerun name",
 			args: args{
-				status: StatusOpts{
+				status: status.StatusOpts{
 					OriginalPipelineRunName: "MOTO",
 				},
 				pacopts: &info.PacOpts{Settings: settings.Settings{ApplicationName: "HELLO"}},
@@ -544,7 +644,7 @@ func TestGetCheckName(t *testing.T) {
 		{
 			name: "application no pipelinerun name",
 			args: args{
-				status: StatusOpts{
+				status: status.StatusOpts{
 					OriginalPipelineRunName: "",
 				},
 				pacopts: &info.PacOpts{Settings: settings.Settings{ApplicationName: "PAC"}},
@@ -653,6 +753,230 @@ func TestSkipCI(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got := SkipCI(tt.commitMessage)
 			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestGetGitOpsCommentPrefix(t *testing.T) {
+	tests := []struct {
+		name string
+		repo *v1alpha1.Repository
+		want string
+	}{
+		{
+			name: "no settings returns default prefix",
+			repo: &v1alpha1.Repository{
+				Spec: v1alpha1.RepositorySpec{
+					Settings: nil,
+				},
+			},
+			want: "/",
+		},
+		{
+			name: "empty GitOpsCommandPrefix returns default prefix",
+			repo: &v1alpha1.Repository{
+				Spec: v1alpha1.RepositorySpec{
+					Settings: &v1alpha1.Settings{
+						GitOpsCommandPrefix: "",
+					},
+				},
+			},
+			want: "/",
+		},
+		{
+			name: "custom prefix present in comment returns custom prefix",
+			repo: &v1alpha1.Repository{
+				Spec: v1alpha1.RepositorySpec{
+					Settings: &v1alpha1.Settings{
+						GitOpsCommandPrefix: "pac",
+					},
+				},
+			},
+			want: "/pac ",
+		},
+		{
+			name: "custom prefix not present in comment returns default prefix",
+			repo: &v1alpha1.Repository{
+				Spec: v1alpha1.RepositorySpec{
+					Settings: &v1alpha1.Settings{
+						GitOpsCommandPrefix: "pac",
+					},
+				},
+			},
+			want: "/pac ",
+		},
+		{
+			name: "custom prefix with retest command",
+			repo: &v1alpha1.Repository{
+				Spec: v1alpha1.RepositorySpec{
+					Settings: &v1alpha1.Settings{
+						GitOpsCommandPrefix: "pac",
+					},
+				},
+			},
+			want: "/pac ",
+		},
+		{
+			name: "custom prefix with cancel command",
+			repo: &v1alpha1.Repository{
+				Spec: v1alpha1.RepositorySpec{
+					Settings: &v1alpha1.Settings{
+						GitOpsCommandPrefix: "pac",
+					},
+				},
+			},
+			want: "/pac ",
+		},
+		{
+			name: "custom prefix with ok-to-test command",
+			repo: &v1alpha1.Repository{
+				Spec: v1alpha1.RepositorySpec{
+					Settings: &v1alpha1.Settings{
+						GitOpsCommandPrefix: "pac",
+					},
+				},
+			},
+			want: "/pac ",
+		},
+		{
+			name: "multiline comment with custom prefix",
+			repo: &v1alpha1.Repository{
+				Spec: v1alpha1.RepositorySpec{
+					Settings: &v1alpha1.Settings{
+						GitOpsCommandPrefix: "pac",
+					},
+				},
+			},
+			want: "/pac ",
+		},
+		{
+			name: "multiline comment with default prefix only",
+			repo: &v1alpha1.Repository{
+				Spec: v1alpha1.RepositorySpec{
+					Settings: &v1alpha1.Settings{
+						GitOpsCommandPrefix: "pac",
+					},
+				},
+			},
+			want: "/pac ",
+		},
+		{
+			name: "different custom prefix",
+			repo: &v1alpha1.Repository{
+				Spec: v1alpha1.RepositorySpec{
+					Settings: &v1alpha1.Settings{
+						GitOpsCommandPrefix: "myteam",
+					},
+				},
+			},
+			want: "/myteam ",
+		},
+		{
+			name: "comment with both default and custom prefix prefers custom",
+			repo: &v1alpha1.Repository{
+				Spec: v1alpha1.RepositorySpec{
+					Settings: &v1alpha1.Settings{
+						GitOpsCommandPrefix: "pac",
+					},
+				},
+			},
+			want: "/pac ",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := GetGitOpsCommentPrefix(tt.repo)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestGetBBCloudStatusKey(t *testing.T) {
+	tests := []struct {
+		name     string
+		status   status.StatusOpts
+		pacopts  *info.PacOpts
+		expected string
+	}{
+		{
+			name:   "application name only no pipeline run name",
+			status: status.StatusOpts{OriginalPipelineRunName: ""},
+			pacopts: &info.PacOpts{
+				Settings: settings.Settings{ApplicationName: "MyApp"},
+			},
+			expected: "MyApp",
+		},
+		{
+			name:   "application name longer than 40 truncated",
+			status: status.StatusOpts{OriginalPipelineRunName: ""},
+			pacopts: &info.PacOpts{
+				Settings: settings.Settings{ApplicationName: strings.Repeat("x", 50)},
+			},
+			expected: strings.Repeat("x", 40),
+		},
+		{
+			name:   "app and pr name combined fit in 40 chars",
+			status: status.StatusOpts{OriginalPipelineRunName: "my-pr"},
+			pacopts: &info.PacOpts{
+				Settings: settings.Settings{ApplicationName: "MyApp"},
+			},
+			expected: "MyApp / my-pr",
+		},
+		{
+			name:   "app and pr name combined exceed 40 chars falls back to pr name only",
+			status: status.StatusOpts{OriginalPipelineRunName: "this-is-a-very-long-pipeline-run-name"},
+			pacopts: &info.PacOpts{
+				Settings: settings.Settings{ApplicationName: "MyApplication"},
+			},
+			expected: "this-is-a-very-long-pipeline-run-name",
+		},
+		{
+			name:   "no application name short pipeline run name",
+			status: status.StatusOpts{OriginalPipelineRunName: "my-pr"},
+			pacopts: &info.PacOpts{
+				Settings: settings.Settings{ApplicationName: ""},
+			},
+			expected: "my-pr",
+		},
+		{
+			name:   "no application name pipeline run name exactly 40",
+			status: status.StatusOpts{OriginalPipelineRunName: strings.Repeat("a", 40)},
+			pacopts: &info.PacOpts{
+				Settings: settings.Settings{ApplicationName: ""},
+			},
+			expected: strings.Repeat("a", 40),
+		},
+		{
+			name:   "no application name pipeline run name longer than 40 truncated with hash",
+			status: status.StatusOpts{OriginalPipelineRunName: strings.Repeat("c", 50)},
+			pacopts: &info.PacOpts{
+				Settings: settings.Settings{ApplicationName: ""},
+			},
+			expected: strings.Repeat("c", 33) + "-5de6bf",
+		},
+		{
+			name:   "no application name no pipeline run name",
+			status: status.StatusOpts{OriginalPipelineRunName: ""},
+			pacopts: &info.PacOpts{
+				Settings: settings.Settings{ApplicationName: ""},
+			},
+			expected: "",
+		},
+		{
+			name:   "long pr name with app produces stable hash",
+			status: status.StatusOpts{OriginalPipelineRunName: strings.Repeat("b", 50)},
+			pacopts: &info.PacOpts{
+				Settings: settings.Settings{ApplicationName: "App"},
+			},
+			expected: strings.Repeat("b", 33) + "-c01a9b",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := GetBBCloudStatusKey(tt.status, tt.pacopts)
+			assert.Equal(t, tt.expected, got)
+			assert.Assert(t, len(got) <= 40, "key length %d exceeds 40 char limit: %s", len(got), got)
 		})
 	}
 }

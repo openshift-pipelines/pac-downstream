@@ -8,7 +8,7 @@ import (
 	rtesting "knative.dev/pkg/reconciler/testing"
 )
 
-func TestClients_GetURL(t *testing.T) {
+func TestClientsGetURL(t *testing.T) {
 	tests := []struct {
 		name       string
 		remoteURLS map[string]map[string]string

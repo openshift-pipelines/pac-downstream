@@ -4,12 +4,14 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"testing"
 
-	"github.com/google/go-github/v81/github"
+	"github.com/google/go-github/v85/github"
 	apipac "github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/consoleui"
@@ -29,11 +31,14 @@ import (
 	"go.uber.org/zap"
 	zapobserver "go.uber.org/zap/zaptest/observer"
 	"gotest.tools/v3/assert"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"knative.dev/pkg/apis"
+	knativeduckv1 "knative.dev/pkg/apis/duck/v1"
 	rtesting "knative.dev/pkg/reconciler/testing"
 )
 
-func TestPacRun_checkNeedUpdate(t *testing.T) {
+func TestPacRunCheckNeedUpdate(t *testing.T) {
 	tests := []struct {
 		name                 string
 		tmpl                 string
@@ -302,6 +307,18 @@ func TestGetPipelineRunsFromRepo(t *testing.T) {
 		EventType:     "ok-to-test-comment",
 		TriggerTarget: "pull_request",
 	}
+	retestAllEvent := &info.Event{
+		SHA:               "principale",
+		Organization:      "organizationes",
+		Repository:        "lagaffe",
+		URL:               "https://service/documentation",
+		HeadBranch:        "main",
+		BaseBranch:        "main",
+		Sender:            "fantasio",
+		EventType:         opscomments.RetestAllCommentEventType.String(),
+		TriggerTarget:     "pull_request",
+		PullRequestNumber: 10,
+	}
 	testExplicitNoMatchPREvent := &info.Event{
 		SHA:           "principale",
 		Organization:  "organizationes",
@@ -316,6 +333,18 @@ func TestGetPipelineRunsFromRepo(t *testing.T) {
 		},
 	}
 
+	noOpsCommentEvent := &info.Event{
+		SHA:           "principale",
+		Organization:  "organizationes",
+		Repository:    "lagaffe",
+		URL:           "https://service/documentation",
+		HeadBranch:    "main",
+		BaseBranch:    "main",
+		Sender:        "fantasio",
+		EventType:     opscomments.NoOpsCommentEventType.String(),
+		TriggerTarget: "pull_request",
+	}
+
 	tests := []struct {
 		name                  string
 		repositories          *v1alpha1.Repository
@@ -323,6 +352,8 @@ func TestGetPipelineRunsFromRepo(t *testing.T) {
 		expectedNumberOfPruns int
 		event                 *info.Event
 		logSnippet            string
+		wantErr               bool
+		seedData              *testclient.Data
 	}{
 		{
 			name: "more than one pipelinerun in .tekton dir",
@@ -422,6 +453,74 @@ func TestGetPipelineRunsFromRepo(t *testing.T) {
 			expectedNumberOfPruns: 0,
 			event:                 okToTestEvent,
 		},
+		{
+			name: "same name pipelineruns error on regular event",
+			repositories: &v1alpha1.Repository{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "testrepo",
+					Namespace: "test",
+				},
+				Spec: v1alpha1.RepositorySpec{},
+			},
+			tektondir: "testdata/same_name_pipelineruns",
+			event:     pullRequestEvent,
+			wantErr:   true,
+		},
+		{
+			name: "same name pipelineruns skipped on no-ops comment event",
+			repositories: &v1alpha1.Repository{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "testrepo",
+					Namespace: "test",
+				},
+				Spec: v1alpha1.RepositorySpec{},
+			},
+			tektondir:             "testdata/same_name_pipelineruns",
+			expectedNumberOfPruns: 0,
+			event:                 noOpsCommentEvent,
+			logSnippet:            "skipping MetadataResolve error for no-ops comment event",
+		},
+		{
+			name: "retest when all pipelines already succeeded returns no runs and posts comment",
+			repositories: &v1alpha1.Repository{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "testrepo",
+					Namespace: "test",
+				},
+				Spec: v1alpha1.RepositorySpec{},
+			},
+			tektondir:             "testdata/pull_request",
+			expectedNumberOfPruns: 0,
+			event:                 retestAllEvent,
+			logSnippet:            "All PipelineRuns for this commit have already succeeded",
+			seedData: &testclient.Data{
+				Repositories: []*v1alpha1.Repository{{
+					ObjectMeta: metav1.ObjectMeta{Name: "testrepo", Namespace: "test"},
+					Spec:       v1alpha1.RepositorySpec{},
+				}},
+				PipelineRuns: []*tektonv1.PipelineRun{{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "pull_request-xyz",
+						Namespace: "test",
+						Labels: map[string]string{
+							apipac.SHA:            "principale",
+							apipac.OriginalPRName: "pull_request",
+						},
+						Annotations: map[string]string{
+							apipac.OriginalPRName: "pull_request",
+						},
+					},
+					Status: tektonv1.PipelineRunStatus{
+						Status: knativeduckv1.Status{
+							Conditions: knativeduckv1.Conditions{{
+								Type:   apis.ConditionSucceeded,
+								Status: corev1.ConditionTrue,
+							}},
+						},
+					},
+				}},
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -431,11 +530,23 @@ func TestGetPipelineRunsFromRepo(t *testing.T) {
 			fakeclient, mux, _, teardown := ghtesthelper.SetupGH()
 			defer teardown()
 
+			// For retest-when-all-succeeded case, CreateComment is called; register handler so it succeeds.
+			if tt.name == "retest when all pipelines already succeeded returns no runs and posts comment" {
+				mux.HandleFunc("/repos/organizationes/lagaffe/issues/10/comments", func(w http.ResponseWriter, r *http.Request) {
+					if r.Method == http.MethodPost {
+						w.WriteHeader(http.StatusCreated)
+					}
+				})
+			}
 			if tt.tektondir != "" {
 				ghtesthelper.SetupGitTree(t, mux, tt.tektondir, tt.event, false)
 			}
 
-			stdata, _ := testclient.SeedTestData(t, ctx, testclient.Data{})
+			seedData := testclient.Data{}
+			if tt.seedData != nil {
+				seedData = *tt.seedData
+			}
+			stdata, _ := testclient.SeedTestData(t, ctx, seedData)
 			cs := &params.Run{
 				Clients: clients.Clients{
 					PipelineAsCode: stdata.PipelineAsCode,
@@ -464,6 +575,10 @@ func TestGetPipelineRunsFromRepo(t *testing.T) {
 			p := NewPacs(tt.event, vcx, cs, pacInfo, k8int, logger, nil)
 			p.eventEmitter = events.NewEventEmitter(stdata.Kube, logger)
 			matchedPRs, err := p.getPipelineRunsFromRepo(ctx, tt.repositories)
+			if tt.wantErr {
+				assert.Assert(t, err != nil, "expected an error but got nil")
+				return
+			}
 			assert.NilError(t, err)
 			matchedPRNames := make([]string, len(matchedPRs))
 			for i := range matchedPRs {
@@ -639,6 +754,36 @@ func TestVerifyRepoAndUser(t *testing.T) {
 			wantRepoNil:   false,
 			wantErr:       false,
 		},
+		{
+			name: "happy path with ok-to-test comment status reporting",
+			runevent: info.Event{
+				Organization:  "owner",
+				Repository:    "repo",
+				URL:           "https://example.com/owner/repo",
+				SHA:           "123abc",
+				EventType:     opscomments.OkToTestCommentEventType.String(),
+				TriggerTarget: triggertype.PullRequest,
+				Sender:        "owner",
+				Request:       request,
+			},
+			repositories: []*v1alpha1.Repository{{
+				ObjectMeta: metav1.ObjectMeta{Name: "repo", Namespace: "ns"},
+				Spec: v1alpha1.RepositorySpec{
+					URL: "https://example.com/owner/repo",
+					GitProvider: &v1alpha1.GitProvider{
+						Secret: &v1alpha1.Secret{
+							Name: "secret",
+						},
+						WebhookSecret: &v1alpha1.Secret{
+							Name: "webhook-secret",
+						},
+					},
+				},
+			}},
+			webhookSecret: "secret",
+			wantRepoNil:   false,
+			wantErr:       false,
+		},
 	}
 
 	pacInfo := &info.PacOpts{Settings: settings.DefaultSettings()}
@@ -673,14 +818,23 @@ func TestVerifyRepoAndUser(t *testing.T) {
 			// status endpoint stub (used when CreateStatus is called)
 			mux.HandleFunc(
 				fmt.Sprintf("/repos/%s/%s/statuses/%s", tt.runevent.Organization, tt.runevent.Repository, tt.runevent.SHA),
-				func(rw http.ResponseWriter, _ *http.Request) { fmt.Fprint(rw, `{}`) },
+				func(rw http.ResponseWriter, r *http.Request) {
+					body, _ := io.ReadAll(r.Body)
+					a := struct {
+						State string `json:"state"`
+					}{}
+					err := json.Unmarshal(body, &a)
+					assert.NilError(t, err)
+					assert.Equal(t, a.State, "success")
+					fmt.Fprint(rw, `{}`)
+				},
 			)
 
 			vcx := &ghprovider.Provider{Token: github.Ptr("token"), Logger: logger}
 			vcx.SetGithubClient(ghClient)
 			vcx.SetPacInfo(pacInfo)
 
-			k8int := &kitesthelper.KinterfaceTest{GetSecretResult: map[string]string{"pipelines-as-code-secret": tt.webhookSecret}}
+			k8int := &kitesthelper.KinterfaceTest{GetSecretResult: map[string]string{"pipelines-as-code-secret": tt.webhookSecret, "secret": "token", "webhook-secret": "secret"}}
 
 			stdata, _ := testclient.SeedTestData(t, ctx, testclient.Data{Repositories: tt.repositories /*Secret: []*corev1.Secret{secret}*/})
 			in := info.NewInfo()

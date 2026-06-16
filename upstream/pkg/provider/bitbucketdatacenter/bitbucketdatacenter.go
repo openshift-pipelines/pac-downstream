@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/google/go-github/v81/github"
+	"github.com/google/go-github/v85/github"
 	"github.com/jenkins-x/go-scm/scm"
 	"github.com/jenkins-x/go-scm/scm/driver/stash"
 	"github.com/jenkins-x/go-scm/scm/transport/oauth2"
@@ -20,6 +20,7 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
 	providerMetrics "github.com/openshift-pipelines/pipelines-as-code/pkg/provider/providermetrics"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/status"
 	"go.uber.org/zap"
 )
 
@@ -40,6 +41,7 @@ type Provider struct {
 	apiURL                    string
 	provenance                string
 	projectKey                string
+	previousHeadCommit        string
 	repo                      *v1alpha1.Repository
 	triggerEvent              string
 	cachedChangedFiles        *changedfiles.ChangedFiles
@@ -89,31 +91,36 @@ func sanitizeTitle(s string) string {
 	return strings.Split(s, "\n")[0]
 }
 
-func (v *Provider) CreateStatus(ctx context.Context, event *info.Event, statusOpts provider.StatusOpts) error {
+func (v *Provider) CreateStatus(ctx context.Context, event *info.Event, statusOpts status.StatusOpts) error {
 	detailsURL := event.Provider.URL
+	state := scm.StateUnknown
+
 	switch statusOpts.Conclusion {
-	case "skipped":
-		statusOpts.Conclusion = "FAILED"
+	case status.ConclusionSkipped:
+		state = scm.StateFailure
 		statusOpts.Title = "➖ Skipping this commit"
-	case "neutral":
-		statusOpts.Conclusion = "FAILED"
+	case status.ConclusionNeutral:
+		state = scm.StateFailure
 		statusOpts.Title = "➖ CI has stopped"
-	case "failure":
-		statusOpts.Conclusion = "FAILED"
+	case status.ConclusionFailure:
+		state = scm.StateFailure
 		statusOpts.Title = "❌ Failed"
-	case "pending":
+	case status.ConclusionPending:
 		if statusOpts.Status == "queued" {
-			statusOpts.Conclusion = "UNKNOWN"
+			state = scm.StateUnknown
 		} else {
-			statusOpts.Conclusion = "INPROGRESS"
+			// TODO: Should this be scm.StateRunning?
+			state = scm.StatePending
 			statusOpts.Title = "⚡ CI has started"
 		}
-	case "success":
-		statusOpts.Conclusion = "SUCCESSFUL"
+	case status.ConclusionSuccess:
+		state = scm.StateSuccess
 		statusOpts.Title = "Commit has been validated"
-	case "completed":
-		statusOpts.Conclusion = "SUCCESSFUL"
+	case status.ConclusionCompleted:
+		state = scm.StateSuccess
 		statusOpts.Title = "Completed"
+	case status.ConclusionCancelled:
+		// TODO
 	}
 	if statusOpts.DetailsURL != "" {
 		detailsURL = statusOpts.DetailsURL
@@ -133,7 +140,7 @@ func (v *Provider) CreateStatus(ctx context.Context, event *info.Event, statusOp
 
 	OrgAndRepo := fmt.Sprintf("%s/%s", event.Organization, event.Repository)
 	opts := &scm.StatusInput{
-		State: convertState(statusOpts.Conclusion),
+		State: state,
 		Label: key,
 		Desc:  statusOpts.Text,
 		Link:  detailsURL,
@@ -149,7 +156,7 @@ func (v *Provider) CreateStatus(ctx context.Context, event *info.Event, statusOp
 	}
 	bbComment := fmt.Sprintf("**%s%s** - %s\n\n%s", v.pacInfo.ApplicationName, onPr, statusOpts.Title, statusOpts.Text)
 
-	if statusOpts.Conclusion == "SUCCESSFUL" && statusOpts.Status == "completed" &&
+	if state == scm.StateSuccess && statusOpts.Status == "completed" &&
 		statusOpts.Text != "" && event.TriggerTarget == triggertype.PullRequest && event.PullRequestNumber > 0 {
 		input := &scm.CommentInput{
 			Body: bbComment,
@@ -164,19 +171,8 @@ func (v *Provider) CreateStatus(ctx context.Context, event *info.Event, statusOp
 	return nil
 }
 
-func convertState(from string) scm.State {
-	switch from {
-	case "FAILED":
-		return scm.StateFailure
-	case "INPROGRESS":
-		return scm.StatePending
-	case "SUCCESSFUL":
-		return scm.StateSuccess
-	case "UNKNOWN":
-		return scm.StateUnknown
-	default:
-		return scm.StateUnknown
-	}
+func (v *Provider) GetCommitStatuses(_ context.Context, _ *info.Event) ([]provider.CommitStatusInfo, error) {
+	return nil, nil
 }
 
 func (v *Provider) concatAllYamlFiles(ctx context.Context, objects []string, sha string, runevent *info.Event) (string, error) {
@@ -427,7 +423,13 @@ func (v *Provider) fetchChangedFiles(ctx context.Context, runevent *info.Event) 
 	case triggertype.Push:
 		opts := &scm.ListOptions{Page: 1, Size: apiResponseLimit}
 		for {
-			changes, _, err := v.Client().Git.ListChanges(ctx, orgAndRepo, runevent.SHA, opts)
+			var changes []*scm.Change
+			var err error
+			if v.previousHeadCommit != "" {
+				changes, _, err = v.getMergeCommitChanges(ctx, runevent.Organization, runevent.Repository, v.previousHeadCommit, runevent.SHA, opts)
+			} else {
+				changes, _, err = v.Client().Git.ListChanges(ctx, orgAndRepo, runevent.SHA, opts)
+			}
 			if err != nil {
 				return changedfiles.ChangedFiles{}, fmt.Errorf("failed to list changes for commit %s: %w", runevent.SHA, err)
 			}

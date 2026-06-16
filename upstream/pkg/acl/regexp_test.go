@@ -100,9 +100,8 @@ func TestMatchRegexp(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := MatchRegexp(tt.args.reg, tt.args.comment); got != tt.want {
-				t.Errorf("MatchRegexp() = %v, want %v", got, tt.want)
-			}
+			got := MatchRegexp(tt.args.reg, tt.args.comment)
+			assert.Equal(t, got, tt.want)
 		})
 	}
 }

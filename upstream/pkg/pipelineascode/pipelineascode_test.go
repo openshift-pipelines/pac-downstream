@@ -15,7 +15,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/google/go-github/v81/github"
+	"github.com/google/go-github/v85/github"
 	apipac "github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
@@ -610,7 +610,11 @@ func TestRun(t *testing.T) {
 						},
 					},
 					Controller: &info.ControllerInfo{
-						Secret: info.DefaultPipelinesAscodeSecretName,
+						Secret:           info.DefaultPipelinesAscodeSecretName,
+						GlobalRepository: "global-repo",
+					},
+					Kube: &info.KubeOpts{
+						Namespace: repo.InstallNamespace,
 					},
 				},
 			}

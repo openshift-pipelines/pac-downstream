@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/go-github/v81/github"
+	"github.com/google/go-github/v85/github"
 	apipac "github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	pacv1a1 "github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/formatting"
@@ -15,6 +15,7 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/settings"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/pipelineascode"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/status"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/secrets"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/sort"
 	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
@@ -101,12 +102,12 @@ func (r *Reconciler) getFailureSnippet(ctx context.Context, pr *tektonv1.Pipelin
 	return fmt.Sprintf("task <b>%s</b> has the status <b>\"%s\"</b>:\n<pre>%s</pre>", name, sortedTaskInfos[0].Reason, text)
 }
 
-func (r *Reconciler) postFinalStatus(ctx context.Context, logger *zap.SugaredLogger, pacInfo *info.PacOpts, vcx provider.Interface, event *info.Event, createdPR *tektonv1.PipelineRun) (*tektonv1.PipelineRun, error) {
+func (r *Reconciler) postFinalStatus(ctx context.Context, logger *zap.SugaredLogger, pacInfo *info.PacOpts, vcx provider.Interface, event *info.Event, createdPR *tektonv1.PipelineRun) (*tektonv1.PipelineRun, map[string]*tektonv1.PipelineRunTaskRunStatus, error) {
 	pr, err := r.run.Clients.Tekton.TektonV1().PipelineRuns(createdPR.GetNamespace()).Get(
 		ctx, createdPR.GetName(), metav1.GetOptions{},
 	)
 	if err != nil {
-		return pr, err
+		return pr, nil, err
 	}
 
 	trStatus := kstatus.GetStatusFromTaskStatusOrFromAsking(ctx, pr, r.run)
@@ -115,7 +116,7 @@ func (r *Reconciler) postFinalStatus(ctx context.Context, logger *zap.SugaredLog
 		var err error
 		taskStatusText, err = sort.TaskStatusTmpl(pr, trStatus, r.run, vcx.GetConfig())
 		if err != nil {
-			return pr, err
+			return pr, trStatus, err
 		}
 	} else {
 		taskStatusText = pr.Status.GetCondition(apis.ConditionSucceeded).Message
@@ -143,10 +144,10 @@ func (r *Reconciler) postFinalStatus(ctx context.Context, logger *zap.SugaredLog
 	}
 	var tmplStatusText string
 	if tmplStatusText, err = mt.MakeTemplate(vcx.GetTemplate(provider.PipelineRunStatusType)); err != nil {
-		return nil, fmt.Errorf("cannot create message template: %w", err)
+		return nil, trStatus, fmt.Errorf("cannot create message template: %w", err)
 	}
 
-	status := provider.StatusOpts{
+	status := status.StatusOpts{
 		Status:                  pipelineascode.CompletedStatus,
 		PipelineRun:             pr,
 		Conclusion:              formatting.PipelineRunStatus(pr),
@@ -158,13 +159,13 @@ func (r *Reconciler) postFinalStatus(ctx context.Context, logger *zap.SugaredLog
 
 	err = createStatusWithRetry(ctx, logger, vcx, event, status)
 	logger.Infof("pipelinerun %s has a status of '%s'", pr.Name, status.Conclusion)
-	return pr, err
+	return pr, trStatus, err
 }
 
-func createStatusWithRetry(ctx context.Context, logger *zap.SugaredLogger, vcx provider.Interface, event *info.Event, status provider.StatusOpts) error {
+func createStatusWithRetry(ctx context.Context, logger *zap.SugaredLogger, vcx provider.Interface, event *info.Event, statusOpts status.StatusOpts) error {
 	var finalError error
 	for _, backoff := range backoffSchedule {
-		err := vcx.CreateStatus(ctx, event, status)
+		err := vcx.CreateStatus(ctx, event, statusOpts)
 		if err == nil {
 			return nil
 		}

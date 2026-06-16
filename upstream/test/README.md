@@ -45,22 +45,50 @@ this repo should differ from the one which is configured as part of `TEST_GITHUB
 - `TEST_BITBUCKET_CLOUD_E2E_REPOSITORY` - Bitbucket Cloud repository (i.e. `project/repo`)
 - `TEST_BITBUCKET_CLOUD_TOKEN` - Bitbucket Cloud token
 - `TEST_GITLAB_API_URL` - Gitlab API URL i.e: `https://gitlab.com`
-- `TEST_GITLAB_PROJECT_ID` - Gitlab project ID (you can get it in the repo details/settings)
+- `TEST_GITLAB_GROUP` - Gitlab group/namespace where test projects will be created and deleted
 - `TEST_GITLAB_TOKEN` - Gitlab Token
+- `TEST_GITLAB_SECOND_TOKEN` - Optional second GitLab token from a different user for fork-based GitLab tests
+- `TEST_GITLAB_SECOND_GROUP` - Optional group/namespace where the second user should create forks
+- `TEST_GITLAB_SMEEURL` - Smee URL for forwarding GitLab webhooks to the controller
 - `TEST_GITEA_API_URL` - URL where GITEA is running (i.e: [GITEA_HOST](http://localhost:3000))
 - `TEST_GITEA_SMEEURL` - URL of smee
 - `TEST_GITEA_PASSWORD` - set password as **pac**
 - `TEST_GITEA_USERNAME` - set username as **pac**
 - `TEST_GITEA_REPO_OWNER` - set repo owner as **pac/pac**
-- `TEST_BITBUCKET_SERVER_USER` - Bitbucket Data Center Username
-- `TEST_BITBUCKET_SERVER_TOKEN` - Bitbucket Data Center token
-- `TEST_BITBUCKET_SERVER_E2E_REPOSITORY` - Bitbucket Data Center repository (i.e. `project/repo`)
-- `TEST_BITBUCKET_SERVER_API_URL` - URL where your Bitbucket Data Center instance is running.
-- `TEST_BITBUCKET_SERVER_WEBHOOK_SECRET` - Webhook secret
+- `TEST_BITBUCKET_DATA_CENTER_USER` - Bitbucket Data Center Username
+- `TEST_BITBUCKET_DATA_CENTER_TOKEN` - Bitbucket Data Center token
+- `TEST_BITBUCKET_DATA_CENTER_E2E_REPOSITORY` - Bitbucket Data Center repository (i.e. `project/repo`)
+- `TEST_BITBUCKET_DATA_CENTER_API_URL` - URL where your Bitbucket Data Center instance is running.
+- `TEST_BITBUCKET_DATA_CENTER_WEBHOOK_SECRET` - Webhook secret
 
 - `PAC_API_INSTRUMENTATION_DIR` - Optional. When set, E2E tests write per-test JSON reports of GitHub API calls parsed from controller logs to this directory. Useful for analyzing API usage and rate limits. Example: `export PAC_API_INSTRUMENTATION_DIR=/tmp/api-instrumentation`.
 
 You don't need to configure all of those if you restrict running your e2e tests to a subset.
+
+### YAML Configuration File
+
+Instead of setting individual environment variables, you can use a YAML
+configuration file. Set `PAC_E2E_CONFIG` to the path of your config file:
+
+```shell
+PAC_E2E_CONFIG=./test/e2e-config.yaml make test-e2e
+```
+
+Copy the example file and fill in the values for the providers you want to test:
+
+```shell
+cp test/e2e-config.yaml.example test/e2e-config.yaml
+# edit test/e2e-config.yaml with your values
+```
+
+The YAML file groups settings by provider section (`common`, `github`,
+`github_enterprise`, `gitlab`, `gitea`, `bitbucket_cloud`,
+`bitbucket_datacenter`). See `test/e2e-config.yaml.example` for the full list of
+fields.
+
+Environment variables always take precedence over YAML values, so you can use
+the config file for base settings and override specific values via env vars
+(useful for CI secrets).
 
 ## Running
 
@@ -78,29 +106,57 @@ You can specify only a subsets of test to run with :
 
 same goes for `TestGitlab` or other methods.
 
+### Running GitLab tests manually
+
+GitLab tests require a smee URL to forward webhooks from the external GitLab
+instance to your local controller (the same pattern as Gitea tests).
+
+1. Create your own group on the GitLab instance
+   (e.g. `https://gitlab.pipelinesascode.com`) to hold the temporary test
+   projects. Each test run creates a project inside this group and deletes it
+   on cleanup. Use `TEST_GITLAB_GROUP` to point to your group.
+
+2. Generate a smee channel and start the gosmee client to forward webhooks to
+   your controller:
+
+   ```shell
+   # Generate a new smee channel URL
+   SMEE_URL=$(curl -s https://hook.pipelinesascode.com -o /dev/null -w '%{redirect_url}')
+
+   # Start forwarding webhooks to your controller
+   gosmee client "${SMEE_URL}" "https://your-controller-url"
+   ```
+
+3. Set the required environment variables (or use a
+   [YAML config file](#yaml-configuration-file)):
+
+   ```shell
+   export TEST_GITLAB_API_URL=https://gitlab.pipelinesascode.com
+   export TEST_GITLAB_TOKEN=<your-token>
+   export TEST_GITLAB_GROUP=<your-group>
+   export TEST_GITLAB_SECOND_TOKEN=<second-user-token> # optional, required for real fork fallback tests
+   export TEST_GITLAB_SECOND_GROUP=<second-user-group> # optional, recommended when the second user has multiple namespaces
+   export TEST_GITLAB_SMEEURL="${SMEE_URL}"
+   export TEST_EL_URL=https://your-controller-url
+   export TEST_EL_WEBHOOK_SECRET=<your-webhook-secret>
+   ```
+
+   Fork-status fallback tests skip automatically when `TEST_GITLAB_SECOND_TOKEN` is not set.
+
+4. Run the tests:
+
+   ```shell
+   cd test/; go test -tags=e2e -v -run TestGitlab .
+   ```
+
+To clean up stale test projects (older than 7 days) left from previous runs:
+
+```shell
+./hack/cleanup-gitlab-projects.py        # dry-run
+./hack/cleanup-gitlab-projects.py --force # actually delete
+```
+
 If you need to update the golden files in the end-to-end test, add the `-update` flag to the [go test](https://pkg.go.dev/cmd/go#hdr-Test_packages) command to refresh those files. First, run it if you expect the test output to change (or for a new test), then run it again without the flag to ensure everything is correct.
-
-## Running nightly tests
-
-Some tests are set as nightly which mean not run on every PR, because exposing rate limitation often.
-We run those as nightly via github action on kind.
-
-You can use `make test-e2e-nightly` if you want to run those manually as long
-as you have all the env variables set.
-
-If you are writing a test targeting a nightly test you need to check for the env variable:
-
-```go
-    if os.Getenv("NIGHTLY_E2E_TEST") != "true" {
-        t.Skip("Skipping test since only enabled for nightly")
-    }
-```
-
-and maybe add to the test-e2e-nightly Makefile target to the -run argument :
-
-```bash
--run '(TestGithub|TestOtherPrefixOfTest)'
-```
 
 ## Continuous Integration (CI) with GitHub Actions
 
@@ -154,7 +210,7 @@ Secrets are stored in GitHub Secrets and made available to the workflow via `${{
 The `hack/gh-workflow-ci.sh` script contains several functions that assist in the CI process:
 
 1. `create_pac_github_app_secret` - Creates the required secrets for GitHub app authentication
-2. ~~`create_second_github_app_controller_on_ghe`~~ - Use [startpaac](https://github.com/openshift-pipelines/startpaac) instead. See [Second Controller Setup](#second-controller-setup) below.
+2. ~~`create_second_github_app_controller_on_ghe`~~ - Use [startpaac](https://github.com/pipelines-as-code/startpaac) instead. See [Second Controller Setup](#second-controller-setup) below.
 3. `run_e2e_tests` - Executes the E2E tests with proper filters
 4. `collect_logs` - Gathers logs and diagnostic information
 
@@ -162,7 +218,7 @@ The script filters tests by category using pattern matching on test function nam
 
 #### Second Controller Setup
 
-In CI, use [startpaac](https://github.com/openshift-pipelines/startpaac) to install the second GitHub controller (GHE). When running with the `--ci` flag, startpaac automatically installs the second controller when `PAC_SECOND_SECRET_FOLDER` is set.
+In CI, use [startpaac](https://github.com/pipelines-as-code/startpaac) to install the second GitHub controller (GHE). When running with the `--ci` flag, startpaac automatically installs the second controller when `PAC_SECOND_SECRET_FOLDER` is set.
 
 Example from e2e.yaml workflow:
 
@@ -291,7 +347,6 @@ To add new provider tests:
 1. Create test files following the existing patterns
 2. Ensure proper naming convention to match the test category filters
 3. Update environment variables if needed
-4. For nightly-only tests, include the check for `NIGHTLY_E2E_TEST`
 
 For infrastructure changes:
 

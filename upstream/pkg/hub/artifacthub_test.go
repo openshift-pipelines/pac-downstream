@@ -128,7 +128,7 @@ func TestGetTypeByKind(t *testing.T) {
 	}
 }
 
-func TestArtifactHubClient_GetResource(t *testing.T) {
+func TestArtifactHubClientGetResource(t *testing.T) {
 	ctx := context.Background()
 	testCases := []struct {
 		name        string
@@ -282,7 +282,7 @@ func TestArtifactHubClient_GetResource(t *testing.T) {
 	}
 }
 
-func TestArtifactHubClient_getLatestVersion(t *testing.T) {
+func TestArtifactHubClientGetLatestVersion(t *testing.T) {
 	ctx := context.Background()
 
 	tests := []struct {
@@ -404,7 +404,7 @@ func TestArtifactHubClient_getLatestVersion(t *testing.T) {
 	}
 }
 
-func TestArtifactHubClient_getSpecificVersion(t *testing.T) {
+func TestArtifactHubClientGetSpecificVersion(t *testing.T) {
 	ctx := context.Background()
 
 	tests := []struct {
@@ -540,7 +540,7 @@ func TestArtifactHubClient_getSpecificVersion(t *testing.T) {
 	}
 }
 
-func TestNewArtifactHubClient_URLHandling(t *testing.T) {
+func TestNewArtifactHubClientURLHandling(t *testing.T) {
 	tests := []struct {
 		name      string
 		url       string

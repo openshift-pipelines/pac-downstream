@@ -8,15 +8,17 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 
-	"github.com/google/go-github/v81/github"
+	"github.com/google/go-github/v85/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/clients"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/settings"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
+	providerstatus "github.com/openshift-pipelines/pipelines-as-code/pkg/provider/status"
 	testclient "github.com/openshift-pipelines/pipelines-as-code/pkg/test/clients"
 	ghtesthelper "github.com/openshift-pipelines/pipelines-as-code/pkg/test/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/test/logger"
@@ -53,7 +55,7 @@ func TestGithubProviderCreateCheckRun(t *testing.T) {
 		SHA:          "createCheckRunSHA",
 	}
 
-	err := cnx.getOrUpdateCheckRunStatus(ctx, event, provider.StatusOpts{
+	err := cnx.getOrUpdateCheckRunStatus(ctx, event, providerstatus.StatusOpts{
 		PipelineRunName: "pr1",
 		Status:          "hello moto",
 	})
@@ -69,7 +71,7 @@ func TestGetOrUpdateCheckRunStatusForMultipleFailedPipelineRun(t *testing.T) {
 		pacInfo:  &info.PacOpts{},
 	}
 	defer teardown()
-	statusOptionData := []provider.StatusOpts{{
+	statusOptionData := []providerstatus.StatusOpts{{
 		PipelineRunName:          "",
 		Title:                    "Failed",
 		InstanceCountForCheckRun: 0,
@@ -137,7 +139,7 @@ func TestGetExistingCheckRunIDFromMultiple(t *testing.T) {
 		}
 	})
 
-	id, err := cnx.getExistingCheckRunID(ctx, event, provider.StatusOpts{
+	id, err := cnx.getExistingCheckRunID(ctx, event, providerstatus.StatusOpts{
 		PipelineRunName: chosenOne,
 	})
 	assert.NilError(t, err)
@@ -177,7 +179,7 @@ func TestGetExistingPendingApprovalCheckRunID(t *testing.T) {
 		}`, chosenID, chosenOne, pendingApproval)
 	})
 
-	id, err := cnx.getExistingCheckRunID(ctx, event, provider.StatusOpts{
+	id, err := cnx.getExistingCheckRunID(ctx, event, providerstatus.StatusOpts{
 		PipelineRunName: chosenOne,
 	})
 	assert.NilError(t, err)
@@ -216,7 +218,7 @@ func TestGetExistingFailedCheckRunID(t *testing.T) {
 		}`, chosenID, chosenOne)
 	})
 
-	id, err := cnx.getExistingCheckRunID(ctx, event, provider.StatusOpts{
+	id, err := cnx.getExistingCheckRunID(ctx, event, providerstatus.StatusOpts{
 		PipelineRunName: chosenOne,
 	})
 	assert.NilError(t, err)
@@ -474,11 +476,11 @@ func TestGithubProviderCreateStatus(t *testing.T) {
 				})
 			}
 
-			status := provider.StatusOpts{
+			status := providerstatus.StatusOpts{
 				PipelineRunName: prname,
 				PipelineRun:     pr,
 				Status:          tt.args.status,
-				Conclusion:      tt.args.conclusion,
+				Conclusion:      providerstatus.Conclusion(tt.args.conclusion),
 				Text:            tt.args.text,
 				DetailsURL:      tt.args.detailsURL,
 				AccessDenied:    tt.args.accessDenied,
@@ -547,13 +549,13 @@ func TestGithubProvidercreateStatusCommit(t *testing.T) {
 		name               string
 		event              *info.Event
 		wantErr            bool
-		status             provider.StatusOpts
+		status             providerstatus.StatusOpts
 		expectedConclusion string
 	}{
 		{
 			name:  "completed",
 			event: anevent,
-			status: provider.StatusOpts{
+			status: providerstatus.StatusOpts{
 				Status:     "completed",
 				Summary:    "I just wanna say",
 				Text:       "Finito amigo",
@@ -564,7 +566,7 @@ func TestGithubProvidercreateStatusCommit(t *testing.T) {
 		{
 			name:  "in_progress",
 			event: anevent,
-			status: provider.StatusOpts{
+			status: providerstatus.StatusOpts{
 				Status: "in_progress",
 			},
 			expectedConclusion: "pending",
@@ -572,7 +574,7 @@ func TestGithubProvidercreateStatusCommit(t *testing.T) {
 		{
 			name:  "pull_request status pending",
 			event: anevent,
-			status: provider.StatusOpts{
+			status: providerstatus.StatusOpts{
 				Conclusion: "pending",
 			},
 			expectedConclusion: "pending",
@@ -580,7 +582,7 @@ func TestGithubProvidercreateStatusCommit(t *testing.T) {
 		{
 			name:  "pull_request status neutral",
 			event: anevent,
-			status: provider.StatusOpts{
+			status: providerstatus.StatusOpts{
 				Conclusion: "neutral",
 			},
 			expectedConclusion: "success",
@@ -673,7 +675,7 @@ func TestProviderGetExistingCheckRunID(t *testing.T) {
 				_, _ = fmt.Fprintf(w, "%s", tt.jsonret)
 			})
 
-			got, err := v.getExistingCheckRunID(ctx, event, provider.StatusOpts{
+			got, err := v.getExistingCheckRunID(ctx, event, providerstatus.StatusOpts{
 				PipelineRunName: tt.prname,
 			})
 			if (err != nil) != tt.wantErr {
@@ -683,6 +685,91 @@ func TestProviderGetExistingCheckRunID(t *testing.T) {
 			if !reflect.DeepEqual(got, tt.expectedID) {
 				t.Errorf("getExistingCheckRunID() got = %v, want %v", got, tt.expectedID)
 			}
+		})
+	}
+}
+
+func TestGetExistingCheckRunIDCache(t *testing.T) {
+	tests := []struct {
+		name            string
+		jsonret         string
+		failFirstN      int
+		goroutines      int
+		secondLookup    string
+		expectedID      int64
+		expectedAPIHits int64
+	}{
+		{
+			name:            "second call serves from cache",
+			jsonret:         `{"total_count": 2, "check_runs": [{"id": 55555, "external_id": "mypr"}, {"id": 55556, "external_id": "mypr2"}]}`,
+			secondLookup:    "mypr2",
+			expectedID:      55555,
+			expectedAPIHits: 1,
+		},
+		{
+			name:            "concurrent calls share single fetch",
+			jsonret:         `{"total_count": 2, "check_runs": [{"id": 55555, "external_id": "mypr"}, {"id": 55556, "external_id": "mypr2"}]}`,
+			goroutines:      10,
+			expectedAPIHits: 1,
+		},
+		{
+			name:            "retries on transient error",
+			jsonret:         `{"total_count": 1, "check_runs": [{"id": 77777, "external_id": "mypr"}]}`,
+			failFirstN:      1,
+			expectedID:      77777,
+			expectedAPIHits: 2,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, _ := rtesting.SetupFakeContext(t)
+			client, mux, _, teardown := ghtesthelper.SetupGH()
+			defer teardown()
+
+			event := &info.Event{
+				Organization: "owner",
+				Repository:   "repository",
+				SHA:          "sha",
+			}
+
+			var apiHits atomic.Int64
+			mux.HandleFunc(fmt.Sprintf("/repos/%v/%v/commits/%v/check-runs", event.Organization, event.Repository, event.SHA), func(w http.ResponseWriter, _ *http.Request) {
+				hit := apiHits.Add(1)
+				if int(hit) <= tt.failFirstN {
+					w.WriteHeader(http.StatusBadGateway)
+					return
+				}
+				fmt.Fprint(w, tt.jsonret)
+			})
+
+			cnx := New()
+			cnx.SetGithubClient(client)
+
+			if tt.goroutines > 1 {
+				var wg sync.WaitGroup
+				wg.Add(tt.goroutines)
+				for range tt.goroutines {
+					go func() {
+						defer wg.Done()
+						_, _ = cnx.getExistingCheckRunID(ctx, event, providerstatus.StatusOpts{PipelineRunName: "mypr"})
+					}()
+				}
+				wg.Wait()
+			} else {
+				id, err := cnx.getExistingCheckRunID(ctx, event, providerstatus.StatusOpts{PipelineRunName: "mypr"})
+				assert.NilError(t, err)
+				if tt.expectedID != 0 {
+					assert.Assert(t, id != nil)
+					assert.Equal(t, *id, tt.expectedID)
+				}
+				if tt.secondLookup != "" {
+					id2, err := cnx.getExistingCheckRunID(ctx, event, providerstatus.StatusOpts{PipelineRunName: tt.secondLookup})
+					assert.NilError(t, err)
+					assert.Assert(t, id2 != nil)
+				}
+			}
+
+			assert.Equal(t, apiHits.Load(), tt.expectedAPIHits)
 		})
 	}
 }

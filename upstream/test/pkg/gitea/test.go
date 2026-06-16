@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"codeberg.org/mvdkleijn/forgejo-sdk/forgejo/v2"
+	"codeberg.org/mvdkleijn/forgejo-sdk/forgejo/v3"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
@@ -78,22 +78,28 @@ func PostCommentOnPullRequest(t *testing.T, topt *TestOpts, body string) {
 
 func checkEvents(t *testing.T, events *corev1.EventList, topts *TestOpts) {
 	t.Helper()
-	newEvents := make([]corev1.Event, 0)
-	// filter out events that are not related to the test like checking for cancelled pipelineruns
-	for i := len(events.Items) - 1; i >= 0; i-- {
+	unexpected := unexpectedEvents(events)
+	for i := range events.Items {
 		topts.ParamsRun.Clients.Log.Infof("Reason is %s", events.Items[i].Reason)
-		if events.Items[i].Reason == "CancelInProgress" {
-			continue
-		}
-		newEvents = append(newEvents, events.Items[i])
 	}
-	if len(newEvents) > 0 {
-		topts.ParamsRun.Clients.Log.Infof("0 events expected in case of failure but got %d", len(newEvents))
-		for _, em := range newEvents {
+	if len(unexpected) > 0 {
+		topts.ParamsRun.Clients.Log.Infof("0 warning events expected in case of failure but got %d", len(unexpected))
+		for _, em := range unexpected {
 			topts.ParamsRun.Clients.Log.Infof("Event: Reason: %s Type: %s ReportingInstance: %s Message: %s", em.Reason, em.Type, em.ReportingInstance, em.Message)
 		}
 		t.FailNow()
 	}
+}
+
+func unexpectedEvents(events *corev1.EventList) []corev1.Event {
+	unexpected := make([]corev1.Event, 0)
+	for i := len(events.Items) - 1; i >= 0; i-- {
+		if events.Items[i].Type == corev1.EventTypeNormal {
+			continue
+		}
+		unexpected = append(unexpected, events.Items[i])
+	}
+	return unexpected
 }
 
 func AddLabelToIssue(t *testing.T, topt *TestOpts, label string) {
@@ -131,7 +137,7 @@ func TestPR(t *testing.T, topts *TestOpts) (context.Context, func()) {
 	hookURL := os.Getenv("TEST_GITEA_SMEEURL")
 	topts.InternalGiteaURL = os.Getenv("TEST_GITEA_INTERNAL_URL")
 	if topts.InternalGiteaURL == "" {
-		topts.InternalGiteaURL = "http://forgejo.forgejo:3000"
+		topts.InternalGiteaURL = "http://forgejo-http.forgejo:3000"
 	}
 	if topts.ExtraArgs == nil {
 		topts.ExtraArgs = map[string]string{}
@@ -199,7 +205,10 @@ func TestPR(t *testing.T, topts *TestOpts) (context.Context, func()) {
 	if topts.GlobalRepoCRParams == nil {
 		spec.GitProvider = gp
 	} else {
-		spec.GitProvider = &v1alpha1.GitProvider{Type: providerType}
+		spec.GitProvider = &v1alpha1.GitProvider{
+			Type:   providerType,
+			Secret: &v1alpha1.Secret{Name: topts.TargetNS, Key: "token"},
+		}
 	}
 	assert.NilError(t, CreateCRD(ctx, topts, spec, false))
 
@@ -310,7 +319,7 @@ func NewPR(t *testing.T, topts *TestOpts) func() {
 	topts.GiteaPassword = giteaPassword
 	topts.InternalGiteaURL = os.Getenv("TEST_GITEA_INTERNAL_URL")
 	if topts.InternalGiteaURL == "" {
-		topts.InternalGiteaURL = "http://forgejo.forgejo:3000"
+		topts.InternalGiteaURL = "http://forgejo-http.forgejo:3000"
 	}
 	if topts.ExtraArgs == nil {
 		topts.ExtraArgs = map[string]string{}
@@ -635,7 +644,7 @@ func GetStandardParams(t *testing.T, topts *TestOpts, eventType string) (repoURL
 		topts.ParamsRun.Clients.Kube.CoreV1(),
 		topts.TargetNS, fmt.Sprintf("tekton.dev/pipelineRun=%s",
 			prs.Items[0].Name), "step-test-standard-params-value",
-		&numLines)
+		&numLines, nil)
 	assert.NilError(t, err)
 	assert.Assert(t, out != "")
 	out = strings.TrimSpace(out)

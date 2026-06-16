@@ -1,0 +1,122 @@
+package gitlab
+
+import (
+	"fmt"
+	"net/http"
+	"time"
+
+	gitlab "gitlab.com/gitlab-org/api/client-go"
+	"go.uber.org/zap"
+)
+
+// CreateGitLabProject creates a new GitLab project inside a group and adds
+// a webhook pointing to the given hookURL (for example, a smee channel URL
+// used to forward events to the controller). The project is initialised with
+// a README on the "main" branch.
+func CreateGitLabProject(client *gitlab.Client, groupPath, projectName, hookURL, webhookSecret string, isPrivate bool, logger *zap.SugaredLogger) (*gitlab.Project, error) {
+	logger.Infof("Looking up GitLab group %s", groupPath)
+	group, _, err := client.Groups.GetGroup(groupPath, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to look up group %s: %w", groupPath, err)
+	}
+
+	visibility := gitlab.PublicVisibility
+	if isPrivate {
+		visibility = gitlab.PrivateVisibility
+	}
+
+	logger.Infof("Creating GitLab project %s in group %s (ID %d)", projectName, groupPath, group.ID)
+	project, _, err := client.Projects.CreateProject(&gitlab.CreateProjectOptions{
+		Name:                 gitlab.Ptr(projectName),
+		NamespaceID:          gitlab.Ptr(group.ID),
+		InitializeWithReadme: gitlab.Ptr(true),
+		DefaultBranch:        gitlab.Ptr("main"),
+		Visibility:           gitlab.Ptr(visibility),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create project %s: %w", projectName, err)
+	}
+	logger.Infof("Created GitLab project %s (ID %d)", project.PathWithNamespace, project.ID)
+
+	logger.Infof("Adding webhook to project %s pointing to %s", project.PathWithNamespace, hookURL)
+	_, _, err = client.Projects.AddProjectHook(project.ID, &gitlab.AddProjectHookOptions{
+		URL:                   gitlab.Ptr(hookURL),
+		Token:                 gitlab.Ptr(webhookSecret),
+		MergeRequestsEvents:   gitlab.Ptr(true),
+		NoteEvents:            gitlab.Ptr(true),
+		PushEvents:            gitlab.Ptr(true),
+		TagPushEvents:         gitlab.Ptr(true),
+		EnableSSLVerification: gitlab.Ptr(false),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to add webhook to project %s: %w", project.PathWithNamespace, err)
+	}
+
+	return project, nil
+}
+
+func ForkGitLabProject(client *gitlab.Client, projectID int, namespacePath string, isPrivate bool, logger *zap.SugaredLogger) (*gitlab.Project, error) {
+	currentUser, _, err := client.Users.CurrentUser()
+	if err != nil {
+		logger.Warnf("could not fetch current GitLab user: %v", err)
+		logger.Infof("Forking GitLab project %d into namespace %q", projectID, namespacePath)
+	} else {
+		logger.Infof("Forking GitLab project %d as user %s (ID %d) into namespace %q",
+			projectID, currentUser.Username, currentUser.ID, namespacePath)
+	}
+
+	var project *gitlab.Project
+	var lastErr error
+	visibility := gitlab.PublicVisibility
+	if isPrivate {
+		visibility = gitlab.PrivateVisibility
+	}
+	deadline := time.Now().Add(30 * time.Second)
+	for attempt := 1; time.Now().Before(deadline); attempt++ {
+		options := &gitlab.ForkProjectOptions{
+			Visibility: gitlab.Ptr(visibility),
+		}
+		if namespacePath != "" {
+			options.NamespacePath = gitlab.Ptr(namespacePath)
+		}
+		var resp *gitlab.Response
+		project, resp, lastErr = client.Projects.ForkProject(projectID, options)
+		if lastErr == nil {
+			break
+		}
+		if resp != nil && resp.StatusCode == http.StatusNotFound && namespacePath != "" {
+			logger.Warnf("Fork into namespace %q failed (404) — second user may not be a member of that group; retrying into personal namespace", namespacePath)
+			project, resp, lastErr = client.Projects.ForkProject(projectID, &gitlab.ForkProjectOptions{})
+			if lastErr == nil {
+				break
+			}
+		}
+		if resp != nil && resp.StatusCode == http.StatusNotFound {
+			logger.Warnf("Fork attempt %d failed with 404 (project %d not yet visible to forking user, possible membership propagation lag) — retrying in 5s", attempt, projectID)
+			time.Sleep(5 * time.Second)
+			continue
+		}
+		// Non-retryable error
+		break
+	}
+	if lastErr != nil {
+		return nil, fmt.Errorf("failed to fork project %d: %w", projectID, lastErr)
+	}
+
+	logger.Infof("Forked GitLab project into %s (ID %d)", project.PathWithNamespace, project.ID)
+
+	return project, nil
+}
+
+func AddGitLabProjectMember(client *gitlab.Client, projectID int, userID int64, accessLevel gitlab.AccessLevelValue, logger *zap.SugaredLogger) error {
+	logger.Infof("Granting user %d access level %d on GitLab project %d", userID, accessLevel, projectID)
+	_, _, err := client.ProjectMembers.AddProjectMember(projectID, &gitlab.AddProjectMemberOptions{
+		UserID:      userID,
+		AccessLevel: gitlab.Ptr(accessLevel),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to add user %d to project %d: %w", userID, projectID, err)
+	}
+
+	return nil
+}

@@ -27,7 +27,7 @@ func newRepoWithPolicy(policy *v1alpha1.Policy) *v1alpha1.Repository {
 	}
 }
 
-func TestPolicy_IsAllowed(t *testing.T) {
+func TestPolicyIsAllowed(t *testing.T) {
 	senderName := "sender"
 	eventWithSender := info.NewEvent()
 	eventWithSender.Sender = senderName

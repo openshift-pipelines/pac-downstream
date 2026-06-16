@@ -19,7 +19,6 @@ import (
 )
 
 func TestBitbucketDataCenterCELPathChangeOnPush(t *testing.T) {
-	t.Skip("skipping test for now, until we ge the bitbucket infra back")
 	targetNS := names.SimpleNameGenerator.RestrictLengthWithRandomSuffix("pac-e2e-ns")
 	ctx := context.Background()
 	bitbucketWSOwner := os.Getenv("TEST_BITBUCKET_DATA_CENTER_E2E_REPOSITORY")
@@ -39,7 +38,7 @@ func TestBitbucketDataCenterCELPathChangeOnPush(t *testing.T) {
 	branch, resp, err := client.Git.CreateRef(ctx, bitbucketWSOwner, targetNS, mainBranchRef)
 	assert.NilError(t, err, "error creating branch: http status code: %d : %v", resp.Status, err)
 	runcnx.Clients.Log.Infof("Branch %s has been created", branch.Name)
-	defer tbbs.TearDown(ctx, t, runcnx, client, -1, bitbucketWSOwner, branch.Name)
+	defer tbbs.TearDown(ctx, t, runcnx, client, nil, bitbucketWSOwner, branch.Name)
 
 	files, err = payload.GetEntries(files, targetNS, branch.Name, triggertype.Push.String(), map[string]string{})
 	assert.NilError(t, err)

@@ -245,6 +245,53 @@ func TestRemote(t *testing.T) {
 			},
 		},
 		{
+			name: "multiple pipelineruns sharing same remote pipeline with relative tasks, pipeline and tasks all resolve",
+			pipelineruns: []*tektonv1.PipelineRun{
+				ttkn.MakePR(randomPipelineRunName, map[string]string{
+					apipac.Pipeline: remotePipelineURL,
+				},
+					tektonv1.PipelineRunSpec{
+						PipelineRef: &tektonv1.PipelineRef{
+							Name: remotePipelineName,
+						},
+					},
+				),
+				ttkn.MakePR(randomPipelineRunName+"-second", map[string]string{
+					apipac.Pipeline: remotePipelineURL, // SAME URL as first PipelineRun
+				},
+					tektonv1.PipelineRunSpec{
+						PipelineRef: &tektonv1.PipelineRef{
+							Name: remotePipelineName,
+						},
+					},
+				),
+			},
+			remoteURLS: map[string]map[string]string{
+				remotePipelineURL: {
+					"body": string(pipelineWithRelativeTaskRefYamlB),
+					"code": "200",
+				},
+				remoteTaskURL + "-a": {
+					"body": string(singleRelativeTaskBa),
+					"code": "200",
+				},
+				remoteTaskURL + "-b": {
+					"body": string(singleRelativeTaskBb),
+					"code": "200",
+				},
+				remoteTaskURL + "-c": {
+					"body": string(singleRelativeTaskBc),
+					"code": "200",
+				},
+			},
+			expectedTaskSpec:     taskFromPipelineSpec,
+			expectedLogsSnippets: []string{},
+			expectedPipelineRun: []string{
+				"remote-pipeline-with-relative-tasks.yaml",
+				"remote-pipeline-with-relative-tasks-same-pipeline.yaml",
+			},
+		},
+		{
 			name: "remote pipeline with remote task in pipeline overridden from pipelinerun",
 			pipelineruns: []*tektonv1.PipelineRun{
 				ttkn.MakePR(randomPipelineRunName, map[string]string{
@@ -593,10 +640,10 @@ func TestAssembleTaskFQDNs(t *testing.T) {
 			expected:    []string{"https://example.com/repo/task.yaml"},
 		},
 		{
-			name:        "repository file path URL returns tasks unchanged",
+			name:        "repository file path URL resolves relative tasks",
 			pipelineURL: "share/pipelines/build.yaml",
 			tasks:       []string{"../tasks/t.yaml", "tasks/other-task.yaml"},
-			expected:    []string{"../tasks/t.yaml", "tasks/other-task.yaml"},
+			expected:    []string{"share/tasks/t.yaml", "share/pipelines/tasks/other-task.yaml"},
 		},
 	}
 	for _, tt := range tests {

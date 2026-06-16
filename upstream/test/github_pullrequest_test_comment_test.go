@@ -5,11 +5,10 @@ package test
 import (
 	"context"
 	"fmt"
-	"os"
 	"regexp"
 	"testing"
 
-	"github.com/google/go-github/v81/github"
+	"github.com/google/go-github/v85/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/opscomments"
 	tgithub "github.com/openshift-pipelines/pipelines-as-code/test/pkg/github"
 	twait "github.com/openshift-pipelines/pipelines-as-code/test/pkg/wait"
@@ -18,9 +17,6 @@ import (
 )
 
 func TestGithubGHEPullRequestTest(t *testing.T) {
-	if os.Getenv("NIGHTLY_E2E_TEST") != "true" {
-		t.Skip("Skipping test since only enabled for nightly")
-	}
 	ctx := context.TODO()
 	g := &tgithub.PRTest{
 		Label:     "Github test implicit comment",
@@ -90,10 +86,10 @@ func TestGithubGHEOnCommentAnnotation(t *testing.T) {
 	assert.Equal(t, *repo.Status[len(repo.Status)-1].EventType, opscomments.OnCommentEventType.String())
 	lastPrName := repo.Status[len(repo.Status)-1].PipelineRunName
 
-	err = twait.RegexpMatchingInPodLog(context.Background(), g.Cnx, g.TargetNamespace, fmt.Sprintf("tekton.dev/pipelineRun=%s", lastPrName), "step-task", *regexp.MustCompile(triggerComment), "", 2)
+	err = twait.RegexpMatchingInPodLog(context.Background(), g.Cnx, g.TargetNamespace, fmt.Sprintf("tekton.dev/pipelineRun=%s", lastPrName), "step-task", *regexp.MustCompile(triggerComment), "", 2, nil)
 	assert.NilError(t, err)
 
 	err = twait.RegexpMatchingInPodLog(context.Background(), g.Cnx, g.TargetNamespace, fmt.Sprintf("tekton.dev/pipelineRun=%s", lastPrName), "step-task", *regexp.MustCompile(fmt.Sprintf(
-		"The event is %s", opscomments.OnCommentEventType.String())), "", 2)
+		"The event is %s", opscomments.OnCommentEventType.String())), "", 2, nil)
 	assert.NilError(t, err)
 }
