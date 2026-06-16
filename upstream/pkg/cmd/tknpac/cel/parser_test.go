@@ -392,6 +392,87 @@ func TestGiteaParserWithMissingFields(t *testing.T) {
 			},
 		},
 		{
+			name: "issue comment with pull request source repository",
+			payload: `{
+				"action": "created",
+				"issue": {
+					"url": "https://gitea.com/api/v1/repos/test-org/test-repo/issues/42",
+					"number": 42,
+					"pull_request": {"html_url": "https://gitea.com/test-org/test-repo/pulls/42"}
+				},
+				"pull_request": {
+					"number": 42,
+					"title": "Test PR",
+					"head": {
+						"ref": "feature",
+						"sha": "abc123",
+						"repo": {"html_url": "https://gitea.com/testuser/test-repo-fork"}
+					},
+					"base": {
+						"ref": "main",
+						"repo": {"html_url": "https://gitea.com/test-org/test-repo"}
+					},
+					"html_url": "https://gitea.com/test-org/test-repo/pulls/42"
+				},
+				"comment": {"body": "/retest"},
+				"repository": {
+					"name": "test-repo",
+					"owner": {"login": "test-org"},
+					"html_url": "https://gitea.com/test-org/test-repo",
+					"default_branch": "main"
+				},
+				"sender": {"login": "testuser"}
+			}`,
+			wantErr: false,
+			checks: func(t *testing.T, event *info.Event) {
+				assert.Equal(t, event.PullRequestNumber, 42)
+				assert.Equal(t, event.HeadURL, "https://gitea.com/testuser/test-repo-fork")
+				assert.Equal(t, event.BaseURL, "https://gitea.com/test-org/test-repo")
+				assert.Equal(t, event.HeadBranch, "feature")
+				assert.Equal(t, event.BaseBranch, "main")
+				assert.Equal(t, event.SHA, "abc123")
+				assert.Equal(t, event.SHAURL, "https://gitea.com/test-org/test-repo/pulls/42/commit/abc123")
+			},
+		},
+		{
+			name: "pull request comment with pull request source repository",
+			payload: `{
+				"action": "created",
+				"issue": {
+					"url": "https://gitea.com/api/v1/repos/test-org/test-repo/issues/43",
+					"number": 43,
+					"pull_request": {"html_url": "https://gitea.com/test-org/test-repo/pulls/43"}
+				},
+				"pull_request": {
+					"number": 43,
+					"title": "Another PR",
+					"head": {
+						"ref": "bugfix",
+						"sha": "def456",
+						"repo": {"html_url": "https://gitea.com/testuser/test-repo-fork"}
+					},
+					"base": {
+						"ref": "main",
+						"repo": {"html_url": "https://gitea.com/test-org/test-repo"}
+					},
+					"html_url": "https://gitea.com/test-org/test-repo/pulls/43"
+				},
+				"comment": {"body": "/test"},
+				"repository": {
+					"name": "test-repo",
+					"owner": {"login": "test-org"}
+				},
+				"sender": {"login": "testuser"}
+			}`,
+			wantErr: false,
+			checks: func(t *testing.T, event *info.Event) {
+				assert.Equal(t, event.PullRequestNumber, 43)
+				assert.Equal(t, event.HeadURL, "https://gitea.com/testuser/test-repo-fork")
+				assert.Equal(t, event.BaseURL, "https://gitea.com/test-org/test-repo")
+				assert.Equal(t, event.SHA, "def456")
+			},
+		},
+		{
 			name: "pull request with missing head repository",
 			payload: `{
 				"action": "opened",
@@ -429,6 +510,8 @@ func TestGiteaParserWithMissingFields(t *testing.T) {
 			switch {
 			case strings.Contains(tt.name, "push"):
 				headers["X-Gitea-Event-Type"] = "push"
+			case strings.Contains(tt.name, "pull request comment"):
+				headers["X-Gitea-Event-Type"] = "pull_request_comment"
 			case strings.Contains(tt.name, "issue comment"):
 				headers["X-Gitea-Event-Type"] = "issue_comment"
 			}
@@ -443,6 +526,81 @@ func TestGiteaParserWithMissingFields(t *testing.T) {
 			if tt.checks != nil {
 				tt.checks(t, event)
 			}
+		})
+	}
+}
+
+func TestEventFromForgejo(t *testing.T) {
+	prPayload := `{
+		"action": "opened",
+		"number": 1,
+		"pull_request": {
+			"title": "Test PR",
+			"head": {"ref": "feature", "sha": "abc123",
+				"repo": {"html_url": "https://forgejo.example.com/fork/repo"}},
+			"base": {"ref": "main",
+				"repo": {"html_url": "https://forgejo.example.com/owner/repo"}}
+		},
+		"repository": {
+			"html_url": "https://forgejo.example.com/owner/repo",
+			"name": "repo",
+			"default_branch": "main",
+			"owner": {"login": "owner"}
+		},
+		"sender": {"login": "contributor"}
+	}`
+
+	tests := []struct {
+		name    string
+		headers map[string]string
+		wantErr bool
+		checks  func(t *testing.T, event *info.Event)
+	}{
+		{
+			name: "Forgejo header only",
+			headers: map[string]string{
+				"X-Forgejo-Event-Type": "pull_request",
+			},
+			checks: func(t *testing.T, event *info.Event) {
+				t.Helper()
+				assert.Equal(t, event.Organization, "owner")
+				assert.Equal(t, event.Repository, "repo")
+				assert.Equal(t, event.Sender, "contributor")
+				assert.Equal(t, event.HeadBranch, "feature")
+				assert.Equal(t, event.BaseBranch, "main")
+			},
+		},
+		{
+			name: "both Forgejo and Gitea headers",
+			headers: map[string]string{
+				"X-Forgejo-Event-Type": "pull_request",
+				"X-Gitea-Event-Type":   "pull_request",
+			},
+			checks: func(t *testing.T, event *info.Event) {
+				t.Helper()
+				assert.Equal(t, event.Organization, "owner")
+				assert.Equal(t, event.Repository, "repo")
+			},
+		},
+		{
+			name: "error when only Gitea header provided",
+			headers: map[string]string{
+				"X-Gitea-Event-Type": "pull_request",
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			event, err := eventFromForgejo([]byte(prPayload), tt.headers)
+			if tt.wantErr {
+				assert.Assert(t, err != nil)
+				return
+			}
+			assert.NilError(t, err)
+			assert.Assert(t, event != nil)
+			tt.checks(t, event)
 		})
 	}
 }

@@ -1,7 +1,6 @@
 package app
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -56,7 +55,7 @@ var validSecret = &corev1.Secret{
 	},
 }
 
-func Test_GenerateJWT(t *testing.T) {
+func TestGenerateJWT(t *testing.T) {
 	namespaceWhereSecretNotInstalled := &corev1.Namespace{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "foo",
@@ -145,8 +144,9 @@ func Test_GenerateJWT(t *testing.T) {
 				},
 			}
 
-			ip := NewInstallation(httptest.NewRequestWithContext(context.Background(), http.MethodGet, "http://localhost", strings.NewReader("")), run, &v1alpha1.Repository{}, &github.Provider{}, tt.namespace.GetName())
-			token, err := ip.GenerateJWT(ctx)
+			gh := github.New()
+			gh.Run = run
+			token, err := gh.GenerateJWT(ctx, tt.namespace.GetName(), stdata.Kube)
 			if tt.wantErr {
 				assert.Assert(t, err != nil)
 				return
@@ -161,7 +161,7 @@ func Test_GenerateJWT(t *testing.T) {
 }
 
 // Test_GetAndUpdateInstallationID tests we properly obtain the list of repos for a GitHub App and find a matching repo.
-func Test_GetAndUpdateInstallationID(t *testing.T) {
+func TestGetAndUpdateInstallationID(t *testing.T) {
 	tdata := testclient.Data{
 		Namespaces: []*corev1.Namespace{testNamespace},
 		Secret:     []*corev1.Secret{validSecret},
@@ -207,10 +207,11 @@ func Test_GetAndUpdateInstallationID(t *testing.T) {
 	ctx = info.StoreCurrentControllerName(ctx, "default")
 	ctx = info.StoreNS(ctx, testNamespace.GetName())
 
-	ip := NewInstallation(httptest.NewRequestWithContext(context.Background(), http.MethodGet, "http://localhost", strings.NewReader("")), run, &v1alpha1.Repository{}, &github.Provider{}, testNamespace.GetName())
-	jwtToken, err := ip.GenerateJWT(ctx)
+	gh := github.New()
+	gh.Run = run
+	jwtToken, err := gh.GenerateJWT(ctx, testNamespace.GetName(), stdata.Kube)
 	assert.NilError(t, err)
-	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "http://localhost", strings.NewReader(""))
+	req := httptest.NewRequestWithContext(ctx, http.MethodGet, "http://localhost", strings.NewReader(""))
 	repo := &v1alpha1.Repository{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "repo",
@@ -257,7 +258,7 @@ func Test_GetAndUpdateInstallationID(t *testing.T) {
 			`{"total_count": 2,"repositories": [{"id":1,"html_url": "https://matched/%s/incoming"},{"id":2,"html_url": "https://anotherrepo/that/would/failit"}]}`,
 			orgName)
 	})
-	ip = NewInstallation(req, run, repo, gprovider, testNamespace.GetName())
+	ip := NewInstallation(req, run, repo, gprovider, testNamespace.GetName())
 	_, token, installationID, err := ip.GetAndUpdateInstallationID(ctx)
 	assert.NilError(t, err)
 	assert.Equal(t, installationID, int64(wantID))
@@ -297,8 +298,9 @@ func TestGetAndUpdateInstallationIDIgnoresEnterpriseHostHeader(t *testing.T) {
 	ctx = info.StoreCurrentControllerName(ctx, "default")
 	ctx = info.StoreNS(ctx, testNamespace.GetName())
 
-	jwtInstallation := &Install{run: run, namespace: testNamespace.GetName()}
-	jwtToken, err := jwtInstallation.GenerateJWT(ctx)
+	gh := github.New()
+	gh.Run = run
+	jwtToken, err := gh.GenerateJWT(ctx, testNamespace.GetName(), stdata.Kube)
 	assert.NilError(t, err)
 
 	mux.HandleFunc(fmt.Sprintf("/repos/%s/%s/installation", orgName, repoName), func(w http.ResponseWriter, _ *http.Request) {
@@ -342,7 +344,7 @@ func testMethod(t *testing.T, r *http.Request) {
 	}
 }
 
-func TestGetAndUpdateInstallationID_Fallbacks(t *testing.T) {
+func TestGetAndUpdateInstallationIDFallbacks(t *testing.T) {
 	tdata := testclient.Data{
 		Namespaces: []*corev1.Namespace{testNamespace},
 		Secret:     []*corev1.Secret{validSecret},
@@ -466,8 +468,9 @@ func TestGetAndUpdateInstallationID_Fallbacks(t *testing.T) {
 			ctx = info.StoreCurrentControllerName(ctx, "default")
 			ctx = info.StoreNS(ctx, testNamespace.GetName())
 
-			ip := NewInstallation(httptest.NewRequestWithContext(context.Background(), http.MethodGet, "http://localhost", strings.NewReader("")), run, &v1alpha1.Repository{}, &github.Provider{}, testNamespace.GetName())
-			jwtToken, err := ip.GenerateJWT(ctx)
+			gh := github.New()
+			gh.Run = run
+			jwtToken, err := gh.GenerateJWT(ctx, testNamespace.GetName(), stdata.Kube)
 			assert.NilError(t, err)
 
 			tt.setupMux(mux, jwtToken)
@@ -485,7 +488,7 @@ func TestGetAndUpdateInstallationID_Fallbacks(t *testing.T) {
 			gprovider.SetGithubClient(fakeghclient)
 			t.Setenv("PAC_GIT_PROVIDER_TOKEN_APIURL", serverURL)
 
-			ip = NewInstallation(httptest.NewRequestWithContext(context.Background(), http.MethodGet, "http://localhost", strings.NewReader("")), run, repo, gprovider, testNamespace.GetName())
+			ip := NewInstallation(httptest.NewRequestWithContext(ctx, http.MethodGet, "http://localhost", strings.NewReader("")), run, repo, gprovider, testNamespace.GetName())
 			enterpriseHost, token, installationID, err := ip.GetAndUpdateInstallationID(ctx)
 
 			if tt.wantErr {

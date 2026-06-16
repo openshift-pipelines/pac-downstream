@@ -19,10 +19,12 @@ on:
       - opened
       - reopened
       - synchronize
+      - labeled
     paths:
       - "**.go"
       - ".github/workflows/**"
       - "test/testdata/**"
+      - "vendor/**"
 
 jobs:
   e2e-tests:
@@ -31,20 +33,27 @@ jobs:
     if: >
       github.event_name == 'schedule' ||
       github.event_name == 'workflow_dispatch' ||
-      github.event_name == 'pull_request_target'
+      (github.event_name == 'pull_request_target' && github.event.action != 'labeled') ||
+      (github.event_name == 'pull_request_target' && github.event.action == 'labeled' && github.event.label.name == 'ok-to-test')
     concurrency:
       group: ${{ github.workflow }}-${{ matrix.provider }}-${{ github.event.pull_request.number || github.ref_name }}
       cancel-in-progress: true
 
     name: e2e tests
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
     strategy:
       fail-fast: false
       matrix:
         provider:
           [
             github_public,
-            github_ghe,
+            github_ghe_1,
+            github_ghe_2,
+            github_ghe_3,
             gitlab_bitbucket,
             gitea_1,
             gitea_2,
@@ -53,224 +62,95 @@ jobs:
           ]
 
     env:
-      CONTROLLER_DOMAIN_URL: controller.paac-127-0-0-1.nip.io
+      # Common/Infra
+      CONTROLLER_DOMAIN_URL: paac.paac-127-0-0-1.nip.io
       KOCACHE: /tmp/ko-cache
-      KO_DOCKER_REPO: localhost:5000
-      KUBECONFIG: /home/runner/.kube/config.kind
-      TARGET_TEAM_SLUGS: "pipeline-as-code,pipeline-as-code-contributors"
-      TEST_BITBUCKET_CLOUD_API_URL: https://api.bitbucket.org/2.0
-      TEST_BITBUCKET_CLOUD_E2E_REPOSITORY: cboudjna/pac-e2e-tests
-      TEST_BITBUCKET_CLOUD_TOKEN: ${{ secrets.BITBUCKET_CLOUD_TOKEN }}
-      TEST_BITBUCKET_CLOUD_USER: cboudjna
-      TEST_BITBUCKET_SERVER_API_URL: ${{ secrets.BITBUCKET_SERVER_API_URL }}
-      TEST_BITBUCKET_SERVER_E2E_REPOSITORY: PAC/pac-e2e-tests
-      TEST_BITBUCKET_SERVER_TOKEN: ${{ secrets.BITBUCKET_SERVER_TOKEN }}
-      TEST_BITBUCKET_SERVER_USER: pipelines
-      TEST_BITBUCKET_SERVER_WEBHOOK_SECRET: ${{ secrets.BITBUCKET_SERVER_WEBHOOK_SECRET }}
-      TEST_EL_URL: http://controller.paac-127-0-0-1.nip.io
+      KO_DOCKER_REPO: registry.paac-127-0-0-1.nip.io
+      KUBECONFIG: /home/runner/.kube/config.local
+      TARGET_TEAM_SLUGS: "pipelines-as-code-maintainers,pipelines-as-code-collaborators"
+      TEST_EL_URL: https://paac.paac-127-0-0-1.nip.io
       TEST_EL_WEBHOOK_SECRET: ${{ secrets.WEBHOOK_SECRET }}
-      TEST_GITEA_API_URL: http://localhost:3000
-      TEST_GITEA_INTERNAL_URL: http://gitea.gitea:3000
-      TEST_GITEA_PASSWORD: pac
-      TEST_GITEA_REPO_OWNER: pac/pac
-      TEST_GITEA_USERNAME: pac
+
+      # GitHub (Public)
       TEST_GITHUB_API_URL: api.github.com
       TEST_GITHUB_PRIVATE_TASK_NAME: task-remote
       TEST_GITHUB_PRIVATE_TASK_URL: https://github.com/openshift-pipelines/pipelines-as-code-e2e-tests-private/blob/main/remote_task.yaml
       TEST_GITHUB_REPO_INSTALLATION_ID: ${{ vars.INSTALLATION_ID }}
       TEST_GITHUB_REPO_OWNER_GITHUBAPP: openshift-pipelines/pipelines-as-code-e2e-tests
       TEST_GITHUB_REPO_OWNER_WEBHOOK: openshift-pipelines/pipelines-as-code-e2e-tests-webhook
+      TEST_GITHUB_TOKEN: ${{ secrets.GH_APPS_TOKEN }}
+
+      # GitHub Enterprise (Second)
       TEST_GITHUB_SECOND_API_URL: ghe.pipelinesascode.com
-      TEST_GITHUB_SECOND_EL_URL: http://ghe.paac-127-0-0-1.nip.io
+      TEST_GITHUB_SECOND_EL_URL: https://ghe.paac-127-0-0-1.nip.io
       TEST_GITHUB_SECOND_REPO_INSTALLATION_ID: 1
       TEST_GITHUB_SECOND_REPO_OWNER_GITHUBAPP: pipelines-as-code/e2e
+      TEST_GITHUB_SECOND_SMEE_URL: ${{ secrets.TEST_GITHUB_SECOND_SMEE_URL }}
       TEST_GITHUB_SECOND_TOKEN: ${{ secrets.TEST_GITHUB_SECOND_TOKEN }}
-      TEST_GITHUB_TOKEN: ${{ secrets.GH_APPS_TOKEN }}
-      TEST_GITLAB_PROJECT_ID: ${{ vars.TEST_GITLAB_PROJECT_ID }}
+      TEST_GITHUB_SECOND_WEBHOOK_ORG: pac-e2e-webhook-tests
+      TEST_GITHUB_SECOND_WEBHOOK_TOKEN: ${{ secrets.TEST_GITHUB_SECOND_WEBHOOK_TOKEN }}
+      TEST_GITHUB_SECOND_WEBHOOK_SECRET: ${{ secrets.TEST_GITHUB_SECOND_WEBHOOK_SECRET }}
+      TEST_GITHUB_SECOND_APPLICATION_ID: ${{ vars.TEST_GITHUB_SECOND_APPLICATION_ID }}
+
+      # GitLab
       TEST_GITLAB_TOKEN: ${{ secrets.GITLAB_TOKEN }}
+      TEST_GITLAB_SECOND_TOKEN: ${{ secrets.TEST_GITLAB_SECOND_TOKEN }}
+      TEST_GITLAB_SECOND_GROUP: ${{ vars.TEST_GITLAB_SECOND_GROUP }}
+
+      # Gitea
+      TEST_GITEA_API_URL: http://localhost:3000
+      TEST_GITEA_INTERNAL_URL: http://forgejo-http.forgejo.svc.cluster.local:3000
+      TEST_GITEA_PASSWORD: pac
+      TEST_GITEA_REPO_OWNER: pac/pac
+      TEST_GITEA_USERNAME: pac
+
+      # Bitbucket Cloud
+      TEST_BITBUCKET_CLOUD_API_URL: https://api.bitbucket.org/2.0
+      TEST_BITBUCKET_CLOUD_E2E_REPOSITORY: cboudjna/pac-e2e-tests
+      TEST_BITBUCKET_CLOUD_TOKEN: ${{ secrets.BITBUCKET_CLOUD_TOKEN }}
+      TEST_BITBUCKET_CLOUD_USER: cboudjna
+
+      # Bitbucket Data Center
+      TEST_BITBUCKET_DATA_CENTER_API_URL: ${{ secrets.BITBUCKET_DATA_CENTER_API_URL }}
+      TEST_BITBUCKET_DATA_CENTER_E2E_REPOSITORY: PAC/pac-e2e-tests
+      TEST_BITBUCKET_DATA_CENTER_TOKEN: ${{ secrets.BITBUCKET_DATA_CENTER_TOKEN }}
+      TEST_BITBUCKET_DATA_CENTER_USER: pipelines
+      TEST_BITBUCKET_DATA_CENTER_WEBHOOK_SECRET: ${{ secrets.BITBUCKET_DATA_CENTER_WEBHOOK_SECRET }}
+      TESTRR_URL: https://testrr.pipelinesascode.com
+      TESTRR_PROJECT: pipelinesascode
+      TESTRR_USERNAME: pac
+      TESTRR_PASSWORD: ${{ secrets.TESTRR_PASSWORD }}
+      TESTRR_BRANCH: ${{ github.head_ref || github.ref_name }}
+      TESTRR_COMMIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      TESTRR_BUILD_ID: ${{ github.run_id }}
+      TESTRR_BUILD_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      TESTRR_RUN_LABEL: gha-e2e-${{ matrix.provider }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
           ref: ${{ inputs.target_ref || github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
 
-      # Step to check PR author's org membership and repo permissions.
-      # This step will fail the job if checks do not pass, skipping subsequent steps.
       - name: Check user permissions on PRs
         if: github.event_name == 'pull_request_target'
-        uses: actions/github-script@v8
+        uses: pipelines-as-code/ok-to-test@25881c6245695bd81a22df9f2ebdd9569b420581 # v1
         with:
-          script: |
-            if (!context || !context.payload || !context.payload.pull_request) {
-              core.setFailed('Invalid GitHub context: missing required pull_request information');
-              return;
-            }
+          github-token: ${{ secrets.GH_TOKEN }}
+          team-slugs: ${{ env.TARGET_TEAM_SLUGS }}
 
-            async function run() {
-              const actor = context.payload.pull_request.user.login;
-              const repoOwner = context.repo.owner;
-              const repoName = context.repo.repo;
-              const targetOrg = context.repo.owner;
-
-              core.info(`🔍 Starting permission check for user: @${actor}`);
-              core.info(`📋 Repository: ${repoOwner}/${repoName}`);
-              core.info(`🏢 Target organization: ${targetOrg}`);
-
-              // Condition 1: Check if the user is a trusted bot.
-              const trustedBots = ["dependabot[bot]", "renovate[bot]"];
-              core.info(`🤖 Checking if @${actor} is a trusted bot...`);
-              core.info(`   Trusted bots list: ${trustedBots.join(', ')}`);
-
-              if (trustedBots.includes(actor)) {
-                core.info(`✅ Condition met: User @${actor} is a trusted bot. Proceeding.`);
-                return; // Success
-              }
-              core.info(`   ❌ User @${actor} is not a trusted bot.`);
-
-              // Condition 2: Check for public membership in the target organization.
-              core.info(`\n👥 Condition 2: Checking organization and team membership...`);
-              core.info(
-                `User @${actor} is not a trusted bot. Checking for membership in '${targetOrg}'...`,
-              );
-              try {
-                // Optional: check membership in one or more org teams (set TARGET_TEAM_SLUGS as comma-separated slugs in workflow env)
-                const teamSlugsEnv = process.env.TARGET_TEAM_SLUGS || "";
-                const teamSlugs = teamSlugsEnv
-                  .split(",")
-                  .map((s) => s.trim())
-                  .filter(Boolean);
-
-                core.info(`🔧 TARGET_TEAM_SLUGS environment variable: "${teamSlugsEnv}"`);
-                core.info(`📝 Parsed team slugs: [${teamSlugs.join(', ')}]`);
-
-                if (teamSlugs.length > 0) {
-                  core.info(`🔍 Checking team membership for ${teamSlugs.length} team(s)...`);
-                  for (const team_slug of teamSlugs) {
-                    core.info(`   Checking team: ${team_slug}...`);
-                    try {
-                      const membership = await github.rest.teams.getMembershipForUserInOrg({
-                        org: targetOrg,
-                        team_slug,
-                        username: actor,
-                      });
-                      core.info(`   API response for team '${team_slug}': ${JSON.stringify(membership.data)}`);
-                      if (
-                        membership &&
-                        membership.data &&
-                        membership.data.state === "active"
-                      ) {
-                        core.info(
-                          `✅ Condition met: User @${actor} is a member of team '${team_slug}' in '${targetOrg}'. Proceeding.`,
-                        );
-                        return; // Success
-                      } else {
-                        core.info(`   ⚠️ Team membership found but state is not 'active': ${membership.data.state}`);
-                      }
-                    } catch (err) {
-                      // Not a member of this team or team doesn't exist — continue to next
-                      core.info(
-                        `   ❌ User @${actor} is not a member of team '${team_slug}' (or team not found). Error: ${err.message}`,
-                      );
-                    }
-                  }
-                  // If we tried team checks and none matched, continue to next org membership checks
-                  core.info(
-                    `ⓘ User @${actor} is not a member of any configured teams in '${targetOrg}'. Falling back to org membership checks.`,
-                  );
-                } else {
-                  core.info(`ℹ️ No teams configured in TARGET_TEAM_SLUGS. Skipping team membership checks.`);
-                }
-                core.info(`🏢 Checking organization membership for @${actor} in '${targetOrg}'...`);
-                try {
-                  core.info(`   Attempting checkMembershipForUser API call...`);
-                  await github.rest.orgs.checkMembershipForUser({
-                    org: targetOrg,
-                    username: actor,
-                  });
-                  core.info(
-                    `✅ Condition met: User @${actor} is a member of '${targetOrg}'. Proceeding.`,
-                  );
-                  return; // Success
-                } catch (err) {
-                  // Try public membership as fallback
-                  core.info(`   ❌ Private membership check failed: ${err.message}`);
-                  core.info(`   Attempting checkPublicMembershipForUser API call...`);
-                  try {
-                    await github.rest.orgs.checkPublicMembershipForUser({
-                      org: targetOrg,
-                      username: actor,
-                    });
-                    core.info(
-                      `✅ Condition met: User @${actor} is a public member of '${targetOrg}'. Proceeding.`,
-                    );
-                    return; // Success
-                  } catch (publicErr) {
-                    // Neither private nor public member - will be caught by outer catch
-                    core.info(`   ❌ Public membership check failed: ${publicErr.message}`);
-                    throw publicErr;
-                  }
-                }
-              } catch (error) {
-                // This is not a failure, just one unmet condition. Log and continue.
-                core.info(
-                  `ⓘ User @${actor} is not a public member of '${targetOrg}'. Checking repository permissions as a fallback.`,
-                );
-              }
-
-              // Condition 3: Check for write/admin permission on the repository.
-              core.info(`\n🔐 Condition 3: Checking repository collaborator permissions...`);
-              try {
-                core.info(`   Attempting getCollaboratorPermissionLevel API call...`);
-                const response = await github.rest.repos.getCollaboratorPermissionLevel({
-                  owner: repoOwner,
-                  repo: repoName,
-                  username: actor,
-                });
-
-                const permission = response.data.permission;
-                core.info(`   User @${actor} has '${permission}' permission on ${repoOwner}/${repoName}`);
-
-                if (permission === "admin" || permission === "write") {
-                  core.info(
-                    `✅ Condition met: User @${actor} has '${permission}' repository permission. Proceeding.`,
-                  );
-                  return; // Success
-                } else {
-                  // If we reach here, no conditions were met. This is the final failure.
-                  core.info(`   ❌ Permission '${permission}' is insufficient (requires 'write' or 'admin')`);
-                  core.setFailed(
-                    `❌ Permission check failed. User @${actor} did not meet any required conditions (trusted bot, org member, or repo write access).`,
-                  );
-                  return;
-                }
-              } catch (error) {
-                // This error means they are not even a collaborator.
-                core.info(`   ❌ Collaborator permission check failed: ${error.message}`);
-                core.setFailed(
-                  `❌ Permission check failed. User @${actor} is not a collaborator on this repository and did not meet other conditions.`,
-                );
-                return;
-              }
-            }
-
-            run().catch(err => {
-              core.error(`💥 Unexpected error during permission check: ${err.message}`);
-              core.error(`   Stack trace: ${err.stack}`);
-              core.setFailed(`Unexpected error during permission check: ${err.message}`);
-            });
-
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
         with:
           go-version-file: "go.mod"
 
       - name: Cache ko layer cache
-        uses: actions/cache@v5
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
         with:
           path: /tmp/ko-cache
           key: ${{ runner.os }}-ko-${{ hashFiles('go.sum') }}
           restore-keys: |
             ${{ runner.os }}-ko-
 
-      - uses: ko-build/setup-ko@v0.9
+      - uses: ko-build/setup-ko@d006021bd0c28d1ce33a07e7943d48b079944c8d # v0.9
 
       # Start binary build in background as soon as possible so we can optimize
       # the run of e2e when it's start later on
@@ -280,18 +160,32 @@ jobs:
           echo $! > /tmp/binary-build.pid
 
       - name: Install gosmee
-        uses: jaxxstorm/action-install-gh-release@v2.1.0
+        uses: jaxxstorm/action-install-gh-release@25e24d2d23ae098373794ef1d6faecb48ee52da8 # v3.0.0
         with:
           repo: chmouel/gosmee
 
       - name: Install Snazy
-        uses: jaxxstorm/action-install-gh-release@v2.1.0
+        uses: jaxxstorm/action-install-gh-release@25e24d2d23ae098373794ef1d6faecb48ee52da8 # v3.0.0
         with:
           repo: chmouel/snazy
 
+      - name: Install minica
+        run: | # zizmor: ignore[github-env]
+          go install github.com/jsha/minica@latest
+          echo "${HOME}/go/bin" >> "$GITHUB_PATH"
+
+      - name: Clone startpaac
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          repository: openshift-pipelines/startpaac
+          path: startpaac
+          persist-credentials: false
+
       - name: Run gosmee for main controller
+        env:
+          PYSMEE_URL: ${{ secrets.PYSMEE_URL }}
         run: |
-          nohup gosmee client --insecure-skip-tls-verify  --saveDir /tmp/gosmee-replay ${{ secrets.PYSMEE_URL }} "http://${CONTROLLER_DOMAIN_URL}" > /tmp/gosmee-main.log 2>&1 &
+          nohup gosmee client --saveDir /tmp/gosmee-replay "${PYSMEE_URL}" "https://${CONTROLLER_DOMAIN_URL}" > /tmp/gosmee-main.log 2>&1 &
 
       - name: Generate unique gosmee URL for Gitea tests
         if: startsWith(matrix.provider, 'gitea') || matrix.provider == 'concurrency'
@@ -300,77 +194,162 @@ jobs:
           SMEE_URL=$(curl -s https://hook.pipelinesascode.com -o /dev/null -w '%{redirect_url}')
           echo "Generated unique smee URL: ${SMEE_URL}"
           echo "url=${SMEE_URL}" >> "$GITHUB_OUTPUT"
-          echo "TEST_GITEA_SMEEURL=${SMEE_URL}" >> "$GITHUB_ENV"
+
+      - name: Run gosmee for main controller (Gitea)
+        if: startsWith(matrix.provider, 'gitea') || matrix.provider == 'concurrency'
+        env:
+          TEST_GITEA_SMEEURL: ${{ steps.gosmee-url.outputs.url }}
+        run: |
+          nohup gosmee client --saveDir /tmp/gosmee-replay "${TEST_GITEA_SMEEURL}" "https://${CONTROLLER_DOMAIN_URL}" >> /tmp/gosmee-main.log 2>&1 &
+
+      - name: Generate unique gosmee URL for GitLab tests
+        if: matrix.provider == 'gitlab_bitbucket'
+        id: gosmee-gitlab-url
+        run: |
+          SMEE_URL=$(curl -s https://hook.pipelinesascode.com -o /dev/null -w '%{redirect_url}')
+          echo "Generated unique GitLab smee URL: ${SMEE_URL}"
+          echo "url=${SMEE_URL}" >> "$GITHUB_OUTPUT"
+
+      - name: Run gosmee for GitLab tests
+        if: matrix.provider == 'gitlab_bitbucket'
+        env:
+          TEST_GITLAB_SMEEURL: ${{ steps.gosmee-gitlab-url.outputs.url }}
+        run: |
+          nohup gosmee client --saveDir /tmp/gosmee-replay-gitlab "${TEST_GITLAB_SMEEURL}" "https://${CONTROLLER_DOMAIN_URL}" >> /tmp/gosmee-gitlab.log 2>&1 &
+
+      - name: Run gosmee for second controller GHE App
+        if: startsWith(matrix.provider, 'github_ghe') || matrix.provider == 'concurrency'
+        run: |
+          nohup gosmee client --saveDir /tmp/gosmee-replay-ghe "${TEST_GITHUB_SECOND_SMEE_URL}" "https://ghe.paac-127-0-0-1.nip.io" >> /tmp/gosmee-ghe.log 2>&1 &
+
+      - name: Generate unique gosmee URL for GHE webhook tests
+        if: startsWith(matrix.provider, 'github_ghe') || matrix.provider == 'concurrency'
+        id: gosmee-ghe-webhook-url
+        run: |
+          SMEE_URL=$(curl -s https://hook.pipelinesascode.com -o /dev/null -w '%{redirect_url}')
+          echo "Generated unique GHE webhook smee URL: ${SMEE_URL}"
+          echo "url=${SMEE_URL}" >> "$GITHUB_OUTPUT"
+
+      - name: Run gosmee for second controller GHE webhook
+        if: startsWith(matrix.provider, 'github_ghe') || matrix.provider == 'concurrency'
+        env:
+          TEST_GITHUB_SECOND_WEBHOOK_SMEE_URL: ${{ steps.gosmee-ghe-webhook-url.outputs.url }}
+        run: |
+          nohup gosmee client --saveDir /tmp/gosmee-replay-ghe-webhook "${TEST_GITHUB_SECOND_WEBHOOK_SMEE_URL}" "https://ghe.paac-127-0-0-1.nip.io" >> /tmp/gosmee-ghe-webhook.log 2>&1 &
 
       - name: Setup tmate session
-        uses: mxschmitt/action-tmate@v3
+        uses: mxschmitt/action-tmate@35b54afac29c97fb54faba5b513f8fbd1882f113 # v3
         # add all environment so we can debug easily
         env:
-          CONTROLLER_DOMAIN_URL: controller.paac-127-0-0-1.nip.io
+          # Common/Infra
+          CONTROLLER_DOMAIN_URL: paac.paac-127-0-0-1.nip.io
           KOCACHE: /tmp/ko-cache
-          KO_DOCKER_REPO: localhost:5000
-          KUBECONFIG: /home/runner/.kube/config.kind
+          KO_DOCKER_REPO: registry.paac-127-0-0-1.nip.io
+          KUBECONFIG: /home/runner/.kube/config.local
+          PYSMEE_URL: ${{ secrets.PYSMEE_URL }}
           TARGET_TEAM_SLUGS: "pipeline-as-code,pipeline-as-code-contributors"
-          TEST_BITBUCKET_CLOUD_API_URL: https://api.bitbucket.org/2.0
-          TEST_BITBUCKET_CLOUD_E2E_REPOSITORY: cboudjna/pac-e2e-tests
-          TEST_BITBUCKET_CLOUD_TOKEN: ${{ secrets.BITBUCKET_CLOUD_TOKEN }}
-          TEST_BITBUCKET_CLOUD_USER: cboudjna
-          TEST_BITBUCKET_SERVER_API_URL: ${{ secrets.BITBUCKET_SERVER_API_URL }}
-          TEST_BITBUCKET_SERVER_E2E_REPOSITORY: PAC/pac-e2e-tests
-          TEST_BITBUCKET_SERVER_TOKEN: ${{ secrets.BITBUCKET_SERVER_TOKEN }}
-          TEST_BITBUCKET_SERVER_USER: pipelines
-          TEST_BITBUCKET_SERVER_WEBHOOK_SECRET: ${{ secrets.BITBUCKET_SERVER_WEBHOOK_SECRET }}
-          TEST_EL_URL: http://controller.paac-127-0-0-1.nip.io
+          TEST_EL_URL: https://paac.paac-127-0-0-1.nip.io
           TEST_EL_WEBHOOK_SECRET: ${{ secrets.WEBHOOK_SECRET }}
-          TEST_GITEA_API_URL: http://localhost:3000
-          TEST_GITEA_PASSWORD: pac
-          TEST_GITEA_REPO_OWNER: pac/pac
-          TEST_GITEA_USERNAME: pac
+          TEST_PROVIDER: ${{ matrix.provider }}
+
+          # GitHub (Public)
+          APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
           TEST_GITHUB_API_URL: api.github.com
           TEST_GITHUB_PRIVATE_TASK_NAME: task-remote
           TEST_GITHUB_PRIVATE_TASK_URL: https://github.com/openshift-pipelines/pipelines-as-code-e2e-tests-private/blob/main/remote_task.yaml
           TEST_GITHUB_REPO_INSTALLATION_ID: ${{ vars.INSTALLATION_ID }}
           TEST_GITHUB_REPO_OWNER_GITHUBAPP: openshift-pipelines/pipelines-as-code-e2e-tests
           TEST_GITHUB_REPO_OWNER_WEBHOOK: openshift-pipelines/pipelines-as-code-e2e-tests-webhook
+          TEST_GITHUB_TOKEN: ${{ secrets.GH_APPS_TOKEN }}
+
+          # GitHub Enterprise (Second)
           TEST_GITHUB_SECOND_API_URL: ghe.pipelinesascode.com
           TEST_GITHUB_SECOND_APPLICATION_ID: ${{ vars.TEST_GITHUB_SECOND_APPLICATION_ID }}
-          TEST_GITHUB_SECOND_EL_URL: http://ghe.paac-127-0-0-1.nip.io
+          TEST_GITHUB_SECOND_EL_URL: https://ghe.paac-127-0-0-1.nip.io
+          TEST_GITHUB_SECOND_PRIVATE_KEY: ${{ secrets.TEST_GITHUB_SECOND_PRIVATE_KEY }}
           TEST_GITHUB_SECOND_REPO_INSTALLATION_ID: 1
           TEST_GITHUB_SECOND_REPO_OWNER_GITHUBAPP: pipelines-as-code/e2e
-          TEST_GITHUB_SECOND_TOKEN: ${{ secrets.TEST_GITHUB_SECOND_TOKEN }}
           TEST_GITHUB_SECOND_SMEE_URL: ${{ secrets.TEST_GITHUB_SECOND_SMEE_URL }}
+          TEST_GITHUB_SECOND_TOKEN: ${{ secrets.TEST_GITHUB_SECOND_TOKEN }}
+          TEST_GITHUB_SECOND_WEBHOOK_ORG: pac-e2e-webhook-tests
           TEST_GITHUB_SECOND_WEBHOOK_SECRET: ${{ secrets.TEST_GITHUB_SECOND_WEBHOOK_SECRET }}
-          TEST_GITHUB_TOKEN: ${{ secrets.GH_APPS_TOKEN }}
+          TEST_GITHUB_SECOND_WEBHOOK_TOKEN: ${{ secrets.TEST_GITHUB_SECOND_WEBHOOK_TOKEN }}
+
+          # GitLab
           TEST_GITLAB_API_URL: https://gitlab.com
-          TEST_GITLAB_PROJECT_ID: ${{ vars.TEST_GITLAB_PROJECT_ID }}
+          TEST_GITLAB_GROUP: pac-e2e-tests
+          TEST_GITLAB_SECOND_GROUP: ${{ vars.TEST_GITLAB_SECOND_GROUP }}
+          TEST_GITLAB_SMEEURL: ${{ steps.gosmee-gitlab-url.outputs.url }}
           TEST_GITLAB_TOKEN: ${{ secrets.GITLAB_TOKEN }}
-          TEST_PROVIDER: ${{ matrix.provider }}
+          TEST_GITLAB_SECOND_TOKEN: ${{ secrets.TEST_GITLAB_SECOND_TOKEN }}
+
+          # Gitea
+          TEST_GITEA_API_URL: http://localhost:3000
+          TEST_GITEA_INTERNAL_URL: http://forgejo-http.forgejo.svc.cluster.local:3000
+          TEST_GITEA_PASSWORD: pac
+          TEST_GITEA_REPO_OWNER: pac/pac
+          TEST_GITEA_USERNAME: pac
+
+          # Bitbucket Cloud
+          TEST_BITBUCKET_CLOUD_API_URL: https://api.bitbucket.org/2.0
+          TEST_BITBUCKET_CLOUD_E2E_REPOSITORY: cboudjna/pac-e2e-tests
+          TEST_BITBUCKET_CLOUD_TOKEN: ${{ secrets.BITBUCKET_CLOUD_TOKEN }}
+          TEST_BITBUCKET_CLOUD_USER: cboudjna
+
+          # Bitbucket Data Center
+          TEST_BITBUCKET_DATA_CENTER_API_URL: ${{ secrets.BITBUCKET_DATA_CENTER_API_URL }}
+          TEST_BITBUCKET_DATA_CENTER_E2E_REPOSITORY: PAC/pac-e2e-tests
+          TEST_BITBUCKET_DATA_CENTER_TOKEN: ${{ secrets.BITBUCKET_DATA_CENTER_TOKEN }}
+          TEST_BITBUCKET_DATA_CENTER_USER: pipelines
+          TEST_BITBUCKET_DATA_CENTER_WEBHOOK_SECRET: ${{ secrets.BITBUCKET_DATA_CENTER_WEBHOOK_SECRET }}
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.debug_enabled }}
         with:
           detached: true
           limit-access-to-actor: true
 
-      - name: Start installing cluster
-        run: |
-          export PAC_DIR=${PWD}
-          bash -x ./hack/dev/kind/install.sh
-
-      - name: Create PAC github-app-secret
+      - name: Start installing cluster with startpaac
         env:
-          PAC_GITHUB_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
-          PAC_GITHUB_APPLICATION_ID: ${{ vars.APPLICATION_ID }}
-          PAC_WEBHOOK_SECRET: ${{ secrets.WEBHOOK_SECRET }}
+          PAC_DIR: ${{ github.workspace }}
+          VARS_APPLICATION_ID: ${{ vars.APPLICATION_ID }}
+          VARS_TEST_GITHUB_SECOND_APPLICATION_ID: ${{ vars.TEST_GITHUB_SECOND_APPLICATION_ID }}
         run: |
-          ./hack/gh-workflow-ci.sh create_pac_github_app_secret
+          mkdir -p ~/secrets
+          echo "${VARS_APPLICATION_ID}" > ~/secrets/github-application-id
+          echo "${{ secrets.APP_PRIVATE_KEY }}" > ~/secrets/github-private-key
+          echo "${{ secrets.WEBHOOK_SECRET }}" > ~/secrets/webhook.secret
+          echo "${{ secrets.PYSMEE_URL }}" > ~/secrets/smee
 
-      - name: Create second Github APP Controller on GHE
-        env:
-          TEST_GITHUB_SECOND_SMEE_URL: ${{ secrets.TEST_GITHUB_SECOND_SMEE_URL }}
-          TEST_GITHUB_SECOND_PRIVATE_KEY: ${{ secrets.TEST_GITHUB_SECOND_PRIVATE_KEY }}
-          TEST_GITHUB_SECOND_WEBHOOK_SECRET: ${{ secrets.TEST_GITHUB_SECOND_WEBHOOK_SECRET }}
-          TEST_GITHUB_SECOND_APPLICATION_ID: ${{ vars.TEST_GITHUB_SECOND_APPLICATION_ID }}
+
+          mkdir -p ~/secrets-second
+          echo "${VARS_TEST_GITHUB_SECOND_APPLICATION_ID}" > ~/secrets-second/github-application-id
+          echo "${{ secrets.TEST_GITHUB_SECOND_PRIVATE_KEY }}" > ~/secrets-second/github-private-key
+          echo "${{ secrets.TEST_GITHUB_SECOND_WEBHOOK_SECRET }}" > ~/secrets-second/webhook.secret
+          echo "${{ secrets.TEST_GITHUB_SECOND_SMEE_URL }}" > ~/secrets-second/smee
+
+          export PAC_SECRET_FOLDER=~/secrets
+          export PAC_SECOND_SECRET_FOLDER=~/secrets-second
+          export PAC_WEBHOOK_SECRET="${{secrets.WEBHOOK_SECRET}}"
+          export PAC_DOMAIN=paac-127-0-0-1.nip.io
+          export TARGET_HOST=local
+
+          cd startpaac
+          ./startpaac --ci -a
+
+      - name: Install minica CA certificate to system trust store
         run: |
-          ./hack/gh-workflow-ci.sh create_second_github_app_controller_on_ghe
+          set -x
+          if [ -f /tmp/certs/minica.pem ]; then
+            sudo mkdir -p /usr/local/share/ca-certificates/
+            sudo cp /tmp/certs/minica.pem /usr/local/share/ca-certificates/minica.crt
+            sudo update-ca-certificates
+          else
+            echo "ERROR: /tmp/certs/minica.pem not found"
+            exit 1
+          fi
+
+      - name: Configure git to skip TLS verification
+        run: |
+          git config --global http.sslVerify false
 
       - name: Enable debug logging for e2e
         run: |
@@ -394,35 +373,32 @@ jobs:
           TEST_GITHUB_REPO_INSTALLATION_ID: ${{ vars.INSTALLATION_ID }}
           TEST_GITHUB_TOKEN: ${{ secrets.GH_APPS_TOKEN }}
           TEST_GITHUB_SECOND_TOKEN: ${{ secrets.TEST_GITHUB_SECOND_TOKEN }}
+          TEST_GITHUB_SECOND_WEBHOOK_TOKEN: ${{ secrets.TEST_GITHUB_SECOND_WEBHOOK_TOKEN }}
           TEST_GITLAB_TOKEN: ${{ secrets.GITLAB_TOKEN }}
-          TEST_BITBUCKET_SERVER_TOKEN: ${{ secrets.BITBUCKET_SERVER_TOKEN }}
-          TEST_BITBUCKET_SERVER_API_URL: ${{ secrets.BITBUCKET_SERVER_API_URL }}
-          TEST_BITBUCKET_SERVER_WEBHOOK_SECRET: ${{ secrets.BITBUCKET_SERVER_WEBHOOK_SECRET }}
+          TEST_GITLAB_SECOND_TOKEN: ${{ secrets.TEST_GITLAB_SECOND_TOKEN }}
+          TEST_GITLAB_SECOND_GROUP: ${{ vars.TEST_GITLAB_SECOND_GROUP }}
+          TEST_BITBUCKET_DATA_CENTER_TOKEN: ${{ secrets.BITBUCKET_DATA_CENTER_TOKEN }}
+          TEST_BITBUCKET_DATA_CENTER_API_URL: ${{ secrets.BITBUCKET_DATA_CENTER_API_URL }}
+          TEST_BITBUCKET_DATA_CENTER_WEBHOOK_SECRET: ${{ secrets.BITBUCKET_DATA_CENTER_WEBHOOK_SECRET }}
+          TEST_GITEA_SMEEURL: ${{ steps.gosmee-url.outputs.url }}
+          TEST_GITLAB_SMEEURL: ${{ steps.gosmee-gitlab-url.outputs.url }}
+          TEST_GITHUB_SECOND_WEBHOOK_SMEE_URL: ${{ steps.gosmee-ghe-webhook-url.outputs.url }}
         run: |
           ./hack/gh-workflow-ci.sh run_e2e_tests
 
-      - name: Run E2E Tests on nightly
-        # This step still runs specifically for schedule or workflow_dispatch
-        if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+      - name: Generate GitHub Step Summary
+        if: ${{ always() }}
         env:
-          NIGHTLY_E2E_TEST: "true"
           TEST_PROVIDER: ${{ matrix.provider }}
-          TEST_BITBUCKET_CLOUD_TOKEN: ${{ secrets.BITBUCKET_CLOUD_TOKEN }}
-          TEST_EL_WEBHOOK_SECRET: ${{ secrets.WEBHOOK_SECRET }}
-          TEST_GITHUB_REPO_INSTALLATION_ID: ${{ vars.INSTALLATION_ID }}
-          TEST_GITHUB_TOKEN: ${{ secrets.GH_APPS_TOKEN }}
-          TEST_GITHUB_SECOND_TOKEN: ${{ secrets.TEST_GITHUB_SECOND_TOKEN }}
-          TEST_GITLAB_TOKEN: ${{ secrets.GITLAB_TOKEN }}
-          TEST_BITBUCKET_SERVER_TOKEN: ${{ secrets.BITBUCKET_SERVER_TOKEN }}
-          TEST_BITBUCKET_SERVER_API_URL: ${{ secrets.BITBUCKET_SERVER_API_URL }}
-          TEST_BITBUCKET_SERVER_WEBHOOK_SECRET: ${{ secrets.BITBUCKET_SERVER_WEBHOOK_SECRET }}
         run: |
-          ./hack/gh-workflow-ci.sh run_e2e_tests
+          ./hack/gh-workflow-ci.sh generate_github_summary
 
       - name: Collect logs
         if: ${{ always() }}
         env:
           TEST_GITHUB_SECOND_SMEE_URL: ${{ secrets.TEST_GITHUB_SECOND_SMEE_URL }}
+          TEST_GITHUB_SECOND_WEBHOOK_SMEE_URL: ${{ steps.gosmee-ghe-webhook-url.outputs.url }}
+          TEST_GITLAB_SMEEURL: ${{ steps.gosmee-gitlab-url.outputs.url }}
         run: |
           ./hack/gh-workflow-ci.sh collect_logs
 
@@ -433,7 +409,7 @@ jobs:
 
       - name: Upload artifacts
         if: ${{ always() }}
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: logs-e2e-tests-${{ matrix.provider }}
           path: /tmp/logs
@@ -441,12 +417,17 @@ jobs:
   notify-slack:
     name: Notify Slack on Failures
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
     needs: [e2e-tests]
     if: ${{ always() && github.ref_name == 'main' && github.event_name == 'schedule' }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
       - name: Download all artifacts
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           path: artifacts
           pattern: logs-e2e-tests-*

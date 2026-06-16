@@ -10,9 +10,11 @@ import (
 	"testing"
 	"time"
 
+	forgejo "codeberg.org/mvdkleijn/forgejo-sdk/forgejo/v3"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/opscomments"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
 	"github.com/openshift-pipelines/pipelines-as-code/test/pkg/cctx"
 	tgitea "github.com/openshift-pipelines/pipelines-as-code/test/pkg/gitea"
 	pacrepo "github.com/openshift-pipelines/pipelines-as-code/test/pkg/repository"
@@ -22,6 +24,7 @@ import (
 	"gotest.tools/v3/assert"
 )
 
+// TestGiteaCancelRun will test that we can cancel a pipelinerun with the /cancel comment and that the pipelinerun is properly marked as cancelled.
 func TestGiteaCancelRun(t *testing.T) {
 	topts := &tgitea.TestOpts{
 		TargetEvent: triggertype.PullRequest.String(),
@@ -112,7 +115,7 @@ func TestGiteaOnCommentAnnotation(t *testing.T) {
 	last := repo.Status[len(repo.Status)-1]
 	twait.GoldenPodLog(context.Background(), t, topts.ParamsRun, topts.TargetNS,
 		fmt.Sprintf("tekton.dev/pipelineRun=%s", last.PipelineRunName),
-		"step-task", strings.ReplaceAll(fmt.Sprintf("%s-pipelinerun-on-comment-annotation.golden", t.Name()), "/", "-"), 2)
+		"step-task", strings.ReplaceAll(fmt.Sprintf("%s-pipelinerun-on-comment-annotation.golden", t.Name()), "/", "-"), 2, nil)
 
 	tgitea.PostCommentOnPullRequest(t, topts, fmt.Sprintf(`%s revision=main custom1=thisone custom2="another one" custom_no_initial_value="a \"quote\""`, triggerComment))
 	waitOpts.MinNumberStatus = 4
@@ -123,7 +126,58 @@ func TestGiteaOnCommentAnnotation(t *testing.T) {
 	// now we should have only 3 status, the last one is the on comment match with an argument redefining the revision which is a standard parameter
 
 	last = repo.Status[len(repo.Status)-1]
-	err = twait.RegexpMatchingInPodLog(context.Background(), topts.ParamsRun, topts.TargetNS, fmt.Sprintf("tekton.dev/pipelineRun=%s", last.PipelineRunName), "step-task", regexp.Regexp{}, t.Name(), 2)
+	err = twait.RegexpMatchingInPodLog(context.Background(), topts.ParamsRun, topts.TargetNS, fmt.Sprintf("tekton.dev/pipelineRun=%s", last.PipelineRunName), "step-task", regexp.Regexp{}, t.Name(), 2, nil)
+	assert.NilError(t, err)
+}
+
+// TestGiteaOnCommentTestOverride tests that a PipelineRun with
+// on-comment: "^/test.*" is triggered when posting "/test custom1=value".
+// This verifies that key=value arguments are not mistaken for a PipelineRun
+// name, which would bypass the on-comment annotation matching entirely.
+func TestGiteaOnCommentTestOverride(t *testing.T) {
+	var err error
+	ctx := context.Background()
+	topts := &tgitea.TestOpts{
+		TargetRefName: names.SimpleNameGenerator.RestrictLengthWithRandomSuffix("pac-e2e-test"),
+		RepoCRParams: &[]v1alpha1.Params{
+			{
+				Name:  "custom1",
+				Value: "default",
+			},
+		},
+	}
+	topts.TargetNS = topts.TargetRefName
+	topts.ParamsRun, topts.Opts, topts.GiteaCNX, err = tgitea.Setup(ctx)
+	assert.NilError(t, err, fmt.Errorf("cannot do gitea setup: %w", err))
+	ctx, err = cctx.GetControllerCtxInfo(ctx, topts.ParamsRun)
+	assert.NilError(t, err)
+	assert.NilError(t, pacrepo.CreateNS(ctx, topts.TargetNS, topts.ParamsRun))
+	assert.NilError(t, secret.Create(ctx, topts.ParamsRun, map[string]string{"secret": "SHHHHHHH"}, topts.TargetNS, "pac-secret"))
+	topts.TargetEvent = triggertype.PullRequest.String()
+	topts.YAMLFiles = map[string]string{
+		".tekton/on-comment-test-override.yaml": "testdata/pipelinerun-on-comment-test-override.yaml",
+	}
+	topts.ExpectEvents = false
+	_, f := tgitea.TestPR(t, topts)
+	defer f()
+
+	tgitea.PostCommentOnPullRequest(t, topts, "/test custom1=overridden")
+	waitOpts := twait.Opts{
+		RepoName:        topts.TargetNS,
+		Namespace:       topts.TargetNS,
+		MinNumberStatus: 1,
+		PollTimeout:     twait.DefaultTimeout,
+	}
+	repo, err := twait.UntilRepositoryUpdated(context.Background(), topts.ParamsRun.Clients, waitOpts)
+	assert.NilError(t, err)
+	assert.Equal(t, len(repo.Status), 1, "should have exactly 1 status")
+	assert.Equal(t, *repo.Status[0].EventType, opscomments.OnCommentEventType.String(),
+		"should have matched via on-comment annotation, not built-in /test handler")
+
+	last := repo.Status[0]
+	err = twait.RegexpMatchingInPodLog(context.Background(), topts.ParamsRun, topts.TargetNS,
+		fmt.Sprintf("tekton.dev/pipelineRun=%s", last.PipelineRunName), "step-task",
+		*regexp.MustCompile("custom1 is overridden"), "", 2, nil)
 	assert.NilError(t, err)
 }
 
@@ -173,11 +227,18 @@ func TestGiteaTestPipelineRunExplicitlyWithTestComment(t *testing.T) {
 		"we didn't target the proper pipelinerun, we tested: %s", repo.Status[0].PipelineRunName)
 
 	last := repo.Status[len(repo.Status)-1]
-	err = twait.RegexpMatchingInPodLog(context.Background(), topts.ParamsRun, topts.TargetNS, fmt.Sprintf("tekton.dev/pipelineRun=%s", last.PipelineRunName), "step-task", *regexp.MustCompile("custom is awesome"), "", 2)
+	err = twait.RegexpMatchingInPodLog(context.Background(), topts.ParamsRun, topts.TargetNS, fmt.Sprintf("tekton.dev/pipelineRun=%s", last.PipelineRunName), "step-task", *regexp.MustCompile("custom is awesome"), "", 2, nil)
 	assert.NilError(t, err)
 }
 
-func TestGiteaRetestAll(t *testing.T) {
+// TestGiteaTestAll creates a PR with two pipeline definitions (one matching,
+// one non-matching), then posts a /test comment to re-trigger all matching
+// pipelines. It verifies that the repository ends up with exactly 2 statuses:
+// one from the initial push and one from the /test comment.
+// NOTE: We use /test rather than /retest because /retest skips pipelines that
+// already succeeded (via filterSuccessfulTemplates), which causes a race when
+// the initial PipelineRun finishes before the retest filter runs.
+func TestGiteaTestAll(t *testing.T) {
 	var err error
 	ctx := context.Background()
 	topts := &tgitea.TestOpts{
@@ -197,7 +258,7 @@ func TestGiteaRetestAll(t *testing.T) {
 	}
 	_, f := tgitea.TestPR(t, topts)
 	defer f()
-	tgitea.PostCommentOnPullRequest(t, topts, "/retest")
+	tgitea.PostCommentOnPullRequest(t, topts, "/test")
 	waitOpts := twait.Opts{
 		RepoName:        topts.TargetNS,
 		Namespace:       topts.TargetNS,
@@ -207,13 +268,99 @@ func TestGiteaRetestAll(t *testing.T) {
 
 	repo, err := twait.UntilRepositoryUpdated(context.Background(), topts.ParamsRun.Clients, waitOpts)
 	assert.NilError(t, err)
-	var rt bool
+	var hasPullRequest bool
+	var hasTestAll bool
 	for _, status := range repo.Status {
-		// TODO(chmouel): Revert back to opscomments.RetestAllCommentEventType.String(), as pull_request now due of https://issues.redhat.com/browse/SRVKP-5775
 		if *status.EventType == triggertype.PullRequest.String() {
-			rt = true
+			hasPullRequest = true
+		}
+		if *status.EventType == opscomments.TestAllCommentEventType.String() {
+			hasTestAll = true
 		}
 	}
-	assert.Assert(t, rt, "should have a retest all comment event in status")
+	assert.Assert(t, hasPullRequest, "should have the initial pull request event in status")
+	assert.Assert(t, hasTestAll, "should have a test all comment event in status")
 	assert.Equal(t, len(repo.Status), 2, "should have only 2 status")
+}
+
+func TestGiteaRetestCommentUpdate(t *testing.T) {
+	tests := []struct {
+		name            string
+		commentStrategy string
+		wantComments    int
+	}{
+		{
+			name:            "update strategy creates single comment",
+			commentStrategy: provider.UpdateCommentStrategy,
+			wantComments:    1,
+		},
+		{
+			name:            "disable_all strategy creates no comments",
+			commentStrategy: provider.DisableAllCommentStrategy,
+			wantComments:    0,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var err error
+			ctx := context.Background()
+			topts := &tgitea.TestOpts{
+				TargetRefName: names.SimpleNameGenerator.RestrictLengthWithRandomSuffix("pac-e2e-test"),
+			}
+			topts.TargetNS = topts.TargetRefName
+			topts.ParamsRun, topts.Opts, topts.GiteaCNX, err = tgitea.Setup(ctx)
+			assert.NilError(t, err, fmt.Errorf("cannot do gitea setup: %w", err))
+			ctx, err = cctx.GetControllerCtxInfo(ctx, topts.ParamsRun)
+			assert.NilError(t, err)
+			assert.NilError(t, pacrepo.CreateNS(ctx, topts.TargetNS, topts.ParamsRun))
+			assert.NilError(t, secret.Create(ctx, topts.ParamsRun, map[string]string{"secret": "SHHHHHHH"}, topts.TargetNS, "pac-secret"))
+			topts.TargetEvent = triggertype.PullRequest.String()
+			topts.YAMLFiles = map[string]string{
+				".tekton/pr.yaml":      "testdata/pipelinerun.yaml",
+				".tekton/nomatch.yaml": "testdata/pipelinerun-nomatch.yaml",
+			}
+			topts.Settings = &v1alpha1.Settings{
+				Forgejo: &v1alpha1.ForgejoSettings{
+					CommentStrategy: tt.commentStrategy,
+				},
+			}
+			_, f := tgitea.TestPR(t, topts)
+			defer f()
+			tgitea.PostCommentOnPullRequest(t, topts, "/retest")
+			waitOpts := twait.Opts{
+				RepoName:        topts.TargetNS,
+				Namespace:       topts.TargetNS,
+				MinNumberStatus: 2,
+				PollTimeout:     twait.DefaultTimeout,
+			}
+
+			repo, err := twait.UntilRepositoryUpdated(context.Background(), topts.ParamsRun.Clients, waitOpts)
+			assert.NilError(t, err)
+			var rt bool
+			for _, status := range repo.Status {
+				if *status.EventType == triggertype.PullRequest.String() {
+					rt = true
+				}
+			}
+			assert.Assert(t, rt, "should have a retest all comment event in status")
+			assert.Equal(t, len(repo.Status), 2, "should have only 2 status")
+
+			// Verify comment strategy: count pac-status comments.
+			comments, _, err := topts.GiteaCNX.Client().ListRepoIssueComments(
+				topts.PullRequest.Base.Repository.Owner.UserName,
+				topts.PullRequest.Base.Repository.Name,
+				forgejo.ListIssueCommentOptions{})
+			assert.NilError(t, err)
+
+			markerPattern := regexp.MustCompile(`<!-- pac-status-`)
+			var pacStatusCount int
+			for _, comment := range comments {
+				if markerPattern.MatchString(comment.Body) {
+					pacStatusCount++
+				}
+			}
+			assert.Equal(t, pacStatusCount, tt.wantComments,
+				"with comment strategy %q, expected %d pac-status comment(s) but found %d", tt.commentStrategy, tt.wantComments, pacStatusCount)
+		})
+	}
 }

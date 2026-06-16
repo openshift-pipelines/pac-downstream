@@ -10,13 +10,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"path"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
-	"codeberg.org/mvdkleijn/forgejo-sdk/forgejo/v2"
+	"codeberg.org/mvdkleijn/forgejo-sdk/forgejo/v3"
+	"github.com/jonboulle/clockwork"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/changedfiles"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/events"
@@ -24,8 +26,10 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/versiondata"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
 	providerMetrics "github.com/openshift-pipelines/pipelines-as-code/pkg/provider/providermetrics"
+	providerstatus "github.com/openshift-pipelines/pipelines-as-code/pkg/provider/status"
 	"go.uber.org/zap"
 )
 
@@ -59,11 +63,14 @@ type Provider struct {
 	Token            *string
 	giteaInstanceURL string
 	// only exposed for e2e tests
-	Password     string
-	repo         *v1alpha1.Repository
-	eventEmitter *events.EventEmitter
-	run          *params.Run
-	triggerEvent string
+	Password           string
+	repo               *v1alpha1.Repository
+	eventEmitter       *events.EventEmitter
+	run                *params.Run
+	triggerEvent       string
+	pacUserID          int64 // user login used by PAC
+	cachedChangedFiles *changedfiles.ChangedFiles
+	clock              clockwork.Clock
 }
 
 func (v *Provider) Client() *forgejo.Client {
@@ -76,6 +83,13 @@ func (v *Provider) Client() *forgejo.Client {
 		v.repo,
 	)
 	return v.giteaClient
+}
+
+func (v *Provider) getClock() clockwork.Clock {
+	if v.clock == nil {
+		return clockwork.NewRealClock()
+	}
+	return v.clock
 }
 
 func (v *Provider) SetGiteaClient(client *forgejo.Client) {
@@ -98,9 +112,25 @@ func (v *Provider) CreateComment(_ context.Context, event *info.Event, commit, u
 			return err
 		}
 
-		re := regexp.MustCompile(updateMarker)
+		re := regexp.MustCompile(regexp.QuoteMeta(updateMarker))
 		for _, comment := range comments {
 			if re.MatchString(comment.Body) {
+				// Get the UserID for the PAC user.
+				if v.pacUserID == 0 {
+					pacUser, _, err := v.Client().GetMyUserInfo()
+					if err != nil {
+						return fmt.Errorf("unable to fetch user info: %w", err)
+					}
+					v.pacUserID = pacUser.ID
+				}
+				// Only edit comments created by this PAC installation's credentials.
+				// Prevents accidentally modifying comments from other users/bots.
+				if comment.Poster.ID != v.pacUserID {
+					v.Logger.Debugf("This comment was not created by PAC, skipping comment edit :%d, created by user %d, PAC user: %d",
+						comment.ID, comment.Poster.ID, v.pacUserID)
+					continue
+				}
+
 				_, _, err := v.Client().EditIssueComment(event.Organization, event.Repository, comment.ID, forgejo.EditIssueCommentOption{
 					Body: commit,
 				})
@@ -120,9 +150,65 @@ func (v *Provider) SetPacInfo(pacInfo *info.PacOpts) {
 	v.pacInfo = pacInfo
 }
 
-// GetTaskURI TODO: Implement ME.
-func (v *Provider) GetTaskURI(_ context.Context, _ *info.Event, _ string) (bool, string, error) {
-	return false, "", nil
+// splitGiteaURL parses a Gitea/Forgejo URL and returns org, repo, path, and ref.
+func splitGiteaURL(uri string) (string, string, string, string, error) {
+	pURL, err := url.Parse(uri)
+	if err != nil {
+		return "", "", "", "", fmt.Errorf("URL %s is not a valid provider URL: %w", uri, err)
+	}
+	split := strings.Split(pURL.EscapedPath(), "/")
+	// minimum: /owner/repo/{src|raw}/{branch|tag|commit}/ref/filepath → 7 segments (split[0] is empty)
+	if len(split) < 7 {
+		return "", "", "", "", fmt.Errorf("URL %s does not seem to be a proper Gitea URL: not enough path segments", uri)
+	}
+
+	spOrg := split[1]
+	spRepo := split[2]
+
+	if split[3] != "src" && split[3] != "raw" {
+		return "", "", "", "", fmt.Errorf("cannot recognize URL as a Gitea URL to fetch: %s (expected 'src' or 'raw' in path)", uri)
+	}
+	if split[4] != "branch" && split[4] != "tag" && split[4] != "commit" {
+		return "", "", "", "", fmt.Errorf("cannot recognize URL as a Gitea URL to fetch: %s (expected 'branch', 'tag', or 'commit' in path)", uri)
+	}
+
+	spRef := split[5]
+	spPath := strings.Join(split[6:], "/")
+
+	if spRef, err = url.PathUnescape(spRef); err != nil {
+		return "", "", "", "", fmt.Errorf("cannot decode ref: %w", err)
+	}
+	if spPath, err = url.PathUnescape(spPath); err != nil {
+		return "", "", "", "", fmt.Errorf("cannot decode path: %w", err)
+	}
+	if spOrg, err = url.PathUnescape(spOrg); err != nil {
+		return "", "", "", "", fmt.Errorf("cannot decode org: %w", err)
+	}
+	if spRepo, err = url.PathUnescape(spRepo); err != nil {
+		return "", "", "", "", fmt.Errorf("cannot decode repo: %w", err)
+	}
+
+	return spOrg, spRepo, spPath, spRef, nil
+}
+
+func (v *Provider) GetTaskURI(_ context.Context, event *info.Event, uri string) (bool, string, error) {
+	if v.giteaClient == nil {
+		return false, "", fmt.Errorf("no gitea client has been initialized")
+	}
+	if ret := provider.CompareHostOfURLS(uri, event.URL); !ret {
+		return false, "", nil
+	}
+
+	spOrg, spRepo, spPath, spRef, err := splitGiteaURL(uri)
+	if err != nil {
+		return false, "", err
+	}
+
+	data, _, err := v.Client().GetFile(spOrg, spRepo, spRef, spPath)
+	if err != nil {
+		return false, "", err
+	}
+	return true, string(data), nil
 }
 
 func (v *Provider) SetLogger(logger *zap.SugaredLogger) {
@@ -182,14 +268,18 @@ func (v *Provider) GetConfig() *info.ProviderConfig {
 func (v *Provider) SetClient(_ context.Context, run *params.Run, runevent *info.Event, repo *v1alpha1.Repository, emitter *events.EventEmitter) error {
 	var err error
 	apiURL := runevent.Provider.URL
+	userAgent := "pipelines-as-code/" + strings.TrimSpace(versiondata.Version)
+	if repo != nil && repo.Spec.Settings != nil && repo.Spec.Settings.Forgejo != nil && repo.Spec.Settings.Forgejo.UserAgent != "" {
+		userAgent = repo.Spec.Settings.Forgejo.UserAgent
+	}
 	// password is not exposed to CRD, it's only used from the e2e tests
 	if v.Password != "" && runevent.Provider.User != "" {
-		v.giteaClient, err = forgejo.NewClient(apiURL, forgejo.SetBasicAuth(runevent.Provider.User, v.Password))
+		v.giteaClient, err = forgejo.NewClient(apiURL, forgejo.SetBasicAuth(runevent.Provider.User, v.Password), forgejo.SetUserAgent(userAgent))
 	} else {
 		if runevent.Provider.Token == "" {
 			return fmt.Errorf("no git_provider.secret has been set in the repo crd")
 		}
-		v.giteaClient, err = forgejo.NewClient(apiURL, forgejo.SetToken(runevent.Provider.Token))
+		v.giteaClient, err = forgejo.NewClient(apiURL, forgejo.SetToken(runevent.Provider.Token), forgejo.SetUserAgent(userAgent))
 	}
 	if err != nil {
 		return err
@@ -206,27 +296,28 @@ func (v *Provider) SetClient(_ context.Context, run *params.Run, runevent *info.
 	return nil
 }
 
-func (v *Provider) CreateStatus(_ context.Context, event *info.Event, statusOpts provider.StatusOpts) error {
+func (v *Provider) CreateStatus(ctx context.Context, event *info.Event, statusOpts providerstatus.StatusOpts) error {
 	if v.giteaClient == nil {
 		return fmt.Errorf("cannot set status on gitea no token or url set")
 	}
 	switch statusOpts.Conclusion {
-	case "success":
+	case providerstatus.ConclusionSuccess:
 		statusOpts.Title = "Success"
 		statusOpts.Summary = "has <b>successfully</b> validated your commit."
-	case "failure":
+	case providerstatus.ConclusionFailure:
 		statusOpts.Title = "Failed"
 		statusOpts.Summary = "has <b>failed</b>."
-	case "pending":
+	case providerstatus.ConclusionPending:
 		// for concurrency set title as pending
 		if statusOpts.Title == "" {
 			statusOpts.Title = "Pending"
 		}
 		// for unauthorized user set title as Pending approval
 		statusOpts.Summary = "is skipping this commit."
-	case "neutral":
+	case providerstatus.ConclusionNeutral:
 		statusOpts.Title = "Unknown"
 		statusOpts.Summary = "doesn't know what happened with this commit."
+	case providerstatus.ConclusionCancelled, providerstatus.ConclusionCompleted, providerstatus.ConclusionSkipped:
 	}
 
 	if statusOpts.Status == "in_progress" {
@@ -241,18 +332,19 @@ func (v *Provider) CreateStatus(_ context.Context, event *info.Event, statusOpts
 	// gitea show weirdly the <br>
 	statusOpts.Summary = fmt.Sprintf("%s%s %s", v.pacInfo.ApplicationName, onPr, statusOpts.Summary)
 
-	return v.createStatusCommit(event, v.pacInfo, statusOpts)
+	return v.createStatusCommit(ctx, event, v.pacInfo, statusOpts)
 }
 
-func (v *Provider) createStatusCommit(event *info.Event, pacopts *info.PacOpts, status provider.StatusOpts) error {
+func (v *Provider) createStatusCommit(ctx context.Context, event *info.Event, pacopts *info.PacOpts, status providerstatus.StatusOpts) error {
 	state := forgejo.StatusState(status.Conclusion)
 	switch status.Conclusion {
-	case "neutral":
+	case providerstatus.ConclusionNeutral:
 		state = forgejo.StatusSuccess // We don't have a choice than setting as success, no pending here.c
-	case "pending":
+	case providerstatus.ConclusionPending:
 		if status.Title != "" {
 			state = forgejo.StatusPending
 		}
+	default:
 	}
 	if status.Status == "in_progress" {
 		state = forgejo.StatusPending
@@ -274,7 +366,7 @@ func (v *Provider) createStatusCommit(event *info.Event, pacopts *info.PacOpts, 
 			// Only retry on transient "user does not exist" errors
 			if strings.Contains(err.Error(), "user does not exist") {
 				v.Logger.Warnf("CreateStatus failed with transient error, retrying %d/%d: %v", i+1, maxRetries, err)
-				time.Sleep(time.Duration(i+1) * 500 * time.Millisecond)
+				v.getClock().Sleep(time.Duration(i+1) * 500 * time.Millisecond)
 				continue
 			}
 			return err
@@ -290,18 +382,80 @@ func (v *Provider) createStatusCommit(event *info.Event, pacopts *info.PacOpts, 
 	if opscomments.IsAnyOpsEventType(eventType.String()) {
 		eventType = triggertype.PullRequest
 	}
-	if status.Text != "" && (eventType == triggertype.PullRequest || event.TriggerTarget == triggertype.PullRequest) {
-		status.Text = strings.ReplaceAll(strings.TrimSpace(status.Text), "<br>", "\n")
-		_, _, err := v.Client().CreateIssueComment(event.Organization, event.Repository,
-			int64(event.PullRequestNumber), forgejo.CreateIssueCommentOption{
-				Body: fmt.Sprintf("%s\n%s", status.Summary, status.Text),
-			},
-		)
-		if err != nil {
-			return err
+
+	var commentStrategy string
+	if v.repo != nil && v.repo.Spec.Settings != nil && v.repo.Spec.Settings.Forgejo != nil {
+		commentStrategy = v.repo.Spec.Settings.Forgejo.CommentStrategy
+	}
+	switch commentStrategy {
+	case provider.DisableAllCommentStrategy:
+		v.Logger.Warn("Comments related to PipelineRuns status have been disabled for Gitea/Forgejo pull requests")
+		return nil
+	case provider.UpdateCommentStrategy:
+		if eventType == triggertype.PullRequest || event.TriggerTarget == triggertype.PullRequest {
+			status.Text = strings.ReplaceAll(strings.TrimSpace(status.Text), "<br>", "\n")
+			statusComment := v.formatPipelineComment(event.SHA, status)
+			// Creating the prefix that is added to the status comment for a pipeline run.
+			plrStatusCommentPrefix := fmt.Sprintf(provider.PlrStatusCommentPrefixTemplate, status.OriginalPipelineRunName)
+			// The entire markdown comment, including the prefix that is added to the pull request for the pipelinerun.
+			markdownStatusComment := fmt.Sprintf("%s\n%s", plrStatusCommentPrefix, statusComment)
+
+			if err := v.CreateComment(ctx, event, markdownStatusComment, plrStatusCommentPrefix); err != nil {
+				v.eventEmitter.EmitMessage(
+					v.repo,
+					zap.ErrorLevel,
+					"PipelineRunCommentCreationError",
+					fmt.Sprintf("failed to create comment: %s", err.Error()),
+				)
+				return err
+			}
+		}
+	default:
+		if status.Text != "" && (eventType == triggertype.PullRequest || event.TriggerTarget == triggertype.PullRequest) {
+			status.Text = strings.ReplaceAll(strings.TrimSpace(status.Text), "<br>", "\n")
+			_, _, err := v.Client().CreateIssueComment(event.Organization, event.Repository,
+				int64(event.PullRequestNumber), forgejo.CreateIssueCommentOption{
+					Body: fmt.Sprintf("%s\n%s", status.Summary, status.Text),
+				},
+			)
+			if err != nil {
+				return err
+			}
 		}
 	}
 	return nil
+}
+
+func (v *Provider) GetCommitStatuses(_ context.Context, event *info.Event) ([]provider.CommitStatusInfo, error) {
+	if v.giteaClient == nil {
+		return nil, fmt.Errorf("no gitea client has been initialized")
+	}
+
+	statuses, _, err := v.Client().ListStatuses(
+		event.Organization, event.Repository, event.SHA,
+		forgejo.ListStatusesOption{},
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	var (
+		result []provider.CommitStatusInfo
+		seen   = map[string]struct{}{}
+	)
+	for _, s := range statuses {
+		key := fmt.Sprintf("%s\x00%s", s.Context, string(s.State))
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		result = append(result, provider.CommitStatusInfo{
+			Name:   s.Context,
+			Status: string(s.State),
+		})
+	}
+
+	return result, nil
 }
 
 func (v *Provider) GetTektonDir(_ context.Context, event *info.Event, path, provenance string) (string, error) {
@@ -335,14 +489,22 @@ func (v *Provider) GetTektonDir(_ context.Context, event *info.Event, path, prov
 	if tektonDirSha == "" {
 		return "", nil
 	}
-	// Get all files in the .tekton directory recursively
-	// TODO: figure out if there is a object limit we need to handle here
-	opts := forgejo.GetTreesOptions{Recursive: false}
-	tektonDirObjects, _, err := v.Client().GetTrees(event.Organization, event.Repository, tektonDirSha, opts)
-	if err != nil {
-		return "", err
+
+	entries := []forgejo.GitEntry{}
+	opts := forgejo.GetTreesOptions{Recursive: true, ListOptions: forgejo.ListOptions{PageSize: 100, Page: 1}}
+	for {
+		tektonDirObjects, _, err := v.Client().GetTrees(event.Organization, event.Repository, tektonDirSha, opts)
+		if err != nil {
+			return "", err
+		}
+		entries = append(entries, tektonDirObjects.Entries...)
+		if !tektonDirObjects.Truncated {
+			break
+		}
+		opts.Page++
 	}
-	return v.concatAllYamlFiles(tektonDirObjects.Entries, event)
+
+	return v.concatAllYamlFiles(entries, event)
 }
 
 func (v *Provider) concatAllYamlFiles(objects []forgejo.GitEntry, event *info.Event) (string,
@@ -420,6 +582,12 @@ func (v *Provider) GetCommitInfo(_ context.Context, runevent *info.Event) error 
 		runevent.SHA = pr.Head.Sha
 		runevent.HeadBranch = pr.Head.Ref
 		runevent.BaseBranch = pr.Base.Ref
+		if runevent.HeadURL == "" && pr.Head.Repository != nil {
+			runevent.HeadURL = pr.Head.Repository.HTMLURL
+		}
+		if runevent.BaseURL == "" && pr.Base.Repository != nil {
+			runevent.BaseURL = pr.Base.Repository.HTMLURL
+		}
 		sha = pr.Head.Sha
 	}
 	commit, _, err := v.Client().GetSingleCommit(runevent.Organization, runevent.Repository, sha)
@@ -474,7 +642,19 @@ type PushPayload struct {
 	Commits []forgejo.PayloadCommit `json:"commits,omitempty"`
 }
 
-func (v *Provider) GetFiles(_ context.Context, runevent *info.Event) (changedfiles.ChangedFiles, error) {
+// GetFiles gets and caches the list of files changed by a given event.
+func (v *Provider) GetFiles(ctx context.Context, runevent *info.Event) (changedfiles.ChangedFiles, error) {
+	if v.cachedChangedFiles == nil {
+		changes, err := v.fetchChangedFiles(ctx, runevent)
+		if err != nil {
+			return changedfiles.ChangedFiles{}, err
+		}
+		v.cachedChangedFiles = &changes
+	}
+	return *v.cachedChangedFiles, nil
+}
+
+func (v *Provider) fetchChangedFiles(_ context.Context, runevent *info.Event) (changedfiles.ChangedFiles, error) {
 	changedFiles := changedfiles.ChangedFiles{}
 
 	//nolint:exhaustive // we don't need to handle all cases
@@ -544,4 +724,26 @@ func (v *Provider) CreateToken(_ context.Context, _ []string, _ *info.Event) (st
 
 func (v *Provider) GetTemplate(commentType provider.CommentType) string {
 	return provider.GetHTMLTemplate(commentType)
+}
+
+func (v *Provider) formatPipelineComment(sha string, status providerstatus.StatusOpts) string {
+	var emoji string
+
+	if status.Status == "in_progress" {
+		emoji = "🚀"
+	} else {
+		switch status.Conclusion {
+		case providerstatus.ConclusionCancelled:
+			emoji = "⚠️"
+		case providerstatus.ConclusionFailure:
+			emoji = "❌"
+		case providerstatus.ConclusionSuccess:
+			emoji = "✅"
+		default:
+			emoji = "ℹ️"
+		}
+	}
+
+	return fmt.Sprintf("%s **%s: %s/%s for %s**\n\n%s\n\n<small>Full log available [here](%s)</small>",
+		emoji, status.Title, v.pacInfo.ApplicationName, status.OriginalPipelineRunName, sha, status.Text, status.DetailsURL)
 }

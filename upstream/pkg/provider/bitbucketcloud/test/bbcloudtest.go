@@ -16,6 +16,7 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/settings"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/bitbucketcloud/types"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/status"
 	"gotest.tools/v3/assert"
 	"gotest.tools/v3/env"
 )
@@ -110,7 +111,7 @@ func MuxListDirFiles(t *testing.T, mux *http.ServeMux, event *info.Event, dirs m
 	}
 
 	for key, value := range dirs {
-		urlp := "/repositories/" + event.Organization + "/" + event.Repository + "/src/" + sha + "/" + key + "/"
+		urlp := "/repositories/" + event.Organization + "/" + event.Repository + "/src/" + sha + "/" + key
 		mux.HandleFunc(urlp, func(rw http.ResponseWriter, _ *http.Request) {
 			dircontents := map[string][]bitbucket.RepositoryFile{
 				"values": value,
@@ -178,7 +179,7 @@ func MuxRepoInfo(t *testing.T, mux *http.ServeMux, event *info.Event, repo *bitb
 	})
 }
 
-func MuxCreateCommitstatus(t *testing.T, mux *http.ServeMux, event *info.Event, expectedDescSubstr, applicationName string, expStatus provider.StatusOpts) {
+func MuxCreateCommitstatus(t *testing.T, mux *http.ServeMux, event *info.Event, expectedDescSubstr, applicationName string, expStatus status.StatusOpts) {
 	t.Helper()
 
 	path := fmt.Sprintf("/repositories/%s/%s/commit/%s/statuses/build", event.Organization, event.Repository, event.SHA)
@@ -188,7 +189,7 @@ func MuxCreateCommitstatus(t *testing.T, mux *http.ServeMux, event *info.Event, 
 		err := json.Unmarshal(bit, cso)
 		assert.NilError(t, err)
 		pacOpts := &info.PacOpts{Settings: settings.Settings{ApplicationName: applicationName}}
-		assert.Equal(t, provider.GetCheckName(expStatus, pacOpts), cso.Key)
+		assert.Equal(t, provider.GetBBCloudStatusKey(expStatus, pacOpts), cso.Key)
 
 		if expStatus.DetailsURL != "" {
 			assert.Equal(t, expStatus.DetailsURL, cso.Url)

@@ -11,7 +11,7 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/clients"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/settings"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
+	providerstatus "github.com/openshift-pipelines/pipelines-as-code/pkg/provider/status"
 	testclient "github.com/openshift-pipelines/pipelines-as-code/pkg/test/clients"
 	tprovider "github.com/openshift-pipelines/pipelines-as-code/pkg/test/provider"
 	tektontest "github.com/openshift-pipelines/pipelines-as-code/pkg/test/tekton"
@@ -28,11 +28,11 @@ func TestCreateStatusWithRetry(t *testing.T) {
 	fakelogger := zap.New(observer).Sugar()
 	vcx := tprovider.TestProviderImp{}
 
-	err := createStatusWithRetry(context.TODO(), fakelogger, &vcx, nil, provider.StatusOpts{})
+	err := createStatusWithRetry(context.TODO(), fakelogger, &vcx, nil, providerstatus.StatusOpts{})
 	assert.NilError(t, err)
 }
 
-func TestCreateStatusWithRetry_ErrorCase(t *testing.T) {
+func TestCreateStatusWithRetryErrorCase(t *testing.T) {
 	observer, _ := zapobserver.New(zap.InfoLevel)
 	fakelogger := zap.New(observer).Sugar()
 	vcx := tprovider.TestProviderImp{}
@@ -43,7 +43,7 @@ func TestCreateStatusWithRetry_ErrorCase(t *testing.T) {
 	backoffSchedule = []time.Duration{time.Millisecond}
 	defer func() { backoffSchedule = oldBackoffSchedule }()
 
-	err := createStatusWithRetry(context.TODO(), fakelogger, &vcx, nil, provider.StatusOpts{})
+	err := createStatusWithRetry(context.TODO(), fakelogger, &vcx, nil, providerstatus.StatusOpts{})
 	assert.Error(t, err, "failed to report status: some provider error occurred while reporting status")
 }
 
@@ -77,6 +77,6 @@ func TestPostFinalStatus(t *testing.T) {
 		},
 	}
 
-	_, err := r.postFinalStatus(ctx, fakelogger, pacInfo, vcx, info.NewEvent(), pr1)
+	_, _, err := r.postFinalStatus(ctx, fakelogger, pacInfo, vcx, info.NewEvent(), pr1)
 	assert.NilError(t, err)
 }

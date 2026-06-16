@@ -14,94 +14,69 @@ import (
 	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 	"gotest.tools/v3/assert"
 	"k8s.io/client-go/kubernetes/fake"
+	"knative.dev/pkg/apis"
 )
 
-func TestAnalyzer_Analyze(t *testing.T) {
-	logger, _ := logger.GetLogger()
+func TestAnalyze(t *testing.T) {
+	testLogger, _ := logger.GetLogger()
 
-	// Create fake Kubernetes client
-	fakeClient := fake.NewSimpleClientset()
-
+	fakeClient := fake.NewClientset()
 	run := &params.Run{
 		Clients: paramclients.Clients{
 			Kube: fakeClient,
 		},
 	}
-
-	// Create mock kubeinteraction
 	kinteract := &kubeinteraction.Interaction{}
-
-	analyzer := NewAnalyzer(run, kinteract, logger)
 
 	tests := []struct {
 		name        string
-		request     *AnalyzeRequest
+		repo        *v1alpha1.Repository
 		wantResults int
 		wantError   bool
-		setupRepo   func() *v1alpha1.Repository
 	}{
 		{
-			name: "no ai analysis config",
-			request: &AnalyzeRequest{
-				PipelineRun: &tektonv1.PipelineRun{},
-				Event:       &info.Event{},
-				Repository:  &v1alpha1.Repository{},
-				Provider:    &tprovider.TestProviderImp{},
-			},
+			name:        "no ai analysis config",
+			repo:        &v1alpha1.Repository{},
 			wantResults: 0,
 			wantError:   false,
 		},
 		{
 			name: "ai analysis disabled",
-			request: &AnalyzeRequest{
-				PipelineRun: &tektonv1.PipelineRun{},
-				Event:       &info.Event{},
-				Repository: &v1alpha1.Repository{
-					Spec: v1alpha1.RepositorySpec{
-						Settings: &v1alpha1.Settings{
-							AIAnalysis: &v1alpha1.AIAnalysisConfig{
-								Enabled: false,
-							},
+			repo: &v1alpha1.Repository{
+				Spec: v1alpha1.RepositorySpec{
+					Settings: &v1alpha1.Settings{
+						AIAnalysis: &v1alpha1.AIAnalysisConfig{
+							Enabled: false,
 						},
 					},
 				},
-				Provider: &tprovider.TestProviderImp{},
 			},
 			wantResults: 0,
 			wantError:   false,
 		},
 		{
 			name: "invalid config",
-			request: &AnalyzeRequest{
-				PipelineRun: &tektonv1.PipelineRun{},
-				Event:       &info.Event{},
-				Repository: &v1alpha1.Repository{
-					Spec: v1alpha1.RepositorySpec{
-						Settings: &v1alpha1.Settings{
-							AIAnalysis: &v1alpha1.AIAnalysisConfig{
-								Enabled:  true,
-								Provider: "openai",
-								// Missing required fields
-							},
+			repo: &v1alpha1.Repository{
+				Spec: v1alpha1.RepositorySpec{
+					Settings: &v1alpha1.Settings{
+						AIAnalysis: &v1alpha1.AIAnalysisConfig{
+							Enabled:  true,
+							Provider: "openai",
+							// Missing required fields
 						},
 					},
 				},
-				Provider: &tprovider.TestProviderImp{},
 			},
 			wantResults: 0,
 			wantError:   true,
-		},
-		{
-			name:      "nil request",
-			request:   nil,
-			wantError: true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := context.Background()
-			results, err := analyzer.Analyze(ctx, tt.request)
+			results, err := analyze(ctx, run, kinteract, testLogger,
+				tt.repo, &tektonv1.PipelineRun{}, &info.Event{}, &tprovider.TestProviderImp{})
 
 			if tt.wantError {
 				assert.Assert(t, err != nil, "expected error but got none")
@@ -113,12 +88,7 @@ func TestAnalyzer_Analyze(t *testing.T) {
 	}
 }
 
-func TestAnalyzer_ValidateConfig(t *testing.T) {
-	logger, _ := logger.GetLogger()
-	run := &params.Run{}
-	kinteract := &kubeinteraction.Interaction{}
-	analyzer := NewAnalyzer(run, kinteract, logger)
-
+func TestValidateAnalysisConfig(t *testing.T) {
 	tests := []struct {
 		name      string
 		config    *v1alpha1.AIAnalysisConfig
@@ -241,7 +211,7 @@ func TestAnalyzer_ValidateConfig(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := analyzer.validateConfig(tt.config)
+			err := validateAnalysisConfig(tt.config)
 
 			if tt.wantError {
 				assert.Assert(t, err != nil, "expected error but got none")
@@ -252,12 +222,7 @@ func TestAnalyzer_ValidateConfig(t *testing.T) {
 	}
 }
 
-func TestAnalyzer_ValidateConfig_WithModels(t *testing.T) {
-	logger, _ := logger.GetLogger()
-	run := &params.Run{}
-	kinteract := &kubeinteraction.Interaction{}
-	analyzer := NewAnalyzer(run, kinteract, logger)
-
+func TestValidateAnalysisConfigWithModels(t *testing.T) {
 	tests := []struct {
 		name      string
 		config    *v1alpha1.AIAnalysisConfig
@@ -329,7 +294,7 @@ func TestAnalyzer_ValidateConfig_WithModels(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := analyzer.validateConfig(tt.config)
+			err := validateAnalysisConfig(tt.config)
 
 			if tt.wantError {
 				assert.Assert(t, err != nil, "expected error but got none")
@@ -387,12 +352,7 @@ func TestGetContextCacheKey(t *testing.T) {
 	}
 }
 
-func TestAnalyzer_ShouldTriggerRoleEvaluations(t *testing.T) {
-	logger, _ := logger.GetLogger()
-	run := &params.Run{}
-	kinteract := &kubeinteraction.Interaction{}
-	analyzer := NewAnalyzer(run, kinteract, logger)
-
+func TestShouldTriggerRoleEvaluations(t *testing.T) {
 	celContext := map[string]any{
 		"body": map[string]any{
 			"event": map[string]any{
@@ -410,6 +370,9 @@ func TestAnalyzer_ShouldTriggerRoleEvaluations(t *testing.T) {
 		},
 	}
 
+	failedPR := &tektonv1.PipelineRun{}
+	failedPR.Status.Conditions = append(failedPR.Status.Conditions, apis.Condition{Type: apis.ConditionSucceeded, Status: "False"})
+
 	tests := []struct {
 		name      string
 		role      v1alpha1.AnalysisRole
@@ -417,7 +380,7 @@ func TestAnalyzer_ShouldTriggerRoleEvaluations(t *testing.T) {
 		wantError bool
 	}{
 		{
-			name: "no expression returns true",
+			name: "no expression defaults to failed pipelines only",
 			role: v1alpha1.AnalysisRole{},
 			want: true,
 		},
@@ -440,7 +403,7 @@ func TestAnalyzer_ShouldTriggerRoleEvaluations(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := analyzer.shouldTriggerRole(tt.role, celContext)
+			got, err := shouldTriggerRole(tt.role, celContext, failedPR)
 
 			if tt.wantError {
 				assert.Assert(t, err != nil, "expected error but got none")
@@ -453,69 +416,67 @@ func TestAnalyzer_ShouldTriggerRoleEvaluations(t *testing.T) {
 	}
 }
 
-func TestAnalyzer_ShouldTriggerRole(t *testing.T) {
-	logger, _ := logger.GetLogger()
-	run := &params.Run{}
-	kinteract := &kubeinteraction.Interaction{}
-	analyzer := NewAnalyzer(run, kinteract, logger)
+func TestShouldTriggerRole(t *testing.T) {
+	failedPR := &tektonv1.PipelineRun{}
+	failedPR.Status.Conditions = append(failedPR.Status.Conditions, apis.Condition{Type: apis.ConditionSucceeded, Status: "False"})
+
+	succeededPR := &tektonv1.PipelineRun{}
+	succeededPR.Status.Conditions = append(succeededPR.Status.Conditions, apis.Condition{Type: apis.ConditionSucceeded, Status: "True"})
 
 	tests := []struct {
 		name        string
 		role        v1alpha1.AnalysisRole
 		celContext  map[string]any
+		pr          *tektonv1.PipelineRun
 		wantTrigger bool
 		wantError   bool
 	}{
 		{
-			name: "no cel expression - always trigger",
-			role: v1alpha1.AnalysisRole{
-				Name: "test-role",
-			},
+			name:        "no cel expression - triggers for failed pipeline",
+			role:        v1alpha1.AnalysisRole{Name: "test-role"},
 			celContext:  map[string]any{},
+			pr:          failedPR,
 			wantTrigger: true,
-			wantError:   false,
 		},
 		{
-			name: "simple true expression",
-			role: v1alpha1.AnalysisRole{
-				Name:  "test-role",
-				OnCEL: "true",
-			},
+			name:        "no cel expression - skips succeeded pipeline",
+			role:        v1alpha1.AnalysisRole{Name: "test-role"},
 			celContext:  map[string]any{},
+			pr:          succeededPR,
+			wantTrigger: false,
+		},
+		{
+			name:        "simple true expression",
+			role:        v1alpha1.AnalysisRole{Name: "test-role", OnCEL: "true"},
+			celContext:  map[string]any{},
+			pr:          succeededPR,
 			wantTrigger: true,
-			wantError:   false,
 		},
 		{
-			name: "simple false expression",
-			role: v1alpha1.AnalysisRole{
-				Name:  "test-role",
-				OnCEL: "false",
-			},
+			name:        "simple false expression",
+			role:        v1alpha1.AnalysisRole{Name: "test-role", OnCEL: "false"},
 			celContext:  map[string]any{},
+			pr:          failedPR,
 			wantTrigger: false,
-			wantError:   false,
 		},
 		{
-			name: "invalid cel expression",
-			role: v1alpha1.AnalysisRole{
-				Name:  "test-role",
-				OnCEL: "invalid syntax (",
-			},
-			celContext:  map[string]any{},
-			wantTrigger: false,
-			wantError:   true,
+			name:       "invalid cel expression",
+			role:       v1alpha1.AnalysisRole{Name: "test-role", OnCEL: "invalid syntax ("},
+			celContext: map[string]any{},
+			pr:         failedPR,
+			wantError:  true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			shouldTrigger, err := analyzer.shouldTriggerRole(tt.role, tt.celContext)
+			trigger, err := shouldTriggerRole(tt.role, tt.celContext, tt.pr)
 
 			if tt.wantError {
 				assert.Assert(t, err != nil, "expected error but got none")
 			} else {
 				assert.NilError(t, err)
-				assert.Equal(t, shouldTrigger, tt.wantTrigger)
+				assert.Equal(t, trigger, tt.wantTrigger)
 			}
 		})
 	}

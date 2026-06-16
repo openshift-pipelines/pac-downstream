@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/google/go-cmp/cmp"
+	"github.com/jonboulle/clockwork"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/changedfiles"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/opscomments"
@@ -22,18 +23,24 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/settings"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
+	prmetrics "github.com/openshift-pipelines/pipelines-as-code/pkg/pipelinerunmetrics"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
 	tgitea "github.com/openshift-pipelines/pipelines-as-code/pkg/provider/gitea/test"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/status"
+	"go.opentelemetry.io/otel"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 	"go.uber.org/zap"
 	zapobserver "go.uber.org/zap/zaptest/observer"
 	"gotest.tools/v3/assert"
+	"gotest.tools/v3/golden"
 	rtesting "knative.dev/pkg/reconciler/testing"
 )
 
-func TestProvider_CreateStatus(t *testing.T) {
+func TestProviderCreateStatus(t *testing.T) {
 	type args struct {
 		event      *info.Event
-		statusOpts provider.StatusOpts
+		statusOpts status.StatusOpts
 	}
 	tests := []struct {
 		name    string
@@ -44,8 +51,8 @@ func TestProvider_CreateStatus(t *testing.T) {
 			name: "Test with success conclusion",
 			args: args{
 				event: &info.Event{},
-				statusOpts: provider.StatusOpts{
-					Conclusion: "success",
+				statusOpts: status.StatusOpts{
+					Conclusion: status.ConclusionSuccess,
 				},
 			},
 			wantErr: false,
@@ -54,8 +61,8 @@ func TestProvider_CreateStatus(t *testing.T) {
 			name: "Test with failure conclusion",
 			args: args{
 				event: &info.Event{},
-				statusOpts: provider.StatusOpts{
-					Conclusion: "failure",
+				statusOpts: status.StatusOpts{
+					Conclusion: status.ConclusionFailure,
 				},
 			},
 			wantErr: false,
@@ -64,8 +71,8 @@ func TestProvider_CreateStatus(t *testing.T) {
 			name: "Test with pending conclusion",
 			args: args{
 				event: &info.Event{},
-				statusOpts: provider.StatusOpts{
-					Conclusion: "pending",
+				statusOpts: status.StatusOpts{
+					Conclusion: status.ConclusionPending,
 				},
 			},
 			wantErr: false,
@@ -74,8 +81,8 @@ func TestProvider_CreateStatus(t *testing.T) {
 			name: "Test with neutral conclusion",
 			args: args{
 				event: &info.Event{},
-				statusOpts: provider.StatusOpts{
-					Conclusion: "neutral",
+				statusOpts: status.StatusOpts{
+					Conclusion: status.ConclusionNeutral,
 				},
 			},
 			wantErr: false,
@@ -84,7 +91,7 @@ func TestProvider_CreateStatus(t *testing.T) {
 			name: "Test with in_progress status",
 			args: args{
 				event: &info.Event{},
-				statusOpts: provider.StatusOpts{
+				statusOpts: status.StatusOpts{
 					Status: "in_progress",
 				},
 			},
@@ -94,7 +101,7 @@ func TestProvider_CreateStatus(t *testing.T) {
 			name: "Test with onpr",
 			args: args{
 				event: &info.Event{},
-				statusOpts: provider.StatusOpts{
+				statusOpts: status.StatusOpts{
 					Status:          "in_progress",
 					PipelineRunName: "mypr",
 				},
@@ -105,7 +112,7 @@ func TestProvider_CreateStatus(t *testing.T) {
 			name: "Test with ok-to-test event",
 			args: args{
 				event: &info.Event{EventType: triggertype.OkToTest.String()},
-				statusOpts: provider.StatusOpts{
+				statusOpts: status.StatusOpts{
 					Status:          "in_progress",
 					PipelineRunName: "mypr",
 				},
@@ -116,7 +123,7 @@ func TestProvider_CreateStatus(t *testing.T) {
 			name: "Test with oncomment event",
 			args: args{
 				event: &info.Event{EventType: opscomments.OkToTestCommentEventType.String()},
-				statusOpts: provider.StatusOpts{
+				statusOpts: status.StatusOpts{
 					Status:          "in_progress",
 					PipelineRunName: "mypr",
 				},
@@ -127,7 +134,7 @@ func TestProvider_CreateStatus(t *testing.T) {
 			name: "Test status_text",
 			args: args{
 				event: &info.Event{EventType: triggertype.PullRequest.String()},
-				statusOpts: provider.StatusOpts{
+				statusOpts: status.StatusOpts{
 					Status:          "in_progress",
 					PipelineRunName: "mypr",
 					Text:            "mytext",
@@ -172,7 +179,7 @@ func computeHMACSHA256(payload, secret []byte) string {
 	return hex.EncodeToString(mac.Sum(nil))
 }
 
-func TestProvider_Validate(t *testing.T) {
+func TestProviderValidate(t *testing.T) {
 	testPayload := []byte(`{"ref":"refs/heads/main"}`)
 	testSecret := "mysecret"
 	validSignature := computeHMACSHA256(testPayload, []byte(testSecret))
@@ -275,16 +282,17 @@ func TestProvider_Validate(t *testing.T) {
 	}
 }
 
-func TestProvider_GetFiles(t *testing.T) {
+func TestProviderGetFiles(t *testing.T) {
 	type args struct {
 		runevent *info.Event
 	}
 	tests := []struct {
-		name         string
-		args         args
-		changedFiles string
-		want         changedfiles.ChangedFiles
-		wantErr      bool
+		name                string
+		args                args
+		changedFiles        string
+		want                changedfiles.ChangedFiles
+		wantErr             bool
+		wantAPIRequestCount int64
 	}{
 		{
 			name: "pull_request",
@@ -310,7 +318,8 @@ func TestProvider_GetFiles(t *testing.T) {
 				Modified: []string{"modified.txt"},
 				Renamed:  []string{"renamed.txt"},
 			},
-			changedFiles: `[{"filename":"added.txt","status":"added"},{"filename":"deleted.txt","status":"deleted"},{"filename":"modified.txt","status":"changed"},{"filename":"renamed.txt","status":"renamed"}]`,
+			changedFiles:        `[{"filename":"added.txt","status":"added"},{"filename":"deleted.txt","status":"deleted"},{"filename":"modified.txt","status":"changed"},{"filename":"renamed.txt","status":"renamed"}]`,
+			wantAPIRequestCount: 1,
 		},
 		{
 			name: "push",
@@ -340,7 +349,6 @@ func TestProvider_GetFiles(t *testing.T) {
 				},
 				Deleted:  []string{"deleted.txt"},
 				Modified: []string{"modified.txt"},
-				// Renamed:  []string{"renamed.txt"},
 			},
 		},
 	}
@@ -348,6 +356,11 @@ func TestProvider_GetFiles(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			fakeclient, mux, teardown := tgitea.Setup(t)
 			defer teardown()
+
+			prmetrics.ResetRecorder()
+			reader := sdkmetric.NewManualReader()
+			provider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+			otel.SetMeterProvider(provider)
 
 			mux.HandleFunc(fmt.Sprintf("/repos/%s/%s/pulls/%d/files", tt.args.runevent.Organization, tt.args.runevent.Repository, tt.args.runevent.PullRequestNumber), func(rw http.ResponseWriter, _ *http.Request) {
 				fmt.Fprint(rw, tt.changedFiles)
@@ -358,10 +371,13 @@ func TestProvider_GetFiles(t *testing.T) {
 			repo := &v1alpha1.Repository{Spec: v1alpha1.RepositorySpec{
 				Settings: &v1alpha1.Settings{},
 			}}
+			giteaInstanceURL := "https://gitea.example.com"
 			gprovider := Provider{
-				giteaClient: fakeclient,
-				repo:        repo,
-				Logger:      logger,
+				giteaClient:      fakeclient,
+				repo:             repo,
+				Logger:           logger,
+				giteaInstanceURL: giteaInstanceURL,
+				triggerEvent:     string(tt.args.runevent.TriggerTarget),
 			}
 
 			got, err := gprovider.GetFiles(ctx, tt.args.runevent)
@@ -399,15 +415,43 @@ func TestProvider_GetFiles(t *testing.T) {
 			if !reflect.DeepEqual(got.Renamed, tt.want.Renamed) {
 				t.Errorf("Provider.GetFiles() Renamed = %v, want %v", got.Renamed, tt.want.Renamed)
 			}
+
+			// Verify metrics from first call
+			if tt.wantAPIRequestCount > 0 {
+				var rm metricdata.ResourceMetrics
+				err = reader.Collect(ctx, &rm)
+				assert.NilError(t, err, "error collecting metrics")
+
+				assert.Equal(t, len(rm.ScopeMetrics), 1)
+				assert.Equal(t, len(rm.ScopeMetrics[0].Metrics), 1)
+				assert.Equal(t, rm.ScopeMetrics[0].Metrics[0].Name, "pipelines_as_code_git_provider_api_request_count")
+				count, ok := rm.ScopeMetrics[0].Metrics[0].Data.(metricdata.Sum[int64])
+				assert.Assert(t, ok)
+				assert.Equal(t, count.DataPoints[0].Value, int64(tt.wantAPIRequestCount))
+			}
+
+			// Verify caching: second call should return cached result without additional API calls
+			got2, err2 := gprovider.GetFiles(ctx, tt.args.runevent)
+			assert.NilError(t, err2)
+			assert.DeepEqual(t, got, got2)
+
+			if tt.wantAPIRequestCount > 0 {
+				var rm metricdata.ResourceMetrics
+				err = reader.Collect(ctx, &rm)
+				assert.NilError(t, err, "error collecting metrics")
+				count, ok := rm.ScopeMetrics[0].Metrics[0].Data.(metricdata.Sum[int64])
+				assert.Assert(t, ok)
+				assert.Equal(t, count.DataPoints[0].Value, int64(tt.wantAPIRequestCount))
+			}
 		})
 	}
 }
 
-func TestProvider_CreateStatusCommit(t *testing.T) {
+func TestProviderCreateStatusCommit(t *testing.T) {
 	type args struct {
 		event   *info.Event
 		pacopts *info.PacOpts
-		status  provider.StatusOpts
+		status  status.StatusOpts
 	}
 	tests := []struct {
 		name                            string
@@ -428,8 +472,8 @@ func TestProvider_CreateStatusCommit(t *testing.T) {
 					TriggerTarget:     "pull_request",
 					SHA:               "123456",
 				},
-				status: provider.StatusOpts{
-					Conclusion: "neutral",
+				status: status.StatusOpts{
+					Conclusion: status.ConclusionNeutral,
 				},
 			},
 			wantStatusJSON: `{"state":"success","target_url":"","description":"","context":"myapp"}`,
@@ -437,8 +481,8 @@ func TestProvider_CreateStatusCommit(t *testing.T) {
 		{
 			name: "pending",
 			args: args{
-				status: provider.StatusOpts{
-					Conclusion: "pending",
+				status: status.StatusOpts{
+					Conclusion: status.ConclusionPending,
 					Title:      "Pipeline run for myapp has been triggered",
 				},
 				pacopts: &info.PacOpts{Settings: settings.Settings{
@@ -457,7 +501,7 @@ func TestProvider_CreateStatusCommit(t *testing.T) {
 		{
 			name: "pending from status",
 			args: args{
-				status: provider.StatusOpts{
+				status: status.StatusOpts{
 					Status: "in_progress",
 					Title:  "Pipeline run for myapp has been triggered",
 				},
@@ -477,8 +521,8 @@ func TestProvider_CreateStatusCommit(t *testing.T) {
 		{
 			name: "ok-to-test",
 			args: args{
-				status: provider.StatusOpts{
-					Conclusion: "pending",
+				status: status.StatusOpts{
+					Conclusion: status.ConclusionPending,
 					Title:      "Pipeline run for myapp has been triggered",
 					Text:       "time to get started",
 				},
@@ -499,8 +543,8 @@ func TestProvider_CreateStatusCommit(t *testing.T) {
 		{
 			name: "cancel",
 			args: args{
-				status: provider.StatusOpts{
-					Conclusion: "pending",
+				status: status.StatusOpts{
+					Conclusion: status.ConclusionPending,
 					Title:      "Pipeline run for myapp has been triggered",
 					Text:       "time to get started",
 				},
@@ -521,8 +565,8 @@ func TestProvider_CreateStatusCommit(t *testing.T) {
 		{
 			name: "retest",
 			args: args{
-				status: provider.StatusOpts{
-					Conclusion: "pending",
+				status: status.StatusOpts{
+					Conclusion: status.ConclusionPending,
 					Title:      "Pipeline run for myapp has been triggered",
 					Text:       "time to get started",
 				},
@@ -579,7 +623,7 @@ func TestProvider_CreateStatusCommit(t *testing.T) {
 				giteaClient: fakeclient,
 			}
 
-			if err := v.createStatusCommit(tt.args.event, tt.args.pacopts, tt.args.status); (err != nil) != tt.wantErr {
+			if err := v.createStatusCommit(context.Background(), tt.args.event, tt.args.pacopts, tt.args.status); (err != nil) != tt.wantErr {
 				t.Errorf("Provider.createStatusCommit() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
@@ -636,9 +680,11 @@ func TestProviderCreateStatusCommitRetryOnTransientError(t *testing.T) {
 				_, _ = rw.Write([]byte(`{"state":"success"}`))
 			})
 
+			fc := clockwork.NewFakeClock()
 			v := &Provider{
 				giteaClient: fakeclient,
 				Logger:      logger,
+				clock:       fc,
 			}
 
 			event := &info.Event{
@@ -649,11 +695,22 @@ func TestProviderCreateStatusCommitRetryOnTransientError(t *testing.T) {
 			pacopts := &info.PacOpts{Settings: settings.Settings{
 				ApplicationName: "myapp",
 			}}
-			status := provider.StatusOpts{
+			status := status.StatusOpts{
 				Conclusion: "success",
 			}
 
-			err := v.createStatusCommit(event, pacopts, status)
+			ctx := context.Background()
+			if strings.Contains(tt.errorMessage, "user does not exist") && tt.failCount > 0 {
+				// Drive the fake clock only for retryable cases that actually sleep.
+				go func() {
+					for i := range 3 {
+						fc.BlockUntilContext(ctx, 1) //nolint:errcheck
+						fc.Advance(time.Duration(i+1) * 500 * time.Millisecond)
+					}
+				}()
+			}
+
+			err := v.createStatusCommit(ctx, event, pacopts, status)
 
 			if tt.wantErr {
 				assert.Assert(t, err != nil, "expected an error but got none")
@@ -781,9 +838,12 @@ func TestCreateComment(t *testing.T) {
 			commit:       "Updated Comment",
 			updateMarker: "MARKER",
 			mockResponses: map[string]func(rw http.ResponseWriter, _ *http.Request){
+				"/user": func(rw http.ResponseWriter, _ *http.Request) {
+					fmt.Fprint(rw, `{"id": 100, "login": "pac-user"}`)
+				},
 				"/repos/org/repo/issues/123/comments": func(rw http.ResponseWriter, r *http.Request) {
 					if r.Method == http.MethodGet {
-						fmt.Fprint(rw, `[{"id": 555, "body": "MARKER"}]`)
+						fmt.Fprint(rw, `[{"id": 555, "body": "MARKER", "user": {"id": 100}}]`)
 						return
 					}
 				},
@@ -800,14 +860,41 @@ func TestCreateComment(t *testing.T) {
 			commit:       "New Comment",
 			updateMarker: "MARKER",
 			mockResponses: map[string]func(rw http.ResponseWriter, _ *http.Request){
+				"/user": func(rw http.ResponseWriter, _ *http.Request) {
+					fmt.Fprint(rw, `{"id": 100, "login": "pac-user"}`)
+				},
 				"/repos/org/repo/issues/123/comments": func(rw http.ResponseWriter, r *http.Request) {
 					if r.Method == http.MethodGet {
-						fmt.Fprint(rw, `[{"id": 555, "body": "NO_MATCH"}]`)
+						fmt.Fprint(rw, `[{"id": 555, "body": "NO_MATCH", "user": {"id": 200}}]`)
 						return
 					}
 					assert.Equal(t, r.Method, http.MethodPost)
 					rw.WriteHeader(http.StatusCreated)
 					fmt.Fprint(rw, `{}`)
+				},
+			},
+		},
+		{
+			name:         "skip comment from different user and create new",
+			event:        &info.Event{Organization: "org", Repository: "repo", PullRequestNumber: 123},
+			commit:       "Updated Comment",
+			updateMarker: "MARKER",
+			mockResponses: map[string]func(rw http.ResponseWriter, _ *http.Request){
+				"/user": func(rw http.ResponseWriter, _ *http.Request) {
+					fmt.Fprint(rw, `{"id": 100, "login": "pac-user"}`)
+				},
+				"/repos/org/repo/issues/123/comments": func(rw http.ResponseWriter, r *http.Request) {
+					if r.Method == http.MethodGet {
+						fmt.Fprint(rw, `[{"id": 555, "body": "Old MARKER", "user": {"id": 999}}]`)
+						return
+					}
+					assert.Equal(t, r.Method, http.MethodPost)
+					rw.WriteHeader(http.StatusCreated)
+					fmt.Fprint(rw, `{}`)
+				},
+				"/repos/org/repo/issues/comments/555": func(rw http.ResponseWriter, _ *http.Request) {
+					t.Error("edit endpoint should not be called for comment from different user")
+					rw.WriteHeader(http.StatusOK)
 				},
 			},
 		},
@@ -817,6 +904,8 @@ func TestCreateComment(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			fakeclient, mux, teardown := tgitea.Setup(t)
 			defer teardown()
+			observer, _ := zapobserver.New(zap.InfoLevel)
+			fakelogger := zap.New(observer).Sugar()
 
 			if tt.clientNil {
 				p := &Provider{}
@@ -829,13 +918,117 @@ func TestCreateComment(t *testing.T) {
 				mux.HandleFunc(endpoint, handler)
 			}
 
-			p := &Provider{giteaClient: fakeclient}
+			p := &Provider{giteaClient: fakeclient, Logger: fakelogger}
 			err := p.CreateComment(context.Background(), tt.event, tt.commit, tt.updateMarker)
 			if tt.wantErr != "" {
 				assert.ErrorContains(t, err, tt.wantErr)
 			} else {
 				assert.NilError(t, err)
 			}
+		})
+	}
+}
+
+func TestCreateStatusUpdateCommentNormalizesBreaks(t *testing.T) {
+	fakeclient, mux, teardown := tgitea.Setup(t)
+	defer teardown()
+
+	var createCommentBody string
+	mux.HandleFunc("/repos/org/repo/statuses/", func(rw http.ResponseWriter, _ *http.Request) {
+		fmt.Fprint(rw, `{"state":"pending"}`)
+	})
+	mux.HandleFunc("/repos/org/repo/issues/123/comments", func(rw http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			fmt.Fprint(rw, `[]`)
+		case http.MethodPost:
+			b, err := io.ReadAll(r.Body)
+			assert.NilError(t, err)
+			createCommentBody = string(b)
+			fmt.Fprint(rw, `{}`)
+		default:
+			t.Fatalf("unexpected method: %s", r.Method)
+		}
+	})
+
+	p := &Provider{
+		giteaClient: fakeclient,
+		pacInfo: &info.PacOpts{
+			Settings: settings.Settings{
+				ApplicationName: settings.PACApplicationNameDefaultValue,
+			},
+		},
+		repo: &v1alpha1.Repository{
+			Spec: v1alpha1.RepositorySpec{
+				Settings: &v1alpha1.Settings{
+					Forgejo: &v1alpha1.ForgejoSettings{CommentStrategy: provider.UpdateCommentStrategy},
+				},
+			},
+		},
+	}
+
+	err := p.CreateStatus(context.Background(), &info.Event{
+		Organization:      "org",
+		Repository:        "repo",
+		SHA:               "abc123",
+		PullRequestNumber: 123,
+		EventType:         triggertype.PullRequest.String(),
+		TriggerTarget:     triggertype.PullRequest,
+	}, status.StatusOpts{
+		Status:                  "in_progress",
+		Text:                    "line1<br>line2",
+		OriginalPipelineRunName: "demo",
+		DetailsURL:              "https://example.test/log",
+	})
+	assert.NilError(t, err)
+	assert.Assert(t, !strings.Contains(createCommentBody, "<br>"), "comment body should not contain raw <br>: %s", createCommentBody)
+	assert.Assert(t, strings.Contains(createCommentBody, "line1\\nline2"), "comment body should contain normalized newline: %s", createCommentBody)
+
+	golden.Assert(t, createCommentBody, strings.ReplaceAll(fmt.Sprintf("%s.golden", t.Name()), "/", "-"))
+}
+
+func TestFormatPipelineCommentEmoji(t *testing.T) {
+	p := &Provider{
+		pacInfo: &info.PacOpts{
+			Settings: settings.Settings{
+				ApplicationName: settings.PACApplicationNameDefaultValue,
+			},
+		},
+	}
+
+	tests := []struct {
+		name   string
+		status status.StatusOpts
+		emoji  string
+	}{
+		{
+			name: "failure conclusion uses failure emoji",
+			status: status.StatusOpts{
+				Conclusion:              status.ConclusionFailure,
+				Title:                   "Failed",
+				Text:                    "details",
+				OriginalPipelineRunName: "demo",
+				DetailsURL:              "https://example.test/log",
+			},
+			emoji: "❌",
+		},
+		{
+			name: "in progress status uses rocket emoji",
+			status: status.StatusOpts{
+				Status:                  "in_progress",
+				Title:                   "CI has Started",
+				Text:                    "details",
+				OriginalPipelineRunName: "demo",
+				DetailsURL:              "https://example.test/log",
+			},
+			emoji: "🚀",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := p.formatPipelineComment("abc123", tt.status)
+			assert.Assert(t, strings.HasPrefix(got, tt.emoji+" "), "expected prefix %q in comment %q", tt.emoji+" ", got)
 		})
 	}
 }
@@ -971,6 +1164,348 @@ func TestGetCommitInfo(t *testing.T) {
 					assert.DeepEqual(t, expectedCommitterDate, tt.event.SHACommitterDate)
 				}
 			}
+		})
+	}
+}
+
+func TestGetCommitInfoPRLookupPopulatesURLs(t *testing.T) {
+	ctx, _ := rtesting.SetupFakeContext(t)
+	client, mux, tearDown := tgitea.Setup(t)
+	defer tearDown()
+
+	event := &info.Event{
+		Organization:      "owner",
+		Repository:        "repo",
+		PullRequestNumber: 42,
+		// SHA intentionally empty to trigger PR lookup path
+	}
+
+	// Mock GetPullRequest endpoint
+	mux.HandleFunc("/repos/owner/repo/pulls/42", func(rw http.ResponseWriter, _ *http.Request) {
+		fmt.Fprint(rw, `{
+			"head": {
+				"ref": "feature-branch",
+				"sha": "abc123",
+				"repo": {
+					"html_url": "https://gitea.com/fork-owner/repo"
+				}
+			},
+			"base": {
+				"ref": "main",
+				"repo": {
+					"html_url": "https://gitea.com/owner/repo"
+				}
+			}
+		}`)
+	})
+
+	// Mock GetSingleCommit endpoint
+	mux.HandleFunc("/repos/owner/repo/git/commits/abc123", func(rw http.ResponseWriter, _ *http.Request) {
+		fmt.Fprint(rw, `{
+			"sha": "abc123",
+			"html_url": "https://gitea.com/owner/repo/commit/abc123",
+			"commit": {
+				"message": "feat: test commit"
+			}
+		}`)
+	})
+
+	provider := &Provider{giteaClient: client}
+	err := provider.GetCommitInfo(ctx, event)
+	assert.NilError(t, err)
+	assert.Equal(t, "abc123", event.SHA)
+	assert.Equal(t, "feature-branch", event.HeadBranch)
+	assert.Equal(t, "main", event.BaseBranch)
+	assert.Equal(t, "https://gitea.com/fork-owner/repo", event.HeadURL, "HeadURL should be populated from PR lookup")
+	assert.Equal(t, "https://gitea.com/owner/repo", event.BaseURL, "BaseURL should be populated from PR lookup")
+}
+
+func TestSplitGiteaURL(t *testing.T) {
+	tests := []struct {
+		name     string
+		url      string
+		wantOrg  string
+		wantRepo string
+		wantRef  string
+		wantPath string
+		wantErr  bool
+	}{
+		{
+			name:     "src branch URL",
+			url:      "https://gitea.example.com/owner/repo/src/branch/main/path/to/task.yaml",
+			wantOrg:  "owner",
+			wantRepo: "repo",
+			wantRef:  "main",
+			wantPath: "path/to/task.yaml",
+		},
+		{
+			name:     "raw branch URL",
+			url:      "https://gitea.example.com/owner/repo/raw/branch/main/task.yaml",
+			wantOrg:  "owner",
+			wantRepo: "repo",
+			wantRef:  "main",
+			wantPath: "task.yaml",
+		},
+		{
+			name:     "src tag URL",
+			url:      "https://gitea.example.com/owner/repo/src/tag/v1.0.0/task.yaml",
+			wantOrg:  "owner",
+			wantRepo: "repo",
+			wantRef:  "v1.0.0",
+			wantPath: "task.yaml",
+		},
+		{
+			name:     "src commit URL",
+			url:      "https://gitea.example.com/owner/repo/src/commit/abc123def/path/task.yaml",
+			wantOrg:  "owner",
+			wantRepo: "repo",
+			wantRef:  "abc123def",
+			wantPath: "path/task.yaml",
+		},
+		{
+			name:     "URL encoded branch name",
+			url:      "https://gitea.example.com/owner/repo/src/branch/feature%2Fbranch/task.yaml",
+			wantOrg:  "owner",
+			wantRepo: "repo",
+			wantRef:  "feature/branch",
+			wantPath: "task.yaml",
+		},
+		{
+			name:     "raw commit URL",
+			url:      "https://gitea.example.com/owner/repo/raw/commit/abc123def/task.yaml",
+			wantOrg:  "owner",
+			wantRepo: "repo",
+			wantRef:  "abc123def",
+			wantPath: "task.yaml",
+		},
+		{
+			name:     "raw tag URL",
+			url:      "https://gitea.example.com/owner/repo/raw/tag/v2.0/path/to/task.yaml",
+			wantOrg:  "owner",
+			wantRepo: "repo",
+			wantRef:  "v2.0",
+			wantPath: "path/to/task.yaml",
+		},
+		{
+			name:     "URL encoded path",
+			url:      "https://gitea.example.com/owner/repo/src/branch/main/path%2Fto%2Ftask.yaml",
+			wantOrg:  "owner",
+			wantRepo: "repo",
+			wantRef:  "main",
+			wantPath: "path/to/task.yaml",
+		},
+		{
+			name:    "too short URL",
+			url:     "https://gitea.example.com/owner/repo",
+			wantErr: true,
+		},
+		{
+			name:    "invalid action segment",
+			url:     "https://gitea.example.com/owner/repo/blob/branch/main/task.yaml",
+			wantErr: true,
+		},
+		{
+			name:    "invalid ref type",
+			url:     "https://gitea.example.com/owner/repo/src/invalid/main/task.yaml",
+			wantErr: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			org, repo, path, ref, err := splitGiteaURL(tt.url)
+			if tt.wantErr {
+				assert.Assert(t, err != nil)
+				return
+			}
+			assert.NilError(t, err)
+			assert.Equal(t, tt.wantOrg, org)
+			assert.Equal(t, tt.wantRepo, repo)
+			assert.Equal(t, tt.wantRef, ref)
+			assert.Equal(t, tt.wantPath, path)
+		})
+	}
+}
+
+func TestGetTaskURI(t *testing.T) {
+	tests := []struct {
+		name       string
+		eventURL   string
+		uri        string
+		wantRet    string
+		wantFound  bool
+		wantErr    bool
+		fileExists bool
+	}{
+		{
+			name:       "fetch task from src branch URL",
+			eventURL:   "https://gitea.example.com/owner/repo/pulls/1",
+			uri:        "https://gitea.example.com/owner/repo/src/branch/main/task.yaml",
+			wantRet:    "hello world",
+			wantFound:  true,
+			fileExists: true,
+		},
+		{
+			name:       "fetch task from raw branch URL",
+			eventURL:   "https://gitea.example.com/owner/repo/pulls/1",
+			uri:        "https://gitea.example.com/owner/repo/raw/branch/main/task.yaml",
+			wantRet:    "hello world",
+			wantFound:  true,
+			fileExists: true,
+		},
+		{
+			name:       "fetch task from tag URL",
+			eventURL:   "https://gitea.example.com/owner/repo/pulls/1",
+			uri:        "https://gitea.example.com/owner/repo/src/tag/v1.0/task.yaml",
+			wantRet:    "hello world",
+			wantFound:  true,
+			fileExists: true,
+		},
+		{
+			name:      "different host returns not found",
+			eventURL:  "https://gitea.example.com/owner/repo/pulls/1",
+			uri:       "https://other.example.com/owner/repo/src/branch/main/task.yaml",
+			wantFound: false,
+		},
+		{
+			name:     "bad URI format",
+			eventURL: "https://gitea.example.com/owner/repo/pulls/1",
+			uri:      "https://gitea.example.com/owner/repo",
+			wantErr:  true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fakeclient, mux, teardown := tgitea.Setup(t)
+			defer teardown()
+
+			if tt.fileExists {
+				mux.HandleFunc("/repos/owner/repo/raw/", func(rw http.ResponseWriter, _ *http.Request) {
+					fmt.Fprint(rw, tt.wantRet)
+				})
+			}
+
+			p := &Provider{giteaClient: fakeclient}
+			event := info.NewEvent()
+			event.URL = tt.eventURL
+
+			found, content, err := p.GetTaskURI(context.Background(), event, tt.uri)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("GetTaskURI() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			assert.Equal(t, tt.wantFound, found)
+			if tt.wantFound {
+				assert.Equal(t, tt.wantRet, content)
+			}
+		})
+	}
+}
+
+func TestGetCommitStatuses(t *testing.T) {
+	tests := []struct {
+		name        string
+		event       *info.Event
+		nilClient   bool
+		mockHandler func(http.ResponseWriter, *http.Request)
+		want        []provider.CommitStatusInfo
+		wantErr     string
+	}{
+		{
+			name: "happy path with multiple statuses",
+			event: &info.Event{
+				Organization: "org",
+				Repository:   "repo",
+				SHA:          "abc123",
+			},
+			mockHandler: func(rw http.ResponseWriter, _ *http.Request) {
+				fmt.Fprint(rw, `[
+					{"context":"Pipelines as Code CI / pr-one","status":"success"},
+					{"context":"Pipelines as Code CI / pr-two","status":"failure"}
+				]`)
+			},
+			want: []provider.CommitStatusInfo{
+				{Name: "Pipelines as Code CI / pr-one", Status: "success"},
+				{Name: "Pipelines as Code CI / pr-two", Status: "failure"},
+			},
+		},
+		{
+			name: "deduplicates identical statuses",
+			event: &info.Event{
+				Organization: "org",
+				Repository:   "repo",
+				SHA:          "abc123",
+			},
+			mockHandler: func(rw http.ResponseWriter, _ *http.Request) {
+				fmt.Fprint(rw, `[
+					{"context":"CI / build","status":"success"},
+					{"context":"CI / build","status":"success"},
+					{"context":"CI / build","status":"failure"}
+				]`)
+			},
+			want: []provider.CommitStatusInfo{
+				{Name: "CI / build", Status: "success"},
+				{Name: "CI / build", Status: "failure"},
+			},
+		},
+		{
+			name: "empty response",
+			event: &info.Event{
+				Organization: "org",
+				Repository:   "repo",
+				SHA:          "abc123",
+			},
+			mockHandler: func(rw http.ResponseWriter, _ *http.Request) {
+				fmt.Fprint(rw, `[]`)
+			},
+		},
+		{
+			name:      "nil client returns error",
+			nilClient: true,
+			event: &info.Event{
+				Organization: "org",
+				Repository:   "repo",
+				SHA:          "abc123",
+			},
+			wantErr: "no gitea client has been initialized",
+		},
+		{
+			name: "API error",
+			event: &info.Event{
+				Organization: "org",
+				Repository:   "repo",
+				SHA:          "abc123",
+			},
+			mockHandler: func(rw http.ResponseWriter, _ *http.Request) {
+				rw.WriteHeader(http.StatusInternalServerError)
+			},
+			wantErr: "500",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var p *Provider
+			if tt.nilClient {
+				p = &Provider{}
+			} else {
+				fakeclient, mux, teardown := tgitea.Setup(t)
+				defer teardown()
+
+				mux.HandleFunc(
+					fmt.Sprintf("/repos/%s/%s/commits/%s/statuses",
+						tt.event.Organization, tt.event.Repository, tt.event.SHA),
+					tt.mockHandler,
+				)
+				p = &Provider{giteaClient: fakeclient}
+			}
+
+			got, err := p.GetCommitStatuses(context.Background(), tt.event)
+			if tt.wantErr != "" {
+				assert.ErrorContains(t, err, tt.wantErr)
+				return
+			}
+			assert.NilError(t, err)
+			assert.DeepEqual(t, got, tt.want)
 		})
 	}
 }

@@ -4,19 +4,19 @@ import "github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascod
 
 type E2E struct {
 	Repo, Organization string
+	BaseBranch         string
 	DirectWebhook      bool
-	ProjectID          int
 	ControllerURL      string
 	Concurrency        int
 	UserName           string
 	Password           string
 	LightweightTag     bool
-	Settings           v1alpha1.Settings
+	Settings           *v1alpha1.Settings
 }
 
 var (
 	MainBranch     = "main"
-	RemoteTaskURL  = "https://raw.githubusercontent.com/openshift-pipelines/pipelines-as-code/main/pkg/pipelineascode/testdata/pull_request/.tekton/task.yaml"
+	RemoteTaskURL  = "https://raw.githubusercontent.com/tektoncd/pipelines-as-code/main/pkg/pipelineascode/testdata/pull_request/.tekton/task.yaml"
 	RemoteTaskName = "task-from-tektondir"
 )
 

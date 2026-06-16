@@ -2,6 +2,7 @@ package adapter
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -23,6 +24,11 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/gitea"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/gitlab"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/tlsconfig"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/tracing"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"knative.dev/eventing/pkg/adapter/v2"
@@ -53,7 +59,6 @@ type listener struct {
 	run    *params.Run
 	kint   kubeinteraction.Interface
 	logger *zap.SugaredLogger
-	event  *info.Event
 }
 
 type Response struct {
@@ -94,6 +99,8 @@ func (l *listener) Start(ctx context.Context) error {
 
 	mux.HandleFunc("/", l.handleEvent(ctx))
 
+	enabled, tlsCertFile, tlsKeyFile := l.isTLSEnabled()
+
 	srv := &http.Server{
 		Addr: ":" + adapterPort,
 		Handler: http.TimeoutHandler(mux,
@@ -103,9 +110,30 @@ func (l *listener) Start(ctx context.Context) error {
 		IdleTimeout:       30 * time.Second,
 	}
 
-	enabled, tlsCertFile, tlsKeyFile := l.isTLSEnabled()
 	if enabled {
-		if err := srv.ListenAndServeTLS(tlsCertFile, tlsKeyFile); err != nil {
+		tlsConf := tlsconfig.LoadFromEnv(os.Getenv)
+		serverTLSConfig, err := tlsConf.ToTLSConfig()
+		if err != nil {
+			l.logger.Warnf("Error parsing TLS configuration: %v, using defaults", err)
+			serverTLSConfig = &tls.Config{
+				NextProtos: []string{"h2", "http/1.1"},
+				MinVersion: tls.VersionTLS12,
+			}
+		} else {
+			l.logger.Infof("TLS Configuration: MinVersion=%s, CipherSuites=[%s], CurvePreferences=[%s]",
+				tlsconfig.GetTLSVersionName(serverTLSConfig.MinVersion),
+				tlsconfig.FormatCipherSuites(serverTLSConfig.CipherSuites),
+				tlsconfig.FormatCurvePreferences(serverTLSConfig.CurvePreferences))
+		}
+
+		cert, err := tls.LoadX509KeyPair(tlsCertFile, tlsKeyFile)
+		if err != nil {
+			return fmt.Errorf("failed to load TLS certificate: %w", err)
+		}
+		serverTLSConfig.Certificates = []tls.Certificate{cert}
+		srv.TLSConfig = serverTLSConfig
+
+		if err := srv.ListenAndServeTLS("", ""); err != nil {
 			return err
 		}
 	} else {
@@ -131,9 +159,9 @@ func (l listener) handleEvent(ctx context.Context) http.HandlerFunc {
 			return
 		}
 
-		var event map[string]any
+		var eventBody map[string]any
 		if string(payload) != "" {
-			if err := json.Unmarshal(payload, &event); err != nil {
+			if err := json.Unmarshal(payload, &eventBody); err != nil {
 				l.logger.Errorf("Invalid event body format format: %s", err)
 				response.WriteHeader(http.StatusBadRequest)
 				return
@@ -143,7 +171,7 @@ func (l listener) handleEvent(ctx context.Context) http.HandlerFunc {
 		var gitProvider provider.Interface
 		var logger *zap.SugaredLogger
 
-		l.event = info.NewEvent()
+		event := info.NewEvent()
 		pacInfo := l.run.Info.GetPacOpts()
 
 		globalRepo, err := l.run.Clients.PipelineAsCode.PipelinesascodeV1alpha1().Repositories(l.run.Info.Kube.Namespace).Get(
@@ -170,7 +198,7 @@ func (l listener) handleEvent(ctx context.Context) http.HandlerFunc {
 			return
 		}
 
-		isIncoming, targettedRepo, err := l.detectIncoming(ctx, request, payload)
+		isIncoming, targettedRepo, err := l.detectIncoming(ctx, event, request, payload)
 		if err != nil {
 			if errors.Is(err, errMissingFields) {
 				l.writeResponse(response, http.StatusBadRequest, err.Error())
@@ -180,7 +208,7 @@ func (l listener) handleEvent(ctx context.Context) http.HandlerFunc {
 		}
 
 		if isIncoming {
-			gitProvider, logger, err = l.processIncoming(targettedRepo)
+			gitProvider, logger, err = l.processIncoming(event, targettedRepo)
 		} else {
 			gitProvider, logger, err = l.detectProvider(request, string(payload))
 		}
@@ -192,11 +220,18 @@ func (l listener) handleEvent(ctx context.Context) http.HandlerFunc {
 		}
 		gitProvider.SetPacInfo(&pacInfo)
 
+		tracedCtx := otel.GetTextMapPropagator().Extract(ctx, propagation.HeaderCarrier(request.Header))
+
+		tracer := otel.Tracer(tracing.TracerName)
+		tracedCtx, span := tracer.Start(tracedCtx, "PipelinesAsCode:ProcessEvent",
+			trace.WithSpanKind(trace.SpanKindServer),
+		)
+
 		s := sinker{
 			run:        l.run,
 			vcx:        gitProvider,
 			kint:       l.kint,
-			event:      l.event,
+			event:      event,
 			logger:     logger,
 			payload:    payload,
 			pacInfo:    &pacInfo,
@@ -207,8 +242,10 @@ func (l listener) handleEvent(ctx context.Context) http.HandlerFunc {
 		localRequest := request.Clone(request.Context())
 
 		go func() {
-			err := s.processEvent(ctx, localRequest)
+			defer span.End()
+			err := s.processEvent(tracedCtx, localRequest)
 			if err != nil {
+				span.RecordError(err)
 				logger.Errorf("an error occurred: %v", err)
 			}
 		}()

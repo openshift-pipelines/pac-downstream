@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"golang.org/x/exp/slices"
+	"gotest.tools/v3/assert"
 )
 
 func TestUserInOwnerFile(t *testing.T) {
@@ -127,13 +128,12 @@ func TestUserInOwnerFile(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := UserInOwnerFile(tt.args.ownersContent, tt.args.ownersAliasesContent, tt.args.sender)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("UserInOwnerFile() error = %v, wantErr %v", err, tt.wantErr)
+			if tt.wantErr {
+				assert.Assert(t, err != nil)
 				return
 			}
-			if got != tt.want {
-				t.Errorf("UserInOwnerFile() = %v, want %v", got, tt.want)
-			}
+			assert.NilError(t, err)
+			assert.Equal(t, got, tt.want)
 		})
 	}
 }
@@ -195,13 +195,9 @@ func TestExpandAliases(t *testing.T) {
 			// Can't use reflect.DeepEqual to compare the slices as expandAliases
 			// uses a map for dedup which does not preserve the order.
 			// We do not care about the order, just the content of the slice.
-			if len(got) != len(tt.want) {
-				t.Errorf("expandAliases() got = %v, want %v", got, tt.want)
-			}
+			assert.Equal(t, len(got), len(tt.want))
 			for _, v := range got {
-				if !slices.Contains(tt.want, v) {
-					t.Errorf("expandAliases() got = %v, want %v", got, tt.want)
-				}
+				assert.Assert(t, slices.Contains(tt.want, v), "got = %v, want %v", got, tt.want)
 			}
 		})
 	}

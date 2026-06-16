@@ -36,8 +36,10 @@ import (
 	corev1listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
 	"knative.dev/pkg/apis"
+	duckv1 "knative.dev/pkg/apis/duck/v1"
 	"knative.dev/pkg/controller"
 	"knative.dev/pkg/logging"
+	pkgtls "knative.dev/pkg/network/tls"
 )
 
 const (
@@ -45,8 +47,6 @@ const (
 	TLSKey = "tls.key"
 	// TLSCrt is the key in the TLS secret for the public key of TLS servers
 	TLSCrt = "tls.crt"
-	// DefaultMinTLSVersion is the default minimum TLS version for servers and clients.
-	DefaultMinTLSVersion = tls.VersionTLS12
 	// SecretCACrt is the name of the CA Cert in the secret
 	SecretCACert = "ca.crt"
 	// IMCDispatcherServerTLSSecretName is the name of the tls secret for the imc dispatcher server
@@ -57,6 +57,8 @@ const (
 	BrokerFilterServerTLSSecretName = "mt-broker-filter-server-tls" //nolint:gosec // This is not a hardcoded credential
 	// BrokerIngressServerTLSSecretName is the name of the tls secret for the broker ingress server
 	BrokerIngressServerTLSSecretName = "mt-broker-ingress-server-tls" //nolint:gosec // This is not a hardcoded credential
+	// RequestReplyServerTLSSecretName is the name of the tls secret for the request reply server
+	RequestReplyServerTLSSecretName = "request-reply-server-tls" //nolint:gosec // This is not a hardcoded credential
 )
 
 type ClientConfig struct {
@@ -169,10 +171,13 @@ func GetTLSClientConfig(config ClientConfig) (*tls.Config, error) {
 		return nil, err
 	}
 
-	return &tls.Config{
-		RootCAs:    pool,
-		MinVersion: DefaultMinTLSVersion,
-	}, nil
+	cfg, err := defaultTLSConfigFromEnv()
+	if err != nil {
+		return nil, err
+	}
+
+	cfg.RootCAs = pool
+	return cfg, nil
 }
 
 func NewDefaultServerConfig() ServerConfig {
@@ -180,10 +185,25 @@ func NewDefaultServerConfig() ServerConfig {
 }
 
 func GetTLSServerConfig(config ServerConfig) (*tls.Config, error) {
-	return &tls.Config{
-		MinVersion:     DefaultMinTLSVersion,
-		GetCertificate: config.GetCertificate,
-	}, nil
+	cfg, err := defaultTLSConfigFromEnv()
+	if err != nil {
+		return nil, err
+	}
+
+	cfg.GetCertificate = config.GetCertificate
+	return cfg, nil
+}
+
+// defaultTLSConfigFromEnv loads TLS configuration from environment variables
+// using the shared knative/pkg/tls utility. DefaultConfigFromEnv defaults to
+// TLS 1.3.
+func defaultTLSConfigFromEnv() (*tls.Config, error) {
+	cfg, err := pkgtls.DefaultConfigFromEnv("")
+	if err != nil {
+		return nil, fmt.Errorf("failed to load TLS config from env: %w", err)
+	}
+
+	return cfg, nil
 }
 
 // IsHttpsSink returns true if the sink has scheme equal to https.
@@ -193,6 +213,17 @@ func IsHttpsSink(sink string) bool {
 		return false
 	}
 	return strings.EqualFold(s.Scheme, "https")
+}
+
+// GetHttpsAddress returns the (first) https address out of the list of addresses
+func GetHttpsAddress(addresses []duckv1.Addressable) *duckv1.Addressable {
+	for _, address := range addresses {
+		if IsHttpsSink(address.URL.String()) {
+			return &address
+		}
+	}
+
+	return nil
 }
 
 // certPool returns a x509.CertPool with the combined certs from:
