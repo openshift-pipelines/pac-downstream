@@ -1,5 +1,5 @@
 # Rebuild trigger: 1.15.4 release 2026-02-18
-ARG GO_BUILDER=registry.access.redhat.com/ubi8/go-toolset:latest
+ARG GO_BUILDER=registry.access.redhat.com/ubi9/go-toolset:1.25
 ARG RUNTIME=registry.access.redhat.com/ubi8/ubi-minimal:latest
 
 FROM $GO_BUILDER AS builder
@@ -20,14 +20,14 @@ ARG VERSION=1.15
 COPY --from=builder /tmp/tkn-pac /usr/bin
 
 LABEL \
-    com.redhat.component="openshift-pipelines-pipelines-as-code-cli-rhel8-container" \
+    com.redhat.component="openshift-pipelines-pipelines-as-code-cli-rhel9-container" \
     cpe="cpe:/a:redhat:openshift_pipelines:1.15::el9" \
     description="Red Hat OpenShift Pipelines pipelines-as-code cli" \
     io.k8s.description="Red Hat OpenShift Pipelines pipelines-as-code cli" \
     io.k8s.display-name="Red Hat OpenShift Pipelines pipelines-as-code cli" \
     io.openshift.tags="tekton,openshift,pipelines-as-code,cli" \
     maintainer="pipelines-extcomm@redhat.com" \
-    name="openshift-pipelines/pipelines-pipelines-as-code-cli-rhel8" \
+    name="openshift-pipelines/pipelines-pipelines-as-code-cli-rhel9" \
     summary="Red Hat OpenShift Pipelines pipelines-as-code cli" \
     version="v1.15.5"
 
