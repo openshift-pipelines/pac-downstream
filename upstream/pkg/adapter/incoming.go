@@ -117,11 +117,11 @@ func (l *listener) detectIncoming(ctx context.Context, event *info.Event, req *h
 		return false, nil, nil
 	}
 
-	l.logger.Infof("incoming request has been requested: %v", req.URL.Path)
+	l.logger.Infof("incoming request has been requested: %v", req.URL)
 	payload, err := parseIncomingPayload(req, payloadBody)
 	if payload.legacyMode {
 		// Log this, even if the request is invalid
-		l.logger.Warnf("[SECURITY] Incoming webhook used deprecated URL-based secret passing. This method is insecure and will be removed in upcoming releases. Please use POST body instead.")
+		l.logger.Warnf("[SECURITY] Incoming webhook used legacy URL-based secret passing. This is insecure and will be deprecated. Please use POST body instead.")
 	}
 	if err != nil {
 		return false, nil, err
@@ -183,7 +183,6 @@ func (l *listener) detectIncoming(ctx context.Context, event *info.Event, req *h
 			return false, nil, err
 		}
 		event.Provider.URL = enterpriseURL
-		event.GHEURL = enterpriseURL
 		event.Provider.Token = token
 		event.InstallationID = installationID
 		// Github app is not installed for provided repository url
@@ -223,27 +222,24 @@ func (l *listener) processIncoming(event *info.Event, targetRepo *v1alpha1.Repos
 	event.Organization = org
 	event.Repository = repo
 
-	providerType := ""
-	if targetRepo.Spec.GitProvider != nil {
-		providerType = targetRepo.Spec.GitProvider.Type
-	}
-
 	var provider provider.Interface
-	switch providerType {
-	case "", "github":
-		gh := github.New()
-		gh.RepositoryNames = []string{repo}
-		provider = gh
-	case "gitlab":
-		provider = &gitlab.Provider{}
-	case "gitea", "forgejo":
-		provider = &gitea.Provider{}
-	case "bitbucket-cloud":
-		provider = &bitbucketcloud.Provider{}
-	case "bitbucket-datacenter":
-		provider = &bitbucketdatacenter.Provider{}
-	default:
-		return l.processRes(false, nil, l.logger.With("namespace", targetRepo.Namespace), "", fmt.Errorf("no supported Git provider has been detected"))
+	if targetRepo.Spec.GitProvider == nil || targetRepo.Spec.GitProvider.Type == "" {
+		provider = github.New()
+	} else {
+		switch targetRepo.Spec.GitProvider.Type {
+		case "github":
+			provider = github.New()
+		case "gitlab":
+			provider = &gitlab.Provider{}
+		case "gitea", "forgejo":
+			provider = &gitea.Provider{}
+		case "bitbucket-cloud":
+			provider = &bitbucketcloud.Provider{}
+		case "bitbucket-datacenter":
+			provider = &bitbucketdatacenter.Provider{}
+		default:
+			return l.processRes(false, nil, l.logger.With("namespace", targetRepo.Namespace), "", fmt.Errorf("no supported Git provider has been detected"))
+		}
 	}
 
 	return l.processRes(true, provider, l.logger.With("provider", "incoming", "namespace", targetRepo.Namespace), "", nil)

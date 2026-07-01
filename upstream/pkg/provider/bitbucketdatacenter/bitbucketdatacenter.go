@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/google/go-github/v85/github"
+	"github.com/google/go-github/v84/github"
 	"github.com/jenkins-x/go-scm/scm"
 	"github.com/jenkins-x/go-scm/scm/driver/stash"
 	"github.com/jenkins-x/go-scm/scm/transport/oauth2"
@@ -41,7 +41,6 @@ type Provider struct {
 	apiURL                    string
 	provenance                string
 	projectKey                string
-	previousHeadCommit        string
 	repo                      *v1alpha1.Repository
 	triggerEvent              string
 	cachedChangedFiles        *changedfiles.ChangedFiles
@@ -423,13 +422,7 @@ func (v *Provider) fetchChangedFiles(ctx context.Context, runevent *info.Event) 
 	case triggertype.Push:
 		opts := &scm.ListOptions{Page: 1, Size: apiResponseLimit}
 		for {
-			var changes []*scm.Change
-			var err error
-			if v.previousHeadCommit != "" {
-				changes, _, err = v.getMergeCommitChanges(ctx, runevent.Organization, runevent.Repository, v.previousHeadCommit, runevent.SHA, opts)
-			} else {
-				changes, _, err = v.Client().Git.ListChanges(ctx, orgAndRepo, runevent.SHA, opts)
-			}
+			changes, _, err := v.Client().Git.ListChanges(ctx, orgAndRepo, runevent.SHA, opts)
 			if err != nil {
 				return changedfiles.ChangedFiles{}, fmt.Errorf("failed to list changes for commit %s: %w", runevent.SHA, err)
 			}

@@ -2,7 +2,6 @@ package adapter
 
 import (
 	"context"
-	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -24,11 +23,6 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/gitea"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/gitlab"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/tlsconfig"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/tracing"
-	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/propagation"
-	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"knative.dev/eventing/pkg/adapter/v2"
@@ -99,8 +93,6 @@ func (l *listener) Start(ctx context.Context) error {
 
 	mux.HandleFunc("/", l.handleEvent(ctx))
 
-	enabled, tlsCertFile, tlsKeyFile := l.isTLSEnabled()
-
 	srv := &http.Server{
 		Addr: ":" + adapterPort,
 		Handler: http.TimeoutHandler(mux,
@@ -110,30 +102,9 @@ func (l *listener) Start(ctx context.Context) error {
 		IdleTimeout:       30 * time.Second,
 	}
 
+	enabled, tlsCertFile, tlsKeyFile := l.isTLSEnabled()
 	if enabled {
-		tlsConf := tlsconfig.LoadFromEnv(os.Getenv)
-		serverTLSConfig, err := tlsConf.ToTLSConfig()
-		if err != nil {
-			l.logger.Warnf("Error parsing TLS configuration: %v, using defaults", err)
-			serverTLSConfig = &tls.Config{
-				NextProtos: []string{"h2", "http/1.1"},
-				MinVersion: tls.VersionTLS12,
-			}
-		} else {
-			l.logger.Infof("TLS Configuration: MinVersion=%s, CipherSuites=[%s], CurvePreferences=[%s]",
-				tlsconfig.GetTLSVersionName(serverTLSConfig.MinVersion),
-				tlsconfig.FormatCipherSuites(serverTLSConfig.CipherSuites),
-				tlsconfig.FormatCurvePreferences(serverTLSConfig.CurvePreferences))
-		}
-
-		cert, err := tls.LoadX509KeyPair(tlsCertFile, tlsKeyFile)
-		if err != nil {
-			return fmt.Errorf("failed to load TLS certificate: %w", err)
-		}
-		serverTLSConfig.Certificates = []tls.Certificate{cert}
-		srv.TLSConfig = serverTLSConfig
-
-		if err := srv.ListenAndServeTLS("", ""); err != nil {
+		if err := srv.ListenAndServeTLS(tlsCertFile, tlsKeyFile); err != nil {
 			return err
 		}
 	} else {
@@ -220,13 +191,6 @@ func (l listener) handleEvent(ctx context.Context) http.HandlerFunc {
 		}
 		gitProvider.SetPacInfo(&pacInfo)
 
-		tracedCtx := otel.GetTextMapPropagator().Extract(ctx, propagation.HeaderCarrier(request.Header))
-
-		tracer := otel.Tracer(tracing.TracerName)
-		tracedCtx, span := tracer.Start(tracedCtx, "PipelinesAsCode:ProcessEvent",
-			trace.WithSpanKind(trace.SpanKindServer),
-		)
-
 		s := sinker{
 			run:        l.run,
 			vcx:        gitProvider,
@@ -242,10 +206,8 @@ func (l listener) handleEvent(ctx context.Context) http.HandlerFunc {
 		localRequest := request.Clone(request.Context())
 
 		go func() {
-			defer span.End()
-			err := s.processEvent(tracedCtx, localRequest)
+			err := s.processEvent(ctx, localRequest)
 			if err != nil {
-				span.RecordError(err)
 				logger.Errorf("an error occurred: %v", err)
 			}
 		}()

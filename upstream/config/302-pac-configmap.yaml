@@ -43,8 +43,8 @@ data:
   # i.e: "owner/private-repo1, org/repo2"
   secret-github-app-scope-extra-repos: ""
 
-  # The default hub API url to use, by default it is Artifact Hub's API.
-  hub-url: "https://artifacthub.io/api/v1"
+  # The default hub url to use, by default it is artifacthub.
+  hub-url: "https://artifacthub.io"
 
   # The default hub catalog type, by default it is artifacthub.
   # Other supported values: tektonhub (for custom self-hosted Tekton Hub instances)
@@ -172,12 +172,6 @@ data:
   # a duplicate pipeline run.
   # Default: true
   skip-push-event-for-pr-commits: "true"
-
-  # PipelineRun label names PaC reads to populate tracing span attributes.
-  # Empty disables emission of the corresponding attribute.
-  tracing-label-action: "delivery.tekton.dev/action"
-  tracing-label-application: "delivery.tekton.dev/application"
-  tracing-label-component: "delivery.tekton.dev/component"
 
   # Configure a custom console here, the driver support custom parameters from
   # Repo CR along a few other template variable, see documentation for more

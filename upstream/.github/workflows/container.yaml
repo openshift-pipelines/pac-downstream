@@ -54,8 +54,6 @@ jobs:
           releaseBranchFormat='release-v'
           if [[ ${GITHUB_REF_NAME} == ${releaseBranchFormat}* ]]; then
             tag=v$(echo ${GITHUB_REF_NAME}|sed "s,${releaseBranchFormat},,")
-          elif [[ ${GITHUB_REF} == refs/tags/v* ]]; then
-            tag=${GITHUB_REF_NAME}
           elif [[ ${GITHUB_REF} == refs/pull/* ]]; then
             tag=pr-$(echo ${GITHUB_REF} | cut -c11-|sed 's,/merge,,')
           else

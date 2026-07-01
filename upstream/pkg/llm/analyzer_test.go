@@ -17,66 +17,92 @@ import (
 	"knative.dev/pkg/apis"
 )
 
-func TestAnalyze(t *testing.T) {
-	testLogger, _ := logger.GetLogger()
+func TestAnalyzerAnalyze(t *testing.T) {
+	logger, _ := logger.GetLogger()
 
+	// Create fake Kubernetes client
 	fakeClient := fake.NewClientset()
+
 	run := &params.Run{
 		Clients: paramclients.Clients{
 			Kube: fakeClient,
 		},
 	}
+
+	// Create mock kubeinteraction
 	kinteract := &kubeinteraction.Interaction{}
+
+	analyzer := NewAnalyzer(run, kinteract, logger)
 
 	tests := []struct {
 		name        string
-		repo        *v1alpha1.Repository
+		request     *AnalyzeRequest
 		wantResults int
 		wantError   bool
+		setupRepo   func() *v1alpha1.Repository
 	}{
 		{
-			name:        "no ai analysis config",
-			repo:        &v1alpha1.Repository{},
+			name: "no ai analysis config",
+			request: &AnalyzeRequest{
+				PipelineRun: &tektonv1.PipelineRun{},
+				Event:       &info.Event{},
+				Repository:  &v1alpha1.Repository{},
+				Provider:    &tprovider.TestProviderImp{},
+			},
 			wantResults: 0,
 			wantError:   false,
 		},
 		{
 			name: "ai analysis disabled",
-			repo: &v1alpha1.Repository{
-				Spec: v1alpha1.RepositorySpec{
-					Settings: &v1alpha1.Settings{
-						AIAnalysis: &v1alpha1.AIAnalysisConfig{
-							Enabled: false,
+			request: &AnalyzeRequest{
+				PipelineRun: &tektonv1.PipelineRun{},
+				Event:       &info.Event{},
+				Repository: &v1alpha1.Repository{
+					Spec: v1alpha1.RepositorySpec{
+						Settings: &v1alpha1.Settings{
+							AIAnalysis: &v1alpha1.AIAnalysisConfig{
+								Enabled: false,
+							},
 						},
 					},
 				},
+				Provider: &tprovider.TestProviderImp{},
 			},
 			wantResults: 0,
 			wantError:   false,
 		},
 		{
 			name: "invalid config",
-			repo: &v1alpha1.Repository{
-				Spec: v1alpha1.RepositorySpec{
-					Settings: &v1alpha1.Settings{
-						AIAnalysis: &v1alpha1.AIAnalysisConfig{
-							Enabled:  true,
-							Provider: "openai",
-							// Missing required fields
+			request: &AnalyzeRequest{
+				PipelineRun: &tektonv1.PipelineRun{},
+				Event:       &info.Event{},
+				Repository: &v1alpha1.Repository{
+					Spec: v1alpha1.RepositorySpec{
+						Settings: &v1alpha1.Settings{
+							AIAnalysis: &v1alpha1.AIAnalysisConfig{
+								Enabled:  true,
+								Provider: "openai",
+								// Missing required fields
+							},
 						},
 					},
 				},
+				Provider: &tprovider.TestProviderImp{},
 			},
 			wantResults: 0,
 			wantError:   true,
+		},
+		{
+			name:      "nil request",
+			request:   nil,
+			wantError: true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := context.Background()
-			results, err := analyze(ctx, run, kinteract, testLogger,
-				tt.repo, &tektonv1.PipelineRun{}, &info.Event{}, &tprovider.TestProviderImp{})
+			results, err := analyzer.Analyze(ctx, tt.request)
 
 			if tt.wantError {
 				assert.Assert(t, err != nil, "expected error but got none")
@@ -88,7 +114,12 @@ func TestAnalyze(t *testing.T) {
 	}
 }
 
-func TestValidateAnalysisConfig(t *testing.T) {
+func TestAnalyzerValidateConfig(t *testing.T) {
+	logger, _ := logger.GetLogger()
+	run := &params.Run{}
+	kinteract := &kubeinteraction.Interaction{}
+	analyzer := NewAnalyzer(run, kinteract, logger)
+
 	tests := []struct {
 		name      string
 		config    *v1alpha1.AIAnalysisConfig
@@ -211,7 +242,7 @@ func TestValidateAnalysisConfig(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := validateAnalysisConfig(tt.config)
+			err := analyzer.validateConfig(tt.config)
 
 			if tt.wantError {
 				assert.Assert(t, err != nil, "expected error but got none")
@@ -222,7 +253,12 @@ func TestValidateAnalysisConfig(t *testing.T) {
 	}
 }
 
-func TestValidateAnalysisConfigWithModels(t *testing.T) {
+func TestAnalyzerValidateConfigWithModels(t *testing.T) {
+	logger, _ := logger.GetLogger()
+	run := &params.Run{}
+	kinteract := &kubeinteraction.Interaction{}
+	analyzer := NewAnalyzer(run, kinteract, logger)
+
 	tests := []struct {
 		name      string
 		config    *v1alpha1.AIAnalysisConfig
@@ -294,7 +330,7 @@ func TestValidateAnalysisConfigWithModels(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := validateAnalysisConfig(tt.config)
+			err := analyzer.validateConfig(tt.config)
 
 			if tt.wantError {
 				assert.Assert(t, err != nil, "expected error but got none")
@@ -352,7 +388,12 @@ func TestGetContextCacheKey(t *testing.T) {
 	}
 }
 
-func TestShouldTriggerRoleEvaluations(t *testing.T) {
+func TestAnalyzerShouldTriggerRoleEvaluations(t *testing.T) {
+	logger, _ := logger.GetLogger()
+	run := &params.Run{}
+	kinteract := &kubeinteraction.Interaction{}
+	analyzer := NewAnalyzer(run, kinteract, logger)
+
 	celContext := map[string]any{
 		"body": map[string]any{
 			"event": map[string]any{
@@ -403,7 +444,7 @@ func TestShouldTriggerRoleEvaluations(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := shouldTriggerRole(tt.role, celContext, failedPR)
+			got, err := analyzer.shouldTriggerRole(tt.role, celContext, failedPR)
 
 			if tt.wantError {
 				assert.Assert(t, err != nil, "expected error but got none")
@@ -416,7 +457,12 @@ func TestShouldTriggerRoleEvaluations(t *testing.T) {
 	}
 }
 
-func TestShouldTriggerRole(t *testing.T) {
+func TestAnalyzerShouldTriggerRole(t *testing.T) {
+	logger, _ := logger.GetLogger()
+	run := &params.Run{}
+	kinteract := &kubeinteraction.Interaction{}
+	analyzer := NewAnalyzer(run, kinteract, logger)
+
 	failedPR := &tektonv1.PipelineRun{}
 	failedPR.Status.Conditions = append(failedPR.Status.Conditions, apis.Condition{Type: apis.ConditionSucceeded, Status: "False"})
 
@@ -470,13 +516,13 @@ func TestShouldTriggerRole(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			trigger, err := shouldTriggerRole(tt.role, tt.celContext, tt.pr)
+			shouldTrigger, err := analyzer.shouldTriggerRole(tt.role, tt.celContext, tt.pr)
 
 			if tt.wantError {
 				assert.Assert(t, err != nil, "expected error but got none")
 			} else {
 				assert.NilError(t, err)
-				assert.Equal(t, trigger, tt.wantTrigger)
+				assert.Equal(t, shouldTrigger, tt.wantTrigger)
 			}
 		})
 	}

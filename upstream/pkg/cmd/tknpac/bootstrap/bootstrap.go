@@ -207,7 +207,7 @@ func GithubApp(run *params.Run, ioStreams *cli.IOStreams) *cobra.Command {
 				return err
 			}
 			// installed but there is error for missing resources
-			if installed && !opts.forceInstall && !opts.skipInstall {
+			if installed && !opts.forceInstall {
 				return fmt.Errorf("pipelines as Code is already installed, please pass --force-install to override existing")
 			}
 

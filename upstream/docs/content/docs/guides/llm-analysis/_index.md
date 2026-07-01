@@ -26,8 +26,8 @@ Additional output destinations (`check-run` and `annotation`) and structured JSO
 
 Pipelines-as-Code supports two LLM providers:
 
-- **OpenAI** -- Default model: `gpt-5.4-mini`
-- **Google Gemini** -- Default model: `gemini-3.1-flash-lite-preview`
+- **OpenAI** -- Default model: `gpt-5-mini`
+- **Google Gemini** -- Default model: `gemini-2.5-flash-lite`
 
 You can specify any model your chosen provider supports. See [Model Selection]({{< relref "/docs/guides/llm-analysis/model-and-triggers#model-selection" >}}) for guidance on choosing the right model.
 
@@ -53,7 +53,7 @@ spec:
         key: "token"
       roles:
         - name: "failure-analysis"
-          model: "gpt-5.4-mini"  # Optional: specify model (uses provider default if omitted)
+          model: "gpt-5-mini"  # Optional: specify model (uses provider default if omitted)
           prompt: |
             You are a DevOps expert. Analyze this failed pipeline and:
             1. Identify the root cause
@@ -93,7 +93,7 @@ Each role defines a specific analysis scenario. You can configure multiple roles
 | `name` | string | Yes | Unique identifier for this role |
 | `prompt` | string | Yes | Prompt template for the LLM |
 | `model` | string | No | Model name (consult provider documentation for available models). Uses provider default if not specified. |
-| `on_cel` | string | No | CEL expression for conditional triggering. If not specified, the role runs only for failed PipelineRuns. |
+| `on_cel` | string | No | CEL expression for conditional triggering. If not specified, the role will always run. |
 | `output` | string | Yes | Output destination (currently only `pr-comment` is supported) |
 | `context_items` | object | No | Configuration for context inclusion |
 

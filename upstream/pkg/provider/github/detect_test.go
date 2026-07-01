@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/google/go-github/v85/github"
+	"github.com/google/go-github/v84/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/test/logger"
 	"gotest.tools/v3/assert"
 )
@@ -74,10 +74,9 @@ func TestProviderDetect(t *testing.T) {
 			event: github.CommitCommentEvent{
 				Action: github.Ptr("something"),
 			},
-			wantReason: "commit_comment: unsupported action \"something\"",
 			eventType:  "commit_comment",
 			isGH:       true,
-			processReq: false,
+			processReq: true,
 		},
 		{
 			name: "invalid check run Event",
@@ -93,10 +92,9 @@ func TestProviderDetect(t *testing.T) {
 			event: github.IssueCommentEvent{
 				Action: github.Ptr("deleted"),
 			},
-			wantReason: "issue_comment: unsupported action \"deleted\"",
 			eventType:  "issue_comment",
 			isGH:       true,
-			processReq: false,
+			processReq: true,
 		},
 		{
 			name: "issue comment Event with no valid comment",

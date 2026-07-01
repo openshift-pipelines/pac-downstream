@@ -13,8 +13,8 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/pipelineascode"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/secrets"
 
 	gitlab "gitlab.com/gitlab-org/api/client-go"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -83,7 +83,7 @@ func (v *Provider) ParsePayload(ctx context.Context, run *params.Run, request *h
 		// GitLab sends same event for both Tag creation and deletion i.e. "Tag Push Hook".
 		// if gitEvent.After is containing all zeros and gitEvent.CheckoutSHA is empty
 		// it is Delete "Tag Push Hook".
-		if provider.IsZeroSHA(gitEvent.After) && gitEvent.CheckoutSHA == "" {
+		if isZeroSHA(gitEvent.After) && gitEvent.CheckoutSHA == "" {
 			return nil, fmt.Errorf("event Delete %s is not supported", event)
 		}
 
@@ -205,7 +205,7 @@ func (v *Provider) initGitLabClient(ctx context.Context, event *info.Event) (*in
 		return event, err
 	}
 
-	scm := secrets.SecretFromRepository{
+	scm := pipelineascode.SecretFromRepository{
 		K8int:       kubeInterface,
 		Config:      v.GetConfig(),
 		Event:       event,
@@ -318,4 +318,8 @@ func (v *Provider) handleCommitCommentEvent(ctx context.Context, event *gitlab.C
 	processedEvent.BaseBranch = branchName
 	v.Logger.Infof("gitlab commit_comment: pipelinerun %s has been requested on %s/%s#%s", action, processedEvent.Organization, processedEvent.Repository, processedEvent.SHA)
 	return processedEvent, nil
+}
+
+func isZeroSHA(sha string) bool {
+	return sha == "0000000000000000000000000000000000000000"
 }

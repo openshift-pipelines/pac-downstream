@@ -55,25 +55,21 @@ You need the following tools to interact with your cluster and manage Pipelines-
 
 ### Required Tools
 
-1. `kubectl`
+1
 
-The Kubernetes command-line tool for cluster access.
+kubectl
 
-**Installation**: [kubectl installation guide](https://kubernetes.io/docs/tasks/tools/)
-
-**Verify**:
+The Kubernetes command-line tool for cluster access.**Installation**: [kubectl installation guide](https://kubernetes.io/docs/tasks/tools/)**Verify**:
 
 ```bash
 kubectl version --client
 ```
 
-1. `oc` (OpenShift only)
+2
 
-The OpenShift command-line tool.
+oc (OpenShift only)
 
-**Installation**: [OpenShift CLI tools](https://docs.openshift.com/container-platform/latest/cli_reference/openshift_cli/getting-started-cli.html)
-
-**Verify**:
+The OpenShift command-line tool.**Installation**: [OpenShift CLI tools](https://docs.openshift.com/container-platform/latest/cli_reference/openshift_cli/getting-started-cli.html)**Verify**:
 
 ```bash
 oc version
@@ -83,13 +79,11 @@ oc version
 
 These tools enhance the Pipelines-as-Code experience:
 
-1. `tkn`
+1
 
-The Tekton CLI for managing Tekton resources.
+tkn
 
-**Installation**: [Tekton CLI installation](https://tekton.dev/docs/cli/)
-
-**Install via Homebrew**:
+The Tekton CLI for managing Tekton resources.**Installation**: [Tekton CLI installation](https://tekton.dev/docs/cli/)**Install via Homebrew**:
 
 ```bash
 brew install tektoncd-cli
@@ -101,14 +95,14 @@ brew install tektoncd-cli
 tkn version
 ```
 
-1. `tkn-pac`
+2
 
-The Pipelines-as-Code CLI plugin for `tkn`.
+tkn-pac
 
-**Install via Homebrew**:
+The Pipelines-as-Code CLI plugin for tkn.**Install via Homebrew**:
 
 ```bash
-brew install --cask openshift-pipelines/pipelines-as-code/tektoncd-pac
+brew install openshift-pipelines/pipelines-as-code/tkn-pac
 ```
 
 **Install via Direct Download** (Linux):

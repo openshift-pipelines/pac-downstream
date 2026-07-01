@@ -27,7 +27,7 @@ linters:
     - gocritic
     - godot
     - goheader
-    - gomodguard_v2
+    - gomodguard
     - goprintffuncname
     - gosec
     - gosmopolitan
@@ -57,9 +57,6 @@ linters:
     - whitespace
     - zerologlint
   settings:
-    govet:
-      disable:
-        - inline
     misspell:
       ignore-rules:
         - cancelled
@@ -92,8 +89,6 @@ linters:
           - gosec
         path: _test\.go
       - path: pkg/resolve/resolve.go
-        text: don't use `init` function
-      - path: pkg/llm/providers/
         text: don't use `init` function
       - linters:
           - revive

@@ -14,7 +14,7 @@ import (
 	gitlab2 "gitlab.com/gitlab-org/api/client-go"
 )
 
-func Setup(ctx context.Context) (*params.Run, options.E2E, *gitlab.Provider, error) {
+func Setup(ctx context.Context) (*params.Run, options.E2E, gitlab.Provider, error) {
 	if err := setup.RequireEnvs(
 		"TEST_GITLAB_API_URL",
 		"TEST_GITLAB_TOKEN",
@@ -23,7 +23,7 @@ func Setup(ctx context.Context) (*params.Run, options.E2E, *gitlab.Provider, err
 		"TEST_EL_URL",
 		"TEST_GITLAB_SMEEURL",
 	); err != nil {
-		return nil, options.E2E{}, nil, err
+		return nil, options.E2E{}, gitlab.Provider{}, err
 	}
 	gitlabURL := os.Getenv("TEST_GITLAB_API_URL")
 	gitlabToken := os.Getenv("TEST_GITLAB_TOKEN")
@@ -31,7 +31,7 @@ func Setup(ctx context.Context) (*params.Run, options.E2E, *gitlab.Provider, err
 
 	run := params.New()
 	if err := run.Clients.NewClients(ctx, &run.Info); err != nil {
-		return nil, options.E2E{}, nil, err
+		return nil, options.E2E{}, gitlab.Provider{}, err
 	}
 
 	e2eoptions := options.E2E{
@@ -39,7 +39,7 @@ func Setup(ctx context.Context) (*params.Run, options.E2E, *gitlab.Provider, err
 		UserName:      "oauth2",
 		Password:      gitlabToken,
 	}
-	glprovider := &gitlab.Provider{}
+	glprovider := gitlab.Provider{}
 	err := glprovider.SetClient(ctx, run, &info.Event{
 		Provider: &info.Provider{
 			Token: gitlabToken,
@@ -47,7 +47,7 @@ func Setup(ctx context.Context) (*params.Run, options.E2E, *gitlab.Provider, err
 		},
 	}, nil, nil)
 	if err != nil {
-		return nil, options.E2E{}, nil, err
+		return nil, options.E2E{}, gitlab.Provider{}, err
 	}
 	return run, e2eoptions, glprovider, nil
 }
@@ -57,12 +57,12 @@ func HasSecondIdentity() bool {
 	return ok && token != ""
 }
 
-func SetupSecond(ctx context.Context, run *params.Run) (options.E2E, *gitlab.Provider, error) {
+func SetupSecond(ctx context.Context, run *params.Run) (options.E2E, gitlab.Provider, error) {
 	if err := setup.RequireEnvs(
 		"TEST_GITLAB_API_URL",
 		"TEST_GITLAB_SECOND_TOKEN",
 	); err != nil {
-		return options.E2E{}, nil, err
+		return options.E2E{}, gitlab.Provider{}, err
 	}
 
 	gitlabURL := os.Getenv("TEST_GITLAB_API_URL")
@@ -72,7 +72,7 @@ func SetupSecond(ctx context.Context, run *params.Run) (options.E2E, *gitlab.Pro
 	if run == nil {
 		run = params.New()
 		if err := run.Clients.NewClients(ctx, &run.Info); err != nil {
-			return options.E2E{}, nil, err
+			return options.E2E{}, gitlab.Provider{}, err
 		}
 	}
 
@@ -81,7 +81,7 @@ func SetupSecond(ctx context.Context, run *params.Run) (options.E2E, *gitlab.Pro
 		UserName:      "oauth2",
 		Password:      gitlabToken,
 	}
-	glprovider := &gitlab.Provider{}
+	glprovider := gitlab.Provider{}
 	err := glprovider.SetClient(ctx, run, &info.Event{
 		Provider: &info.Provider{
 			Token: gitlabToken,
@@ -89,7 +89,7 @@ func SetupSecond(ctx context.Context, run *params.Run) (options.E2E, *gitlab.Pro
 		},
 	}, nil, nil)
 	if err != nil {
-		return options.E2E{}, nil, err
+		return options.E2E{}, gitlab.Provider{}, err
 	}
 
 	return e2eoptions, glprovider, nil

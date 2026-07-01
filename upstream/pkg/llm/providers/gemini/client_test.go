@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/llm"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/llm/ltypes"
 	httptesting "github.com/openshift-pipelines/pipelines-as-code/pkg/test/http"
 	"gotest.tools/v3/assert"
 )
@@ -19,7 +19,7 @@ import (
 func TestNewClient(t *testing.T) {
 	tests := []struct {
 		name      string
-		config    *llm.ProviderConfig
+		config    *Config
 		wantError bool
 		errMsg    string
 	}{
@@ -31,7 +31,7 @@ func TestNewClient(t *testing.T) {
 		},
 		{
 			name: "empty api key",
-			config: &llm.ProviderConfig{
+			config: &Config{
 				APIKey: "",
 			},
 			wantError: true,
@@ -39,14 +39,14 @@ func TestNewClient(t *testing.T) {
 		},
 		{
 			name: "valid config with defaults",
-			config: &llm.ProviderConfig{
+			config: &Config{
 				APIKey: "test-key",
 			},
 			wantError: false,
 		},
 		{
 			name: "custom config",
-			config: &llm.ProviderConfig{
+			config: &Config{
 				APIKey:         "test-key",
 				BaseURL:        "https://custom.url",
 				Model:          "custom-model",
@@ -59,18 +59,16 @@ func TestNewClient(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			c, err := newClient(tt.config)
+			client, err := NewClient(tt.config)
 
 			if tt.wantError {
 				assert.Assert(t, err != nil)
 				assert.ErrorContains(t, err, tt.errMsg)
-				assert.Assert(t, c == nil)
+				assert.Assert(t, client == nil)
 			} else {
 				assert.NilError(t, err)
-				assert.Assert(t, c != nil)
-				assert.Equal(t, c.GetProviderName(), "gemini")
-				client, ok := c.(*Client)
-				assert.Assert(t, ok)
+				assert.Assert(t, client != nil)
+				assert.Equal(t, client.GetProviderName(), "gemini")
 				if tt.config.BaseURL == "" {
 					assert.Equal(t, client.config.BaseURL, defaultBaseURL)
 				}
@@ -82,13 +80,13 @@ func TestNewClient(t *testing.T) {
 func TestValidateConfig(t *testing.T) {
 	tests := []struct {
 		name      string
-		config    *llm.ProviderConfig
+		config    *Config
 		wantError bool
 		errMsg    string
 	}{
 		{
 			name: "valid config",
-			config: &llm.ProviderConfig{
+			config: &Config{
 				APIKey:         "valid-key",
 				BaseURL:        "https://api.example.com",
 				TimeoutSeconds: 30,
@@ -98,7 +96,7 @@ func TestValidateConfig(t *testing.T) {
 		},
 		{
 			name: "empty api key",
-			config: &llm.ProviderConfig{
+			config: &Config{
 				APIKey:         "",
 				TimeoutSeconds: 30,
 				MaxTokens:      1000,
@@ -108,7 +106,7 @@ func TestValidateConfig(t *testing.T) {
 		},
 		{
 			name: "negative timeout",
-			config: &llm.ProviderConfig{
+			config: &Config{
 				APIKey:         "valid-key",
 				BaseURL:        "https://api.example.com",
 				TimeoutSeconds: -1,
@@ -119,7 +117,7 @@ func TestValidateConfig(t *testing.T) {
 		},
 		{
 			name: "negative max tokens",
-			config: &llm.ProviderConfig{
+			config: &Config{
 				APIKey:         "valid-key",
 				BaseURL:        "https://api.example.com",
 				TimeoutSeconds: 30,
@@ -130,60 +128,60 @@ func TestValidateConfig(t *testing.T) {
 		},
 		{
 			name: "invalid URL - no scheme",
-			config: &llm.ProviderConfig{
+			config: &Config{
 				APIKey:         "valid-key",
 				BaseURL:        "api.example.com",
 				TimeoutSeconds: 30,
 				MaxTokens:      1000,
 			},
 			wantError: true,
-			errMsg:    "URL scheme must be",
+			errMsg:    "base URL must use http or https scheme",
 		},
 		{
 			name: "invalid URL - wrong scheme",
-			config: &llm.ProviderConfig{
+			config: &Config{
 				APIKey:         "valid-key",
 				BaseURL:        "ftp://api.example.com",
 				TimeoutSeconds: 30,
 				MaxTokens:      1000,
 			},
 			wantError: true,
-			errMsg:    "URL scheme must be",
+			errMsg:    "base URL must use http or https scheme",
 		},
 		{
 			name: "invalid URL - has whitespace",
-			config: &llm.ProviderConfig{
+			config: &Config{
 				APIKey:         "valid-key",
 				BaseURL:        "https://api.example.com /path",
 				TimeoutSeconds: 30,
 				MaxTokens:      1000,
 			},
 			wantError: true,
-			errMsg:    "URL contains invalid whitespace",
+			errMsg:    "invalid base URL",
 		},
 		{
 			name: "invalid URL - no host",
-			config: &llm.ProviderConfig{
+			config: &Config{
 				APIKey:         "valid-key",
 				BaseURL:        "https://",
 				TimeoutSeconds: 30,
 				MaxTokens:      1000,
 			},
 			wantError: true,
-			errMsg:    "URL must contain",
+			errMsg:    "base URL must have a valid host",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			c, err := newClient(tt.config)
+			client, err := NewClient(tt.config)
 			if tt.config.APIKey == "" {
 				assert.Assert(t, err != nil)
 				assert.ErrorContains(t, err, "API key is required")
 				return
 			}
 			assert.NilError(t, err)
-			err = c.ValidateConfig()
+			err = client.ValidateConfig()
 
 			if tt.wantError {
 				assert.Assert(t, err != nil)
@@ -196,14 +194,14 @@ func TestValidateConfig(t *testing.T) {
 }
 
 func TestGetProviderName(t *testing.T) {
-	c, _ := newClient(&llm.ProviderConfig{APIKey: "test-key"})
-	assert.Equal(t, c.GetProviderName(), "gemini")
+	config := &Config{APIKey: "test-key"}
+	client, _ := NewClient(config)
+	assert.Equal(t, client.GetProviderName(), "gemini")
 }
 
 func TestAnalyzeSuccess(t *testing.T) {
-	c, _ := newClient(&llm.ProviderConfig{APIKey: "test-key"})
-	client, ok := c.(*Client)
-	assert.Assert(t, ok)
+	config := &Config{APIKey: "test-key"}
+	client, _ := NewClient(config)
 
 	mockResponse := geminiResponse{
 		Candidates: []geminiCandidate{
@@ -228,7 +226,7 @@ func TestAnalyzeSuccess(t *testing.T) {
 		}),
 	}
 
-	request := &llm.AnalysisRequest{
+	request := &ltypes.AnalysisRequest{
 		Prompt:    "Analyze this",
 		MaxTokens: 100,
 	}
@@ -265,11 +263,10 @@ func TestAnalyzeRequestCreationError(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			c, _ := newClient(&llm.ProviderConfig{APIKey: "test-key"})
-			client, ok := c.(*Client)
-			assert.Assert(t, ok)
+			config := &Config{APIKey: "test-key"}
+			client, _ := NewClient(config)
 
-			request := &llm.AnalysisRequest{
+			request := &ltypes.AnalysisRequest{
 				Prompt:    "Test",
 				MaxTokens: 100,
 				Context:   tt.context,
@@ -284,10 +281,8 @@ func TestAnalyzeRequestCreationError(t *testing.T) {
 }
 
 func testAnalyzeError(t *testing.T, httpResponse *http.Response, expectedErrType string) {
-	t.Helper()
-	c, _ := newClient(&llm.ProviderConfig{APIKey: "test-key"})
-	client, ok := c.(*Client)
-	assert.Assert(t, ok)
+	config := &Config{APIKey: "test-key"}
+	client, _ := NewClient(config)
 
 	client.httpClient = &http.Client{
 		Transport: httptesting.RoundTripFunc(func(_ *http.Request) *http.Response {
@@ -295,7 +290,7 @@ func testAnalyzeError(t *testing.T, httpResponse *http.Response, expectedErrType
 		}),
 	}
 
-	request := &llm.AnalysisRequest{
+	request := &ltypes.AnalysisRequest{
 		Prompt:    "Analyze",
 		MaxTokens: 100,
 	}
@@ -304,7 +299,7 @@ func testAnalyzeError(t *testing.T, httpResponse *http.Response, expectedErrType
 
 	assert.Assert(t, err != nil)
 	assert.Assert(t, response == nil)
-	var analysisErr *llm.AnalysisError
+	var analysisErr *ltypes.AnalysisError
 	assert.Assert(t, errors.As(err, &analysisErr))
 	assert.Equal(t, analysisErr.Type, expectedErrType)
 }
@@ -371,9 +366,8 @@ func TestAnalyzeAPIError(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			c, _ := newClient(&llm.ProviderConfig{APIKey: "test-key"})
-			client, ok := c.(*Client)
-			assert.Assert(t, ok)
+			config := &Config{APIKey: "test-key"}
+			client, _ := NewClient(config)
 
 			client.httpClient = &http.Client{
 				Transport: httptesting.RoundTripFunc(func(_ *http.Request) *http.Response {
@@ -386,7 +380,7 @@ func TestAnalyzeAPIError(t *testing.T) {
 				}),
 			}
 
-			request := &llm.AnalysisRequest{
+			request := &ltypes.AnalysisRequest{
 				Prompt:    "Analyze",
 				MaxTokens: 100,
 			}
@@ -395,7 +389,7 @@ func TestAnalyzeAPIError(t *testing.T) {
 
 			assert.Assert(t, err != nil)
 			assert.Assert(t, response == nil)
-			var analysisErr *llm.AnalysisError
+			var analysisErr *ltypes.AnalysisError
 			assert.Assert(t, errors.As(err, &analysisErr))
 			assert.Equal(t, analysisErr.Type, tt.expectedErrType)
 			assert.Equal(t, analysisErr.Retryable, tt.retryable)
@@ -430,9 +424,8 @@ func TestAnalyzeEmptyContent(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			c, _ := newClient(&llm.ProviderConfig{APIKey: "test-key"})
-			client, ok := c.(*Client)
-			assert.Assert(t, ok)
+			config := &Config{APIKey: "test-key"}
+			client, _ := NewClient(config)
 
 			client.httpClient = &http.Client{
 				Transport: httptesting.RoundTripFunc(func(_ *http.Request) *http.Response {
@@ -445,7 +438,7 @@ func TestAnalyzeEmptyContent(t *testing.T) {
 				}),
 			}
 
-			request := &llm.AnalysisRequest{
+			request := &ltypes.AnalysisRequest{
 				Prompt:    "Analyze",
 				MaxTokens: 100,
 			}
@@ -454,7 +447,7 @@ func TestAnalyzeEmptyContent(t *testing.T) {
 
 			assert.Assert(t, err != nil)
 			assert.Assert(t, response == nil)
-			var analysisErr *llm.AnalysisError
+			var analysisErr *ltypes.AnalysisError
 			assert.Assert(t, errors.As(err, &analysisErr))
 			assert.Equal(t, analysisErr.Type, "empty_response")
 		})
@@ -462,12 +455,11 @@ func TestAnalyzeEmptyContent(t *testing.T) {
 }
 
 func TestAnalyzeTimeout(t *testing.T) {
-	c, _ := newClient(&llm.ProviderConfig{
+	config := &Config{
 		APIKey:         "test-key",
 		TimeoutSeconds: 1,
-	})
-	client, ok := c.(*Client)
-	assert.Assert(t, ok)
+	}
+	client, _ := NewClient(config)
 
 	client.httpClient = &http.Client{
 		Transport: httptesting.RoundTripFunc(func(_ *http.Request) *http.Response {
@@ -482,7 +474,7 @@ func TestAnalyzeTimeout(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 
-	request := &llm.AnalysisRequest{
+	request := &ltypes.AnalysisRequest{
 		Prompt:    "Analyze",
 		MaxTokens: 100,
 	}
@@ -494,12 +486,11 @@ func TestAnalyzeTimeout(t *testing.T) {
 }
 
 func TestConfigDefaults(t *testing.T) {
-	c, _ := newClient(&llm.ProviderConfig{APIKey: "test-key"})
-	client, ok := c.(*Client)
-	assert.Assert(t, ok)
+	config := &Config{APIKey: "test-key"}
+	client, _ := NewClient(config)
 
 	assert.Equal(t, client.config.BaseURL, defaultBaseURL)
 	assert.Equal(t, client.config.Model, defaultModel)
-	assert.Equal(t, client.config.TimeoutSeconds, llm.DefaultTimeoutSeconds)
-	assert.Equal(t, client.config.MaxTokens, llm.DefaultMaxTokens)
+	assert.Equal(t, client.config.TimeoutSeconds, defaultTimeoutSeconds)
+	assert.Equal(t, client.config.MaxTokens, defaultMaxTokens)
 }

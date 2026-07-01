@@ -25,11 +25,10 @@ import (
 	pacapi "github.com/openshift-pipelines/pipelines-as-code/pkg/generated/listers/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/kubeinteraction"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/llm"
-	_ "github.com/openshift-pipelines/pipelines-as-code/pkg/llm/providers/gemini" // register Gemini provider via init
-	_ "github.com/openshift-pipelines/pipelines-as-code/pkg/llm/providers/openai" // register OpenAI provider via init
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/settings"
+	pac "github.com/openshift-pipelines/pipelines-as-code/pkg/pipelineascode"
 	prmetrics "github.com/openshift-pipelines/pipelines-as-code/pkg/pipelinerunmetrics"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
 	providerstatus "github.com/openshift-pipelines/pipelines-as-code/pkg/provider/status"
@@ -285,9 +284,9 @@ func (r *Reconciler) reportFinalStatus(ctx context.Context, logger *zap.SugaredL
 	r.run.Clients.ConsoleUI().SetParams(maptemplate)
 
 	if event.InstallationID > 0 {
-		event.Provider.WebhookSecret, _ = secrets.GetCurrentNSWebhookSecret(ctx, r.kinteract, r.run)
+		event.Provider.WebhookSecret, _ = pac.GetCurrentNSWebhookSecret(ctx, r.kinteract, r.run)
 	} else {
-		secretFromRepo := secrets.SecretFromRepository{
+		secretFromRepo := pac.SecretFromRepository{
 			K8int:       r.kinteract,
 			Config:      provider.GetConfig(),
 			Event:       event,
@@ -310,7 +309,7 @@ func (r *Reconciler) reportFinalStatus(ctx context.Context, logger *zap.SugaredL
 	}
 
 	finalState := kubeinteraction.StateCompleted
-	newPr, trStatus, err := r.postFinalStatus(ctx, logger, pacInfo, provider, event, pr)
+	newPr, err := r.postFinalStatus(ctx, logger, pacInfo, provider, event, pr)
 	if err != nil {
 		logger.Errorf("failed to post final status, moving on: %v", err)
 		finalState = kubeinteraction.StateFailed
@@ -336,8 +335,6 @@ func (r *Reconciler) reportFinalStatus(ctx context.Context, logger *zap.SugaredL
 	if err := r.emitMetrics(ctx, pr); err != nil {
 		logger.Error("failed to emit metrics: ", err)
 	}
-
-	emitTimingSpans(logger, pr, &pacInfo.Settings, trStatus)
 
 	// remove pipelineRun from Queue and start the next one
 	for {
@@ -423,7 +420,7 @@ func (r *Reconciler) initGitProviderClient(ctx context.Context, logger *zap.Suga
 
 	// installation ID indicates Github App installation
 	if event.InstallationID > 0 {
-		event.Provider.WebhookSecret, _ = secrets.GetCurrentNSWebhookSecret(ctx, r.kinteract, r.run)
+		event.Provider.WebhookSecret, _ = pac.GetCurrentNSWebhookSecret(ctx, r.kinteract, r.run)
 	} else {
 		// secretNS is needed when git provider is other than Github App.
 		secretNS := repo.GetNamespace()
@@ -434,7 +431,7 @@ func (r *Reconciler) initGitProviderClient(ctx context.Context, logger *zap.Suga
 			repo.Spec.Merge(r.globalRepo.Spec)
 		}
 
-		secretFromRepo := secrets.SecretFromRepository{
+		secretFromRepo := pac.SecretFromRepository{
 			K8int:       r.kinteract,
 			Config:      detectedProvider.GetConfig(),
 			Event:       event,
@@ -498,5 +495,6 @@ func (r *Reconciler) performLLMAnalysis(
 	event *info.Event,
 	provider provider.Interface,
 ) error {
-	return llm.ExecuteAnalysis(ctx, r.run, r.kinteract, logger, repo, pr, event, provider)
+	orchestrator := llm.NewOrchestrator(r.run, r.kinteract, logger)
+	return orchestrator.ExecuteAnalysis(ctx, repo, pr, event, provider)
 }

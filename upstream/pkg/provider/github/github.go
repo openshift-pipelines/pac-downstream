@@ -16,7 +16,7 @@ import (
 
 	"github.com/gobwas/glob"
 	"github.com/golang-jwt/jwt/v4"
-	"github.com/google/go-github/v85/github"
+	"github.com/google/go-github/v84/github"
 	"github.com/jonboulle/clockwork"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
@@ -41,30 +41,24 @@ const (
 	publicRawURLHost = "raw.githubusercontent.com"
 
 	defaultPaginedNumber = 100
-	// maxCommentPages caps the number of pages fetched when scanning PR
-	// comments (e.g. for /ok-to-test). With defaultPaginedNumber=100 this
-	// allows up to 1000 comments, which is generous for legitimate use while
-	// preventing rate-limit exhaustion from comment flooding.
-	maxCommentPages = 10
 )
 
 var _ provider.Interface = (*Provider)(nil)
 
 type Provider struct {
-	ghClient        *github.Client
-	Logger          *zap.SugaredLogger
-	Run             *params.Run
-	pacInfo         *info.PacOpts
-	Token, APIURL   *string
-	ApplicationID   *int64
-	providerName    string
-	provenance      string
-	RepositoryIDs   []int64
-	RepositoryNames []string
-	repo            *v1alpha1.Repository
-	eventEmitter    *events.EventEmitter
-	PaginedNumber   int
-	userType        string // The type of user i.e bot or not
+	ghClient      *github.Client
+	Logger        *zap.SugaredLogger
+	Run           *params.Run
+	pacInfo       *info.PacOpts
+	Token, APIURL *string
+	ApplicationID *int64
+	providerName  string
+	provenance    string
+	RepositoryIDs []int64
+	repo          *v1alpha1.Repository
+	eventEmitter  *events.EventEmitter
+	PaginedNumber int
+	userType      string // The type of user i.e bot or not
 	skippedRun
 	triggerEvent       string
 	cachedChangedFiles *changedfiles.ChangedFiles
@@ -73,20 +67,11 @@ type Provider struct {
 	pacUserLogin       string // user/bot login used by PAC
 	clock              clockwork.Clock
 	graphQLClient      *graphQLClient
-	checkRunsCache     checkRunsCache
 }
 
 type skippedRun struct {
 	mutex      *sync.Mutex
 	checkRunID int64
-}
-
-type checkRunsCache struct {
-	mu        sync.Mutex
-	runs      []*github.CheckRun
-	loading   bool
-	done      chan struct{}
-	populated bool
 }
 
 func New() *Provider {
@@ -96,8 +81,7 @@ func New() *Provider {
 		skippedRun: skippedRun{
 			mutex: &sync.Mutex{},
 		},
-		clock:          clockwork.NewRealClock(),
-		checkRunsCache: checkRunsCache{},
+		clock: clockwork.NewRealClock(),
 	}
 }
 
@@ -354,29 +338,6 @@ func (v *Provider) SetClient(ctx context.Context, run *params.Run, event *info.E
 		}
 	}
 
-	// Handle GitHub App token scoping for both global and repo-level configuration
-	if event.InstallationID > 0 {
-		v.Logger.Debugf("setupAuthenticatedClient: scoping github app token")
-		token, err := ScopeTokenToListOfRepos(ctx, v, v.pacInfo, repo, run, event, v.eventEmitter, v.Logger)
-		if err != nil {
-			return fmt.Errorf("failed to scope token: %w", err)
-		}
-		switch {
-		case token != "":
-			event.Provider.Token = token
-		case len(v.RepositoryIDs) > 0 || len(v.RepositoryNames) > 0:
-			// Defer scoping until after ScopeTokenToListOfRepos so CreateToken can
-			// look up extra repos from the configmap first.  When no additional repos
-			// are configured, scope the token to only the triggering repo.
-			ns := info.GetNS(ctx)
-			scopedToken, err := v.GetAppToken(ctx, run.Clients.Kube, event.Provider.URL, event.InstallationID, ns)
-			if err != nil {
-				return fmt.Errorf("failed to scope token to triggering repository: %w", err)
-			}
-			event.Provider.Token = scopedToken
-		}
-	}
-
 	return nil
 }
 
@@ -526,7 +487,7 @@ func (v *Provider) GetCommitInfo(ctx context.Context, runevent *info.Event) erro
 func (v *Provider) GetFileInsideRepo(ctx context.Context, runevent *info.Event, path, target string) (string, error) {
 	ref := runevent.SHA
 	if target != "" {
-		ref = target
+		ref = runevent.BaseBranch
 	} else if v.provenance == "default_branch" {
 		ref = runevent.DefaultBranch
 	}

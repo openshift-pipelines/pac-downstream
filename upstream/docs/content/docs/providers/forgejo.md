@@ -35,9 +35,7 @@ These scopes are necessary for basic Pipelines-as-Code functionality:
 - **Organization** (Read) - Only required if using [team-based policies]({{< relref "/docs/advanced/policy-authorization" >}}) to restrict pipeline triggers based on Forgejo organization team membership
 
 {{< callout type="info" >}}
-For most users, only the **Required Scopes** are needed. Skip Organization (Read)
-unless you plan to use `settings.policy.ok_to_test` or
-`settings.policy.pull_request` in your Repository CR configuration.
+For most users, only the **Required Scopes** are needed. Skip Organization (Read) unless you plan to use `policy.team_ids` in your Repository CR configuration.
 {{< /callout >}}
 
 Store the generated token in a safe place, or you will have to recreate it.
@@ -93,10 +91,13 @@ kubectl -n target-namespace create secret generic forgejo-webhook-config \
   --from-literal webhook.secret="SECRET_AS_SET_IN_WEBHOOK_CONFIGURATION"
 ```
 
-{{< callout type="warning" >}}
-Forgejo and Gitea webhook validation requires a non-empty shared secret.
-Do not set `webhook.secret` to an empty string.
-{{< /callout >}}
+If you configured an empty webhook secret, use an empty string:
+
+```shell
+kubectl -n target-namespace create secret generic forgejo-webhook-config \
+  --from-literal provider.token="TOKEN_AS_GENERATED_PREVIOUSLY" \
+  --from-literal webhook.secret=""
+```
 
 ### Create the Repository CR
 
@@ -131,7 +132,7 @@ spec:
 
 - **Forgejo Instance URL**: Specify `git_provider.url` pointing to your Forgejo instance URL.
 
-- **Webhook Secret**: Pipelines-as-Code validates webhook signatures for Forgejo/Gitea using HMAC-SHA256. A webhook secret must be configured both in the Forgejo webhook settings and in the Kubernetes secret referenced by the Repository CR. Requests without a valid signature will be rejected.
+- **Webhook Secret**: Pipelines-as-Code does not currently validate webhook signatures for Forgejo/Gitea. Secrets can be stored, but requests are accepted without signature verification.
 
 - The `git_provider.secret` key cannot reference a secret in another namespace. Pipelines-as-Code always assumes it is in the same namespace where the Repository CR has been created.
 
