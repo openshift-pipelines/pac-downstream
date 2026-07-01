@@ -65,7 +65,6 @@ func TestCtrlOpts(t *testing.T) {
 
 	// Assert that the finalizer name is set correctly.
 	assert.Equal(t, path.Join(pipelinesascode.GroupName, pipelinesascode.FinalizerName), opts.FinalizerName)
-	assert.Assert(t, opts.SkipStatusUpdates)
 
 	// Create a new PipelineRun object with the "started" state label.
 	pr := &pipelinev1.PipelineRun{

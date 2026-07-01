@@ -167,7 +167,7 @@
       }
     },
     "v1beta1.Artifact": {
-      "description": "Artifact represents an artifact within a system, potentially containing multiple values associated with it.",
+      "description": "TaskRunStepArtifact represents an artifact produced or used by a step within a task run. It directly uses the Artifact type for its structure.",
       "type": "object",
       "properties": {
         "buildOutput": {
@@ -670,7 +670,7 @@
       }
     },
     "v1beta1.ParamValue": {
-      "description": "ParamValue is a type that can hold a single string or string array. Used in JSON unmarshalling so that a single JSON field can accept either an individual string or an array of strings.",
+      "description": "ResultValue is a type alias of ParamValue",
       "type": "object",
       "required": [
         "Type",
@@ -1540,7 +1540,7 @@
       }
     },
     "v1beta1.PipelineWorkspaceDeclaration": {
-      "description": "PipelineWorkspaceDeclaration creates a named slot in a Pipeline that a PipelineRun is expected to populate with a workspace binding.",
+      "description": "WorkspacePipelineDeclaration creates a named slot in a Pipeline that a PipelineRun is expected to populate with a workspace binding.\n\nDeprecated: use PipelineWorkspaceDeclaration type instead",
       "type": "object",
       "required": [
         "name"
@@ -2910,7 +2910,7 @@
       }
     },
     "v1beta1.TaskRunResult": {
-      "description": "TaskRunResult used to describe the results of a task",
+      "description": "TaskRunStepResult is a type alias of TaskRunResult",
       "type": "object",
       "required": [
         "name",

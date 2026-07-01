@@ -16,7 +16,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/go-github/v85/github"
+	"github.com/google/go-github/v84/github"
 	"github.com/jonboulle/clockwork"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
@@ -728,79 +728,6 @@ func TestGetFileInsideRepo(t *testing.T) {
 	}
 }
 
-func TestGetFileInsideRepoRefSelection(t *testing.T) {
-	fileContent := base64.StdEncoding.EncodeToString([]byte("valid owners file"))
-	tests := []struct {
-		name        string
-		event       *info.Event
-		target      string
-		provenance  string
-		expectedRef string
-	}{
-		{
-			name: "uses SHA when target is empty",
-			event: &info.Event{
-				Organization:  "org",
-				Repository:    "repo",
-				SHA:           "sha123",
-				BaseBranch:    "main",
-				DefaultBranch: "main",
-			},
-			target:      "",
-			expectedRef: "sha123",
-		},
-		{
-			name: "uses target ref when target is provided",
-			event: &info.Event{
-				Organization:  "org",
-				Repository:    "repo",
-				SHA:           "sha123",
-				BaseBranch:    "main",
-				DefaultBranch: "main",
-			},
-			target:      "refs/heads/release-1.0",
-			expectedRef: "refs/heads/release-1.0",
-		},
-		{
-			name: "uses DefaultBranch when target is empty and provenance is default_branch",
-			event: &info.Event{
-				Organization:  "org",
-				Repository:    "repo",
-				SHA:           "sha123",
-				BaseBranch:    "develop",
-				DefaultBranch: "main",
-			},
-			target:      "",
-			provenance:  "default_branch",
-			expectedRef: "main",
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			ctx, _ := rtesting.SetupFakeContext(t)
-			fakeclient, mux, _, teardown := ghtesthelper.SetupGH()
-			defer teardown()
-			gvcs := Provider{
-				ghClient:   fakeclient,
-				provenance: tt.provenance,
-			}
-
-			mux.HandleFunc("/repos/org/repo/contents/OWNERS", func(w http.ResponseWriter, r *http.Request) {
-				gotRef := r.URL.Query().Get("ref")
-				assert.Equal(t, gotRef, tt.expectedRef)
-				fmt.Fprintf(w, `{"name": "OWNERS", "path": "OWNERS", "sha": "ownersha"}`)
-			})
-			mux.HandleFunc("/repos/org/repo/git/blobs/ownersha", func(w http.ResponseWriter, _ *http.Request) {
-				fmt.Fprintf(w, `{"content": %q, "sha": "ownersha"}`, fileContent)
-			})
-
-			got, err := gvcs.GetFileInsideRepo(ctx, tt.event, "OWNERS", tt.target)
-			assert.NilError(t, err)
-			assert.Equal(t, got, "valid owners file")
-		})
-	}
-}
-
 func TestCheckSenderOrgMembership(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -870,13 +797,13 @@ func TestGetStringPullRequestComment(t *testing.T) {
 	}{
 		{
 			name:      "Get String from comments",
-			runevent:  info.Event{URL: "http://1", PullRequestNumber: 1},
+			runevent:  info.Event{URL: "http://1"},
 			apiReturn: `[{"body": "/ok-to-test"}]`,
 			wantRet:   true,
 		},
 		{
 			name:      "Not matching string in comments",
-			runevent:  info.Event{URL: "http://1", PullRequestNumber: 1},
+			runevent:  info.Event{URL: "http://1"},
 			apiReturn: `[{"body": ""}]`,
 			wantRet:   false,
 		},
@@ -1197,16 +1124,8 @@ func TestGithubSetClient(t *testing.T) {
 					Log: testLog,
 				},
 			}
-			v := Provider{
-				Logger:  testLog,
-				pacInfo: &info.PacOpts{},
-			}
-			repo := &v1alpha1.Repository{
-				Spec: v1alpha1.RepositorySpec{
-					Settings: &v1alpha1.Settings{},
-				},
-			}
-			err := v.SetClient(ctx, fakeRun, tt.event, repo, nil)
+			v := Provider{}
+			err := v.SetClient(ctx, fakeRun, tt.event, nil, nil)
 			assert.NilError(t, err)
 			assert.Equal(t, tt.expectedURL, *v.APIURL)
 			assert.Equal(t, "https", v.Client().BaseURL.Scheme)
@@ -1242,96 +1161,6 @@ func TestGithubSetClient(t *testing.T) {
 			)
 
 			assert.Equal(t, fullExpected, logs[0].Message)
-		})
-	}
-}
-
-func TestSetClientFallbackScopesToken(t *testing.T) {
-	testNamespace := "pipelinesascode"
-	secretName := "pipelines-as-code-secret"
-
-	ctx, _ := rtesting.SetupFakeContext(t)
-	seedData, _ := testclient.SeedTestData(t, ctx, testclient.Data{
-		Secret: []*corev1.Secret{
-			{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      secretName,
-					Namespace: testNamespace,
-				},
-				Data: map[string][]byte{
-					"github-application-id": []byte("12345"),
-					"github-private-key":    []byte(fakePrivateKey),
-				},
-			},
-		},
-	})
-
-	tests := []struct {
-		name            string
-		repositoryIDs   []int64
-		repositoryNames []string
-	}{
-		{
-			name:          "scopes by RepositoryIDs",
-			repositoryIDs: []int64{42},
-		},
-		{
-			name:            "scopes by RepositoryNames",
-			repositoryNames: []string{"my-repo"},
-		},
-		{
-			name:            "scopes by both",
-			repositoryIDs:   []int64{42},
-			repositoryNames: []string{"my-repo"},
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			_, mux, serverURL, teardown := ghtesthelper.SetupGH()
-			defer teardown()
-
-			scopedToken := "ghs_scoped_token_value"
-			mux.HandleFunc(fmt.Sprintf("/app/installations/%d/access_tokens", testInstallationID), func(w http.ResponseWriter, _ *http.Request) {
-				fmt.Fprintf(w, `{"token":%q,"expires_at":"2099-01-01T00:00:00Z"}`, scopedToken)
-			})
-
-			ctx = info.StoreCurrentControllerName(ctx, "default")
-			ctx = info.StoreNS(ctx, testNamespace)
-
-			t.Setenv("PAC_GIT_PROVIDER_TOKEN_APIURL", serverURL+"/api/v3")
-
-			initialToken := "ghs_initial_unscoped_token"
-			event := info.NewEvent()
-			event.InstallationID = testInstallationID
-			event.Provider.Token = initialToken
-
-			testLog, _ := logger.GetLogger()
-			v := Provider{
-				Logger:          testLog,
-				RepositoryIDs:   tt.repositoryIDs,
-				RepositoryNames: tt.repositoryNames,
-				pacInfo:         &info.PacOpts{},
-			}
-
-			run := &params.Run{
-				Clients: clients.Clients{
-					Log:  testLog,
-					Kube: seedData.Kube,
-				},
-				Info: info.Info{
-					Controller: &info.ControllerInfo{Secret: secretName},
-				},
-			}
-
-			repo := &v1alpha1.Repository{
-				Spec: v1alpha1.RepositorySpec{
-					Settings: &v1alpha1.Settings{},
-				},
-			}
-
-			err := v.SetClient(ctx, run, event, repo, nil)
-			assert.NilError(t, err)
-			assert.Equal(t, scopedToken, event.Provider.Token)
 		})
 	}
 }

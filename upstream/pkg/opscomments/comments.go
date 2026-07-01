@@ -182,9 +182,6 @@ func getNameFromComment(typeOfComment, comment string) string {
 		return ""
 	}
 
-	name := strings.TrimSpace(firstArg[1])
-	if strings.Contains(name, "=") {
-		return ""
-	}
-	return name
+	// trim spaces
+	return strings.TrimSpace(firstArg[1])
 }

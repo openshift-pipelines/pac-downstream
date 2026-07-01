@@ -27,9 +27,8 @@ import (
 )
 
 const (
-	TransformConditionAddressable    apis.ConditionType = "Addressable"
-	TransformationConditionReady     apis.ConditionType = "TransformationReady"
-	TransformationEventPoliciesReady apis.ConditionType = "EventPoliciesReady"
+	TransformConditionAddressable apis.ConditionType = "Addressable"
+	TransformationConditionReady  apis.ConditionType = "TransformationReady"
 
 	TransformationAddressableEmptyURL                   string = "NoURL"
 	TransformationAddressableWaitingForServiceEndpoints string = "WaitingForServiceEndpoints"
@@ -49,7 +48,6 @@ const (
 var TransformCondSet = apis.NewLivingConditionSet(
 	TransformationConditionReady,
 	TransformConditionAddressable,
-	TransformationEventPoliciesReady,
 )
 
 // transformJsonataConditionSet is the subset of conditions for the Jsonata transformation
@@ -212,20 +210,4 @@ func (ts *EventTransformStatus) SetAddresses(addresses ...duckv1.Addressable) {
 		Addresses: addresses,
 	}
 	ts.GetConditionSet().Manage(ts).MarkTrue(TransformConditionAddressable)
-}
-
-func (ts *EventTransformStatus) MarkEventPoliciesFailed(reason, messageFormat string, messageA ...interface{}) {
-	TransformCondSet.Manage(ts).MarkFalse(TransformationEventPoliciesReady, reason, messageFormat, messageA...)
-}
-
-func (ts *EventTransformStatus) MarkEventPoliciesUnknown(reason, messageFormat string, messageA ...interface{}) {
-	TransformCondSet.Manage(ts).MarkUnknown(TransformationEventPoliciesReady, reason, messageFormat, messageA...)
-}
-
-func (ts *EventTransformStatus) MarkEventPoliciesTrue() {
-	TransformCondSet.Manage(ts).MarkTrue(TransformationEventPoliciesReady)
-}
-
-func (ts *EventTransformStatus) MarkEventPoliciesTrueWithReason(reason, messageFormat string, messageA ...interface{}) {
-	TransformCondSet.Manage(ts).MarkTrueWithReason(TransformationEventPoliciesReady, reason, messageFormat, messageA...)
 }

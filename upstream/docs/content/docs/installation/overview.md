@@ -26,4 +26,3 @@ After installing Pipelines-as-Code, configure your Git provider to send webhook 
 * [GitLab]({{< relref "/docs/providers/gitlab" >}})
 * [Bitbucket Data Center]({{< relref "/docs/providers/bitbucket-datacenter" >}})
 * [Bitbucket Cloud]({{< relref "/docs/providers/bitbucket-cloud" >}})
-* [Forgejo]({{< relref "/docs/providers/forgejo" >}})

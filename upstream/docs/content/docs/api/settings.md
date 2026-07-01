@@ -32,19 +32,6 @@ settings:
 
 {{< /param >}}
 
-{{< param name="gitops_command_prefix" type="string" id="param-gitops-command-prefix" >}}
-Sets a custom prefix for GitOps commands such as `/test`, `/retest`, and `/cancel`.
-Use a plain word such as `pac`; Pipelines-as-Code adds the leading slash
-automatically. For command behavior and examples, see the
-[GitOps commands guide]({{< relref "/docs/guides/gitops-commands/advanced" >}}).
-
-```yaml
-settings:
-  gitops_command_prefix: "pac"
-```
-
-{{< /param >}}
-
 {{< param name="policy" type="Policy" >}}
 Defines authorization policies for the repository. These policies control which users can trigger PipelineRuns under different conditions.
 
@@ -277,14 +264,12 @@ Defines the base prompt template that Pipelines-as-Code sends to the LLM.
 {{< param name="roles[].model" type="string" id="param-roles-model" >}}
 Specifies the LLM model for this role. If omitted, Pipelines-as-Code uses provider-specific defaults:
 
-- OpenAI: `gpt-5.4-mini`
-- Gemini: `gemini-3.1-flash-lite-preview`
+- OpenAI: `gpt-5-mini`
+- Gemini: `gemini-2.5-flash-lite`
 {{< /param >}}
 
 {{< param name="roles[].on_cel" type="string" id="param-roles-on-cel" >}}
 Defines a CEL expression that determines when Pipelines-as-Code triggers this role.
-Use the structured LLM CEL context, such as `body.event.*`,
-`body.pipelineRun.*`, and `body.repository.*`.
 {{< /param >}}
 
 {{< param name="roles[].output" type="string" id="param-roles-output" >}}
@@ -336,7 +321,7 @@ settings:
       - name: "failure-analysis"
         prompt: "Analyze the following CI/CD failure and suggest fixes"
         model: "gpt-4"
-        on_cel: 'body.event.event_type == "pull_request" && body.pipelineRun.status.conditions[0].status == "False"'
+        on_cel: "event_type == 'pull_request' && status == 'failed'"
         context_items:
           commit_content: true
           error_content: true
@@ -400,7 +385,7 @@ spec:
             2. Specific fix recommendations
             3. Prevention strategies
           model: "gpt-4"
-          on_cel: 'body.event.event_type == "pull_request" && body.pipelineRun.status.conditions[0].status == "False"'
+          on_cel: 'event_type == "pull_request" && status == "failed"'
           output: "pr-comment"
           context_items:
             commit_content: true
@@ -412,7 +397,7 @@ spec:
         - name: "security-review"
           prompt: "Review this change for potential security issues"
           model: "gpt-4"
-          on_cel: '"security-review" in body.event.pull_request_labels'
+          on_cel: 'event_type == "pull_request" && has_label("security-review")'
           context_items:
             commit_content: true
             pr_content: true

@@ -77,8 +77,8 @@ Full documentation is at **<https://pipelinesascode.com>**
 Install the CLI and bootstrap your first repository:
 
 ```shell
-brew install --cask openshift-pipelines/pipelines-as-code/tektoncd-pac
-tkn pac bootstrap
+brew install tektoncd/pipelines-as-code/tkn-pac
+tkn pac bootstrap github
 ```
 
 Then follow the [getting started tutorial](https://pipelinesascode.com/docs/getting-started/).

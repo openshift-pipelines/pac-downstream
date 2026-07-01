@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/secrets"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/pipelineascode"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -16,8 +16,8 @@ func (w *Options) createWebhookSecret(ctx context.Context, response *response) e
 			Name: w.RepositoryName,
 		},
 		Data: map[string][]byte{
-			secrets.DefaultGitProviderSecretKey:        []byte(response.PersonalAccessToken),
-			secrets.DefaultGitProviderWebhookSecretKey: []byte(response.WebhookSecret),
+			pipelineascode.DefaultGitProviderSecretKey:        []byte(response.PersonalAccessToken),
+			pipelineascode.DefaultGitProviderWebhookSecretKey: []byte(response.WebhookSecret),
 		},
 	}, metav1.CreateOptions{})
 	if err != nil {
@@ -33,7 +33,7 @@ func (w *Options) updateWebhookSecret(ctx context.Context, response *response) e
 	if err != nil {
 		return err
 	}
-	secretInfo.Data[secrets.DefaultGitProviderWebhookSecretKey] = []byte(response.WebhookSecret)
+	secretInfo.Data[pipelineascode.DefaultGitProviderWebhookSecretKey] = []byte(response.WebhookSecret)
 
 	_, err = w.Run.Clients.Kube.CoreV1().Secrets(w.RepositoryNamespace).Update(ctx, secretInfo, metav1.UpdateOptions{})
 	if err != nil {
@@ -57,11 +57,11 @@ func (w *Options) updateRepositoryCR(ctx context.Context, res *response) error {
 
 	repo.Spec.GitProvider.Secret = &v1alpha1.Secret{
 		Name: w.RepositoryName,
-		Key:  secrets.DefaultGitProviderSecretKey,
+		Key:  pipelineascode.DefaultGitProviderSecretKey,
 	}
 	repo.Spec.GitProvider.WebhookSecret = &v1alpha1.Secret{
 		Name: w.RepositoryName,
-		Key:  secrets.DefaultGitProviderWebhookSecretKey,
+		Key:  pipelineascode.DefaultGitProviderWebhookSecretKey,
 	}
 
 	if res.UserName != "" {

@@ -265,10 +265,6 @@ func (p *PullRequests) buildPullRequestBody(po *PullRequestsOptions) (string, er
 		body["close_source_branch"] = po.CloseSourceBranch
 	}
 
-	if po.MergeStrategy != "" {
-		body["merge_strategy"] = po.MergeStrategy
-	}
-
 	if po.Draft {
 		body["draft"] = true
 	}

@@ -60,7 +60,7 @@ kubectl apply -f https://github.com/{owner}/{repo}/releases/download/{tag}/relea
 
 The documentation for this release is available here :
 
-https://docs.pipelinesascode.com/{tag}
+https://release-{tag_dashed}.pipelines-as-code.pages.dev
 ```
 
 Where `{tag_dashed}` is the tag with dots replaced by dashes (e.g., `v0.31.0` → `v0-31-0`).
@@ -125,7 +125,7 @@ kubectl apply -f https://github.com/openshift-pipelines/pipelines-as-code/releas
 
 The documentation for this release is available here :
 
-https://docs.pipelinesascode.com/v0.31.0
+https://release-v0-31-0.pipelines-as-code.pages.dev
 
 ## What's Changed
 <!-- GitHub auto-generated changelog goes here -->

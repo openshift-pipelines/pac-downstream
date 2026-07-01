@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"strconv"
@@ -12,7 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/events"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/opscomments"
@@ -27,8 +25,6 @@ import (
 	providerstatus "github.com/openshift-pipelines/pipelines-as-code/pkg/provider/status"
 	testclient "github.com/openshift-pipelines/pipelines-as-code/pkg/test/clients"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/test/logger"
-	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	gitlab "gitlab.com/gitlab-org/api/client-go"
 	"go.opentelemetry.io/otel"
@@ -40,21 +36,6 @@ import (
 	rtesting "knative.dev/pkg/reconciler/testing"
 )
 
-func setupPipelineIDStatusHandler(t *testing.T, mux *http.ServeMux, path string, responsePID int64) {
-	t.Helper()
-	mux.HandleFunc(path, func(rw http.ResponseWriter, r *http.Request) {
-		t.Helper()
-		var reqBody map[string]any
-		if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
-			t.Fatalf("failed to decode request body: %v", err)
-		}
-		_, hasPID := reqBody["pipeline_id"]
-		assert.Assert(t, !hasPID, "request should not have pipeline_id for %s", path)
-		rw.WriteHeader(http.StatusCreated)
-		fmt.Fprintf(rw, `{"id": 1, "pipeline_id": %d}`, responsePID)
-	})
-}
-
 func TestCreateStatus(t *testing.T) {
 	type fields struct {
 		targetProjectID int
@@ -65,14 +46,11 @@ func TestCreateStatus(t *testing.T) {
 		postStr    string
 	}
 	tests := []struct {
-		name           string
-		fields         fields
-		args           args
-		wantErr        bool
-		wantClient     bool
-		setup          func(t *testing.T, mux *http.ServeMux)
-		wantCachedPID  int64
-		checkCachedPID bool
+		name       string
+		fields     fields
+		args       args
+		wantErr    bool
+		wantClient bool
 	}{
 		{
 			name:    "no client has been set",
@@ -365,238 +343,6 @@ func TestCreateStatus(t *testing.T) {
 				postStr: "has successfully",
 			},
 		},
-		{
-			name:           "pipeline ID first call discovers and caches",
-			wantClient:     true,
-			checkCachedPID: true,
-			wantCachedPID:  9999,
-			fields:         fields{targetProjectID: 500},
-			args: args{
-				statusOpts: providerstatus.StatusOpts{
-					Conclusion:              "success",
-					OriginalPipelineRunName: "pr-1",
-					PipelineRun: &tektonv1.PipelineRun{
-						ObjectMeta: metav1.ObjectMeta{
-							Name:        "test-pr",
-							Namespace:   "default",
-							Annotations: map[string]string{},
-						},
-					},
-				},
-				event: &info.Event{
-					TriggerTarget:   "pull_request",
-					SourceProjectID: 500,
-					TargetProjectID: 500,
-					SHA:             "deadbeef",
-				},
-			},
-			setup: func(t *testing.T, mux *http.ServeMux) {
-				t.Helper()
-				setupPipelineIDStatusHandler(t, mux, "/projects/500/statuses/deadbeef", 9999)
-			},
-		},
-		{
-			name:       "pipeline ID read from annotation",
-			wantClient: true,
-			fields:     fields{targetProjectID: 500},
-			args: args{
-				statusOpts: providerstatus.StatusOpts{
-					Conclusion:              "success",
-					OriginalPipelineRunName: "pr-1",
-					PipelineRun: &tektonv1.PipelineRun{
-						ObjectMeta: metav1.ObjectMeta{
-							Name:        "test-pr",
-							Namespace:   "default",
-							Annotations: map[string]string{keys.GitLabPipelineID: "9999"},
-						},
-					},
-				},
-				event: &info.Event{
-					TriggerTarget:   "pull_request",
-					SourceProjectID: 500,
-					TargetProjectID: 500,
-					SHA:             "deadbeef01",
-				},
-			},
-			setup: func(t *testing.T, mux *http.ServeMux) {
-				t.Helper()
-				mux.HandleFunc("/projects/500/statuses/deadbeef01", func(rw http.ResponseWriter, r *http.Request) {
-					var reqBody map[string]any
-					if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
-						t.Fatalf("failed to decode request body: %v", err)
-					}
-					pid, ok := reqBody["pipeline_id"]
-					assert.Assert(t, ok, "request must include pipeline_id")
-					pidFloat, ok := pid.(float64)
-					assert.Assert(t, ok, "pipeline_id must be a number")
-					assert.Equal(t, int64(pidFloat), int64(9999))
-					rw.WriteHeader(http.StatusCreated)
-					fmt.Fprint(rw, `{"id": 1, "pipeline_id": 9999}`)
-				})
-			},
-		},
-		{
-			name:           "pipeline ID zero in response does not cache",
-			wantClient:     true,
-			checkCachedPID: true,
-			wantCachedPID:  0,
-			fields:         fields{targetProjectID: 501},
-			args: args{
-				statusOpts: providerstatus.StatusOpts{
-					Conclusion:              "success",
-					OriginalPipelineRunName: "pr-zero-pid",
-					PipelineRun: &tektonv1.PipelineRun{
-						ObjectMeta: metav1.ObjectMeta{
-							Name:        "test-pr-zero",
-							Namespace:   "default",
-							Annotations: map[string]string{},
-						},
-					},
-				},
-				event: &info.Event{
-					TriggerTarget:   "push",
-					SourceProjectID: 501,
-					TargetProjectID: 501,
-					SHA:             "deadbeef02",
-				},
-			},
-			setup: func(t *testing.T, mux *http.ServeMux) {
-				t.Helper()
-				setupPipelineIDStatusHandler(t, mux, "/projects/501/statuses/deadbeef02", 0)
-			},
-		},
-		{
-			name:       "pipeline ID target fallback reads annotation",
-			wantClient: true,
-			fields:     fields{targetProjectID: 600},
-			args: args{
-				statusOpts: providerstatus.StatusOpts{
-					Conclusion:              "success",
-					OriginalPipelineRunName: "pr-1",
-					PipelineRun: &tektonv1.PipelineRun{
-						ObjectMeta: metav1.ObjectMeta{
-							Name:        "test-pr",
-							Namespace:   "default",
-							Annotations: map[string]string{keys.GitLabPipelineID: "1234"},
-						},
-					},
-				},
-				event: &info.Event{
-					TriggerTarget:   "pull_request",
-					SourceProjectID: 404,
-					TargetProjectID: 600,
-					SHA:             "aabb1122",
-				},
-			},
-			setup: func(t *testing.T, mux *http.ServeMux) {
-				t.Helper()
-				mux.HandleFunc("/projects/404/statuses/aabb1122", func(rw http.ResponseWriter, _ *http.Request) {
-					rw.WriteHeader(http.StatusNotFound)
-					fmt.Fprint(rw, `{"message": "404 Not Found"}`)
-				})
-				mux.HandleFunc("/projects/600/statuses/aabb1122", func(rw http.ResponseWriter, r *http.Request) {
-					var reqBody map[string]any
-					if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
-						t.Fatalf("failed to decode request body: %v", err)
-					}
-					pid, ok := reqBody["pipeline_id"]
-					assert.Assert(t, ok, "target request must include pipeline_id")
-					pidFloat, ok := pid.(float64)
-					assert.Assert(t, ok, "pipeline_id must be a number")
-					assert.Equal(t, int64(pidFloat), int64(1234))
-					rw.WriteHeader(http.StatusCreated)
-					fmt.Fprint(rw, `{"id": 1, "pipeline_id": 1234}`)
-				})
-			},
-		},
-		{
-			name:       "pipeline ID target fallback without annotation",
-			wantClient: true,
-			fields:     fields{targetProjectID: 600},
-			args: args{
-				statusOpts: providerstatus.StatusOpts{
-					Conclusion:              "success",
-					OriginalPipelineRunName: "pr-1",
-					PipelineRun: &tektonv1.PipelineRun{
-						ObjectMeta: metav1.ObjectMeta{
-							Name:        "test-pr",
-							Namespace:   "default",
-							Annotations: map[string]string{},
-						},
-					},
-				},
-				event: &info.Event{
-					TriggerTarget:   "pull_request",
-					SourceProjectID: 404,
-					TargetProjectID: 600,
-					SHA:             "aabb1123",
-				},
-			},
-			setup: func(t *testing.T, mux *http.ServeMux) {
-				t.Helper()
-				mux.HandleFunc("/projects/404/statuses/aabb1123", func(rw http.ResponseWriter, _ *http.Request) {
-					rw.WriteHeader(http.StatusNotFound)
-					fmt.Fprint(rw, `{"message": "404 Not Found"}`)
-				})
-				mux.HandleFunc("/projects/600/statuses/aabb1123", func(rw http.ResponseWriter, r *http.Request) {
-					var reqBody map[string]any
-					if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
-						t.Fatalf("failed to decode request body: %v", err)
-					}
-					_, hasPID := reqBody["pipeline_id"]
-					assert.Assert(t, !hasPID, "target request should not have pipeline_id")
-					rw.WriteHeader(http.StatusCreated)
-					fmt.Fprint(rw, `{"id": 1, "pipeline_id": 7777}`)
-				})
-			},
-		},
-		{
-			name:       "pipeline ID same project fallback preserves annotation",
-			wantClient: true,
-			fields:     fields{targetProjectID: 600},
-			args: args{
-				statusOpts: providerstatus.StatusOpts{
-					Conclusion:              "success",
-					OriginalPipelineRunName: "pr-1",
-					PipelineRun: &tektonv1.PipelineRun{
-						ObjectMeta: metav1.ObjectMeta{
-							Name:        "test-pr",
-							Namespace:   "default",
-							Annotations: map[string]string{keys.GitLabPipelineID: "5555"},
-						},
-					},
-				},
-				event: &info.Event{
-					TriggerTarget:   "pull_request",
-					SourceProjectID: 600,
-					TargetProjectID: 600,
-					SHA:             "aabb1124",
-				},
-			},
-			setup: func(t *testing.T, mux *http.ServeMux) {
-				t.Helper()
-				var callCount int
-				mux.HandleFunc("/projects/600/statuses/aabb1124", func(rw http.ResponseWriter, r *http.Request) {
-					callCount++
-					if callCount == 1 {
-						rw.WriteHeader(http.StatusForbidden)
-						fmt.Fprint(rw, `{"message": "403 Forbidden"}`)
-						return
-					}
-					var reqBody map[string]any
-					if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
-						t.Fatalf("failed to decode request body: %v", err)
-					}
-					pid, ok := reqBody["pipeline_id"]
-					assert.Assert(t, ok, "target request must include pipeline_id")
-					pidFloat, ok := pid.(float64)
-					assert.Assert(t, ok, "pipeline_id must be a number")
-					assert.Equal(t, int64(pidFloat), int64(5555))
-					rw.WriteHeader(http.StatusCreated)
-					fmt.Fprint(rw, `{"id": 1, "pipeline_id": 5555}`)
-				})
-			},
-		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -605,14 +351,13 @@ func TestCreateStatus(t *testing.T) {
 			stdata, _ := testclient.SeedTestData(t, ctx, testclient.Data{})
 			run := &params.Run{
 				Clients: clients.Clients{
-					Kube:   stdata.Kube,
-					Tekton: stdata.Pipeline,
-					Log:    logger,
+					Kube: stdata.Kube,
+					Log:  logger,
 				},
 			}
 			v := &Provider{
 				targetProjectID: int64(tt.fields.targetProjectID),
-				run:             run,
+				run:             params.New(),
 				Logger:          logger,
 				pacInfo: &info.PacOpts{
 					Settings: settings.Settings{
@@ -631,61 +376,59 @@ func TestCreateStatus(t *testing.T) {
 				v.SetGitLabClient(client)
 				defer tearDown()
 
-				if tt.setup != nil {
-					tt.setup(t, mux)
-				} else {
-					// Mock commit status endpoints for both source and target projects
-					if tt.args.event.SourceProjectID != 0 {
-						sourceStatusPath := fmt.Sprintf("/projects/%d/statuses/%s", tt.args.event.SourceProjectID, tt.args.event.SHA)
-						mux.HandleFunc(sourceStatusPath, func(rw http.ResponseWriter, _ *http.Request) {
-							switch tt.args.event.SourceProjectID {
-							case 400:
-								rw.WriteHeader(http.StatusBadRequest)
-								fmt.Fprint(rw, `{"message": "400 Bad Request"}`)
-							case 401:
-								rw.WriteHeader(http.StatusUnauthorized)
-								fmt.Fprint(rw, `{"message": "401 Unauthorized"}`)
-							case 403:
-								rw.WriteHeader(http.StatusForbidden)
-								fmt.Fprint(rw, `{"message": "403 Forbidden"}`)
-							case 404:
-								rw.WriteHeader(http.StatusNotFound)
-								fmt.Fprint(rw, `{"message": "404 Project Not Found"}`)
-							case 422:
-								rw.WriteHeader(http.StatusBadRequest)
-								fmt.Fprint(rw, `{"message": "Cannot transition status via :run from :running"}`)
-							default:
-								rw.WriteHeader(http.StatusCreated)
-								fmt.Fprint(rw, `{}`)
-							}
-						})
-					}
+				// Mock commit status endpoints for both source and target projects
+				if tt.args.event.SourceProjectID != 0 {
+					// Mock source project commit status endpoint
+					sourceStatusPath := fmt.Sprintf("/projects/%d/statuses/%s", tt.args.event.SourceProjectID, tt.args.event.SHA)
+					mux.HandleFunc(sourceStatusPath, func(rw http.ResponseWriter, _ *http.Request) {
+						switch tt.args.event.SourceProjectID {
+						case 400:
+							rw.WriteHeader(http.StatusBadRequest)
+							fmt.Fprint(rw, `{"message": "400 Bad Request"}`)
+						case 401:
+							rw.WriteHeader(http.StatusUnauthorized)
+							fmt.Fprint(rw, `{"message": "401 Unauthorized"}`)
+						case 403:
+							rw.WriteHeader(http.StatusForbidden)
+							fmt.Fprint(rw, `{"message": "403 Forbidden"}`)
+						case 404:
+							rw.WriteHeader(http.StatusNotFound)
+							fmt.Fprint(rw, `{"message": "404 Project Not Found"}`)
+						case 422:
+							rw.WriteHeader(http.StatusBadRequest)
+							fmt.Fprint(rw, `{"message": "Cannot transition status via :run from :running"}`)
+						default:
+							rw.WriteHeader(http.StatusCreated)
+							fmt.Fprint(rw, `{}`)
+						}
+					})
+				}
 
-					if tt.args.event.TargetProjectID != 0 {
-						targetStatusPath := fmt.Sprintf("/projects/%d/statuses/%s", tt.args.event.TargetProjectID, tt.args.event.SHA)
-						mux.HandleFunc(targetStatusPath, func(rw http.ResponseWriter, _ *http.Request) {
-							switch tt.args.event.TargetProjectID {
-							case 400, 405:
-								rw.WriteHeader(http.StatusBadRequest)
-								fmt.Fprint(rw, `{"message": "400 Bad Request"}`)
-							case 401:
-								rw.WriteHeader(http.StatusUnauthorized)
-								fmt.Fprint(rw, `{"message": "401 Unauthorized"}`)
-							case 403:
-								rw.WriteHeader(http.StatusForbidden)
-								fmt.Fprint(rw, `{"message": "403 Forbidden"}`)
-							case 404:
-								rw.WriteHeader(http.StatusNotFound)
-								fmt.Fprint(rw, `{"message": "404 Project Not Found"}`)
-							case 422:
-								rw.WriteHeader(http.StatusBadRequest)
-								fmt.Fprint(rw, `{"message": "Cannot transition status via :run from :running"}`)
-							default:
-								rw.WriteHeader(http.StatusCreated)
-								fmt.Fprint(rw, `{}`)
-							}
-						})
-					}
+				if tt.args.event.TargetProjectID != 0 {
+					// Mock target project commit status endpoint
+					targetStatusPath := fmt.Sprintf("/projects/%d/statuses/%s", tt.args.event.TargetProjectID, tt.args.event.SHA)
+					mux.HandleFunc(targetStatusPath, func(rw http.ResponseWriter, _ *http.Request) {
+						switch tt.args.event.TargetProjectID {
+						case 400, 405:
+							rw.WriteHeader(http.StatusBadRequest)
+							fmt.Fprint(rw, `{"message": "400 Bad Request"}`)
+						case 401:
+							rw.WriteHeader(http.StatusUnauthorized)
+							fmt.Fprint(rw, `{"message": "401 Unauthorized"}`)
+						case 403:
+							rw.WriteHeader(http.StatusForbidden)
+							fmt.Fprint(rw, `{"message": "403 Forbidden"}`)
+						case 404:
+							rw.WriteHeader(http.StatusNotFound)
+							fmt.Fprint(rw, `{"message": "404 Project Not Found"}`)
+						case 422:
+							rw.WriteHeader(http.StatusBadRequest)
+							fmt.Fprint(rw, `{"message": "Cannot transition status via :run from :running"}`)
+						default:
+							rw.WriteHeader(http.StatusCreated)
+							fmt.Fprint(rw, `{}`)
+						}
+					})
 				}
 
 				thelp.MuxNotePost(t, mux, int(v.targetProjectID), tt.args.event.PullRequestNumber, tt.args.postStr)
@@ -694,105 +437,8 @@ func TestCreateStatus(t *testing.T) {
 			if err := v.CreateStatus(ctx, tt.args.event, tt.args.statusOpts); (err != nil) != tt.wantErr {
 				t.Errorf("CreateStatus() error = %v, wantErr %v", err, tt.wantErr)
 			}
-			if tt.checkCachedPID {
-				assert.Equal(t, v.pipelineID, tt.wantCachedPID)
-			}
 		})
 	}
-}
-
-func TestCreateStatusPipelineIDSharedAcrossPipelineRuns(t *testing.T) {
-	ctx, _ := rtesting.SetupFakeContext(t)
-	log, _ := logger.GetLogger()
-	stdata, _ := testclient.SeedTestData(t, ctx, testclient.Data{})
-	run := &params.Run{
-		Clients: clients.Clients{
-			Kube:   stdata.Kube,
-			Tekton: stdata.Pipeline,
-			Log:    log,
-		},
-	}
-
-	client, mux, tearDown := thelp.Setup(t)
-	defer tearDown()
-
-	v := &Provider{
-		run:    run,
-		Logger: log,
-		pacInfo: &info.PacOpts{
-			Settings: settings.Settings{
-				ApplicationName: settings.PACApplicationNameDefaultValue,
-			},
-		},
-		eventEmitter: events.NewEventEmitter(run.Clients.Kube, log),
-	}
-	v.SetGitLabClient(client)
-
-	sha := "abc123"
-	projectID := int64(500)
-
-	mux.HandleFunc(fmt.Sprintf("/projects/%d/statuses/%s", projectID, sha),
-		func(rw http.ResponseWriter, _ *http.Request) {
-			rw.WriteHeader(http.StatusCreated)
-			fmt.Fprint(rw, `{"id": 1, "pipeline_id": 9999}`)
-		})
-
-	event := &info.Event{
-		TriggerTarget:     "pull_request",
-		SourceProjectID:   projectID,
-		TargetProjectID:   projectID,
-		SHA:               sha,
-		PullRequestNumber: 1,
-	}
-
-	// First PipelineRun — discovers the pipeline ID
-	err := v.CreateStatus(ctx, event, providerstatus.StatusOpts{
-		Conclusion:              "success",
-		OriginalPipelineRunName: "pr-lint",
-		PipelineRun: &tektonv1.PipelineRun{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:        "test-pr-lint",
-				Namespace:   "default",
-				Annotations: map[string]string{},
-			},
-		},
-	})
-	assert.NilError(t, err)
-	assert.Equal(t, v.pipelineID, int64(9999))
-
-	// Second PipelineRun — should pick up the pipeline ID from in-memory field
-	var secondCallPID int64
-	secondClient, secondMuxPtr, secondTearDown := thelp.Setup(t)
-	defer secondTearDown()
-	v.SetGitLabClient(secondClient)
-
-	secondMuxPtr.HandleFunc(fmt.Sprintf("/projects/%d/statuses/%s", projectID, sha),
-		func(rw http.ResponseWriter, r *http.Request) {
-			var reqBody map[string]any
-			if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
-				t.Fatalf("failed to decode request body: %v", err)
-			}
-			pid, ok := reqBody["pipeline_id"]
-			assert.Assert(t, ok, "second call must include pipeline_id from cached v.pipelineID")
-			pidFloat, ok := pid.(float64)
-			assert.Assert(t, ok, "pipeline_id must be a number")
-			secondCallPID = int64(pidFloat)
-			rw.WriteHeader(http.StatusCreated)
-			fmt.Fprint(rw, `{"id": 2, "pipeline_id": 9999}`)
-		})
-	err = v.CreateStatus(ctx, event, providerstatus.StatusOpts{
-		Conclusion:              "success",
-		OriginalPipelineRunName: "pr-test",
-		PipelineRun: &tektonv1.PipelineRun{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:        "test-pr-test",
-				Namespace:   "default",
-				Annotations: map[string]string{},
-			},
-		},
-	})
-	assert.NilError(t, err)
-	assert.Equal(t, secondCallPID, int64(9999))
 }
 
 func TestGetCommitInfo(t *testing.T) {
@@ -2300,165 +1946,4 @@ func TestGitLabCreateCommentPaging(t *testing.T) {
 	err := p.CreateComment(context.Background(), event, commit, updateMarker)
 	assert.NilError(t, err)
 	assert.Assert(t, updated == true, "comment update handler has not been called")
-}
-
-func TestSetClientSourceRepoAccessPostsComment(t *testing.T) {
-	ctx, _ := rtesting.SetupFakeContext(t)
-	observer, _ := zapobserver.New(zap.DebugLevel)
-	fakelogger := zap.New(observer).Sugar()
-	run := &params.Run{
-		Clients: clients.Clients{
-			Log: fakelogger,
-		},
-	}
-
-	tests := []struct {
-		name              string
-		triggerTarget     triggertype.Trigger
-		sourceProjectID   int64
-		targetProjectID   int64
-		pullRequestNumber int
-		setupMockResponse func(*http.ServeMux, *bool)
-		expectedError     string
-		expectComment     bool
-	}{
-		{
-			name:              "404 on source project posts MR comment",
-			triggerTarget:     triggertype.PullRequest,
-			sourceProjectID:   456,
-			targetProjectID:   789,
-			pullRequestNumber: 42,
-			setupMockResponse: func(mux *http.ServeMux, commentPosted *bool) {
-				mux.HandleFunc("/projects/456", func(rw http.ResponseWriter, _ *http.Request) {
-					rw.WriteHeader(http.StatusNotFound)
-					fmt.Fprint(rw, `{"message": "404 Project Not Found"}`)
-				})
-				mux.HandleFunc("/projects/789/merge_requests/42/notes", func(rw http.ResponseWriter, r *http.Request) {
-					if r.Method == http.MethodGet {
-						fmt.Fprint(rw, `[]`)
-						return
-					}
-					if r.Method == http.MethodPost {
-						body, _ := io.ReadAll(r.Body)
-						bodyStr := string(body)
-						assert.Assert(t, strings.Contains(bodyStr, "source repository"), "comment should mention source repository, got: %s", bodyStr)
-						assert.Assert(t, strings.Contains(bodyStr, "read_repository"), "comment should mention read_repository scope, got: %s", bodyStr)
-						*commentPosted = true
-					}
-					fmt.Fprint(rw, `{}`)
-				})
-			},
-			expectedError: "failed to access GitLab source repository ID 456: please ensure token has 'read_repository' scope on that repository",
-			expectComment: true,
-		},
-		{
-			name:              "403 on source project posts MR comment",
-			triggerTarget:     triggertype.PullRequest,
-			sourceProjectID:   456,
-			targetProjectID:   789,
-			pullRequestNumber: 42,
-			setupMockResponse: func(mux *http.ServeMux, commentPosted *bool) {
-				mux.HandleFunc("/projects/456", func(rw http.ResponseWriter, _ *http.Request) {
-					rw.WriteHeader(http.StatusForbidden)
-					fmt.Fprint(rw, `{"message": "403 Forbidden"}`)
-				})
-				mux.HandleFunc("/projects/789/merge_requests/42/notes", func(rw http.ResponseWriter, r *http.Request) {
-					if r.Method == http.MethodGet {
-						fmt.Fprint(rw, `[]`)
-						return
-					}
-					if r.Method == http.MethodPost {
-						*commentPosted = true
-					}
-					fmt.Fprint(rw, `{}`)
-				})
-			},
-			expectedError: "failed to access GitLab source repository ID 456: please ensure token has 'read_repository' scope on that repository",
-			expectComment: true,
-		},
-		{
-			name:              "Comment posting failure is non-fatal",
-			triggerTarget:     triggertype.PullRequest,
-			sourceProjectID:   456,
-			targetProjectID:   789,
-			pullRequestNumber: 42,
-			setupMockResponse: func(mux *http.ServeMux, _ *bool) {
-				mux.HandleFunc("/projects/456", func(rw http.ResponseWriter, _ *http.Request) {
-					rw.WriteHeader(http.StatusNotFound)
-					fmt.Fprint(rw, `{"message": "404 Project Not Found"}`)
-				})
-				mux.HandleFunc("/projects/789/merge_requests/42/notes", func(rw http.ResponseWriter, _ *http.Request) {
-					rw.WriteHeader(http.StatusInternalServerError)
-					fmt.Fprint(rw, `{"message": "500 Internal Server Error"}`)
-				})
-			},
-			expectedError: "failed to access GitLab source repository ID 456",
-			expectComment: false,
-		},
-		{
-			name:              "Successful access posts no comment",
-			triggerTarget:     triggertype.PullRequest,
-			sourceProjectID:   456,
-			targetProjectID:   789,
-			pullRequestNumber: 42,
-			setupMockResponse: func(mux *http.ServeMux, _ *bool) {
-				mux.HandleFunc("/projects/456", func(rw http.ResponseWriter, _ *http.Request) {
-					rw.WriteHeader(http.StatusOK)
-					fmt.Fprint(rw, `{"id": 456, "name": "test-repo"}`)
-				})
-			},
-			expectedError: "",
-			expectComment: false,
-		},
-		{
-			name:              "Push event skips source project check entirely",
-			triggerTarget:     triggertype.Push,
-			sourceProjectID:   456,
-			targetProjectID:   789,
-			pullRequestNumber: 0,
-			setupMockResponse: func(mux *http.ServeMux, _ *bool) {
-				mux.HandleFunc("/projects/456", func(rw http.ResponseWriter, _ *http.Request) {
-					fmt.Fprint(rw, `{"id": 456, "name": "test-repo"}`)
-				})
-			},
-			expectedError: "",
-			expectComment: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			mockClient, mux, tearDown := thelp.Setup(t)
-			defer tearDown()
-
-			commentPosted := false
-			if tt.setupMockResponse != nil {
-				tt.setupMockResponse(mux, &commentPosted)
-			}
-
-			v := &Provider{gitlabClient: mockClient}
-			event := &info.Event{
-				Provider: &info.Provider{
-					Token: "test-token",
-				},
-				Organization:      "test-org",
-				Repository:        "test-repo",
-				TriggerTarget:     tt.triggerTarget,
-				SourceProjectID:   tt.sourceProjectID,
-				TargetProjectID:   tt.targetProjectID,
-				PullRequestNumber: tt.pullRequestNumber,
-			}
-
-			err := v.SetClient(ctx, run, event, nil, nil)
-
-			if tt.expectedError != "" {
-				assert.Assert(t, err != nil, "expected error but got none")
-				assert.ErrorContains(t, err, tt.expectedError)
-			} else {
-				assert.NilError(t, err)
-			}
-
-			assert.Equal(t, tt.expectComment, commentPosted, "comment posted mismatch")
-		})
-	}
 }

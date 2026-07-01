@@ -87,18 +87,6 @@ func TestGetNameFromFunction(t *testing.T) {
 			commentType: testComment,
 		},
 		{
-			name:        "key value arg is not a pipeline name",
-			comment:     "/test custom1=value",
-			expected:    "",
-			commentType: testComment,
-		},
-		{
-			name:        "key value args without pipeline name",
-			comment:     "/test foo=bar hello=moto",
-			expected:    "",
-			commentType: testComment,
-		},
-		{
 			name:        "get name from cancel comment",
 			comment:     "/cancel prname",
 			expected:    "prname",
@@ -306,12 +294,6 @@ func TestSetEventTypeTestPipelineRun(t *testing.T) {
 			comment:    "/test prname",
 			wantType:   TestSingleCommentEventType.String(),
 			wantTestPr: "prname",
-		},
-		{
-			name:       "test with key value arg treated as test all",
-			comment:    "/test custom1=value",
-			wantType:   TestSingleCommentEventType.String(),
-			wantTestPr: "",
 		},
 		{
 			name:         "cancel single pr",
