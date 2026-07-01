@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -144,7 +145,7 @@ func Test_GenerateJWT(t *testing.T) {
 				},
 			}
 
-			ip := NewInstallation(httptest.NewRequest(http.MethodGet, "http://localhost", strings.NewReader("")), run, &v1alpha1.Repository{}, &github.Provider{}, tt.namespace.GetName())
+			ip := NewInstallation(httptest.NewRequestWithContext(context.Background(), http.MethodGet, "http://localhost", strings.NewReader("")), run, &v1alpha1.Repository{}, &github.Provider{}, tt.namespace.GetName())
 			token, err := ip.GenerateJWT(ctx)
 			if tt.wantErr {
 				assert.Assert(t, err != nil)
@@ -205,10 +206,10 @@ func Test_GetAndUpdateInstallationID(t *testing.T) {
 	ctx = info.StoreCurrentControllerName(ctx, "default")
 	ctx = info.StoreNS(ctx, testNamespace.GetName())
 
-	ip := NewInstallation(httptest.NewRequest(http.MethodGet, "http://localhost", strings.NewReader("")), run, &v1alpha1.Repository{}, &github.Provider{}, testNamespace.GetName())
+	ip := NewInstallation(httptest.NewRequestWithContext(context.Background(), http.MethodGet, "http://localhost", strings.NewReader("")), run, &v1alpha1.Repository{}, &github.Provider{}, testNamespace.GetName())
 	jwtToken, err := ip.GenerateJWT(ctx)
 	assert.NilError(t, err)
-	req := httptest.NewRequest(http.MethodGet, "http://localhost", strings.NewReader(""))
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "http://localhost", strings.NewReader(""))
 	repo := &v1alpha1.Repository{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "repo",
@@ -257,6 +258,76 @@ func Test_GetAndUpdateInstallationID(t *testing.T) {
 	assert.Equal(t, token, wantToken)
 }
 
+func TestGetAndUpdateInstallationIDIgnoresEnterpriseHostHeader(t *testing.T) {
+	tdata := testclient.Data{
+		Namespaces: []*corev1.Namespace{testNamespace},
+		Secret:     []*corev1.Secret{validSecret},
+	}
+	wantToken := "GOODTOKEN"
+	wantID := int64(120)
+
+	fakeghclient, mux, serverURL, teardown := ghtesthelper.SetupGH()
+	defer teardown()
+
+	ctx, _ := rtesting.SetupFakeContext(t)
+	stdata, _ := testclient.SeedTestData(t, ctx, tdata)
+	logger, _ := logger.GetLogger()
+	run := &params.Run{
+		Clients: clients.Clients{
+			Log:            logger,
+			PipelineAsCode: stdata.PipelineAsCode,
+			Kube:           stdata.Kube,
+		},
+		Info: info.Info{
+			Pac: &info.PacOpts{
+				Settings: settings.Settings{},
+			},
+			Controller: &info.ControllerInfo{Secret: validSecret.GetName()},
+		},
+	}
+	ctx = info.StoreCurrentControllerName(ctx, "default")
+	ctx = info.StoreNS(ctx, testNamespace.GetName())
+
+	jwtInstallation := &Install{run: run, namespace: testNamespace.GetName()}
+	jwtToken, err := jwtInstallation.GenerateJWT(ctx)
+	assert.NilError(t, err)
+
+	mux.HandleFunc("/app/installations", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = fmt.Fprintf(w, `[{"id": %d}]`, wantID)
+	})
+	mux.HandleFunc(fmt.Sprintf("/app/installations/%d/access_tokens", wantID), func(w http.ResponseWriter, r *http.Request) {
+		testMethod(t, r, "POST")
+		w.Header().Set("Authorization", "Bearer "+jwtToken)
+		w.Header().Set("Accept", "application/vnd.github+json")
+		_, _ = fmt.Fprintf(w, `{"token": "%s"}`, wantToken)
+	})
+	mux.HandleFunc("/installation/repositories", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = fmt.Fprint(w, `{"total_count": 1,"repositories": [{"id":1,"html_url": "https://github.com/org/repo"}]}`)
+	})
+
+	repo := &v1alpha1.Repository{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "repo",
+		},
+		Spec: v1alpha1.RepositorySpec{
+			URL: "https://github.com/org/repo",
+		},
+	}
+
+	gprovider := &github.Provider{APIURL: &serverURL, Run: run}
+	gprovider.SetGithubClient(fakeghclient)
+	t.Setenv("PAC_GIT_PROVIDER_TOKEN_APIURL", serverURL+"/api/v3")
+
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "http://localhost", strings.NewReader(""))
+	req.Header.Set("X-GitHub-Enterprise-Host", "127.0.0.1:1")
+	ip := NewInstallation(req, run, repo, gprovider, testNamespace.GetName())
+	enterpriseURL, token, installationID, err := ip.GetAndUpdateInstallationID(ctx)
+	assert.NilError(t, err)
+	assert.Equal(t, enterpriseURL, "")
+	assert.Equal(t, installationID, wantID)
+	assert.Equal(t, token, wantToken)
+}
+
 func testMethod(t *testing.T, r *http.Request, want string) {
 	t.Helper()
 	if got := r.Method; got != want {
@@ -298,7 +369,7 @@ func Test_ListRepos(t *testing.T) {
 	ctx, _ := rtesting.SetupFakeContext(t)
 	gprovider := &github.Provider{}
 	gprovider.SetGithubClient(fakeclient)
-	ip := NewInstallation(httptest.NewRequest(http.MethodGet, "http://localhost", strings.NewReader("")),
+	ip := NewInstallation(httptest.NewRequestWithContext(context.Background(), http.MethodGet, "http://localhost", strings.NewReader("")),
 		&params.Run{}, repo, gprovider, testNamespace.GetName())
 	exist, err := ip.matchRepos(ctx)
 	assert.NilError(t, err)
