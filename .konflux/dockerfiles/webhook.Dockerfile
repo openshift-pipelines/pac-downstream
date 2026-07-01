@@ -1,4 +1,4 @@
-ARG GO_BUILDER=registry.access.redhat.com/ubi9/go-toolset:9.8-1782377916
+ARG GO_BUILDER=registry.access.redhat.com/ubi9/go-toolset:latest
 ARG RUNTIME=registry.access.redhat.com/ubi9/ubi-minimal:latest
 
 FROM $GO_BUILDER AS builder
@@ -32,7 +32,7 @@ LABEL \
     maintainer="pipelines-extcomm@redhat.com" \
     name="openshift-pipelines/pipelines-pipelines-as-code-webhook-rhel9" \
     summary="Red Hat OpenShift Pipelines pipelines-as-code webhook" \
-    version="v1.21.1"
+    version="v1.21.3"
 
 RUN groupadd -r -g 65532 nonroot && \
     useradd --no-log-init -r -u 65532 -g nonroot nonroot
