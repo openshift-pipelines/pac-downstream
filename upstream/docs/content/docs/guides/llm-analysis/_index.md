@@ -5,7 +5,7 @@ weight: 8
 
 {{< tech_preview >}}
 
-Pipelines-as-Code can analyze your CI/CD pipeline runs using Large Language Models (LLMs). An LLM is an AI service (such as OpenAI or Google Gemini) that reads pipeline logs and failure data, then posts human-readable analysis directly on your pull requests.
+Pipelines-as-Code can analyze your CI/CD PipelineRuns using Large Language Models (LLMs). An LLM is an AI service (such as OpenAI or Google Gemini) that reads pipeline logs and failure data, then posts human-readable analysis directly on your pull requests.
 
 Use this feature when you want automated root-cause analysis of pipeline failures without manually reading through logs.
 
@@ -93,7 +93,7 @@ Each role defines a specific analysis scenario. You can configure multiple roles
 | `name` | string | Yes | Unique identifier for this role |
 | `prompt` | string | Yes | Prompt template for the LLM |
 | `model` | string | No | Model name (consult provider documentation for available models). Uses provider default if not specified. |
-| `on_cel` | string | No | CEL expression for conditional triggering. If not specified, the role runs only for failed PipelineRuns. |
+| `on_cel` | string | No | CEL expression for conditional triggering. If not specified, the role runs for completed PipelineRuns (both successful and failed). |
 | `output` | string | Yes | Output destination (currently only `pr-comment` is supported) |
 | `context_items` | object | No | Configuration for context inclusion |
 

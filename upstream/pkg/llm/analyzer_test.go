@@ -380,7 +380,7 @@ func TestShouldTriggerRoleEvaluations(t *testing.T) {
 		wantError bool
 	}{
 		{
-			name: "no expression defaults to failed pipelines only",
+			name: "no expression defaults to completed pipelines",
 			role: v1alpha1.AnalysisRole{},
 			want: true,
 		},
@@ -423,6 +423,9 @@ func TestShouldTriggerRole(t *testing.T) {
 	succeededPR := &tektonv1.PipelineRun{}
 	succeededPR.Status.Conditions = append(succeededPR.Status.Conditions, apis.Condition{Type: apis.ConditionSucceeded, Status: "True"})
 
+	pendingPR := &tektonv1.PipelineRun{}
+	pendingPR.Status.Conditions = append(pendingPR.Status.Conditions, apis.Condition{Type: apis.ConditionSucceeded, Status: "Unknown"})
+
 	tests := []struct {
 		name        string
 		role        v1alpha1.AnalysisRole
@@ -439,10 +442,31 @@ func TestShouldTriggerRole(t *testing.T) {
 			wantTrigger: true,
 		},
 		{
-			name:        "no cel expression - skips succeeded pipeline",
+			name:        "no cel expression - triggers for succeeded pipeline",
 			role:        v1alpha1.AnalysisRole{Name: "test-role"},
 			celContext:  map[string]any{},
 			pr:          succeededPR,
+			wantTrigger: true,
+		},
+		{
+			name:        "no cel expression - skips pending pipeline",
+			role:        v1alpha1.AnalysisRole{Name: "test-role"},
+			celContext:  map[string]any{},
+			pr:          pendingPR,
+			wantTrigger: false,
+		},
+		{
+			name:        "no cel expression - skips nil pipelinerun",
+			role:        v1alpha1.AnalysisRole{Name: "test-role"},
+			celContext:  map[string]any{},
+			pr:          nil,
+			wantTrigger: false,
+		},
+		{
+			name:        "no cel expression - skips pipelinerun without status",
+			role:        v1alpha1.AnalysisRole{Name: "test-role"},
+			celContext:  nil,
+			pr:          &tektonv1.PipelineRun{},
 			wantTrigger: false,
 		},
 		{

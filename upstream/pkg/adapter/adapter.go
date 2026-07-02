@@ -2,6 +2,7 @@ package adapter
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -23,6 +24,7 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/gitea"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/gitlab"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/tlsconfig"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/tracing"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/propagation"
@@ -77,6 +79,15 @@ func New(run *params.Run, k *kubeinteraction.Interaction) adapter.AdapterConstru
 }
 
 func (l *listener) Start(ctx context.Context) error {
+	tp := tracing.New(l.logger)
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := tp.Shutdown(shutdownCtx); err != nil {
+			l.logger.Errorw("failed to shut down tracer provider", "error", err)
+		}
+	}()
+
 	adapterPort := globalAdapterPort
 	envAdapterPort := os.Getenv("PAC_CONTROLLER_PORT")
 	if envAdapterPort != "" {
@@ -97,6 +108,8 @@ func (l *listener) Start(ctx context.Context) error {
 
 	mux.HandleFunc("/", l.handleEvent(ctx))
 
+	enabled, tlsCertFile, tlsKeyFile := l.isTLSEnabled()
+
 	srv := &http.Server{
 		Addr: ":" + adapterPort,
 		Handler: http.TimeoutHandler(mux,
@@ -106,9 +119,30 @@ func (l *listener) Start(ctx context.Context) error {
 		IdleTimeout:       30 * time.Second,
 	}
 
-	enabled, tlsCertFile, tlsKeyFile := l.isTLSEnabled()
 	if enabled {
-		if err := srv.ListenAndServeTLS(tlsCertFile, tlsKeyFile); err != nil {
+		tlsConf := tlsconfig.LoadFromEnv(os.Getenv)
+		serverTLSConfig, err := tlsConf.ToTLSConfig()
+		if err != nil {
+			l.logger.Warnf("Error parsing TLS configuration: %v, using defaults", err)
+			serverTLSConfig = &tls.Config{
+				NextProtos: []string{"h2", "http/1.1"},
+				MinVersion: tls.VersionTLS12,
+			}
+		} else {
+			l.logger.Infof("TLS Configuration: MinVersion=%s, CipherSuites=[%s], CurvePreferences=[%s]",
+				tlsconfig.GetTLSVersionName(serverTLSConfig.MinVersion),
+				tlsconfig.FormatCipherSuites(serverTLSConfig.CipherSuites),
+				tlsconfig.FormatCurvePreferences(serverTLSConfig.CurvePreferences))
+		}
+
+		cert, err := tls.LoadX509KeyPair(tlsCertFile, tlsKeyFile)
+		if err != nil {
+			return fmt.Errorf("failed to load TLS certificate: %w", err)
+		}
+		serverTLSConfig.Certificates = []tls.Certificate{cert}
+		srv.TLSConfig = serverTLSConfig
+
+		if err := srv.ListenAndServeTLS("", ""); err != nil {
 			return err
 		}
 	} else {
