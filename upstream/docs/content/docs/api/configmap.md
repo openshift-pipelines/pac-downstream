@@ -67,7 +67,7 @@ hub-url: "https://artifacthub.io/api/v1"
 {{< /param >}}
 
 {{< param name="hub-catalog-type" type="string" default="artifacthub" id="param-hub-catalog-type" >}}
-Sets the default hub catalog type. Supported values: `artifacthub`, `tektonhub`.
+Sets the default hub catalog type. Supported values: `artifacthub`, `tektonhub`. **Note:** The `tektonhub` type is deprecated and will be removed in a future release. Please migrate to `artifacthub`.
 
 ```yaml
 hub-catalog-type: "artifacthub"
@@ -93,7 +93,7 @@ URL of the catalog API endpoint.
 {{< /param >}}
 
 {{< param name="catalog-{N}-type" type="string" id="param-catalog-n-type" >}}
-Type of catalog (`tektonhub` or `artifacthub`).
+Type of catalog (`tektonhub` or `artifacthub`). **Note:** The `tektonhub` type is deprecated and will be removed in a future release.
 {{< /param >}}
 
 {{< /param-group >}}
@@ -117,6 +117,14 @@ remote-tasks: "true"
 {{< /param >}}
 
 ### Dashboard Integration
+
+Pipelines-as-Code generates links to PipelineRun details in status reports. The console used for those links is chosen in this order:
+
+1. **Custom console**: if `custom-console-url` is set, it is used.
+2. **Tekton Dashboard**: if `tekton-dashboard-url` is set (or the `PAC_TEKTON_DASHBOARD_URL` environment variable), it is used.
+3. **OpenShift Console**: on OpenShift, the console URL is auto-detected from the `console` route in the `openshift-console` namespace. No configuration is needed.
+
+When `custom-console-url` is set, `custom-console-url-pr-details`, `custom-console-url-namespace`, and `custom-console-url-pr-tasklog` should also be configured. Any missing field produces a broken placeholder link in status reports.
 
 {{< param name="tekton-dashboard-url" type="string" id="param-tekton-dashboard-url" >}}
 Sets the Tekton dashboard URL. Pipelines-as-Code uses this base URL to generate links to PipelineRun details in status reports.
