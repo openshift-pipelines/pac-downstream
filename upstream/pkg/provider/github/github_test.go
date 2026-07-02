@@ -254,8 +254,8 @@ func TestGetTektonDir(t *testing.T) {
 			filterMessageSnippet: "Using PipelineRun definition from source pull_request tekton/cat#0",
 			// 1. Get Repo root objects
 			// 2. Get Tekton Dir objects
-			// 3/4. Get object content for each object (pipelinerun.yaml, pipeline.yaml)
-			expectedGHApiCalls: 4,
+			// 3. GraphQL batch fetch for 2 files (replaces 2 REST calls)
+			expectedGHApiCalls: 3,
 		},
 		{
 			name: "test no subtree on push",
@@ -270,8 +270,8 @@ func TestGetTektonDir(t *testing.T) {
 			filterMessageSnippet: "Using PipelineRun definition from source push",
 			// 1. Get Repo root objects
 			// 2. Get Tekton Dir objects
-			// 3/4. Get object content for each object (pipelinerun.yaml, pipeline.yaml)
-			expectedGHApiCalls: 4,
+			// 3. GraphQL batch fetch for 2 files (replaces 2 REST calls)
+			expectedGHApiCalls: 3,
 		},
 		{
 			name: "test provenance default_branch ",
@@ -284,9 +284,10 @@ func TestGetTektonDir(t *testing.T) {
 			treepath:             "testdata/tree/defaultbranch",
 			provenance:           "default_branch",
 			filterMessageSnippet: "Using PipelineRun definition from default_branch: main",
-			// 1. Get Repo root objects
-			// 2. Get Tekton Dir objects
-			// 3/4. Get object content for each object (pipelinerun.yaml, pipeline.yaml)
+			// 1. Resolve default branch to a commit SHA
+			// 2. Get Repo root objects
+			// 3. Get Tekton Dir objects
+			// 4. GraphQL batch fetch for 2 files
 			expectedGHApiCalls: 4,
 		},
 		{
@@ -365,11 +366,21 @@ func TestGetTektonDir(t *testing.T) {
 				Logger:       fakelogger,
 			}
 
+			shaDir := fmt.Sprintf("%x", sha256.Sum256([]byte(tt.treepath)))
+			tt.event.SHA = shaDir
 			if tt.provenance == "default_branch" {
-				tt.event.SHA = tt.event.DefaultBranch
-			} else {
-				shaDir := fmt.Sprintf("%x", sha256.Sum256([]byte(tt.treepath)))
-				tt.event.SHA = shaDir
+				mux.HandleFunc(fmt.Sprintf("/repos/%s/%s/branches/%s",
+					tt.event.Organization, tt.event.Repository, tt.event.DefaultBranch),
+					func(rw http.ResponseWriter, _ *http.Request) {
+						branch := &github.Branch{
+							Name: github.Ptr(tt.event.DefaultBranch),
+							Commit: &github.RepositoryCommit{
+								SHA: github.Ptr(shaDir),
+							},
+						}
+						b, _ := json.Marshal(branch)
+						fmt.Fprint(rw, string(b))
+					})
 			}
 			ghtesthelper.SetupGitTree(t, mux, tt.treepath, tt.event, false)
 
@@ -404,6 +415,232 @@ func TestGetTektonDir(t *testing.T) {
 				gotcha := exporter.FilterMessageSnippet(tt.filterMessageSnippet)
 				assert.Assert(t, gotcha.Len() > 0, "expected to find %s in logs, found %v", tt.filterMessageSnippet, exporter.All())
 			}
+		})
+	}
+}
+
+func TestGetTektonDirGraphQL(t *testing.T) {
+	tests := []struct {
+		name             string
+		event            *info.Event
+		treepath         string
+		provenance       string
+		setup            func(t *testing.T, mux *http.ServeMux, event *info.Event)
+		wantErr          string
+		wantLogSnippet   string
+		expectedAPICount int64
+		skipSetupGitTree bool
+	}{
+		{
+			name: "graphql batch fetch reduces api calls",
+			event: &info.Event{
+				Organization:  "tekton",
+				Repository:    "cat",
+				TriggerTarget: triggertype.PullRequest,
+			},
+			treepath:         "testdata/tree/simple",
+			wantLogSnippet:   "GraphQL batch fetch",
+			expectedAPICount: 3,
+		},
+		{
+			name: "graphql error handling",
+			event: &info.Event{
+				Organization:  "tekton",
+				Repository:    "cat",
+				TriggerTarget: triggertype.PullRequest,
+			},
+			skipSetupGitTree: true,
+			setup: func(t *testing.T, mux *http.ServeMux, event *info.Event) {
+				t.Helper()
+				shaDir := fmt.Sprintf("%x", sha256.Sum256([]byte("testdata/tree/simple")))
+				event.SHA = shaDir
+
+				// Setup tree endpoints manually
+				mux.HandleFunc(fmt.Sprintf("/repos/%v/%v/git/trees/%v", event.Organization, event.Repository, event.SHA),
+					func(rw http.ResponseWriter, _ *http.Request) {
+						tree := &github.Tree{
+							SHA: &event.SHA,
+							Entries: []*github.TreeEntry{
+								{
+									Path: github.Ptr(".tekton"),
+									Type: github.Ptr("tree"),
+									SHA:  github.Ptr("tektondirsha"),
+								},
+							},
+						}
+						b, _ := json.Marshal(tree)
+						fmt.Fprint(rw, string(b))
+					})
+
+				// Set up .tekton directory tree
+				tektonDirSha := "tektondirsha"
+				mux.HandleFunc(fmt.Sprintf("/repos/%v/%v/git/trees/%v", event.Organization, event.Repository, tektonDirSha),
+					func(rw http.ResponseWriter, _ *http.Request) {
+						tree := &github.Tree{
+							SHA: &tektonDirSha,
+							Entries: []*github.TreeEntry{
+								{
+									Path: github.Ptr("pipeline.yaml"),
+									Type: github.Ptr("blob"),
+									SHA:  github.Ptr("pipelinesha"),
+								},
+								{
+									Path: github.Ptr("pipelinerun.yaml"),
+									Type: github.Ptr("blob"),
+									SHA:  github.Ptr("pipelinerunsha"),
+								},
+							},
+						}
+						b, _ := json.Marshal(tree)
+						fmt.Fprint(rw, string(b))
+					})
+
+				// Error handler for /api/graphql
+				mux.HandleFunc("/api/graphql", func(w http.ResponseWriter, _ *http.Request) {
+					http.Error(w, "GraphQL endpoint not available", http.StatusNotFound)
+				})
+			},
+			wantErr: "failed to fetch .tekton files via GraphQL",
+		},
+		{
+			name: "default branch uses resolved sha for graphql",
+			event: &info.Event{
+				Organization:  "tekton",
+				Repository:    "cat",
+				DefaultBranch: "main",
+			},
+			provenance:       "default_branch",
+			skipSetupGitTree: true,
+			setup: func(t *testing.T, mux *http.ServeMux, _ *info.Event) {
+				t.Helper()
+				resolvedSHA := "resolved-default-branch-sha"
+				tektonDirSHA := "tektondirsha"
+
+				mux.HandleFunc("/repos/tekton/cat/branches/main", func(rw http.ResponseWriter, _ *http.Request) {
+					branch := &github.Branch{
+						Name: github.Ptr("main"),
+						Commit: &github.RepositoryCommit{
+							SHA: github.Ptr(resolvedSHA),
+						},
+					}
+					b, _ := json.Marshal(branch)
+					fmt.Fprint(rw, string(b))
+				})
+				mux.HandleFunc("/repos/tekton/cat/git/trees/"+resolvedSHA, func(rw http.ResponseWriter, _ *http.Request) {
+					tree := &github.Tree{
+						SHA: github.Ptr(resolvedSHA),
+						Entries: []*github.TreeEntry{
+							{
+								Path: github.Ptr(".tekton"),
+								Type: github.Ptr("tree"),
+								SHA:  github.Ptr(tektonDirSHA),
+							},
+						},
+					}
+					b, _ := json.Marshal(tree)
+					fmt.Fprint(rw, string(b))
+				})
+				mux.HandleFunc("/repos/tekton/cat/git/trees/"+tektonDirSHA, func(rw http.ResponseWriter, _ *http.Request) {
+					tree := &github.Tree{
+						SHA: github.Ptr(tektonDirSHA),
+						Entries: []*github.TreeEntry{
+							{
+								Path: github.Ptr("pipeline.yaml"),
+								Type: github.Ptr("blob"),
+								SHA:  github.Ptr("pipeline-sha"),
+							},
+							{
+								Path: github.Ptr("pipelinerun.yaml"),
+								Type: github.Ptr("blob"),
+								SHA:  github.Ptr("pipelinerun-sha"),
+							},
+						},
+					}
+					b, _ := json.Marshal(tree)
+					fmt.Fprint(rw, string(b))
+				})
+				mux.HandleFunc("/api/graphql", func(w http.ResponseWriter, r *http.Request) {
+					var graphQLReq struct {
+						Query string `json:"query"`
+					}
+					assert.NilError(t, json.NewDecoder(r.Body).Decode(&graphQLReq))
+					assert.Assert(t, strings.Contains(graphQLReq.Query, resolvedSHA+":.tekton/pipeline.yaml"), graphQLReq.Query)
+					assert.Assert(t, !strings.Contains(graphQLReq.Query, `main:.tekton/pipeline.yaml`), graphQLReq.Query)
+
+					_ = json.NewEncoder(w).Encode(map[string]any{
+						"data": map[string]any{
+							"repository": map[string]any{
+								"file0": map[string]any{"text": "kind: Pipeline\nmetadata:\n  name: pipeline\n"},
+								"file1": map[string]any{"text": "kind: PipelineRun\nmetadata:\n  name: run\n"},
+							},
+						},
+					})
+				})
+			},
+			expectedAPICount: 4,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Common setup
+			prmetrics.ResetRecorder()
+			reader := sdkmetric.NewManualReader()
+			provider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+			otel.SetMeterProvider(provider)
+
+			observer, exporter := zapobserver.New(zap.DebugLevel)
+			fakelogger := zap.New(observer).Sugar()
+			ctx, _ := rtesting.SetupFakeContext(t)
+			fakeclient, mux, _, teardown := ghtesthelper.SetupGH()
+			defer teardown()
+
+			gvcs := Provider{
+				ghClient:     fakeclient,
+				providerName: "github",
+				Logger:       fakelogger,
+			}
+
+			// Custom setup if provided
+			if tt.setup != nil {
+				tt.setup(t, mux, tt.event)
+			}
+
+			// Standard tree setup unless skipped
+			if !tt.skipSetupGitTree && tt.treepath != "" {
+				shaDir := fmt.Sprintf("%x", sha256.Sum256([]byte(tt.treepath)))
+				tt.event.SHA = shaDir
+				ghtesthelper.SetupGitTree(t, mux, tt.treepath, tt.event, false)
+			}
+
+			// Execute test
+			got, err := gvcs.GetTektonDir(ctx, tt.event, ".tekton", tt.provenance)
+
+			// Validate error
+			if tt.wantErr != "" {
+				assert.ErrorContains(t, err, tt.wantErr)
+				return
+			}
+			assert.NilError(t, err)
+
+			// Validate logs if specified
+			if tt.wantLogSnippet != "" {
+				logs := exporter.FilterMessageSnippet(tt.wantLogSnippet)
+				assert.Assert(t, logs.Len() > 0, "expected log message: %s", tt.wantLogSnippet)
+			}
+
+			// Validate metrics if specified
+			if tt.expectedAPICount > 0 {
+				var rm metricdata.ResourceMetrics
+				err = reader.Collect(ctx, &rm)
+				assert.NilError(t, err)
+				count, ok := rm.ScopeMetrics[0].Metrics[0].Data.(metricdata.Sum[int64])
+				assert.Assert(t, ok)
+				assert.Equal(t, count.DataPoints[0].Value, tt.expectedAPICount)
+			}
+
+			// Validate content
+			assert.Assert(t, len(got) > 0, "expected non-empty GetTektonDir output")
 		})
 	}
 }
@@ -696,6 +933,31 @@ func TestGithubGetCommitInfo(t *testing.T) {
 			wantHasSkipCmd: true,
 		},
 		{
+			name: "incoming webhook populates DefaultBranch",
+			event: &info.Event{
+				Organization: "owner",
+				Repository:   "repository",
+				SHA:          "shacommitinfo",
+				EventType:    "incoming",
+			},
+			shaurl:   "https://git.provider/commit/info",
+			shatitle: "My beautiful pony",
+			message:  "My beautiful pony",
+		},
+		{
+			name: "DefaultBranch already set is preserved",
+			event: &info.Event{
+				Organization:  "owner",
+				Repository:    "repository",
+				SHA:           "shacommitinfo",
+				DefaultBranch: "develop",
+				EventType:     "incoming",
+			},
+			shaurl:   "https://git.provider/commit/info",
+			shatitle: "My beautiful pony",
+			message:  "My beautiful pony",
+		},
+		{
 			name: "error",
 			event: &info.Event{
 				Organization: "owner",
@@ -703,6 +965,7 @@ func TestGithubGetCommitInfo(t *testing.T) {
 				SHA:          "shacommitinfo",
 			},
 			apiReply: "hello moto",
+			wantErr:  "invalid character",
 		},
 		{
 			name:     "noclient",
@@ -715,6 +978,12 @@ func TestGithubGetCommitInfo(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			fakeclient, mux, _, teardown := ghtesthelper.SetupGH()
 			defer teardown()
+			// Mock the repo endpoint so GetCommitInfo can resolve DefaultBranch
+			// when it is not already set on the event (e.g. incoming webhooks).
+			mux.HandleFunc(fmt.Sprintf("/repos/%s/%s",
+				tt.event.Organization, tt.event.Repository), func(rw http.ResponseWriter, _ *http.Request) {
+				fmt.Fprint(rw, `{"default_branch": "main"}`)
+			})
 			mux.HandleFunc(fmt.Sprintf("/repos/%s/%s/git/commits/%s",
 				tt.event.Organization, tt.event.Repository, tt.event.SHA), func(rw http.ResponseWriter, _ *http.Request) {
 				if tt.apiReply != "" {
@@ -785,6 +1054,7 @@ func TestGithubGetCommitInfo(t *testing.T) {
 				assert.ErrorContains(t, err, tt.wantErr)
 				return
 			}
+			assert.NilError(t, err)
 			assert.Equal(t, tt.shatitle, tt.event.SHATitle)
 			assert.Equal(t, tt.shaurl, tt.event.SHAURL)
 
@@ -803,6 +1073,16 @@ func TestGithubGetCommitInfo(t *testing.T) {
 				assert.DeepEqual(t, expectedCommitterDate, tt.event.SHACommitterDate)
 			}
 			assert.Equal(t, tt.wantHasSkipCmd, tt.event.HasSkipCommand)
+
+			// For incoming events, verify DefaultBranch is populated
+			if tt.event.EventType == "incoming" {
+				if tt.event.DefaultBranch == "develop" {
+					// If it was already set, it should be preserved
+					assert.Equal(t, "develop", tt.event.DefaultBranch, "DefaultBranch should be preserved")
+				} else {
+					assert.Equal(t, "main", tt.event.DefaultBranch, "DefaultBranch should be populated from API")
+				}
+			}
 		})
 	}
 }
@@ -1407,6 +1687,164 @@ func TestCreateToken(t *testing.T) {
 	if err != nil {
 		assert.ErrorContains(t, err, "could not refresh installation id 1234567's token")
 	}
+}
+
+func TestGetPullRequest(t *testing.T) {
+	const (
+		org   = "owner"
+		repo  = "repo"
+		prNum = 42
+	)
+	prJSON := `{
+		"number": 42,
+		"title": "very cool feature pr",
+		"html_url": "https://github.com/owner/repo/pull/42",
+		"user": {"login": "author"},
+		"head": {
+			"sha": "headsha123",
+			"ref": "feature-branch",
+			"repo": {"html_url": "https://github.com/author/repo"}
+		},
+		"base": {
+			"ref": "main",
+			"repo": {
+				"html_url": "https://github.com/owner/repo",
+				"default_branch": "main",
+				"id": 9876
+			}
+		},
+		"labels": [{"name": "bug"}, {"name": "enhancement"}]
+	}`
+
+	tests := []struct {
+		name              string
+		event             *info.Event
+		apiReturn         string
+		wantErr           bool
+		wantErrStr        string
+		wantSHA           string
+		wantSHAURL        string
+		wantURL           string
+		wantDefaultBranch string
+		wantHeadBranch    string
+		wantBaseBranch    string
+		wantHeadURL       string
+		wantBaseURL       string
+		wantTitle         string
+		wantSender        string
+		wantEventType     string
+		wantLabels        []string
+		wantRepoID        int64
+	}{
+		{
+			name: "populates all event fields from PR response",
+			event: &info.Event{
+				Organization:      org,
+				Repository:        repo,
+				PullRequestNumber: prNum,
+			},
+			apiReturn:         prJSON,
+			wantSHA:           "headsha123",
+			wantSHAURL:        "https://github.com/owner/repo/pull/42/commit/headsha123",
+			wantURL:           "https://github.com/owner/repo",
+			wantDefaultBranch: "main",
+			wantHeadBranch:    "feature-branch",
+			wantBaseBranch:    "main",
+			wantHeadURL:       "https://github.com/author/repo",
+			wantBaseURL:       "https://github.com/owner/repo",
+			wantTitle:         "very cool feature pr",
+			wantSender:        "author",
+			wantEventType:     triggertype.PullRequest.String(),
+			wantLabels:        []string{"bug", "enhancement"},
+			wantRepoID:        9876,
+		},
+		{
+			name: "returns error on API failure",
+			event: &info.Event{
+				Organization:      org,
+				Repository:        repo,
+				PullRequestNumber: prNum,
+			},
+			wantErr:    true,
+			wantErrStr: "404",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, _ := rtesting.SetupFakeContext(t)
+			fakeclient, mux, _, teardown := ghtesthelper.SetupGH()
+			defer teardown()
+
+			if tt.apiReturn != "" {
+				mux.HandleFunc(fmt.Sprintf("/repos/%s/%s/pulls/%d", org, repo, prNum),
+					func(rw http.ResponseWriter, _ *http.Request) {
+						fmt.Fprint(rw, tt.apiReturn)
+					})
+			}
+
+			provider := &Provider{ghClient: fakeclient}
+			got, err := provider.getPullRequest(ctx, tt.event)
+			if tt.wantErr {
+				assert.Assert(t, err != nil)
+				if tt.wantErrStr != "" {
+					assert.ErrorContains(t, err, tt.wantErrStr)
+				}
+				return
+			}
+			assert.NilError(t, err)
+
+			assert.Equal(t, tt.wantSHA, got.SHA)
+			assert.Equal(t, tt.wantSHAURL, got.SHAURL)
+			assert.Equal(t, tt.wantURL, got.URL)
+			assert.Equal(t, tt.wantDefaultBranch, got.DefaultBranch)
+			assert.Equal(t, tt.wantHeadBranch, got.HeadBranch)
+			assert.Equal(t, tt.wantBaseBranch, got.BaseBranch)
+			assert.Equal(t, tt.wantHeadURL, got.HeadURL)
+			assert.Equal(t, tt.wantBaseURL, got.BaseURL)
+			assert.Equal(t, tt.wantTitle, got.PullRequestTitle)
+			assert.Equal(t, tt.wantSender, got.Sender)
+			assert.Equal(t, tt.wantEventType, got.EventType)
+			assert.DeepEqual(t, tt.wantLabels, got.PullRequestLabel)
+			assert.Equal(t, 1, len(provider.RepositoryIDs))
+			assert.Equal(t, tt.wantRepoID, provider.RepositoryIDs[0])
+		})
+	}
+}
+
+func TestGetPullRequestCaching(t *testing.T) {
+	ctx, _ := rtesting.SetupFakeContext(t)
+	fakeclient, mux, _, teardown := ghtesthelper.SetupGH()
+	defer teardown()
+
+	callCount := 0
+	mux.HandleFunc("/repos/owner/repo/pulls/1", func(rw http.ResponseWriter, _ *http.Request) {
+		callCount++
+		fmt.Fprint(rw, `{
+			"number": 1,
+			"title": "cached pr",
+			"html_url": "https://github.com/owner/repo/pull/1",
+			"user": {"login": "author"},
+			"head": {"sha": "abc", "ref": "head", "repo": {"html_url": "https://github.com/author/repo"}},
+			"base": {"ref": "main", "repo": {"html_url": "https://github.com/owner/repo", "default_branch": "main", "id": 1}},
+			"labels": [{"name": "bug"}, {"name": "enhancement"}]
+		}`)
+	})
+
+	event := &info.Event{
+		Organization:      "owner",
+		Repository:        "repo",
+		PullRequestNumber: 1,
+	}
+	provider := &Provider{ghClient: fakeclient}
+
+	_, err := provider.getPullRequest(ctx, event)
+	assert.NilError(t, err)
+	assert.Equal(t, 1, callCount, "expected exactly one API call on first invocation")
+
+	_, err = provider.getPullRequest(ctx, event)
+	assert.NilError(t, err)
+	assert.Equal(t, 1, callCount, "expected no additional API call on second invocation (cache hit)")
 }
 
 func TestIsHeadCommitOfBranch(t *testing.T) {
