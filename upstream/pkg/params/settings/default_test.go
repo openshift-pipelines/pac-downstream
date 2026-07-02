@@ -175,6 +175,29 @@ func TestGetCatalogHub(t *testing.T) {
 			httpClient:  mockHTTPClient,
 		},
 		{
+			name: "tektonhub default catalog emits deprecation warning",
+			config: map[string]string{
+				"hub-catalog-type": "tektonhub",
+			},
+			numCatalogs: 1,
+			hubCatalogs: &sync.Map{},
+			wantLog:     "CONFIG: Tekton Hub catalog type is deprecated and will be removed in a future release",
+			httpClient:  mockHTTPClient,
+		},
+		{
+			name: "tektonhub custom catalog emits deprecation warning",
+			config: map[string]string{
+				"catalog-1-id":   "myhub",
+				"catalog-1-url":  "https://myhub.com",
+				"catalog-1-name": "tekton",
+				"catalog-1-type": "tektonhub",
+			},
+			numCatalogs: 2,
+			hubCatalogs: &sync.Map{},
+			wantLog:     "CONFIG: custom catalog myhub uses Tekton Hub type, which is deprecated",
+			httpClient:  mockHTTPClient,
+		},
+		{
 			name: "custom catalog type detection via API - success (ArtifactHub)",
 			config: map[string]string{
 				"catalog-1-id":   "example-ah",

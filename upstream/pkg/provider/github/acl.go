@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/google/go-github/v84/github"
+	"github.com/google/go-github/v85/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/acl"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/opscomments"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
@@ -25,7 +25,7 @@ func (v *Provider) CheckPolicyAllowing(ctx context.Context, event *info.Event, a
 			members, resp, err := wrapAPI(v, "list_team_members_by_slug", func() ([]*github.User, *github.Response, error) {
 				return v.Client().Teams.ListTeamMembersBySlug(ctx, event.Organization, team, &github.TeamListTeamMembersOptions{ListOptions: opt})
 			})
-			if resp.StatusCode == http.StatusNotFound {
+			if resp != nil && resp.StatusCode == http.StatusNotFound {
 				// we explicitly disallow the policy when the team is not found
 				// maybe we should ignore it instead? i'd rather keep this explicit
 				// and conservative since being security related.
@@ -142,14 +142,14 @@ func (v *Provider) aclAllowedOkToTestFromAnOwner(ctx context.Context, event *inf
 		if !v.pacInfo.RememberOKToTest {
 			return v.aclAllowedOkToTestCurrentComment(ctx, revent, event.Comment.GetID())
 		}
-		revent.URL = event.Issue.GetPullRequestLinks().GetHTMLURL()
+		revent.PullRequestNumber = event.GetIssue().GetNumber()
 	case *github.PullRequestEvent:
 		// if we don't need to check old comments, then on push event we don't need
 		// to check anything for the non-allowed user
 		if !v.pacInfo.RememberOKToTest {
 			return false, nil
 		}
-		revent.URL = event.GetPullRequest().GetHTMLURL()
+		revent.PullRequestNumber = event.GetPullRequest().GetNumber()
 	default:
 		return false, nil
 	}
@@ -204,15 +204,18 @@ func (v *Provider) aclCheckAll(ctx context.Context, rev *info.Event) (bool, erro
 		return true, nil
 	}
 
-	// If the user who has submitted the PR is not a owner or public member or Collaborator or not there in OWNERS file
-	// but has permission to push to branches then allow the CI to be run.
-	// This can only happen with GithubApp and Bots.
-	// Ex: dependabot, bots
-	if rev.PullRequestNumber != 0 {
+	// Allow same-repo pull requests from bots or other non-members when the PR
+	// branch lives in this repository instead of a fork.
+	if v.canUseSameRepoPullRequestShortcut(rev) {
 		isFromSameRepo := v.checkPullRequestForSameURL(ctx, rev)
 		if isFromSameRepo {
 			return true, nil
 		}
+	} else if rev.PullRequestNumber != 0 && v.Logger != nil {
+		v.Logger.Debugf(
+			"Skipping same-repo pull request shortcut for untrusted event %T on %s/%s#%d from sender %s",
+			rev.Event, rev.Organization, rev.Repository, rev.PullRequestNumber, rev.Sender,
+		)
 	}
 
 	// If the user who has submitted the pr is a owner on the repo then allows
@@ -238,13 +241,30 @@ func (v *Provider) aclCheckAll(ctx context.Context, rev *info.Event) (bool, erro
 	return v.IsAllowedOwnersFile(ctx, rev)
 }
 
-// checkPullRequestForSameURL checks if a pull request's head and base branches are from the same repository.
-// means if the user has access to create a branch in the repository without forking or having any
-// permissions then PAC should allow to run CI.
+// canUseSameRepoPullRequestShortcut returns true only for event types where
+// the sender is expected to match the pull request author. That keeps the
+// same-repo shortcut available for PR and rerequest flows, but not comments.
+func (v *Provider) canUseSameRepoPullRequestShortcut(rev *info.Event) bool {
+	if rev.PullRequestNumber == 0 {
+		return false
+	}
+
+	switch rev.Event.(type) {
+	case *github.PullRequestEvent, *github.CheckRunEvent, *github.CheckSuiteEvent:
+		return true
+	default:
+		return false
+	}
+}
+
+// checkPullRequestForSameURL returns true when the PR comes from another branch
+// in the same repository instead of from a fork.
 //
-//	ex: dependabot, *[bot] etc...
+// This is the fast path that lets bot-authored PRs such as Dependabot run
+// without needing collaborator, org-member, or OWNERS access.
 //
-// HeadURL is set by getPullRequest() before aclCheckAll; if missing, fall through to other ACL checks.
+// HeadURL is filled by getPullRequest() before aclCheckAll. If it is missing,
+// ACL falls back to the regular membership checks.
 func (v *Provider) checkPullRequestForSameURL(_ context.Context, runevent *info.Event) bool {
 	if runevent.HeadURL == "" {
 		return false
@@ -310,10 +330,6 @@ func (v *Provider) getFileFromDefaultBranch(ctx context.Context, path string, ru
 // the comments text of a pull request.
 func (v *Provider) GetStringPullRequestComment(ctx context.Context, runevent *info.Event) ([]*github.IssueComment, error) {
 	var ret []*github.IssueComment
-	prNumber, err := convertPullRequestURLtoNumber(runevent.URL)
-	if err != nil {
-		return nil, err
-	}
 
 	opt := &github.IssueListCommentsOptions{
 		ListOptions: github.ListOptions{PerPage: v.PaginedNumber},
@@ -321,10 +337,10 @@ func (v *Provider) GetStringPullRequestComment(ctx context.Context, runevent *in
 
 	gitOpsCommentPrefix := provider.GetGitOpsCommentPrefix(v.repo)
 
-	for {
+	for page := 0; page < maxCommentPages; page++ {
 		comments, resp, err := wrapAPI(v, "list_issue_comments", func() ([]*github.IssueComment, *github.Response, error) {
 			return v.Client().Issues.ListComments(ctx, runevent.Organization, runevent.Repository,
-				prNumber, opt)
+				runevent.PullRequestNumber, opt)
 		})
 		if err != nil {
 			return nil, err
