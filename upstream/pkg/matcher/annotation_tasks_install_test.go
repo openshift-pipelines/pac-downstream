@@ -243,6 +243,7 @@ func TestGetTaskFromAnnotationName(t *testing.T) {
 		wantErr                string
 		wantLog                string
 		wantProviderRemoteTask bool
+		wantDeprecated         bool
 	}{
 		{
 			name: "test-annotations-error-remote-http-not-k8",
@@ -346,10 +347,11 @@ func TestGetTaskFromAnnotationName(t *testing.T) {
 			wantErr: "remote task \"foo://bar\" not found",
 		},
 		{
-			name:        "test-get-from-custom-hub",
-			gotTaskName: "task",
-			task:        "anotherHub://chmouzie",
-			wantLog:     "successfully fetched task chmouzie from custom catalog Hub anotherHub on URL https://mybelovedhub",
+			name:           "test-get-from-custom-hub",
+			gotTaskName:    "task",
+			task:           "anotherHub://chmouzie",
+			wantLog:        "successfully fetched task chmouzie from custom catalog Hub anotherHub on URL https://mybelovedhub",
+			wantDeprecated: true,
 			remoteURLS: map[string]map[string]string{
 				testHubURL + "/resource/" + testCatalogHubName + "/task/chmouzie": {
 					"body": `{"data": {"LatestVersion": {"version": "0.1"}}}`,
@@ -362,9 +364,10 @@ func TestGetTaskFromAnnotationName(t *testing.T) {
 			},
 		},
 		{
-			name:        "test-get-from-hub-latest",
-			gotTaskName: "task",
-			task:        "chmouzie",
+			name:           "test-get-from-hub-latest",
+			gotTaskName:    "task",
+			task:           "chmouzie",
+			wantDeprecated: true,
 			remoteURLS: map[string]map[string]string{
 				testHubURL + "/resource/" + testCatalogHubName + "/task/chmouzie": {
 					"body": `{"data": {"LatestVersion": {"version": "0.1"}}}`,
@@ -377,9 +380,10 @@ func TestGetTaskFromAnnotationName(t *testing.T) {
 			},
 		},
 		{
-			name:        "test-get-from-hub-specific-version",
-			gotTaskName: "task",
-			task:        "chmouzie:0.2",
+			name:           "test-get-from-hub-specific-version",
+			gotTaskName:    "task",
+			task:           "chmouzie:0.2",
+			wantDeprecated: true,
 			remoteURLS: map[string]map[string]string{
 				testHubURL + "/resource/" + testCatalogHubName + "/task/chmouzie/0.2": {
 					"body": `{}`,
@@ -468,6 +472,13 @@ func TestGetTaskFromAnnotationName(t *testing.T) {
 			if tt.gotTaskName != "" {
 				assert.Equal(t, tt.gotTaskName, got.GetName())
 			}
+
+			if tt.wantDeprecated {
+				assert.Assert(t, len(rt.DeprecatedHubResources) > 0, "expected DeprecatedHubResources to be populated for tektonhub catalog")
+				assert.Assert(t, len(fakelog.FilterMessageSnippet("Tekton Hub integration is deprecated").TakeAll()) > 0, "expected deprecation warning in logs")
+			} else {
+				assert.Assert(t, len(rt.DeprecatedHubResources) == 0, "expected DeprecatedHubResources to be empty for non-tektonhub catalog")
+			}
 		})
 	}
 }
@@ -511,6 +522,7 @@ func TestGetPipelineFromAnnotationName(t *testing.T) {
 		runevent        info.Event
 		wantErr         string
 		wantLog         string
+		wantDeprecated  bool
 	}{
 		{
 			name:            "good/fetching from remote http",
@@ -609,6 +621,7 @@ func TestGetPipelineFromAnnotationName(t *testing.T) {
 			gotPipelineName: "pipeline",
 			pipeline:        "anotherHub://chmouzie",
 			wantLog:         "successfully fetched pipeline chmouzie from custom catalog Hub anotherHub on URL https://mybelovedhub",
+			wantDeprecated:  true,
 			remoteURLS: map[string]map[string]string{
 				testHubURL + "/resource/" + testCatalogHubName + "/pipeline/chmouzie": {
 					"body": `{"data": {"LatestVersion": {"version": "0.1"}}}`,
@@ -624,6 +637,7 @@ func TestGetPipelineFromAnnotationName(t *testing.T) {
 			name:            "test-get-from-hub-latest",
 			gotPipelineName: "pipeline",
 			pipeline:        "chmouzie",
+			wantDeprecated:  true,
 			remoteURLS: map[string]map[string]string{
 				testHubURL + "/resource/" + testCatalogHubName + "/pipeline/chmouzie": {
 					"body": `{"data": {"LatestVersion": {"version": "0.1"}}}`,
@@ -639,6 +653,7 @@ func TestGetPipelineFromAnnotationName(t *testing.T) {
 			name:            "test-get-from-hub-specific-version",
 			gotPipelineName: "pipeline",
 			pipeline:        "chmouzie:0.2",
+			wantDeprecated:  true,
 			remoteURLS: map[string]map[string]string{
 				testHubURL + "/resource/" + testCatalogHubName + "/pipeline/chmouzie/0.2": {
 					"body": `{}`,
@@ -727,6 +742,13 @@ func TestGetPipelineFromAnnotationName(t *testing.T) {
 
 			if tt.gotPipelineName != "" {
 				assert.Equal(t, tt.gotPipelineName, got.GetName())
+			}
+
+			if tt.wantDeprecated {
+				assert.Assert(t, len(rt.DeprecatedHubResources) > 0, "expected DeprecatedHubResources to be populated for tektonhub catalog")
+				assert.Assert(t, len(fakelog.FilterMessageSnippet("Tekton Hub integration is deprecated").TakeAll()) > 0, "expected deprecation warning in logs")
+			} else {
+				assert.Assert(t, len(rt.DeprecatedHubResources) == 0, "expected DeprecatedHubResources to be empty for non-tektonhub catalog")
 			}
 		})
 	}

@@ -22,6 +22,10 @@ Check these boxes to add the permissions to the token:
 - **read:repository:bitbucket**
 - **write:repository:bitbucket**
 
+{{< callout type="info" >}}
+Note: if you're contributing to PaC and want to run PaC E2E test locally you need one more permission i.e. **write:pullrequest:bitbucket** to create pull requests in E2E test.
+{{< /callout >}}
+
 Store the generated token in a safe place, or you will have to recreate it.
 
 ## Webhook Configuration using the CLI
