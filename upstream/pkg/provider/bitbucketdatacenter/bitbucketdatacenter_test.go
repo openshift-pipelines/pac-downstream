@@ -15,12 +15,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/clients"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/settings"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
 	bbtest "github.com/openshift-pipelines/pipelines-as-code/pkg/provider/bitbucketdatacenter/test"
+	bbtypes "github.com/openshift-pipelines/pipelines-as-code/pkg/provider/bitbucketdatacenter/types"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/status"
 	"go.opentelemetry.io/otel"
 
@@ -308,13 +310,15 @@ func TestSetClient(t *testing.T) {
 		name          string
 		apiURL        string
 		opts          *info.Event
+		repo          *v1alpha1.Repository
 		wantErrSubstr string
+		muxToken      func(w http.ResponseWriter, r *http.Request)
 		muxUser       func(w http.ResponseWriter, r *http.Request)
 	}{
 		{
-			name:          "bad/no username",
+			name:          "bad/no token",
 			opts:          info.NewEvent(),
-			wantErrSubstr: "no spec.git_provider.user",
+			wantErrSubstr: "no spec.git_provider.secret",
 		},
 		{
 			name: "bad/no secret",
@@ -329,57 +333,125 @@ func TestSetClient(t *testing.T) {
 			name: "bad/no url",
 			opts: &info.Event{
 				Provider: &info.Provider{
-					User:  "foo",
 					Token: "bar",
 				},
 			},
 			wantErrSubstr: "no spec.git_provider.url",
 		},
 		{
-			name: "bad/invalid user",
+			name: "bad/invalid user in whomi",
+			opts: &info.Event{
+				Provider: &info.Provider{
+					Token: "bar",
+					URL:   "https://fakebitbucketdc",
+				},
+			},
+			muxToken: func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusUnauthorized)
+				_, _ = w.Write([]byte(`{"errors": [{"message": "Unauthorized"}]}`))
+			},
+			apiURL:        "https://fakebitbucketdc/rest",
+			wantErrSubstr: "token validation failed: unauthorized",
+		},
+		{
+			name: "bad/invalid user at rest after whomi",
 			opts: &info.Event{
 				Provider: &info.Provider{
 					User:  "foo",
 					Token: "bar",
-					URL:   "https://foo.bar",
+					URL:   "https://fakebitbucketdc",
 				},
+			},
+			muxToken: func(w http.ResponseWriter, _ *http.Request) {
+				fmt.Fprint(w, `foo`)
 			},
 			muxUser: func(w http.ResponseWriter, _ *http.Request) {
 				w.WriteHeader(http.StatusUnauthorized)
 				_, _ = w.Write([]byte(`{"errors": [{"message": "Unauthorized"}]}`))
 			},
-			apiURL:        "https://foo.bar/rest",
-			wantErrSubstr: "cannot get user foo with token",
+			apiURL:        "https://fakebitbucketdc/rest",
+			wantErrSubstr: "token validation failed: unauthorized",
 		},
 		{
-			name: "bad/unknown error",
+			name: "internal error at whoami",
 			opts: &info.Event{
 				Provider: &info.Provider{
 					User:  "foo",
 					Token: "bar",
-					URL:   "https://foo.bar",
+					URL:   "https://fakebitbucketdc",
 				},
+			},
+			muxToken: func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusInternalServerError)
+			},
+			apiURL:        "https://fakebitbucketdc/rest",
+			wantErrSubstr: "token validation failed: Internal Server Error",
+		},
+		{
+			name: "not found at whoami",
+			opts: &info.Event{
+				Provider: &info.Provider{
+					User:  "foo",
+					Token: "bar",
+					URL:   "https://fakebitbucketdc",
+				},
+			},
+			muxToken: func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusNotFound)
+			},
+			apiURL:        "https://fakebitbucketdc/rest",
+			wantErrSubstr: "token validation failed: http status: 404 : ",
+		},
+		{
+			name: "not found at whoami with error message",
+			opts: &info.Event{
+				Provider: &info.Provider{
+					User:  "foo",
+					Token: "bar",
+					URL:   "https://fakebitbucketdc",
+				},
+			},
+			muxToken: func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusNotFound)
+				_, _ = w.Write([]byte(`{"errors": [{"message": "Not Found"}]}`))
+			},
+			apiURL:        "https://fakebitbucketdc/rest",
+			wantErrSubstr: "token validation failed: http status: 404 : Not Found",
+		},
+		{
+			name: "internal error at users rest",
+			opts: &info.Event{
+				Provider: &info.Provider{
+					User:  "foo",
+					Token: "bar",
+					URL:   "https://fakebitbucketdc",
+				},
+			},
+			muxToken: func(w http.ResponseWriter, _ *http.Request) {
+				fmt.Fprint(w, `foo`)
 			},
 			muxUser: func(w http.ResponseWriter, _ *http.Request) {
 				w.WriteHeader(http.StatusInternalServerError)
 				_, _ = w.Write([]byte(`{"errors": [{"message": "Internal Server Error"}]}`))
 			},
-			apiURL:        "https://foo.bar/rest",
-			wantErrSubstr: "cannot get user foo: Internal Server Error",
+			apiURL:        "https://fakebitbucketdc/rest",
+			wantErrSubstr: "token validation failed: Internal Server Error",
 		},
 		{
 			name: "good/url append /rest",
 			opts: &info.Event{
 				Provider: &info.Provider{
-					User:  "foo",
 					Token: "bar",
-					URL:   "https://foo.bar",
+					URL:   "https://fakebitbucketdc",
 				},
+			},
+			muxToken: func(w http.ResponseWriter, _ *http.Request) {
+				fmt.Fprint(w, `foo`)
 			},
 			muxUser: func(w http.ResponseWriter, _ *http.Request) {
 				fmt.Fprint(w, `{"name": "foo"}`)
 			},
-			apiURL: "https://foo.bar/rest",
+			apiURL: "https://fakebitbucketdc/rest",
 		},
 	}
 	for _, tt := range tests {
@@ -394,11 +466,14 @@ func TestSetClient(t *testing.T) {
 			ctx, _ := rtesting.SetupFakeContext(t)
 			client, mux, tearDown, tURL := bbtest.SetupBBDataCenterClient()
 			defer tearDown()
+			if tt.muxToken != nil {
+				mux.HandleFunc("/whoami", tt.muxToken)
+			}
 			if tt.muxUser != nil {
 				mux.HandleFunc("/users/foo", tt.muxUser)
 			}
 			v := &Provider{client: client, baseURL: tURL}
-			err := v.SetClient(ctx, fakeRun, tt.opts, nil, nil)
+			err := v.SetClient(ctx, fakeRun, tt.opts, tt.repo, nil)
 			if tt.wantErrSubstr != "" {
 				assert.ErrorContains(t, err, tt.wantErrSubstr)
 				return
@@ -707,40 +782,62 @@ func TestGetFiles(t *testing.T) {
 		PullRequestNumber: 1,
 	}
 
-	pushFiles := []*bbtest.DiffStat{
+	pushFiles := []*bbtypes.DiffStat{
 		{
-			Path: bbtest.DiffPath{ToString: "added.md"},
+			Path: bbtypes.DiffPath{ToString: "added.md"},
 			Type: "ADD",
 		},
 		{
-			Path: bbtest.DiffPath{ToString: "modified.txt"},
+			Path: bbtypes.DiffPath{ToString: "modified.txt"},
 			Type: "MODIFY",
 		},
 		{
-			Path: bbtest.DiffPath{ToString: "renamed.yaml"},
+			Path: bbtypes.DiffPath{ToString: "renamed.yaml"},
 			Type: "MOVE",
 		},
 		{
-			Path: bbtest.DiffPath{ToString: "deleted.go"},
+			Path: bbtypes.DiffPath{ToString: "deleted.go"},
 			Type: "DELETE",
 		},
 	}
 
-	pullRequestFiles := []*bbtest.DiffStat{
+	pullRequestFiles := []*bbtypes.DiffStat{
 		{
-			Path: bbtest.DiffPath{ToString: "added.go"},
+			Path: bbtypes.DiffPath{ToString: "added.go"},
 			Type: "ADD",
 		},
 		{
-			Path: bbtest.DiffPath{ToString: "modified.yaml"},
+			Path: bbtypes.DiffPath{ToString: "modified.yaml"},
 			Type: "MODIFY",
 		},
 		{
-			Path: bbtest.DiffPath{ToString: "renamed.txt"},
+			Path: bbtypes.DiffPath{ToString: "renamed.txt"},
 			Type: "MOVE",
 		},
 		{
-			Path: bbtest.DiffPath{ToString: "deleted.md"},
+			Path: bbtypes.DiffPath{ToString: "deleted.md"},
+			Type: "DELETE",
+		},
+	}
+
+	mergeCommitPushEvent := &info.Event{
+		SHA:           "MERGESHA456",
+		Organization:  "pac",
+		Repository:    "test",
+		TriggerTarget: triggertype.Push,
+	}
+
+	mergeCommitFiles := []*bbtypes.DiffStat{
+		{
+			Path: bbtypes.DiffPath{ToString: "merge-added.go"},
+			Type: "ADD",
+		},
+		{
+			Path: bbtypes.DiffPath{ToString: "merge-modified.txt"},
+			Type: "MODIFY",
+		},
+		{
+			Path: bbtypes.DiffPath{ToString: "merge-deleted.md"},
 			Type: "DELETE",
 		},
 	}
@@ -748,7 +845,8 @@ func TestGetFiles(t *testing.T) {
 	tests := []struct {
 		name                   string
 		event                  *info.Event
-		changeFiles            []*bbtest.DiffStat
+		changeFiles            []*bbtypes.DiffStat
+		previousHeadCommit     string
 		wantAddedFilesCount    int
 		wantDeletedFilesCount  int
 		wantModifiedFilesCount int
@@ -794,6 +892,23 @@ func TestGetFiles(t *testing.T) {
 			wantError:              true,
 			errMsg:                 "failed to list changes for pull request: No message available",
 		},
+		{
+			name:                   "good/merge commit push event",
+			event:                  mergeCommitPushEvent,
+			changeFiles:            mergeCommitFiles,
+			previousHeadCommit:     "PREVIOUSHEAD789",
+			wantAddedFilesCount:    1,
+			wantDeletedFilesCount:  1,
+			wantModifiedFilesCount: 1,
+			wantRenamedFilesCount:  0,
+		},
+		{
+			name:               "bad/merge commit push event api error",
+			event:              mergeCommitPushEvent,
+			previousHeadCommit: "PREVIOUSHEAD789",
+			wantError:          true,
+			errMsg:             "failed to list changes for commit MERGESHA456: failed to get merge commit changes: status code: 401",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -801,11 +916,25 @@ func TestGetFiles(t *testing.T) {
 			client, mux, tearDown, tURL := bbtest.SetupBBDataCenterClient()
 			defer tearDown()
 
-			stats := &bbtest.DiffStats{
+			stats := &bbtypes.DiffStats{
+				Pagination: bbtypes.Pagination{
+					LastPage: true,
+				},
 				Values: tt.changeFiles,
 			}
 
-			if tt.event.TriggerTarget == triggertype.Push {
+			if tt.event.TriggerTarget == triggertype.Push && tt.previousHeadCommit != "" {
+				mux.HandleFunc("/projects/pac/repos/test/changes", func(w http.ResponseWriter, r *http.Request) {
+					if tt.wantError {
+						w.WriteHeader(http.StatusUnauthorized)
+						return
+					}
+					assert.Equal(t, r.URL.Query().Get("since"), tt.previousHeadCommit)
+					assert.Equal(t, r.URL.Query().Get("until"), tt.event.SHA)
+					b, _ := json.Marshal(stats)
+					fmt.Fprint(w, string(b))
+				})
+			} else if tt.event.TriggerTarget == triggertype.Push {
 				mux.HandleFunc("/projects/pac/repos/test/commits/IAMSHA123/changes", func(w http.ResponseWriter, _ *http.Request) {
 					if tt.wantError {
 						w.WriteHeader(http.StatusUnauthorized)
@@ -831,7 +960,7 @@ func TestGetFiles(t *testing.T) {
 			provider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
 			otel.SetMeterProvider(provider)
 
-			v := &Provider{client: client, baseURL: tURL, triggerEvent: string(tt.event.TriggerTarget)}
+			v := &Provider{client: client, baseURL: tURL, triggerEvent: string(tt.event.TriggerTarget), previousHeadCommit: tt.previousHeadCommit}
 			changedFiles, err := v.GetFiles(ctx, tt.event)
 			if tt.wantError {
 				assert.Equal(t, err.Error(), tt.errMsg)
@@ -855,33 +984,37 @@ func TestGetFiles(t *testing.T) {
 				}
 			}
 
-			var rm metricdata.ResourceMetrics
-			err = reader.Collect(ctx, &rm)
-			assert.NilError(t, err, "error collecting metrics")
+			// getMergeCommitChanges uses v.client.Do directly (not v.Client()),
+			// so no API usage metrics are recorded for that path.
+			if tt.previousHeadCommit == "" {
+				var rm metricdata.ResourceMetrics
+				err = reader.Collect(ctx, &rm)
+				assert.NilError(t, err, "error collecting metrics")
 
-			assert.Equal(t, len(rm.ScopeMetrics), 1)
-			assert.Equal(t, len(rm.ScopeMetrics[0].Metrics), 1)
-			assert.Equal(t, rm.ScopeMetrics[0].Metrics[0].Name, "pipelines_as_code_git_provider_api_request_count")
-			count, ok := rm.ScopeMetrics[0].Metrics[0].Data.(metricdata.Sum[int64])
-			assert.Assert(t, ok)
-			assert.Equal(t, count.DataPoints[0].Value, int64(1))
-
-			_, _ = v.GetFiles(ctx, tt.event)
-			// recollect the metrics af
-			err = reader.Collect(ctx, &rm)
-			assert.NilError(t, err, "error collecting metrics")
-
-			assert.Equal(t, len(rm.ScopeMetrics), 1)
-			assert.Equal(t, len(rm.ScopeMetrics[0].Metrics), 1)
-			assert.Equal(t, rm.ScopeMetrics[0].Metrics[0].Name, "pipelines_as_code_git_provider_api_request_count")
-			count, ok = rm.ScopeMetrics[0].Metrics[0].Data.(metricdata.Sum[int64])
-			assert.Assert(t, ok)
-			if tt.wantError {
-				// no caching on error so we expect 2 metrics
-				assert.Equal(t, count.DataPoints[0].Value, int64(2))
-			} else {
-				// caching on success so we expect 1 metric
+				assert.Equal(t, len(rm.ScopeMetrics), 1)
+				assert.Equal(t, len(rm.ScopeMetrics[0].Metrics), 1)
+				assert.Equal(t, rm.ScopeMetrics[0].Metrics[0].Name, "pipelines_as_code_git_provider_api_request_count")
+				count, ok := rm.ScopeMetrics[0].Metrics[0].Data.(metricdata.Sum[int64])
+				assert.Assert(t, ok)
 				assert.Equal(t, count.DataPoints[0].Value, int64(1))
+
+				_, _ = v.GetFiles(ctx, tt.event)
+				// recollect the metrics af
+				err = reader.Collect(ctx, &rm)
+				assert.NilError(t, err, "error collecting metrics")
+
+				assert.Equal(t, len(rm.ScopeMetrics), 1)
+				assert.Equal(t, len(rm.ScopeMetrics[0].Metrics), 1)
+				assert.Equal(t, rm.ScopeMetrics[0].Metrics[0].Name, "pipelines_as_code_git_provider_api_request_count")
+				count, ok = rm.ScopeMetrics[0].Metrics[0].Data.(metricdata.Sum[int64])
+				assert.Assert(t, ok)
+				if tt.wantError {
+					// no caching on error so we expect 2 metrics
+					assert.Equal(t, count.DataPoints[0].Value, int64(2))
+				} else {
+					// caching on success so we expect 1 metric
+					assert.Equal(t, count.DataPoints[0].Value, int64(1))
+				}
 			}
 		})
 	}

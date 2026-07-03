@@ -154,9 +154,10 @@ func TestRemote(t *testing.T) {
 		{
 			name: "remote pipeline with remote task from pipeline",
 			pipelineruns: []*tektonv1.PipelineRun{
-				ttkn.MakePR(randomPipelineRunName, map[string]string{
-					apipac.Pipeline: remotePipelineURL,
-				},
+				ttkn.MakePR(
+					randomPipelineRunName, map[string]string{
+						apipac.Pipeline: remotePipelineURL,
+					},
 					tektonv1.PipelineRunSpec{
 						PipelineRef: &tektonv1.PipelineRef{
 							Name: "remote-pipeline",
@@ -188,18 +189,20 @@ func TestRemote(t *testing.T) {
 		{
 			name: "remote pipelines with relative tasks",
 			pipelineruns: []*tektonv1.PipelineRun{
-				ttkn.MakePR(randomPipelineRunName, map[string]string{
-					apipac.Pipeline: remotePipelineURL,
-				},
+				ttkn.MakePR(
+					randomPipelineRunName, map[string]string{
+						apipac.Pipeline: remotePipelineURL,
+					},
 					tektonv1.PipelineRunSpec{
 						PipelineRef: &tektonv1.PipelineRef{
 							Name: remotePipelineName,
 						},
 					},
 				),
-				ttkn.MakePR(randomPipelineRunName, map[string]string{
-					apipac.Pipeline: remotePipelineURL + "-1",
-				},
+				ttkn.MakePR(
+					randomPipelineRunName, map[string]string{
+						apipac.Pipeline: remotePipelineURL + "-1",
+					},
 					tektonv1.PipelineRunSpec{
 						PipelineRef: &tektonv1.PipelineRef{
 							Name: remotePipelineName,
@@ -247,18 +250,20 @@ func TestRemote(t *testing.T) {
 		{
 			name: "multiple pipelineruns sharing same remote pipeline with relative tasks, pipeline and tasks all resolve",
 			pipelineruns: []*tektonv1.PipelineRun{
-				ttkn.MakePR(randomPipelineRunName, map[string]string{
-					apipac.Pipeline: remotePipelineURL,
-				},
+				ttkn.MakePR(
+					randomPipelineRunName, map[string]string{
+						apipac.Pipeline: remotePipelineURL,
+					},
 					tektonv1.PipelineRunSpec{
 						PipelineRef: &tektonv1.PipelineRef{
 							Name: remotePipelineName,
 						},
 					},
 				),
-				ttkn.MakePR(randomPipelineRunName+"-second", map[string]string{
-					apipac.Pipeline: remotePipelineURL, // SAME URL as first PipelineRun
-				},
+				ttkn.MakePR(
+					randomPipelineRunName+"-second", map[string]string{
+						apipac.Pipeline: remotePipelineURL, // SAME URL as first PipelineRun
+					},
 					tektonv1.PipelineRunSpec{
 						PipelineRef: &tektonv1.PipelineRef{
 							Name: remotePipelineName,
@@ -294,10 +299,11 @@ func TestRemote(t *testing.T) {
 		{
 			name: "remote pipeline with remote task in pipeline overridden from pipelinerun",
 			pipelineruns: []*tektonv1.PipelineRun{
-				ttkn.MakePR(randomPipelineRunName, map[string]string{
-					apipac.Pipeline: remotePipelineURL,
-					apipac.Task:     taskFromPipelineRunURL,
-				},
+				ttkn.MakePR(
+					randomPipelineRunName, map[string]string{
+						apipac.Pipeline: remotePipelineURL,
+						apipac.Task:     taskFromPipelineRunURL,
+					},
 					tektonv1.PipelineRunSpec{
 						PipelineRef: &tektonv1.PipelineRef{
 							Name: "remote-pipeline",
@@ -329,7 +335,8 @@ func TestRemote(t *testing.T) {
 		{
 			name: "remote pipelinerun no annotations",
 			pipelineruns: []*tektonv1.PipelineRun{
-				ttkn.MakePR(randomPipelineRunName, map[string]string{},
+				ttkn.MakePR(
+					randomPipelineRunName, map[string]string{},
 					tektonv1.PipelineRunSpec{
 						PipelineRef: &tektonv1.PipelineRef{
 							Name: "remote-pipeline",
@@ -343,9 +350,10 @@ func TestRemote(t *testing.T) {
 			name:           "error/remote pipelinerun is 404",
 			wantErrSnippet: "error getting remote pipeline \"" + remotePipelineURL + "\"",
 			pipelineruns: []*tektonv1.PipelineRun{
-				ttkn.MakePR(randomPipelineRunName, map[string]string{
-					apipac.Pipeline: remotePipelineURL,
-				},
+				ttkn.MakePR(
+					randomPipelineRunName, map[string]string{
+						apipac.Pipeline: remotePipelineURL,
+					},
 					tektonv1.PipelineRunSpec{
 						PipelineRef: &tektonv1.PipelineRef{
 							Name: "remote-pipeline",
@@ -357,11 +365,12 @@ func TestRemote(t *testing.T) {
 		{
 			name: "skip fetching multiple tasks of the same name from pipelinerun annotations and pipeline annotation",
 			pipelineruns: []*tektonv1.PipelineRun{
-				ttkn.MakePR(randomPipelineRunName, map[string]string{
-					apipac.Pipeline:    remotePipelineURL,
-					apipac.Task:        remoteTaskURL,
-					apipac.Task + "-1": remoteTaskURL,
-				},
+				ttkn.MakePR(
+					randomPipelineRunName, map[string]string{
+						apipac.Pipeline:    remotePipelineURL,
+						apipac.Task:        remoteTaskURL,
+						apipac.Task + "-1": remoteTaskURL,
+					},
 					tektonv1.PipelineRunSpec{
 						PipelineRef: &tektonv1.PipelineRef{
 							Name: "remote-pipeline",
@@ -389,10 +398,11 @@ func TestRemote(t *testing.T) {
 		{
 			name: "skip fetching multiple tasks of the same name from pipelinerun annotations and tektondir",
 			pipelineruns: []*tektonv1.PipelineRun{
-				ttkn.MakePR(randomPipelineRunName, map[string]string{
-					apipac.Pipeline: remotePipelineURL,
-					apipac.Task:     remoteTaskURL,
-				},
+				ttkn.MakePR(
+					randomPipelineRunName, map[string]string{
+						apipac.Pipeline: remotePipelineURL,
+						apipac.Task:     remoteTaskURL,
+					},
 					tektonv1.PipelineRunSpec{
 						PipelineRef: &tektonv1.PipelineRef{
 							Name: "remote-pipeline",
@@ -425,10 +435,11 @@ func TestRemote(t *testing.T) {
 		{
 			name: "skip fetching multiple pipelines of the same name from pipelinerun annotations and tektondir",
 			pipelineruns: []*tektonv1.PipelineRun{
-				ttkn.MakePR(randomPipelineRunName, map[string]string{
-					apipac.Pipeline: remotePipelineURL,
-					apipac.Task:     remoteTaskURL,
-				},
+				ttkn.MakePR(
+					randomPipelineRunName, map[string]string{
+						apipac.Pipeline: remotePipelineURL,
+						apipac.Task:     remoteTaskURL,
+					},
 					tektonv1.PipelineRunSpec{
 						PipelineRef: &tektonv1.PipelineRef{
 							Name: "remote-pipeline",
@@ -510,6 +521,84 @@ func TestRemote(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Verifies that cached remote pipelines are deep-copied before modification.
+// Without deep copy, when the first PipelineRun applies its task annotation,
+// it would mutate the cached pipeline and leak that task into the second run.
+func TestSharedRemotePipelineCacheNotMutated(t *testing.T) {
+	taskName := "shared-task"
+
+	pipelineTask := tektonv1.TaskSpec{
+		Steps: []tektonv1.Step{
+			{Name: "from-pipeline", Image: "alpine", Command: []string{"true"}},
+		},
+	}
+	pipelinerunTask := tektonv1.TaskSpec{
+		Steps: []tektonv1.Step{
+			{Name: "from-pipelinerun", Image: "busybox", Command: []string{"false"}},
+		},
+	}
+
+	// remote pipeline with a single TaskRef
+	pipeline := ttkn.MakePipeline("shared-pipeline", []tektonv1.PipelineTask{
+		{Name: taskName, TaskRef: &tektonv1.TaskRef{Name: taskName}},
+	}, map[string]string{
+		apipac.Task: "http://remote/shared-task",
+	})
+	pipelineB, err := yaml.Marshal(pipeline)
+	assert.NilError(t, err)
+
+	pipelineTaskB, err := ttkn.MakeTaskB(taskName, pipelineTask)
+	assert.NilError(t, err)
+	pipelinerunTaskB, err := ttkn.MakeTaskB(taskName, pipelinerunTask)
+	assert.NilError(t, err)
+
+	remoteURLS := map[string]map[string]string{
+		"http://remote/shared-pipeline": {"body": string(pipelineB), "code": "200"},
+		"http://remote/shared-task":     {"body": string(pipelineTaskB), "code": "200"},
+		"http://remote/pr-task":         {"body": string(pipelinerunTaskB), "code": "200"},
+	}
+
+	// first run: overrides the task via pipelinerun annotation
+	// second run: same pipeline, no override — should get the original task
+	pipelineruns := []*tektonv1.PipelineRun{
+		ttkn.MakePR("first-run", map[string]string{
+			apipac.Pipeline: "http://remote/shared-pipeline",
+			apipac.Task:     "http://remote/pr-task",
+		}, tektonv1.PipelineRunSpec{
+			PipelineRef: &tektonv1.PipelineRef{Name: "shared-pipeline"},
+		}),
+		ttkn.MakePR("second-run", map[string]string{
+			apipac.Pipeline: "http://remote/shared-pipeline",
+		}, tektonv1.PipelineRunSpec{
+			PipelineRef: &tektonv1.PipelineRef{Name: "shared-pipeline"},
+		}),
+	}
+
+	observer, _ := zapobserver.New(zap.InfoLevel)
+	logger := zap.New(observer).Sugar()
+	ctx, _ := rtesting.SetupFakeContext(t)
+	httpTestClient := httptesthelper.MakeHTTPTestClient(remoteURLS)
+	rt := &matcher.RemoteTasks{
+		ProviderInterface: &testprovider.TestProviderImp{},
+		Logger:            logger,
+		Run: &params.Run{
+			Clients: clients.Clients{HTTP: *httpTestClient},
+		},
+	}
+
+	ret, err := resolveRemoteResources(ctx, rt, TektonTypes{PipelineRuns: pipelineruns}, &Opts{RemoteTasks: true, GenerateName: true})
+	assert.NilError(t, err)
+	assert.Equal(t, len(ret), 2)
+
+	firstStep := ret[0].Spec.PipelineSpec.Tasks[0].TaskSpec.Steps[0]
+	assert.Equal(t, firstStep.Name, "from-pipelinerun")
+	assert.Equal(t, firstStep.Image, "busybox")
+
+	secondStep := ret[1].Spec.PipelineSpec.Tasks[0].TaskSpec.Steps[0]
+	assert.Equal(t, secondStep.Name, "from-pipeline")
+	assert.Equal(t, secondStep.Image, "alpine")
 }
 
 func TestAssembleTaskFQDNs(t *testing.T) {

@@ -314,7 +314,8 @@ func getContextCacheKey(config *v1alpha1.ContextConfig) string {
 		maxLines = config.ContainerLogs.GetMaxLines()
 	}
 
-	return fmt.Sprintf("commit:%t-pr:%t-error:%t-logs:%t-%d",
+	return fmt.Sprintf(
+		"commit:%t-pr:%t-error:%t-logs:%t-%d",
 		config.CommitContent,
 		config.PRContent,
 		config.ErrorContent,
@@ -344,11 +345,10 @@ func countFailedResults(results []AnalysisResult) int {
 }
 
 // shouldTriggerRole evaluates the CEL expression to determine if a role should be triggered.
-// If no on_cel is provided, defaults to triggering only for failed PipelineRuns.
+// If no on_cel is provided, the role runs only after the PipelineRun completes.
 func shouldTriggerRole(role v1alpha1.AnalysisRole, celContext map[string]any, pr *tektonv1.PipelineRun) (bool, error) {
 	if role.OnCEL == "" {
-		succeededCondition := pr.Status.GetCondition(apis.ConditionSucceeded)
-		return succeededCondition != nil && succeededCondition.Status == corev1.ConditionFalse, nil
+		return isCompletedPipelineRun(pr), nil
 	}
 
 	result, err := cel.Value(role.OnCEL, celContext["body"],
@@ -364,6 +364,16 @@ func shouldTriggerRole(role v1alpha1.AnalysisRole, celContext map[string]any, pr
 	}
 
 	return false, fmt.Errorf("CEL expression '%s' did not return boolean value", role.OnCEL)
+}
+
+// isCompletedPipelineRun checks whether a PipelineRun has finished,
+// regardless of success or failure.
+func isCompletedPipelineRun(pr *tektonv1.PipelineRun) bool {
+	if pr == nil {
+		return false
+	}
+	c := pr.Status.GetCondition(apis.ConditionSucceeded)
+	return c != nil && (c.Status == corev1.ConditionTrue || c.Status == corev1.ConditionFalse)
 }
 
 // validateAnalysisConfig validates the AI analysis configuration.
