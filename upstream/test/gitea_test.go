@@ -4,6 +4,7 @@ package test
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -66,6 +67,99 @@ func TestGiteaPullRequestTaskAnnotations(t *testing.T) {
 	}
 	_, f := tgitea.TestPR(t, topts)
 	defer f()
+}
+
+// TestGiteaGetTaskURI verifies that remote tasks hosted on the same Gitea
+// instance are fetched using the provider's authenticated GetTaskURI path
+// rather than falling back to unauthenticated HTTP.
+func TestGiteaGetTaskURI(t *testing.T) {
+	ctx := context.Background()
+	runcnx, opts, giteacnx, err := tgitea.Setup(ctx)
+	assert.NilError(t, err)
+
+	remoteRepoName := names.SimpleNameGenerator.RestrictLengthWithRandomSuffix("remote-task-repo")
+	hookURL := os.Getenv("TEST_GITEA_SMEEURL")
+	webhookSecret := os.Getenv("TEST_EL_WEBHOOK_SECRET")
+	remoteRepo, err := tgitea.CreateGiteaRepo(
+		giteacnx.Client(), opts.Organization,
+		remoteRepoName, options.MainBranch, hookURL, webhookSecret,
+		false, runcnx.Clients.Log,
+	)
+	assert.NilError(t, err)
+
+	defer func() {
+		if os.Getenv("TEST_NOCLEANUP") != "true" {
+			_, _ = giteacnx.Client().DeleteRepo(opts.Organization, remoteRepoName)
+		}
+	}()
+
+	taskFiles := []struct {
+		remoteFile string
+		refType    string
+	}{
+		{"task-branch.yaml", "branch"},
+		{"task-tag.yaml", "tag"},
+		{"task-commit.yaml", "commit"},
+	}
+	var commitSHA string
+	for _, tf := range taskFiles {
+		content := remoteTaskYAML(tf.refType)
+		fr, _, createErr := giteacnx.Client().CreateFile(
+			opts.Organization, remoteRepoName, tf.remoteFile,
+			forgejo.CreateFileOptions{
+				Content: base64.StdEncoding.EncodeToString([]byte(content)),
+				FileOptions: forgejo.FileOptions{
+					Message:    "Add " + tf.remoteFile,
+					BranchName: options.MainBranch,
+				},
+			},
+		)
+		assert.NilError(t, createErr)
+		if tf.refType == "commit" {
+			commitSHA = fr.Commit.SHA
+		}
+	}
+
+	tagName := "v0.0.1"
+	_, _, err = giteacnx.Client().CreateTag(opts.Organization, remoteRepoName, forgejo.CreateTagOption{
+		TagName: tagName,
+		Target:  options.MainBranch,
+	})
+	assert.NilError(t, err)
+
+	branchURL := fmt.Sprintf("%s/raw/branch/%s/task-branch.yaml", remoteRepo.HTMLURL, options.MainBranch)
+	tagURL := fmt.Sprintf("%s/src/tag/%s/task-tag.yaml", remoteRepo.HTMLURL, tagName)
+	commitURL := fmt.Sprintf("%s/raw/commit/%s/task-commit.yaml", remoteRepo.HTMLURL, commitSHA)
+
+	runcnx.Clients.Log.Infof("Remote task URLs: branch=%s tag=%s commit=%s", branchURL, tagURL, commitURL)
+
+	topts := &tgitea.TestOpts{
+		Regexp:      successRegexp,
+		TargetEvent: triggertype.PullRequest.String(),
+		YAMLFiles: map[string]string{
+			".tekton/pr.yaml": "testdata/pipelinerun_remote_task_on_gitea.yaml",
+		},
+		CheckForStatus: "success",
+		ExtraArgs: map[string]string{
+			"RemoteTaskBranchURL": branchURL,
+			"RemoteTaskTagURL":    tagURL,
+			"RemoteTaskCommitURL": commitURL,
+		},
+		ParamsRun: runcnx,
+		Opts:      opts,
+		GiteaCNX:  giteacnx,
+	}
+	_, f := tgitea.TestPR(t, topts)
+	defer f()
+
+	for _, tf := range taskFiles {
+		err = twait.RegexpMatchingInPodLog(ctx, runcnx, topts.TargetNS,
+			fmt.Sprintf("tekton.dev/pipelineTask=task-from-%s", tf.refType),
+			"step-echo",
+			*regexp.MustCompile(fmt.Sprintf("Hello from %s ref", tf.refType)),
+			"", 2, nil)
+		assert.NilError(t, err, "task-from-%s did not produce expected log output", tf.refType)
+	}
 }
 
 func TestGiteaUseDisplayName(t *testing.T) {
@@ -273,7 +367,8 @@ func TestGiteaBadYamlValidation(t *testing.T) {
 	defer f()
 	maxLines := int64(1000)
 	assert.NilError(t, twait.RegexpMatchingInControllerLog(ctx, topts.ParamsRun, *regexp.MustCompile(
-		"cannot read the PipelineRun: pr-bad-format.yaml, error: yaml validation error: line 3: could not find expected ':'"),
+		"cannot read the PipelineRun: pr-bad-format.yaml, error: yaml validation error: line 3: could not find expected ':'",
+	),
 		10, "controller", &maxLines, nil))
 }
 
@@ -599,7 +694,8 @@ func TestGiteaPush(t *testing.T) {
 	}
 	_, f := tgitea.TestPR(t, topts)
 	defer f()
-	merged, resp, err := topts.GiteaCNX.Client().MergePullRequest(topts.Opts.Organization, topts.Opts.Repo, topts.PullRequest.Index,
+	merged, resp, err := topts.GiteaCNX.Client().MergePullRequest(
+		topts.Opts.Organization, topts.Opts.Repo, topts.PullRequest.Index,
 		forgejo.MergePullRequestOption{
 			Title: "Merged with Panache",
 			Style: "merge",
@@ -1045,7 +1141,8 @@ func TestGiteaPipelineRunWithSameName(t *testing.T) {
 	comments, _, err := topts.GiteaCNX.Client().ListRepoIssueComments(
 		topts.PullRequest.Base.Repository.Owner.UserName,
 		topts.PullRequest.Base.Repository.Name,
-		forgejo.ListIssueCommentOptions{})
+		forgejo.ListIssueCommentOptions{},
+	)
 	assert.NilError(t, err)
 
 	failureRe := regexp.MustCompile("found multiple pipelinerun in .tekton with the same name")
@@ -1136,14 +1233,15 @@ func verifyProvenance(t *testing.T, topts *tgitea.TestOpts, expectedOutput, cNam
 			isGlobal)
 		assert.NilError(t, err)
 
-		defer (func() {
+		defer func() {
 			if os.Getenv("TEST_NOCLEANUP") != "true" {
 				topts.ParamsRun.Clients.Log.Infof("Cleaning up global repo %s in %s", info.DefaultGlobalRepoName, globalNs)
 				err = topts.ParamsRun.Clients.PipelineAsCode.PipelinesascodeV1alpha1().Repositories(globalNs).Delete(
-					context.Background(), info.DefaultGlobalRepoName, metav1.DeleteOptions{})
+					context.Background(), info.DefaultGlobalRepoName, metav1.DeleteOptions{},
+				)
 				assert.NilError(t, err)
 			}
-		})()
+		}()
 	}
 	_, f := tgitea.TestPR(t, topts)
 	defer f()
@@ -1295,6 +1393,20 @@ func TestGiteaHubTaskNotFound(t *testing.T) {
 			tgitea.WaitForPullRequestCommentMatch(t, topts)
 		})
 	}
+}
+
+func remoteTaskYAML(refType string) string {
+	return fmt.Sprintf(`apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: remote-task-gitea-%s
+spec:
+  steps:
+    - name: echo
+      image: registry.access.redhat.com/ubi10/ubi-micro
+      script: |
+        echo "Hello from %s ref"
+`, refType, refType)
 }
 
 // Local Variables:

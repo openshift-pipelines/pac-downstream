@@ -25,6 +25,7 @@ on:
       - ".github/workflows/**"
       - "test/testdata/**"
       - "vendor/**"
+      - "hack/**"
 
 jobs:
   e2e-tests:
@@ -108,7 +109,7 @@ jobs:
       TEST_BITBUCKET_CLOUD_API_URL: https://api.bitbucket.org/2.0
       TEST_BITBUCKET_CLOUD_E2E_REPOSITORY: cboudjna/pac-e2e-tests
       TEST_BITBUCKET_CLOUD_TOKEN: ${{ secrets.BITBUCKET_CLOUD_TOKEN }}
-      TEST_BITBUCKET_CLOUD_USER: cboudjna
+      TEST_BITBUCKET_CLOUD_USER: cboudjna@redhat.com
 
       # Bitbucket Data Center
       TEST_BITBUCKET_DATA_CENTER_API_URL: ${{ secrets.BITBUCKET_DATA_CENTER_API_URL }}
@@ -126,10 +127,14 @@ jobs:
       TESTRR_BUILD_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
       TESTRR_RUN_LABEL: gha-e2e-${{ matrix.provider }}
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      # Safe: external contributor PRs do not run this workflow without
+      # an explicit maintainer ok-to-test approval (see the permission
+      # check step below).
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           ref: ${{ inputs.target_ref || github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
+          allow-unsafe-pr-checkout: true
 
       - name: Check user permissions on PRs
         if: github.event_name == 'pull_request_target'
@@ -138,19 +143,19 @@ jobs:
           github-token: ${{ secrets.GH_TOKEN }}
           team-slugs: ${{ env.TARGET_TEAM_SLUGS }}
 
-      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version-file: "go.mod"
 
       - name: Cache ko layer cache
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
         with:
           path: /tmp/ko-cache
           key: ${{ runner.os }}-ko-${{ hashFiles('go.sum') }}
           restore-keys: |
             ${{ runner.os }}-ko-
 
-      - uses: ko-build/setup-ko@d006021bd0c28d1ce33a07e7943d48b079944c8d # v0.9
+      - uses: ko-build/setup-ko@61b4d1d396f5b2e7d6bb6fefdce3dc38d1a13445 # v0.10
 
       # Start binary build in background as soon as possible so we can optimize
       # the run of e2e when it's start later on
@@ -175,7 +180,7 @@ jobs:
           echo "${HOME}/go/bin" >> "$GITHUB_PATH"
 
       - name: Clone startpaac
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: openshift-pipelines/startpaac
           path: startpaac
@@ -185,7 +190,7 @@ jobs:
         env:
           PYSMEE_URL: ${{ secrets.PYSMEE_URL }}
         run: |
-          nohup gosmee client --saveDir /tmp/gosmee-replay "${PYSMEE_URL}" "https://${CONTROLLER_DOMAIN_URL}" > /tmp/gosmee-main.log 2>&1 &
+          nohup gosmee client --insecure-skip-tls-verify --saveDir /tmp/gosmee-replay "${PYSMEE_URL}" "https://${CONTROLLER_DOMAIN_URL}" > /tmp/gosmee-main.log 2>&1 &
 
       - name: Generate unique gosmee URL for Gitea tests
         if: startsWith(matrix.provider, 'gitea') || matrix.provider == 'concurrency'
@@ -200,7 +205,7 @@ jobs:
         env:
           TEST_GITEA_SMEEURL: ${{ steps.gosmee-url.outputs.url }}
         run: |
-          nohup gosmee client --saveDir /tmp/gosmee-replay "${TEST_GITEA_SMEEURL}" "https://${CONTROLLER_DOMAIN_URL}" >> /tmp/gosmee-main.log 2>&1 &
+          nohup gosmee client --insecure-skip-tls-verify --saveDir /tmp/gosmee-replay "${TEST_GITEA_SMEEURL}" "https://${CONTROLLER_DOMAIN_URL}" >> /tmp/gosmee-main.log 2>&1 &
 
       - name: Generate unique gosmee URL for GitLab tests
         if: matrix.provider == 'gitlab_bitbucket'
@@ -215,12 +220,12 @@ jobs:
         env:
           TEST_GITLAB_SMEEURL: ${{ steps.gosmee-gitlab-url.outputs.url }}
         run: |
-          nohup gosmee client --saveDir /tmp/gosmee-replay-gitlab "${TEST_GITLAB_SMEEURL}" "https://${CONTROLLER_DOMAIN_URL}" >> /tmp/gosmee-gitlab.log 2>&1 &
+          nohup gosmee client --insecure-skip-tls-verify --saveDir /tmp/gosmee-replay-gitlab "${TEST_GITLAB_SMEEURL}" "https://${CONTROLLER_DOMAIN_URL}" >> /tmp/gosmee-gitlab.log 2>&1 &
 
       - name: Run gosmee for second controller GHE App
         if: startsWith(matrix.provider, 'github_ghe') || matrix.provider == 'concurrency'
         run: |
-          nohup gosmee client --saveDir /tmp/gosmee-replay-ghe "${TEST_GITHUB_SECOND_SMEE_URL}" "https://ghe.paac-127-0-0-1.nip.io" >> /tmp/gosmee-ghe.log 2>&1 &
+          nohup gosmee client --insecure-skip-tls-verify --saveDir /tmp/gosmee-replay-ghe "${TEST_GITHUB_SECOND_SMEE_URL}" "https://ghe.paac-127-0-0-1.nip.io" >> /tmp/gosmee-ghe.log 2>&1 &
 
       - name: Generate unique gosmee URL for GHE webhook tests
         if: startsWith(matrix.provider, 'github_ghe') || matrix.provider == 'concurrency'
@@ -235,10 +240,10 @@ jobs:
         env:
           TEST_GITHUB_SECOND_WEBHOOK_SMEE_URL: ${{ steps.gosmee-ghe-webhook-url.outputs.url }}
         run: |
-          nohup gosmee client --saveDir /tmp/gosmee-replay-ghe-webhook "${TEST_GITHUB_SECOND_WEBHOOK_SMEE_URL}" "https://ghe.paac-127-0-0-1.nip.io" >> /tmp/gosmee-ghe-webhook.log 2>&1 &
+          nohup gosmee client --insecure-skip-tls-verify --saveDir /tmp/gosmee-replay-ghe-webhook "${TEST_GITHUB_SECOND_WEBHOOK_SMEE_URL}" "https://ghe.paac-127-0-0-1.nip.io" >> /tmp/gosmee-ghe-webhook.log 2>&1 &
 
       - name: Setup tmate session
-        uses: mxschmitt/action-tmate@c0afd6f790e3a5564914980036ebf83216678101 # v3
+        uses: mxschmitt/action-tmate@35b54afac29c97fb54faba5b513f8fbd1882f113 # v3
         # add all environment so we can debug easily
         env:
           # Common/Infra
@@ -423,7 +428,7 @@ jobs:
     needs: [e2e-tests]
     if: ${{ always() && github.ref_name == 'main' && github.event_name == 'schedule' }}
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
       - name: Download all artifacts

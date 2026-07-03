@@ -51,19 +51,20 @@ const (
 var _ provider.Interface = (*Provider)(nil)
 
 type Provider struct {
-	ghClient      *github.Client
-	Logger        *zap.SugaredLogger
-	Run           *params.Run
-	pacInfo       *info.PacOpts
-	Token, APIURL *string
-	ApplicationID *int64
-	providerName  string
-	provenance    string
-	RepositoryIDs []int64
-	repo          *v1alpha1.Repository
-	eventEmitter  *events.EventEmitter
-	PaginedNumber int
-	userType      string // The type of user i.e bot or not
+	ghClient        *github.Client
+	Logger          *zap.SugaredLogger
+	Run             *params.Run
+	pacInfo         *info.PacOpts
+	Token, APIURL   *string
+	ApplicationID   *int64
+	providerName    string
+	provenance      string
+	RepositoryIDs   []int64
+	RepositoryNames []string
+	repo            *v1alpha1.Repository
+	eventEmitter    *events.EventEmitter
+	PaginedNumber   int
+	userType        string // The type of user i.e bot or not
 	skippedRun
 	triggerEvent       string
 	cachedChangedFiles *changedfiles.ChangedFiles
@@ -360,9 +361,19 @@ func (v *Provider) SetClient(ctx context.Context, run *params.Run, event *info.E
 		if err != nil {
 			return fmt.Errorf("failed to scope token: %w", err)
 		}
-		// If Global and Repo level configurations are not provided then lets not override the provider token.
-		if token != "" {
+		switch {
+		case token != "":
 			event.Provider.Token = token
+		case len(v.RepositoryIDs) > 0 || len(v.RepositoryNames) > 0:
+			// Defer scoping until after ScopeTokenToListOfRepos so CreateToken can
+			// look up extra repos from the configmap first.  When no additional repos
+			// are configured, scope the token to only the triggering repo.
+			ns := info.GetNS(ctx)
+			scopedToken, err := v.GetAppToken(ctx, run.Clients.Kube, event.Provider.URL, event.InstallationID, ns)
+			if err != nil {
+				return fmt.Errorf("failed to scope token to triggering repository: %w", err)
+			}
+			event.Provider.Token = scopedToken
 		}
 	}
 
@@ -976,7 +987,8 @@ func (v *Provider) debugCommentPhase(event *info.Event, trace commentTraceLogCon
 	}
 
 	baseFields := make([]any, 0, 18+len(kv))
-	baseFields = append(baseFields,
+	baseFields = append(
+		baseFields,
 		"phase", phase,
 		"organization", org,
 		"repository", repo,
@@ -1027,13 +1039,15 @@ func (v *Provider) listCommentsByMarker(
 	}
 
 	if len(comments) == v.PaginedNumber {
-		v.debugCommentPhase(event, trace, phase+"_pagination_warning",
+		v.debugCommentPhase(
+			event, trace, phase+"_pagination_warning",
 			"fetched_count", len(comments),
 			"note", "response returned exactly PerPage comments; marker matches beyond page 1 may be missed",
 		)
 	}
 
-	v.debugCommentPhase(event, trace, phase,
+	v.debugCommentPhase(
+		event, trace, phase,
 		"fetched_count", len(comments),
 		"matched_count", len(matchedComments),
 		"matched_comments", compactCommentIDs(matchedComments),
@@ -1060,7 +1074,8 @@ func (v *Provider) CreateComment(ctx context.Context, event *info.Event, commit,
 		}
 
 		if len(existingComments) > 1 {
-			v.debugCommentPhase(event, trace, "duplicate_detected",
+			v.debugCommentPhase(
+				event, trace, "duplicate_detected",
 				"matched_count", len(existingComments),
 				"matched_comments", compactCommentIDs(existingComments),
 			)
@@ -1099,14 +1114,16 @@ func (v *Provider) CreateComment(ctx context.Context, event *info.Event, commit,
 		})
 	})
 	if err != nil {
-		v.debugCommentPhase(event, trace, "create_comment_done",
+		v.debugCommentPhase(
+			event, trace, "create_comment_done",
 			"status_code", responseStatusCode(createResp),
 			"github_request_id", githubRequestID(createResp),
 			"create_error", err.Error(),
 		)
 		return err
 	}
-	v.debugCommentPhase(event, trace, "create_comment_done",
+	v.debugCommentPhase(
+		event, trace, "create_comment_done",
 		"status_code", responseStatusCode(createResp),
 		"github_request_id", githubRequestID(createResp),
 		"created_comment_id", createdComment.GetID(),
