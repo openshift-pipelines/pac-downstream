@@ -46,14 +46,56 @@ type Reconciler struct {
 	qm                queuepkg.ManagerInterface
 	metrics           *prmetrics.Recorder
 	eventEmitter      *events.EventEmitter
-	globalRepo        *v1alpha1.Repository
-	secretNS          string
 }
 
 var (
 	_ pipelinerunreconciler.Interface = (*Reconciler)(nil)
 	_ pipelinerunreconciler.Finalizer = (*Reconciler)(nil)
 )
+
+func copyRepositoryForMerge(repo *v1alpha1.Repository) *v1alpha1.Repository {
+	repo = repo.DeepCopy()
+	if repo.Spec.Settings != nil {
+		settings := *repo.Spec.Settings
+		if settings.Policy != nil {
+			policy := *settings.Policy
+			policy.OkToTest = append([]string(nil), settings.Policy.OkToTest...)
+			policy.PullRequest = append([]string(nil), settings.Policy.PullRequest...)
+			settings.Policy = &policy
+		}
+		if settings.Gitlab != nil {
+			gitlab := *settings.Gitlab
+			settings.Gitlab = &gitlab
+		}
+		if settings.Github != nil {
+			github := *settings.Github
+			settings.Github = &github
+		}
+		if settings.Forgejo != nil {
+			forgejo := *settings.Forgejo
+			settings.Forgejo = &forgejo
+		}
+		if settings.AIAnalysis != nil {
+			aiAnalysis := *settings.AIAnalysis
+			settings.AIAnalysis = &aiAnalysis
+		}
+		settings.GithubAppTokenScopeRepos = append([]string(nil), settings.GithubAppTokenScopeRepos...)
+		repo.Spec.Settings = &settings
+	}
+	if repo.Spec.GitProvider != nil {
+		gitProvider := *repo.Spec.GitProvider
+		if gitProvider.Secret != nil {
+			secret := *gitProvider.Secret
+			gitProvider.Secret = &secret
+		}
+		if gitProvider.WebhookSecret != nil {
+			webhookSecret := *gitProvider.WebhookSecret
+			gitProvider.WebhookSecret = &webhookSecret
+		}
+		repo.Spec.GitProvider = &gitProvider
+	}
+	return repo
+}
 
 // ReconcileKind is the main entry point for reconciling PipelineRun resources.
 func (r *Reconciler) ReconcileKind(ctx context.Context, pr *tektonv1.PipelineRun) pkgreconciler.Event {
@@ -268,12 +310,15 @@ func (r *Reconciler) reportFinalStatus(ctx context.Context, logger *zap.SugaredL
 		return nil, fmt.Errorf("reportFinalStatus: %w", err)
 	}
 
-	r.secretNS = repo.GetNamespace()
-	if r.globalRepo, err = r.repoLister.Repositories(r.run.Info.Kube.Namespace).Get(r.run.Info.Controller.GlobalRepository); err == nil && r.globalRepo != nil {
-		if repo.Spec.GitProvider != nil && repo.Spec.GitProvider.Secret == nil && r.globalRepo.Spec.GitProvider != nil && r.globalRepo.Spec.GitProvider.Secret != nil {
-			r.secretNS = r.globalRepo.GetNamespace()
+	secretNS := repo.GetNamespace()
+	inheritedGlobalSecret := false
+	if globalRepo, err := r.repoLister.Repositories(r.run.Info.Kube.Namespace).Get(r.run.Info.Controller.GlobalRepository); err == nil && globalRepo != nil {
+		if repo.Spec.GitProvider != nil && repo.Spec.GitProvider.Secret == nil && globalRepo.Spec.GitProvider != nil && globalRepo.Spec.GitProvider.Secret != nil {
+			secretNS = globalRepo.GetNamespace()
+			inheritedGlobalSecret = true
 		}
-		repo.Spec.Merge(r.globalRepo.Spec)
+		repo = copyRepositoryForMerge(repo)
+		repo.Spec.Merge(globalRepo.Spec)
 	}
 
 	cp := customparams.NewCustomParams(event, repo, r.run, r.kinteract, r.eventEmitter, nil)
@@ -288,13 +333,14 @@ func (r *Reconciler) reportFinalStatus(ctx context.Context, logger *zap.SugaredL
 		event.Provider.WebhookSecret, _ = secrets.GetCurrentNSWebhookSecret(ctx, r.kinteract, r.run)
 	} else {
 		secretFromRepo := secrets.SecretFromRepository{
-			K8int:       r.kinteract,
-			Config:      provider.GetConfig(),
-			Event:       event,
-			Repo:        repo,
-			WebhookType: pacInfo.WebhookType,
-			Logger:      logger,
-			Namespace:   r.secretNS,
+			K8int:                 r.kinteract,
+			Config:                provider.GetConfig(),
+			Event:                 event,
+			Repo:                  repo,
+			WebhookType:           pacInfo.WebhookType,
+			Logger:                logger,
+			Namespace:             secretNS,
+			InheritedGlobalSecret: inheritedGlobalSecret,
 		}
 		if err := secretFromRepo.Get(ctx); err != nil {
 			return repo, fmt.Errorf("cannot get secret from repository: %w", err)
@@ -427,21 +473,25 @@ func (r *Reconciler) initGitProviderClient(ctx context.Context, logger *zap.Suga
 	} else {
 		// secretNS is needed when git provider is other than Github App.
 		secretNS := repo.GetNamespace()
-		if r.globalRepo, err = r.repoLister.Repositories(r.run.Info.Kube.Namespace).Get(r.run.Info.Controller.GlobalRepository); err == nil && r.globalRepo != nil {
-			if repo.Spec.GitProvider != nil && repo.Spec.GitProvider.Secret == nil && r.globalRepo.Spec.GitProvider != nil && r.globalRepo.Spec.GitProvider.Secret != nil {
-				r.secretNS = r.globalRepo.GetNamespace()
+		inheritedGlobalSecret := false
+		if globalRepo, err := r.repoLister.Repositories(r.run.Info.Kube.Namespace).Get(r.run.Info.Controller.GlobalRepository); err == nil && globalRepo != nil {
+			if repo.Spec.GitProvider != nil && repo.Spec.GitProvider.Secret == nil && globalRepo.Spec.GitProvider != nil && globalRepo.Spec.GitProvider.Secret != nil {
+				secretNS = globalRepo.GetNamespace()
+				inheritedGlobalSecret = true
 			}
-			repo.Spec.Merge(r.globalRepo.Spec)
+			repo = copyRepositoryForMerge(repo)
+			repo.Spec.Merge(globalRepo.Spec)
 		}
 
 		secretFromRepo := secrets.SecretFromRepository{
-			K8int:       r.kinteract,
-			Config:      detectedProvider.GetConfig(),
-			Event:       event,
-			Repo:        repo,
-			WebhookType: pacInfo.WebhookType,
-			Logger:      logger,
-			Namespace:   secretNS,
+			K8int:                 r.kinteract,
+			Config:                detectedProvider.GetConfig(),
+			Event:                 event,
+			Repo:                  repo,
+			WebhookType:           pacInfo.WebhookType,
+			Logger:                logger,
+			Namespace:             secretNS,
+			InheritedGlobalSecret: inheritedGlobalSecret,
 		}
 		if err := secretFromRepo.Get(ctx); err != nil {
 			return nil, nil, fmt.Errorf("cannot get secret from repository: %w", err)

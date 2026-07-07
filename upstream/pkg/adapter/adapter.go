@@ -79,6 +79,15 @@ func New(run *params.Run, k *kubeinteraction.Interaction) adapter.AdapterConstru
 }
 
 func (l *listener) Start(ctx context.Context) error {
+	tp := tracing.New(l.logger)
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := tp.Shutdown(shutdownCtx); err != nil {
+			l.logger.Errorw("failed to shut down tracer provider", "error", err)
+		}
+	}()
+
 	adapterPort := globalAdapterPort
 	envAdapterPort := os.Getenv("PAC_CONTROLLER_PORT")
 	if envAdapterPort != "" {
@@ -223,7 +232,8 @@ func (l listener) handleEvent(ctx context.Context) http.HandlerFunc {
 		tracedCtx := otel.GetTextMapPropagator().Extract(ctx, propagation.HeaderCarrier(request.Header))
 
 		tracer := otel.Tracer(tracing.TracerName)
-		tracedCtx, span := tracer.Start(tracedCtx, "PipelinesAsCode:ProcessEvent",
+		tracedCtx, span := tracer.Start(
+			tracedCtx, "PipelinesAsCode:ProcessEvent",
 			trace.WithSpanKind(trace.SpanKindServer),
 		)
 
