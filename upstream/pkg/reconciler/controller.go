@@ -3,6 +3,7 @@ package reconciler
 import (
 	"context"
 	"path"
+	"time"
 
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
@@ -14,6 +15,7 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	prmetrics "github.com/openshift-pipelines/pipelines-as-code/pkg/pipelinerunmetrics"
 	queuepkg "github.com/openshift-pipelines/pipelines-as-code/pkg/queue"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/tracing"
 	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 	tektonPipelineRunInformerv1 "github.com/tektoncd/pipeline/pkg/client/injection/informers/pipeline/v1/pipelinerun"
 	tektonPipelineRunReconcilerv1 "github.com/tektoncd/pipeline/pkg/client/injection/reconciler/pipeline/v1/pipelinerun"
@@ -29,6 +31,17 @@ func NewController() func(context.Context, configmap.Watcher) *controller.Impl {
 	return func(ctx context.Context, _ configmap.Watcher) *controller.Impl {
 		ctx = info.StoreNS(ctx, system.Namespace())
 		log := logging.FromContext(ctx)
+
+		tp := tracing.New(log)
+		// linter false positive: fresh Background is required because outer ctx is cancelled past <-ctx.Done().
+		go func() { //nolint:gosec
+			<-ctx.Done()
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := tp.Shutdown(shutdownCtx); err != nil {
+				log.Errorw("failed to shut down tracer provider", "error", err)
+			}
+		}()
 
 		run := params.New()
 		err := run.Clients.NewClients(ctx, &run.Info)

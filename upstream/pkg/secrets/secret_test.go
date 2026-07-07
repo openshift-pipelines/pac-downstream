@@ -47,7 +47,8 @@ func TestSecretFromRepository(t *testing.T) {
 			logmatch: []*regexp.Regexp{
 				regexp.MustCompile(fmt.Sprintf(
 					"^Using git provider lalala: apiurl=https://apiurl.default user= token-secret=repo-secret token-key=%s",
-					DefaultGitProviderSecretKey)),
+					DefaultGitProviderSecretKey,
+				)),
 			},
 		},
 		{
@@ -107,7 +108,13 @@ func TestSecretFromRepository(t *testing.T) {
 			}
 			event := info.NewEvent()
 			sfr := SecretFromRepository{
-				k8int, tt.providerconfig, event, tt.repo, tt.providerType, "namespace", logger,
+				K8int:       k8int,
+				Config:      tt.providerconfig,
+				Event:       event,
+				Repo:        tt.repo,
+				WebhookType: tt.providerType,
+				Namespace:   "namespace",
+				Logger:      logger,
 			}
 
 			err := sfr.Get(ctx)
