@@ -1,0 +1,19 @@
+extends: substitution
+message: Use '%s' instead of '%s'
+level: error
+scope: summary
+nonword: false
+swap:
+  "Pipeline as Code": Pipelines-as-Code
+  "Pipelines as Code": Pipelines-as-Code
+  "Pipeline-as-Code": Pipelines-as-Code
+  "GitOPS": GitOps
+  "globing": globbing
+  "pipeline run": PipelineRun
+  pipelinerun: PipelineRun
+  pipelineRun: PipelineRun
+  Pipelinerun: PipelineRun
+  "pipeline runs": PipelineRuns
+  pipelineruns: PipelineRuns
+  pipelineRuns: PipelineRuns
+  Pipelineruns: PipelineRuns
