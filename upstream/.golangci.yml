@@ -1,0 +1,138 @@
+version: "2"
+run:
+  build-tags:
+    - e2e
+linters:
+  enable:
+    - asasalint
+    - asciicheck
+    - bidichk
+    - bodyclose
+    - copyloopvar
+    - decorder
+    - dogsled
+    - dupl
+    - dupword
+    - durationcheck
+    - errchkjson
+    - errname
+    - errorlint
+    - exhaustive
+    - forbidigo
+    - forcetypeassert
+    - ginkgolinter
+    - gocheckcompilerdirectives
+    - gochecknoinits
+    - gochecksumtype
+    - gocritic
+    - godot
+    - goheader
+    - gomodguard_v2
+    - goprintffuncname
+    - gosec
+    - gosmopolitan
+    - grouper
+    - importas
+    - loggercheck
+    - makezero
+    - mirror
+    - misspell
+    - nakedret
+    - nilerr
+    - noctx
+    - nosprintfhostport
+    - prealloc
+    - predeclared
+    - promlinter
+    - protogetter
+    - reassign
+    - revive
+    - sloglint
+    - staticcheck
+    - tagalign
+    - testableexamples
+    - tparallel
+    - unparam
+    - usestdlibvars
+    - whitespace
+    - zerologlint
+  settings:
+    govet:
+      disable:
+        - inline
+    misspell:
+      ignore-rules:
+        - cancelled
+      extra-words:
+        - typo: "canceled"
+          correction: "cancelled"
+    errcheck:
+      exclude-functions:
+        - (*github.com/tektoncd/pipeline/vendor/go.uber.org/zap.SugaredLogger).Sync
+        - flag.Set
+        - logger.Sync
+        - fmt.Fprintf
+        - fmt.Fprintln
+        - (io.Closer).Close
+        - updateConfigMap
+    exhaustive:
+      default-signifies-exhaustive: true
+    gocritic:
+      disabled-checks:
+        - unlambda
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      - linters:
+          - gosec
+        path: _test\.go
+      - path: pkg/resolve/resolve.go
+        text: don't use `init` function
+      - path: pkg/llm/providers/
+        text: don't use `init` function
+      - linters:
+          - revive
+        path: pkg/errors/
+        text: "var-naming"
+      - linters:
+          - revive
+        path: pkg/llm/context/
+        text: "var-naming"
+      - linters:
+          - revive
+        path: pkg/sort/
+        text: "var-naming"
+      - linters:
+          - revive
+        path: pkg/test/http/
+        text: "var-naming"
+      - linters:
+          - gosec
+        text: "G115|G117|G702|G703|G704|G705|G706"
+    paths:
+      - vendor
+      - pkg/provider/gitea/structs
+      - third_party$
+      - builtin$
+      - examples$
+formatters:
+  enable:
+    - gofumpt
+    - goimports
+  settings:
+    gofumpt:
+      extra-rules: true
+  exclusions:
+    generated: lax
+    paths:
+      - vendor
+      - go-build-cache
+      - pkg/provider/gitea/structs
+      - third_party$
+      - builtin$
+      - examples$
