@@ -25,7 +25,7 @@ func CreateCRD(ctx context.Context, t *testing.T, bprovider bitbucketcloud.Provi
 			RepoSlug: opts.Repo,
 		},
 	)
-	assert.NilError(t, err)
+	assert.NilError(t, err, "failed to get repository %s/%s: %v", opts.Organization, opts.Repo, err)
 
 	links := &types.Links{}
 	err = mapstructure.Decode(repo.Links, links)
