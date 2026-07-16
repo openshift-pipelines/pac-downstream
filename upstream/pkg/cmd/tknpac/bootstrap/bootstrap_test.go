@@ -13,6 +13,7 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	testclient "github.com/openshift-pipelines/pipelines-as-code/pkg/test/clients"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/test/logger"
+	"github.com/spf13/cobra"
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
@@ -327,4 +328,42 @@ func TestGetDashboardURL(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestAddGithubAppFlag(t *testing.T) {
+	opts := &bootstrapOpts{}
+	cmd := &cobra.Command{Use: "test"}
+	addGithubAppFlag(cmd, opts)
+
+	assert.NilError(t, cmd.PersistentFlags().Set("github-organization-name", "myorg"))
+	assert.Equal(t, opts.GithubOrganizationName, "myorg")
+
+	assert.NilError(t, cmd.PersistentFlags().Set("github-application-name", "myapp"))
+	assert.Equal(t, opts.GithubApplicationName, "myapp")
+
+	assert.NilError(t, cmd.PersistentFlags().Set("route-url", "https://route.example.com"))
+	assert.Equal(t, opts.RouteName, "https://route.example.com")
+
+	assert.NilError(t, cmd.PersistentFlags().Set("webserver-port", "9090"))
+	assert.Equal(t, opts.webserverPort, 9090)
+
+	assert.NilError(t, cmd.PersistentFlags().Set("install-type", "github-enterprise-app"))
+	assert.Equal(t, opts.providerType, "github-enterprise-app")
+
+	assert.NilError(t, cmd.PersistentFlags().Set("force-configure", "true"))
+	assert.Equal(t, opts.forceGitHubApp, true)
+
+	flag := cmd.PersistentFlags().Lookup("github-api-url")
+	assert.Assert(t, flag != nil)
+}
+
+func TestAddCommonFlags(t *testing.T) {
+	io, _ := newIOStream()
+	io.SetColorEnabled(true)
+	cmd := &cobra.Command{Use: "test"}
+	addCommonFlags(cmd, io)
+
+	flag := cmd.PersistentFlags().Lookup("no-color")
+	assert.Assert(t, flag != nil)
+	assert.Equal(t, flag.DefValue, "false")
 }

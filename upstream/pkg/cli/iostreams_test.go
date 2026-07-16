@@ -4,6 +4,7 @@ import (
 	"os"
 	"testing"
 
+	surveyCore "github.com/AlecAivazis/survey/v2/core"
 	"gotest.tools/v3/assert"
 )
 
@@ -90,4 +91,26 @@ func TestIOTest(t *testing.T) {
 	assert.NilError(t, err)
 	assert.Equal(t, n, len(testData))
 	assert.DeepEqual(t, errOut.Bytes(), testData)
+}
+
+func TestIOStreamsColorScheme(t *testing.T) {
+	ios := &IOStreams{colorEnabled: true, is256enabled: true}
+	cs := ios.ColorScheme()
+	assert.Assert(t, cs != nil)
+	assert.Equal(t, cs.enabled, true)
+	assert.Equal(t, cs.is256enabled, true)
+}
+
+func TestIOStreamsSetSurveyColor(t *testing.T) {
+	iosDisabled := &IOStreams{}
+	iosDisabled.SetColorEnabled(false)
+	assert.Equal(t, surveyCore.DisableColor, true)
+
+	iosEnabled := &IOStreams{}
+	iosEnabled.SetColorEnabled(true)
+	assert.Assert(t, surveyCore.TemplateFuncsWithColor["color"] != nil)
+	colorFn, ok := surveyCore.TemplateFuncsWithColor["color"].(func(string) string)
+	assert.Assert(t, ok)
+	assert.Assert(t, colorFn("white") != "")
+	assert.Assert(t, colorFn("red") != "")
 }
