@@ -24,7 +24,7 @@ COPY head ${KO_DATA_PATH}/HEAD
 
 LABEL \
     com.redhat.component="openshift-pipelines-pipelines-as-code-controller-rhel8-container" \
-    cpe="cpe:/a:redhat:openshift_pipelines:1.15::el9" \
+    cpe="cpe:/a:redhat:openshift_pipelines:1.15::el8" \
     description="Red Hat OpenShift Pipelines pipelines-as-code controller" \
     io.k8s.description="Red Hat OpenShift Pipelines pipelines-as-code controller" \
     io.k8s.display-name="Red Hat OpenShift Pipelines pipelines-as-code controller" \
