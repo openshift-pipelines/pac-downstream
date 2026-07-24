@@ -68,7 +68,7 @@ jobs:
       KOCACHE: /tmp/ko-cache
       KO_DOCKER_REPO: registry.paac-127-0-0-1.nip.io
       KUBECONFIG: /home/runner/.kube/config.local
-      TARGET_TEAM_SLUGS: "pipelines-as-code-maintainers,pipelines-as-code-collaborators"
+      TARGET_TEAM_SLUGS: "pipelines-as-code.maintainers,pipelines-as-code.collaborators"
       TEST_EL_URL: https://paac.paac-127-0-0-1.nip.io
       TEST_EL_WEBHOOK_SECRET: ${{ secrets.WEBHOOK_SECRET }}
 
@@ -110,6 +110,7 @@ jobs:
       TEST_BITBUCKET_CLOUD_E2E_REPOSITORY: cboudjna/pac-e2e-tests
       TEST_BITBUCKET_CLOUD_TOKEN: ${{ secrets.BITBUCKET_CLOUD_TOKEN }}
       TEST_BITBUCKET_CLOUD_USER: cboudjna@redhat.com
+      TEST_BITBUCKET_CLOUD_WEBHOOK_SECRET: ${{ secrets.BITBUCKET_CLOUD_WEBHOOK_SECRET }}
 
       # Bitbucket Data Center
       TEST_BITBUCKET_DATA_CENTER_API_URL: ${{ secrets.BITBUCKET_DATA_CENTER_API_URL }}
@@ -134,7 +135,7 @@ jobs:
           github-token: ${{ secrets.GH_TOKEN }}
           team-slugs: ${{ env.TARGET_TEAM_SLUGS }}
 
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: "go.mod"
 
@@ -181,7 +182,7 @@ jobs:
         env:
           PYSMEE_URL: ${{ secrets.PYSMEE_URL }}
         run: |
-          nohup gosmee client --insecure-skip-tls-verify --saveDir /tmp/gosmee-replay "${PYSMEE_URL}" "https://${CONTROLLER_DOMAIN_URL}" > /tmp/gosmee-main.log 2>&1 &
+          nohup gosmee client --insecure-skip-tls-verify --output json --log-level debug --target-connection-timeout 5 --target-retries 5 --saveDir /tmp/gosmee-replay "${PYSMEE_URL}" "https://${CONTROLLER_DOMAIN_URL}" > /tmp/gosmee-main.log 2>&1 &
 
       - name: Generate unique gosmee URL for Gitea tests
         if: startsWith(matrix.provider, 'gitea') || matrix.provider == 'concurrency'
@@ -196,7 +197,7 @@ jobs:
         env:
           TEST_GITEA_SMEEURL: ${{ steps.gosmee-url.outputs.url }}
         run: |
-          nohup gosmee client --insecure-skip-tls-verify --saveDir /tmp/gosmee-replay "${TEST_GITEA_SMEEURL}" "https://${CONTROLLER_DOMAIN_URL}" >> /tmp/gosmee-main.log 2>&1 &
+          nohup gosmee client --insecure-skip-tls-verify --output json --log-level debug --target-connection-timeout 5 --target-retries 5 --saveDir /tmp/gosmee-replay-gitea "${TEST_GITEA_SMEEURL}" "https://${CONTROLLER_DOMAIN_URL}" > /tmp/gosmee-gitea.log 2>&1 &
 
       - name: Generate unique gosmee URL for GitLab tests
         if: matrix.provider == 'gitlab_bitbucket'
@@ -211,12 +212,12 @@ jobs:
         env:
           TEST_GITLAB_SMEEURL: ${{ steps.gosmee-gitlab-url.outputs.url }}
         run: |
-          nohup gosmee client --insecure-skip-tls-verify --saveDir /tmp/gosmee-replay-gitlab "${TEST_GITLAB_SMEEURL}" "https://${CONTROLLER_DOMAIN_URL}" >> /tmp/gosmee-gitlab.log 2>&1 &
+          nohup gosmee client --insecure-skip-tls-verify --output json --log-level debug --target-connection-timeout 5 --target-retries 5 --saveDir /tmp/gosmee-replay-gitlab "${TEST_GITLAB_SMEEURL}" "https://${CONTROLLER_DOMAIN_URL}" > /tmp/gosmee-gitlab.log 2>&1 &
 
       - name: Run gosmee for second controller GHE App
         if: startsWith(matrix.provider, 'github_ghe') || matrix.provider == 'concurrency'
         run: |
-          nohup gosmee client --insecure-skip-tls-verify --saveDir /tmp/gosmee-replay-ghe "${TEST_GITHUB_SECOND_SMEE_URL}" "https://ghe.paac-127-0-0-1.nip.io" >> /tmp/gosmee-ghe.log 2>&1 &
+          nohup gosmee client --insecure-skip-tls-verify --output json --log-level debug --target-connection-timeout 5 --target-retries 5 --saveDir /tmp/gosmee-replay-ghe "${TEST_GITHUB_SECOND_SMEE_URL}" "https://ghe.paac-127-0-0-1.nip.io" > /tmp/gosmee-ghe.log 2>&1 &
 
       - name: Generate unique gosmee URL for GHE webhook tests
         if: startsWith(matrix.provider, 'github_ghe') || matrix.provider == 'concurrency'
@@ -231,7 +232,7 @@ jobs:
         env:
           TEST_GITHUB_SECOND_WEBHOOK_SMEE_URL: ${{ steps.gosmee-ghe-webhook-url.outputs.url }}
         run: |
-          nohup gosmee client --insecure-skip-tls-verify --saveDir /tmp/gosmee-replay-ghe-webhook "${TEST_GITHUB_SECOND_WEBHOOK_SMEE_URL}" "https://ghe.paac-127-0-0-1.nip.io" >> /tmp/gosmee-ghe-webhook.log 2>&1 &
+          nohup gosmee client --insecure-skip-tls-verify --output json --log-level debug --target-connection-timeout 5 --target-retries 5 --saveDir /tmp/gosmee-replay-ghe-webhook "${TEST_GITHUB_SECOND_WEBHOOK_SMEE_URL}" "https://ghe.paac-127-0-0-1.nip.io" > /tmp/gosmee-ghe-webhook.log 2>&1 &
 
       - name: Setup tmate session
         uses: mxschmitt/action-tmate@35b54afac29c97fb54faba5b513f8fbd1882f113 # v3
@@ -291,6 +292,7 @@ jobs:
           TEST_BITBUCKET_CLOUD_E2E_REPOSITORY: cboudjna/pac-e2e-tests
           TEST_BITBUCKET_CLOUD_TOKEN: ${{ secrets.BITBUCKET_CLOUD_TOKEN }}
           TEST_BITBUCKET_CLOUD_USER: cboudjna
+          TEST_BITBUCKET_CLOUD_WEBHOOK_SECRET: ${{ secrets.BITBUCKET_CLOUD_WEBHOOK_SECRET }}
 
           # Bitbucket Data Center
           TEST_BITBUCKET_DATA_CENTER_API_URL: ${{ secrets.BITBUCKET_DATA_CENTER_API_URL }}
@@ -365,6 +367,7 @@ jobs:
         env:
           TEST_PROVIDER: ${{ matrix.provider }}
           TEST_BITBUCKET_CLOUD_TOKEN: ${{ secrets.BITBUCKET_CLOUD_TOKEN }}
+          TEST_BITBUCKET_CLOUD_WEBHOOK_SECRET: ${{ secrets.BITBUCKET_CLOUD_WEBHOOK_SECRET }}
           TEST_EL_WEBHOOK_SECRET: ${{ secrets.WEBHOOK_SECRET }}
           TEST_GITHUB_REPO_INSTALLATION_ID: ${{ vars.INSTALLATION_ID }}
           TEST_GITHUB_TOKEN: ${{ secrets.GH_APPS_TOKEN }}
