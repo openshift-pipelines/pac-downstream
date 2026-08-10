@@ -4,6 +4,7 @@
 [![Container Repository on GHCR](https://img.shields.io/badge/GHCR-image-87DCC0.svg?logo=GitHub)](https://github.com/orgs/tektoncd/packages/container/package/pipelines-as-code%2Fpipelines-as-code-controller)
 [![Go Report Card](https://goreportcard.com/badge/tektoncd/pipelines-as-code)](https://goreportcard.com/report/tektoncd/pipelines-as-code)
 [![E2E Tests](https://github.com/tektoncd/pipelines-as-code/actions/workflows/e2e.yaml/badge.svg)](https://github.com/tektoncd/pipelines-as-code/actions/workflows/e2e.yaml)
+[![codecov](https://codecov.io/gh/tektoncd/pipelines-as-code/branch/main/graph/badge.svg)](https://codecov.io/gh/tektoncd/pipelines-as-code)
 [![License](https://img.shields.io/github/license/tektoncd/pipelines-as-code)](LICENSE)
 
 <img src="docs/static/images/pac-logo-with-tagline-small.png" alt="PAC LOGO" width="300" align="right"/>

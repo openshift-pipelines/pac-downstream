@@ -287,7 +287,7 @@ func (v *Provider) SetClient(_ context.Context, run *params.Run, runevent *info.
 	}
 
 	// Added log for security audit purposes to log client access when a token is used
-	run.Clients.Log.Infof("gitea: initialized API client with provided credentials user=%s providerURL=%s", runevent.Provider.User, apiURL)
+	v.Logger.Infof("gitea: initialized API client with provided credentials user=%s providerURL=%s", runevent.Provider.User, apiURL)
 
 	v.giteaInstanceURL = runevent.Provider.URL
 	v.eventEmitter = emitter
@@ -554,6 +554,9 @@ func (v *Provider) GetFileInsideRepo(_ context.Context, runevent *info.Event, pa
 	content, _, err := v.Client().GetContents(runevent.Organization, runevent.Repository, ref, path)
 	if err != nil {
 		return "", err
+	}
+	if content == nil || content.Content == nil {
+		return "", fmt.Errorf("cannot find %s inside the repository %s/%s", path, runevent.Organization, runevent.Repository)
 	}
 	// base64 decode to string
 	decoded, err := base64.StdEncoding.DecodeString(*content.Content)

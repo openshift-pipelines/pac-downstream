@@ -6,6 +6,8 @@ import (
 
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
+	fake "github.com/tektoncd/pipeline/pkg/client/clientset/versioned/fake"
+	informers "github.com/tektoncd/pipeline/pkg/client/informers/externalversions"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/metric"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
@@ -69,4 +71,77 @@ func TestCountRunningPRs(t *testing.T) {
 	count, ok := rm.ScopeMetrics[0].Metrics[0].Data.(metricdata.Gauge[int64])
 	assert.Assert(t, ok)
 	assert.Equal(t, count.DataPoints[0].Value, int64(numberOfRunningPRs))
+}
+
+func TestRecorderMetrics(t *testing.T) {
+	ResetRecorder()
+	reader := sdkmetric.NewManualReader()
+	provider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+	otel.SetMeterProvider(provider)
+	m, err := NewRecorder()
+	assert.NilError(t, err)
+
+	ctx := context.Background()
+	assert.NilError(t, m.Count(ctx, "github", "pull_request", "ns", "repo"))
+	assert.NilError(t, m.CountPRDuration(ctx, "ns", "repo", "succeeded", "", 10))
+	assert.NilError(t, m.ReportGitProviderAPIUsage("github", "pull_request", "ns", "repo"))
+
+	var rm metricdata.ResourceMetrics
+	err = reader.Collect(ctx, &rm)
+	assert.NilError(t, err, "error collecting metrics")
+
+	names := map[string]bool{}
+	for _, sm := range rm.ScopeMetrics {
+		for _, met := range sm.Metrics {
+			names[met.Name] = true
+		}
+	}
+	assert.Assert(t, names["pipelines_as_code_pipelinerun_count"])
+	assert.Assert(t, names["pipelines_as_code_pipelinerun_duration_seconds_sum"])
+	assert.Assert(t, names["pipelines_as_code_git_provider_api_request_count"])
+}
+
+func TestRecorderNotInitialized(t *testing.T) {
+	ResetRecorder()
+	r := &Recorder{}
+	ctx := context.Background()
+
+	assert.Assert(t, r.Count(ctx, "github", "pull_request", "ns", "repo") != nil)
+	assert.Assert(t, r.CountPRDuration(ctx, "ns", "repo", "succeeded", "", 10) != nil)
+	assert.Assert(t, r.ReportGitProviderAPIUsage("github", "pull_request", "ns", "repo") != nil)
+}
+
+func TestObserveRunningPRsMetricsEmpty(t *testing.T) {
+	ResetRecorder()
+	reader := sdkmetric.NewManualReader()
+	provider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+	otel.SetMeterProvider(provider)
+	m, err := NewRecorder()
+	assert.NilError(t, err)
+
+	err = m.ObserveRunningPRsMetrics(nil, nil)
+	assert.NilError(t, err)
+}
+
+func TestReportRunningPipelineRuns(t *testing.T) {
+	ResetRecorder()
+	reader := sdkmetric.NewManualReader()
+	provider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+	otel.SetMeterProvider(provider)
+	m, err := NewRecorder()
+	assert.NilError(t, err)
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	fakeClient := fake.NewSimpleClientset()
+	factory := informers.NewSharedInformerFactory(fakeClient, 0)
+	lister := factory.Tekton().V1().PipelineRuns().Lister()
+
+	done := make(chan struct{})
+	go func() {
+		m.ReportRunningPipelineRuns(ctx, lister)
+		close(done)
+	}()
+	cancel()
+	<-done
 }

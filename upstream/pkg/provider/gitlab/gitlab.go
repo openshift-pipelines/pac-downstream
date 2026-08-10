@@ -263,8 +263,7 @@ func (v *Provider) setClient(ctx context.Context, run *params.Run, runevent *inf
 	}
 	v.Token = &runevent.Provider.Token
 
-	run.Clients.Log.Infof("gitlab: initialized for client with token for apiURL=%s, org=%s, repo=%s", apiURL, runevent.Organization, runevent.Repository)
-
+	v.Logger.Infof("gitlab: initialized for client with token for apiURL=%s, org=%s, repo=%s", apiURL, runevent.Organization, runevent.Repository)
 	// In a scenario where the source repository is forked and a merge request (MR) is created on the upstream
 	// repository, runevent.SourceProjectID will not be 0 when SetClient is called from the pac-watcher code.
 	// This is because, in the controller, SourceProjectID is set in the annotation of the pull request,
@@ -279,18 +278,18 @@ func (v *Provider) setClient(ctx context.Context, run *params.Run, runevent *inf
 
 	switch {
 	case runevent.Provider.GitProviderSecretFromGlobalRepo:
-		run.Clients.Log.Debugf("gitlab token auto-rotation skipped: git_provider.secret is inherited from global Repository secret namespace=%s", runevent.Provider.GitProviderSecretNamespace)
+		v.Logger.Debugf("gitlab token auto-rotation skipped: git_provider.secret is inherited from global Repository secret namespace=%s", runevent.Provider.GitProviderSecretNamespace)
 	case !rotateToken:
-		run.Clients.Log.Debugf("gitlab token auto-rotation skipped: client initialized before webhook validation")
+		v.Logger.Debugf("gitlab token auto-rotation skipped: client initialized before webhook validation")
 	case v.isTokenAutoRotationEnabled():
 		if newToken, rotateErr := v.maybeRotateToken(ctx); rotateErr != nil {
 			switch {
 			case errors.Is(rotateErr, errMissingSelfRotateScope):
-				run.Clients.Log.Debugf("gitlab token auto-rotation: %v", rotateErr)
+				v.Logger.Debugf("gitlab token auto-rotation: %v", rotateErr)
 			case errors.Is(rotateErr, errTokenRotatedSecretUpdateFailed):
 				return fmt.Errorf("gitlab token auto-rotation failed: %w", rotateErr)
 			default:
-				run.Clients.Log.Warnf("gitlab token auto-rotation check failed: %v", rotateErr)
+				v.Logger.Warnf("gitlab token auto-rotation check failed: %v", rotateErr)
 			}
 		} else if newToken != "" {
 			v.gitlabClient, err = gitlab.NewClient(newToken, gitlab.WithBaseURL(apiURL))
@@ -320,7 +319,7 @@ func (v *Provider) setClient(ctx context.Context, run *params.Run, runevent *inf
 				marker := "<!-- pac-source-repo-inaccessible -->"
 				comment := fmt.Sprintf("%s\n%s", marker, formatSourceRepoInaccessibleComment(runevent.SourceProjectID))
 				if commentErr := v.CreateComment(ctx, runevent, comment, marker); commentErr != nil {
-					run.Clients.Log.Warnf("failed to post source repository access error as MR comment: %v", commentErr)
+					v.Logger.Warnf("failed to post source repository access error as MR comment: %v", commentErr)
 				}
 			}
 			return returnErr
@@ -547,9 +546,7 @@ func (v *Provider) GetCommitStatuses(_ context.Context, event *info.Event) ([]pr
 			if firstErr == nil {
 				firstErr = err
 			}
-			if v.Logger != nil {
-				v.Logger.Debugf("failed to get commit statuses from gitlab project ID %d for SHA %s: %v", projectID, event.SHA, err)
-			}
+			v.Logger.Debugf("failed to get commit statuses from gitlab project ID %d for SHA %s: %v", projectID, event.SHA, err)
 			continue
 		}
 
@@ -573,13 +570,23 @@ func (v *Provider) GetCommitStatuses(_ context.Context, event *info.Event) ([]pr
 	return nil, firstErr
 }
 
+// sourceRevision selects the immutable event SHA when available and preserves
+// the branch fallback for events that do not carry a usable SHA.
+func sourceRevision(event *info.Event) string {
+	if event.SHA != "" && !provider.IsZeroSHA(event.SHA) {
+		return event.SHA
+	}
+	return event.HeadBranch
+}
+
 func (v *Provider) GetTektonDir(_ context.Context, event *info.Event, path, provenance string) (string, error) {
 	if v.gitlabClient == nil {
 		return "", fmt.Errorf("no gitlab client has been initialized, " +
 			"exiting... (hint: did you forget setting a secret on your repo?)")
 	}
-	// default set provenance from head
-	revision := event.HeadBranch
+	// Prefer the immutable event revision so later branch updates cannot change
+	// the PipelineRun definitions selected for this event.
+	revision := sourceRevision(event)
 	if provenance == "default_branch" {
 		revision = event.DefaultBranch
 		v.Logger.Infof("Using PipelineRun definition from default_branch: %s", event.DefaultBranch)
@@ -588,9 +595,8 @@ func (v *Provider) GetTektonDir(_ context.Context, event *info.Event, path, prov
 		if event.TriggerTarget == triggertype.PullRequest {
 			trigger = "merge request"
 		}
-		v.Logger.Infof("Using PipelineRun definition from source %s on commit SHA: %s", trigger, event.SHA)
+		v.Logger.Infof("Using PipelineRun definition from source %s on revision: %s", trigger, revision)
 	}
-
 	opt := &gitlab.ListTreeOptions{
 		Path:      gitlab.Ptr(path),
 		Ref:       gitlab.Ptr(revision),
@@ -668,8 +674,14 @@ func (v *Provider) getObject(fname, branch string, pid int64) ([]byte, *gitlab.R
 	return file, resp, nil
 }
 
-func (v *Provider) GetFileInsideRepo(_ context.Context, runevent *info.Event, path, _ string) (string, error) {
-	getobj, _, err := v.getObject(path, runevent.HeadBranch, v.sourceProjectID)
+func (v *Provider) GetFileInsideRepo(_ context.Context, runevent *info.Event, path, targetRevision string) (string, error) {
+	revision := targetRevision
+	if revision == "" {
+		// Default repository-local resources to the same immutable source revision
+		// as the PipelineRun definitions; an explicit provenance revision wins above.
+		revision = sourceRevision(runevent)
+	}
+	getobj, _, err := v.getObject(path, revision, v.sourceProjectID)
 	if err != nil {
 		return "", err
 	}
@@ -681,33 +693,55 @@ func (v *Provider) GetCommitInfo(_ context.Context, runevent *info.Event) error 
 		return fmt.Errorf("%s", noClientErrStr)
 	}
 
-	// if we don't have a SHA (ie: incoming-webhook) then get it from the branch
-	// and populate in the runevent.
-	if runevent.SHA == "" && runevent.HeadBranch != "" {
-		branchinfo, _, err := v.Client().Commits.GetCommit(v.sourceProjectID, runevent.HeadBranch, &gitlab.GetCommitOptions{})
+	commitRef := ""
+	expectedSHA := ""
+	if isBranchCreationRunEvent(runevent) {
+		// Resolve the immutable event SHA so a later push cannot move the branch creation to a new HEAD.
+		commitRef = runevent.SHA
+		expectedSHA = runevent.SHA
+	} else if runevent.SHA == "" && runevent.HeadBranch != "" {
+		// Incoming webhooks do not carry a SHA, so resolve their mutable branch ref as before.
+		commitRef = runevent.HeadBranch
+	}
+
+	if commitRef != "" {
+		commitInfo, _, err := v.Client().Commits.GetCommit(v.sourceProjectID, commitRef, &gitlab.GetCommitOptions{})
 		if err != nil {
 			return err
 		}
-		runevent.SHA = branchinfo.ID
-		runevent.SHATitle = branchinfo.Title
-		runevent.SHAURL = branchinfo.WebURL
+		if expectedSHA != "" && !strings.EqualFold(commitInfo.ID, expectedSHA) {
+			return fmt.Errorf("resolved commit SHA %s does not match event SHA %s", commitInfo.ID, expectedSHA)
+		}
+		runevent.SHA = commitInfo.ID
+		runevent.SHATitle = commitInfo.Title
+		runevent.SHAURL = commitInfo.WebURL
 
 		// Populate full commit information for LLM context
-		runevent.SHAMessage = branchinfo.Message
-		runevent.SHAAuthorName = branchinfo.AuthorName
-		runevent.SHAAuthorEmail = branchinfo.AuthorEmail
-		if branchinfo.AuthoredDate != nil {
-			runevent.SHAAuthorDate = *branchinfo.AuthoredDate
+		runevent.SHAMessage = commitInfo.Message
+		runevent.SHAAuthorName = commitInfo.AuthorName
+		runevent.SHAAuthorEmail = commitInfo.AuthorEmail
+		if commitInfo.AuthoredDate != nil {
+			runevent.SHAAuthorDate = *commitInfo.AuthoredDate
 		}
-		runevent.SHACommitterName = branchinfo.CommitterName
-		runevent.SHACommitterEmail = branchinfo.CommitterEmail
-		if branchinfo.CommittedDate != nil {
-			runevent.SHACommitterDate = *branchinfo.CommittedDate
+		runevent.SHACommitterName = commitInfo.CommitterName
+		runevent.SHACommitterEmail = commitInfo.CommitterEmail
+		if commitInfo.CommittedDate != nil {
+			runevent.SHACommitterDate = *commitInfo.CommittedDate
 		}
+		runevent.CommitMetadataIncomplete = false
 	}
 	runevent.HasSkipCommand = provider.SkipCI(runevent.SHAMessage)
 
 	return nil
+}
+
+func isBranchCreationRunEvent(runevent *info.Event) bool {
+	pushEvent, ok := runevent.Event.(*gitlab.PushEvent)
+	return ok &&
+		runevent.TriggerTarget == triggertype.Push &&
+		strings.EqualFold(runevent.SHA, pushEvent.After) &&
+		len(pushEvent.Commits) == 0 &&
+		isBranchCreationPayload(pushEvent)
 }
 
 // GetFiles gets and caches the list of files changed by a given event.

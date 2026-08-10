@@ -30,7 +30,11 @@ import (
 	"gotest.tools/v3/golden"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"knative.dev/pkg/apis"
 )
+
+// SuccessRegexp matches a successful Pipelines as Code CI comment, accounting for possible HTML tags.
+var SuccessRegexp = regexp.MustCompile(`.*Pipelines as Code CI.*has.*successfully.*validated your commit.*`)
 
 type TestOpts struct {
 	TargetRepoName        string
@@ -66,6 +70,7 @@ type TestOpts struct {
 	FileChanges           []scm.FileChange
 	CreateSecret          []corev1.Secret
 	ProviderType          string // defaults to "forgejo" if empty
+	SecondUserName        string
 }
 
 func PostCommentOnPullRequest(t *testing.T, topt *TestOpts, body string) {
@@ -116,6 +121,33 @@ func AddLabelToIssue(t *testing.T, topt *TestOpts, label string) {
 	_, _, err = topt.GiteaCNX.Client().AddIssueLabels(topt.Opts.Organization, topt.Opts.Repo, topt.PullRequest.Index, opt)
 	assert.NilError(t, err)
 	topt.ParamsRun.Clients.Log.Infof("Added label \"%s\" to %s", label, topt.PullRequest.HTMLURL)
+}
+
+// createPullRequestWithRetry creates a pull request, retrying on transient
+// errors. A request that times out on the client side can still have
+// succeeded on the Gitea server, so on failure it also checks whether the
+// pull request now exists before retrying, to avoid failing the test on a
+// spurious "pull request already exists" from a prior attempt.
+func createPullRequestWithRetry(t *testing.T, topts *TestOpts, owner, repo, base string) *forgejo.PullRequest {
+	t.Helper()
+	pr, err := retryOnAPIError(
+		topts.ParamsRun.Clients.Log, "Creating PullRequest", 5, 5*time.Second,
+		func() (*forgejo.PullRequest, error) {
+			pr, _, err := topts.GiteaCNX.Client().CreatePullRequest(owner, repo, forgejo.CreatePullRequestOption{
+				Title: "Test Pull Request - " + topts.TargetRefName,
+				Head:  topts.TargetRefName,
+				Base:  base,
+			})
+			return pr, err
+		},
+		func() (*forgejo.PullRequest, bool, error) {
+			return lookup(topts.GiteaCNX.Client().GetPullRequestByBaseAndHead(owner, repo, base, topts.TargetRefName))
+		},
+	)
+	if err != nil {
+		t.Fatalf("cannot create pull request: %v", err)
+	}
+	return pr
 }
 
 // TestPR will test the pull request event and grab comments from the PR.
@@ -252,20 +284,7 @@ func TestPR(t *testing.T, topts *TestOpts) (context.Context, func()) {
 	topts.SHA = scm.PushFilesToRefGit(t, scmOpts, entries)
 
 	topts.ParamsRun.Clients.Log.Infof("Creating PullRequest")
-	for i := 0; i < 5; i++ {
-		if topts.PullRequest, _, err = topts.GiteaCNX.Client().CreatePullRequest(topts.Opts.Organization, repoInfo.Name, forgejo.CreatePullRequestOption{
-			Title: "Test Pull Request - " + topts.TargetRefName,
-			Head:  topts.TargetRefName,
-			Base:  topts.DefaultBranch,
-		}); err == nil {
-			break
-		}
-		topts.ParamsRun.Clients.Log.Infof("Creating PullRequest has failed, retrying %d/%d, err", i, 5, err)
-		if i == 4 {
-			t.Fatalf("cannot create pull request: %v", err)
-		}
-		time.Sleep(5 * time.Second)
-	}
+	topts.PullRequest = createPullRequestWithRetry(t, topts, topts.Opts.Organization, repoInfo.Name, topts.DefaultBranch)
 	topts.ParamsRun.Clients.Log.Infof("PullRequest %s has been created", topts.PullRequest.HTMLURL)
 
 	if topts.CheckForStatus != "" {
@@ -372,20 +391,7 @@ func NewPR(t *testing.T, topts *TestOpts) func() {
 	scm.ChangeFilesRefGit(t, scmOpts, topts.FileChanges)
 
 	topts.ParamsRun.Clients.Log.Infof("Creating PullRequest")
-	for i := 0; i < 5; i++ {
-		if topts.PullRequest, _, err = topts.GiteaCNX.Client().CreatePullRequest(topts.Opts.Organization, repoInfo.Name, forgejo.CreatePullRequestOption{
-			Title: "Test Pull Request - " + topts.TargetRefName,
-			Head:  topts.TargetRefName,
-			Base:  options.MainBranch,
-		}); err == nil {
-			break
-		}
-		topts.ParamsRun.Clients.Log.Infof("Creating PullRequest has failed, retrying %d/%d, err", i, 5, err)
-		if i == 4 {
-			t.Fatalf("cannot create pull request: %v", err)
-		}
-		time.Sleep(5 * time.Second)
-	}
+	topts.PullRequest = createPullRequestWithRetry(t, topts, topts.Opts.Organization, repoInfo.Name, options.MainBranch)
 	topts.ParamsRun.Clients.Log.Infof("PullRequest %s has been created", topts.PullRequest.HTMLURL)
 
 	if topts.CheckForStatus != "" {
@@ -629,15 +635,24 @@ func GetStandardParams(t *testing.T, topts *TestOpts, eventType string) (repoURL
 		for i, pr := range prs.Items {
 			names[i] = pr.Name
 		}
-		assert.Equal(t, len(prs.Items), 1, "should have only one "+eventType+" pipelinerun", names)
+		if len(prs.Items) > 1 {
+			t.Fatalf("should have only one %s pipelinerun, got %d: %v", eventType, len(prs.Items), names)
+		}
 
-		if prs.Items[0].Status.Status.Conditions[0].Reason == "Succeeded" || prs.Items[0].Status.Status.Conditions[0].Reason == "Failed" {
-			break
+		// the pipelinerun may not have been created yet (e.g., the webhook
+		// event is still in flight) or may not have status conditions yet,
+		// keep retrying until it is finished.
+		if len(prs.Items) == 1 {
+			if cond := prs.Items[0].Status.GetCondition(apis.ConditionSucceeded); cond != nil {
+				if cond.Reason == "Succeeded" || cond.Reason == "Failed" {
+					break
+				}
+			}
+		}
+		if i == 20 {
+			t.Fatalf("%s pipelinerun has not finished, something is fishy", eventType)
 		}
 		time.Sleep(5 * time.Second)
-		if i == 20 {
-			t.Fatalf("pipelinerun has not finished, something is fishy")
-		}
 	}
 	numLines := int64(10)
 	out, err := tlogs.GetPodLog(context.Background(),
@@ -661,6 +676,9 @@ func GetStandardParams(t *testing.T, topts *TestOpts, eventType string) (repoURL
 	return repoURL, sourceURL, sourceBranch, targetBranch
 }
 
+// VerifyConcurrency runs a PR against a global repository concurrency limit and
+// checks the effective limit was respected. The local limit wins when both are
+// set, which is what the caller passes as effectiveLimit.
 func VerifyConcurrency(t *testing.T, topts *TestOpts, globalRepoConcurrencyLimit *int) {
 	t.Helper()
 	ctx := context.Background()
@@ -694,4 +712,11 @@ func VerifyConcurrency(t *testing.T, topts *TestOpts, globalRepoConcurrencyLimit
 
 	_, f := TestPR(t, topts)
 	defer f()
+
+	// the local limit takes precedence over the global one when both are set
+	effectiveLimit := *globalRepoConcurrencyLimit
+	if topts.ConcurrencyLimit != nil {
+		effectiveLimit = *topts.ConcurrencyLimit
+	}
+	AssertConcurrencyRespected(ctx, t, topts, effectiveLimit)
 }

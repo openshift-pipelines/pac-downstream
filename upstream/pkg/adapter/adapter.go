@@ -141,16 +141,34 @@ func (l *listener) Start(ctx context.Context) error {
 		}
 		serverTLSConfig.Certificates = []tls.Certificate{cert}
 		srv.TLSConfig = serverTLSConfig
-
-		if err := srv.ListenAndServeTLS("", ""); err != nil {
-			return err
-		}
-	} else {
-		if err := srv.ListenAndServe(); err != nil {
-			return err
-		}
 	}
-	return nil
+
+	// Shut the server down gracefully when the context is cancelled
+	// (SIGTERM/SIGINT via knative signals), so the process exits cleanly
+	// instead of being killed at the end of the pod grace period.
+	errCh := make(chan error, 1)
+	go func() {
+		var err error
+		if enabled {
+			err = srv.ListenAndServeTLS("", "")
+		} else {
+			err = srv.ListenAndServe()
+		}
+		errCh <- err
+	}()
+
+	select {
+	case err := <-errCh:
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			return err
+		}
+		return nil
+	case <-ctx.Done():
+		l.logger.Info("shutting down listener")
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		return srv.Shutdown(shutdownCtx)
+	}
 }
 
 func (l listener) handleEvent(ctx context.Context) http.HandlerFunc {
@@ -253,10 +271,9 @@ func (l listener) handleEvent(ctx context.Context) http.HandlerFunc {
 
 		go func() {
 			defer span.End()
-			err := s.processEvent(tracedCtx, localRequest)
+			err := s.handleEvent(tracedCtx, localRequest)
 			if err != nil {
 				span.RecordError(err)
-				logger.Errorf("an error occurred: %v", err)
 			}
 		}()
 
@@ -266,6 +283,9 @@ func (l listener) handleEvent(ctx context.Context) http.HandlerFunc {
 
 func (l listener) processRes(processEvent bool, provider provider.Interface, logger *zap.SugaredLogger, skipReason string, err error) (provider.Interface, *zap.SugaredLogger, error) {
 	if processEvent {
+		if provider == nil {
+			return nil, logger, fmt.Errorf("internal error: no provider detected while processEvent is true")
+		}
 		provider.SetLogger(logger)
 		return provider, logger, nil
 	}

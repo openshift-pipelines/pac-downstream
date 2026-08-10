@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
@@ -9,6 +10,7 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	paramclients "github.com/openshift-pipelines/pipelines-as-code/pkg/params/clients"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
+	kitesthelper "github.com/openshift-pipelines/pipelines-as-code/pkg/test/kubernetestint"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/test/logger"
 	tprovider "github.com/openshift-pipelines/pipelines-as-code/pkg/test/provider"
 	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
@@ -16,6 +18,20 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 	"knative.dev/pkg/apis"
 )
+
+type nilResponseClient struct{}
+
+func (n *nilResponseClient) Analyze(_ context.Context, _ *AnalysisRequest) (*AnalysisResponse, error) {
+	return nil, nil
+}
+
+func (n *nilResponseClient) GetProviderName() string {
+	return string(ProviderOpenAI)
+}
+
+func (n *nilResponseClient) ValidateConfig() error {
+	return nil
+}
 
 func TestAnalyze(t *testing.T) {
 	testLogger, _ := logger.GetLogger()
@@ -86,6 +102,183 @@ func TestAnalyze(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestAnalyzeNilResponse(t *testing.T) {
+	originalFactory := registry[ProviderOpenAI]
+	registry[ProviderOpenAI] = func(_ *ProviderConfig) (Client, error) {
+		return &nilResponseClient{}, nil
+	}
+	t.Cleanup(func() {
+		registry[ProviderOpenAI] = originalFactory
+	})
+
+	testLogger, _ := logger.GetLogger()
+	kinteract := &kitesthelper.KinterfaceTest{
+		GetSecretResult: map[string]string{"llm-token": "token"},
+	}
+	repo := &v1alpha1.Repository{
+		Spec: v1alpha1.RepositorySpec{
+			Settings: &v1alpha1.Settings{
+				AIAnalysis: &v1alpha1.AIAnalysisConfig{
+					Enabled:  true,
+					Provider: string(ProviderOpenAI),
+					TokenSecretRef: &v1alpha1.Secret{
+						Name: "llm-token",
+					},
+					Roles: []v1alpha1.AnalysisRole{
+						{
+							Name:   "review",
+							Prompt: "review this run",
+							OnCEL:  "true",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	results, err := analyze(context.Background(), &params.Run{}, kinteract, testLogger,
+		repo, &tektonv1.PipelineRun{}, &info.Event{}, &tprovider.TestProviderImp{})
+	assert.NilError(t, err)
+	assert.Equal(t, len(results), 1)
+	assert.ErrorContains(t, results[0].Error, "LLM client returned no response")
+}
+
+func TestExecuteAnalysis(t *testing.T) {
+	testLogger, _ := logger.GetLogger()
+
+	fakeClient := fake.NewClientset()
+	run := &params.Run{
+		Clients: paramclients.Clients{
+			Kube: fakeClient,
+		},
+	}
+	kinteract := &kubeinteraction.Interaction{}
+	pr := &tektonv1.PipelineRun{}
+
+	tests := []struct {
+		name           string
+		repo           *v1alpha1.Repository
+		nilPipelineRun bool
+		wantErr        string
+	}{
+		{
+			name: "no settings",
+			repo: &v1alpha1.Repository{},
+		},
+		{
+			name: "ai analysis nil",
+			repo: &v1alpha1.Repository{
+				Spec: v1alpha1.RepositorySpec{
+					Settings: &v1alpha1.Settings{},
+				},
+			},
+		},
+		{
+			name: "ai analysis disabled",
+			repo: &v1alpha1.Repository{
+				Spec: v1alpha1.RepositorySpec{
+					Settings: &v1alpha1.Settings{
+						AIAnalysis: &v1alpha1.AIAnalysisConfig{Enabled: false},
+					},
+				},
+			},
+		},
+		{
+			name: "invalid config returns error wrapped",
+			repo: &v1alpha1.Repository{
+				Spec: v1alpha1.RepositorySpec{
+					Settings: &v1alpha1.Settings{
+						AIAnalysis: &v1alpha1.AIAnalysisConfig{
+							Enabled:  true,
+							Provider: "openai",
+						},
+					},
+				},
+			},
+			wantErr: "LLM analysis failed",
+		},
+		{
+			name: "nil pipelinerun",
+			repo: &v1alpha1.Repository{
+				Spec: v1alpha1.RepositorySpec{
+					Settings: &v1alpha1.Settings{
+						AIAnalysis: &v1alpha1.AIAnalysisConfig{Enabled: true},
+					},
+				},
+			},
+			nilPipelineRun: true,
+			wantErr:        "no pipelinerun provided",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pipelineRun := pr
+			if tt.nilPipelineRun {
+				pipelineRun = nil
+			}
+			err := ExecuteAnalysis(context.Background(), run, kinteract, testLogger,
+				tt.repo, pipelineRun, &info.Event{}, &tprovider.TestProviderImp{})
+			if tt.wantErr != "" {
+				assert.ErrorContains(t, err, tt.wantErr)
+				return
+			}
+			assert.NilError(t, err)
+		})
+	}
+}
+
+func TestPostPRComment(t *testing.T) {
+	testLogger, _ := logger.GetLogger()
+	prov := &tprovider.TestProviderImp{}
+
+	tests := []struct {
+		name  string
+		event *info.Event
+	}{
+		{
+			name:  "no pull request number, skipped",
+			event: &info.Event{PullRequestNumber: 0},
+		},
+		{
+			name:  "with pull request number",
+			event: &info.Event{PullRequestNumber: 42},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := AnalysisResult{
+				Role:     "test-role",
+				Response: &AnalysisResponse{Content: "analysis content"},
+			}
+			err := postPRComment(context.Background(), result, tt.event, prov, testLogger)
+			assert.NilError(t, err)
+		})
+	}
+}
+
+func TestCountResults(t *testing.T) {
+	results := []AnalysisResult{
+		{Role: "a", Response: &AnalysisResponse{}},
+		{Role: "b", Error: fmt.Errorf("failed")},
+		{Role: "c", Response: &AnalysisResponse{}},
+		{Role: "d", Error: fmt.Errorf("failed again")},
+	}
+
+	assert.Equal(t, countSuccessfulResults(results), 2)
+	assert.Equal(t, countFailedResults(results), 2)
+}
+
+func TestAnalysisErrorMessage(t *testing.T) {
+	err := &AnalysisError{
+		Provider: "openai",
+		Type:     "timeout",
+		Message:  "request timed out",
+	}
+	assert.Equal(t, err.Error(), "request timed out")
 }
 
 func TestValidateAnalysisConfig(t *testing.T) {
