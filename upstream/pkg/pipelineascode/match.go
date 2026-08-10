@@ -14,6 +14,7 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/gitclient"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/matcher"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/opscomments"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
 	providerstatus "github.com/openshift-pipelines/pipelines-as-code/pkg/provider/status"
@@ -147,6 +148,7 @@ func (p *PacRun) getPipelineRunsFromRepo(ctx context.Context, repo *v1alpha1.Rep
 	if repo.Spec.Settings != nil && repo.Spec.Settings.PipelineRunProvenance != "" {
 		provenance = repo.Spec.Settings.PipelineRunProvenance
 	}
+	repositoryRevision := getRepositoryRevisionForProvenance(p.event, provenance)
 	p.debugf("getPipelineRunsFromRepo: repo=%s/%s provenance=%s", repo.GetNamespace(), repo.GetName(), provenance)
 	rawTemplates, err := p.vcx.GetTektonDir(ctx, p.event, tektonDir, provenance)
 	if err != nil && p.event.TriggerTarget == triggertype.PullRequest && strings.Contains(err.Error(), "error unmarshalling yaml file") {
@@ -352,17 +354,14 @@ func (p *PacRun) getPipelineRunsFromRepo(ctx context.Context, repo *v1alpha1.Rep
 			}
 		}
 		p.debugf("getPipelineRunsFromRepo: resolving remote tasks for pipelineRuns=%d", len(types.PipelineRuns))
-		var deprecatedHubResources []string
-		pipelineRuns, deprecatedHubResources, err = resolve.Resolve(ctx, p.run, p.logger, p.vcx, types, p.event, &resolve.Opts{
-			GenerateName: true,
-			RemoteTasks:  true,
+		pipelineRuns, err = resolve.Resolve(ctx, p.run, p.logger, p.vcx, types, p.event, &resolve.Opts{
+			GenerateName:       true,
+			RemoteTasks:        true,
+			RepositoryRevision: repositoryRevision,
 		})
 		if err != nil {
 			p.eventEmitter.EmitMessage(repo, zap.ErrorLevel, "RepositoryFailedToMatch", fmt.Sprintf("failed to match pipelineRuns: %s", err.Error()))
 			return nil, err
-		}
-		if len(deprecatedHubResources) > 0 {
-			p.postTektonHubDeprecationNotice(ctx, repo, deprecatedHubResources)
 		}
 	}
 
@@ -402,6 +401,17 @@ func (p *PacRun) getPipelineRunsFromRepo(ctx context.Context, repo *v1alpha1.Rep
 	p.debugf("getPipelineRunsFromRepo: final match count=%d", len(matchedPRs))
 
 	return matchedPRs, nil
+}
+
+func getRepositoryRevisionForProvenance(event *info.Event, provenance string) string {
+	// Preserve existing provider behavior unless the event requires pinned repository resolution.
+	if event.PipelineRunSourceRevision == "" {
+		return ""
+	}
+	if provenance == "default_branch" {
+		return event.DefaultBranch
+	}
+	return event.PipelineRunSourceRevision
 }
 
 func filterRunningPipelineRunOnTargetTest(testPipeline string, prs []*tektonv1.PipelineRun) *tektonv1.PipelineRun {
@@ -494,40 +504,6 @@ func (p *PacRun) changePipelineRun(ctx context.Context, repo *v1alpha1.Repositor
 		p.debugf("changePipelineRun: updated pipelinerun=%s with git_auth_secret annotation", prName)
 	}
 	return nil
-}
-
-const tektonHubDeprecationMarker = "<!-- pac-deprecation-tektonhub -->"
-
-func (p *PacRun) postTektonHubDeprecationNotice(ctx context.Context, repo *v1alpha1.Repository, deprecatedResources []string) {
-	// Emit Kubernetes Event on the Repository CR
-	deprecMsg := fmt.Sprintf("Tekton Hub integration is deprecated and will be removed in a future release. The following resources were resolved from a Tekton Hub catalog: %s. Please migrate to Artifact Hub or fetch tasks from a git repository.", strings.Join(deprecatedResources, ", "))
-	p.eventEmitter.EmitMessage(repo, zap.WarnLevel, "DeprecatedTektonHub", deprecMsg)
-
-	// Post a consolidated comment on the pull request (force-posted, ignores disable_all)
-	if p.event.PullRequestNumber > 0 {
-		commentBody := formatTektonHubDeprecationComment(deprecatedResources)
-		if commentErr := p.vcx.CreateComment(ctx, p.event, commentBody, tektonHubDeprecationMarker); commentErr != nil {
-			p.logger.Warnf("failed to post Tekton Hub deprecation comment on PR: %s", commentErr)
-		}
-	}
-}
-
-func formatTektonHubDeprecationComment(deprecatedResources []string) string {
-	var sb strings.Builder
-	sb.WriteString("> [!WARNING]\n")
-	sb.WriteString("> **Tekton Hub Deprecation Notice**\n")
-	sb.WriteString(">\n")
-	sb.WriteString("> The following resources were resolved from a Tekton Hub catalog, which is **deprecated** and will be **removed in a future release**:\n")
-	sb.WriteString(">\n")
-	for _, r := range deprecatedResources {
-		fmt.Fprintf(&sb, "> - %s\n", r)
-	}
-	sb.WriteString(">\n")
-	sb.WriteString("> Please migrate to [Artifact Hub](https://artifacthub.io) or fetch tasks directly from a git repository or remote URL.\n")
-	sb.WriteString("> See the [migration guide](https://pipelinesascode.com/docs/guides/pipeline-resolution/) for alternatives.\n")
-	sb.WriteString("\n")
-	sb.WriteString(tektonHubDeprecationMarker)
-	return sb.String()
 }
 
 // checkNeedUpdate checks if the template needs an update form the user, try to

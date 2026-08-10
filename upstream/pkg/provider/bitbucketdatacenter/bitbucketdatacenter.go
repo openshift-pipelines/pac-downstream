@@ -257,7 +257,10 @@ func (v *Provider) GetFileInsideRepo(ctx context.Context, event *info.Event, pat
 }
 
 func removeLastSegment(urlStr string) string {
-	u, _ := url.Parse(urlStr)
+	u, err := url.Parse(urlStr)
+	if err != nil {
+		return urlStr
+	}
 	segments := strings.Split(u.Path, "/")
 	switch {
 	case len(segments) > 1:
@@ -309,7 +312,7 @@ func (v *Provider) SetClient(ctx context.Context, run *params.Run, event *info.E
 		v.client = client
 
 		// Added for security audit purposes to log client access when a token is used
-		run.Clients.Log.Infof("bitbucket-datacenter: initialized client with provided token for user=%s providerURL=%s", event.Provider.User, event.Provider.URL)
+		v.Logger.Infof("bitbucket-datacenter: initialized client with provided token for user=%s providerURL=%s", event.Provider.User, event.Provider.URL)
 	}
 	v.run = run
 	v.repo = repo
@@ -326,7 +329,10 @@ func (v *Provider) SetClient(ctx context.Context, run *params.Run, event *info.E
 		return fmt.Errorf("token validation failed: Internal Server Error")
 	}
 	if err != nil {
-		return fmt.Errorf("token validation failed: http status: %d : %w", resp.Status, err)
+		if resp != nil {
+			return fmt.Errorf("token validation failed: http status: %d : %w", resp.Status, err)
+		}
+		return fmt.Errorf("token validation failed: %w", err)
 	}
 
 	// the token must have admin permissions at project or repository level

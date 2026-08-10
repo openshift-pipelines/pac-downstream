@@ -26,6 +26,7 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/settings"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
 	prmetrics "github.com/openshift-pipelines/pipelines-as-code/pkg/pipelinerunmetrics"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
 	testclient "github.com/openshift-pipelines/pipelines-as-code/pkg/test/clients"
 	ghtesthelper "github.com/openshift-pipelines/pipelines-as-code/pkg/test/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/test/logger"
@@ -79,7 +80,10 @@ func TestGetTaskURI(t *testing.T) {
 			ctx, _ := rtesting.SetupFakeContext(t)
 			fakeclient, mux, _, teardown := ghtesthelper.SetupGH()
 			defer teardown()
-			provider := &Provider{ghClient: fakeclient}
+			l, _ := logger.GetLogger()
+			provider := New()
+			provider.SetGithubClient(fakeclient)
+			provider.SetLogger(l)
 			event := info.NewEvent()
 			event.HeadBranch = "main"
 			event.URL = tt.eventURL
@@ -705,8 +709,10 @@ func TestGetFileInsideRepo(t *testing.T) {
 			ctx, _ := rtesting.SetupFakeContext(t)
 			fakeclient, mux, _, teardown := ghtesthelper.SetupGH()
 			defer teardown()
+			l, _ := logger.GetLogger()
 			gvcs := Provider{
 				ghClient: fakeclient,
+				Logger:   l,
 			}
 			for s, f := range tt.rets {
 				mux.HandleFunc(s, f)
@@ -780,9 +786,11 @@ func TestGetFileInsideRepoRefSelection(t *testing.T) {
 			ctx, _ := rtesting.SetupFakeContext(t)
 			fakeclient, mux, _, teardown := ghtesthelper.SetupGH()
 			defer teardown()
+			l, _ := logger.GetLogger()
 			gvcs := Provider{
 				ghClient:   fakeclient,
 				provenance: tt.provenance,
+				Logger:     l,
 			}
 
 			mux.HandleFunc("/repos/org/repo/contents/OWNERS", func(w http.ResponseWriter, r *http.Request) {
@@ -842,8 +850,10 @@ func TestCheckSenderOrgMembership(t *testing.T) {
 			fakeclient, mux, _, teardown := ghtesthelper.SetupGH()
 			defer teardown()
 			ctx, _ := rtesting.SetupFakeContext(t)
+			l, _ := logger.GetLogger()
 			gprovider := Provider{
 				ghClient: fakeclient,
+				Logger:   l,
 			}
 			mux.HandleFunc(fmt.Sprintf("/orgs/%s/members", tt.runevent.Organization), func(rw http.ResponseWriter, _ *http.Request) {
 				fmt.Fprint(rw, tt.apiReturn)
@@ -891,9 +901,11 @@ func TestGetStringPullRequestComment(t *testing.T) {
 					Settings: &v1alpha1.Settings{},
 				},
 			}
+			l, _ := logger.GetLogger()
 			gprovider := Provider{
 				ghClient: fakeclient,
 				repo:     repo,
+				Logger:   l,
 			}
 			mux.HandleFunc(fmt.Sprintf("/repos/issues/%s/comments", filepath.Base(tt.runevent.URL)), func(rw http.ResponseWriter, _ *http.Request) {
 				fmt.Fprint(rw, tt.apiReturn)
@@ -1118,9 +1130,15 @@ func TestGithubGetCommitInfo(t *testing.T) {
 				fmt.Fprint(rw, string(jsonData))
 			})
 			ctx, _ := rtesting.SetupFakeContext(t)
-			provider := &Provider{ghClient: fakeclient}
+			l, _ := logger.GetLogger()
+			provider := &Provider{
+				ghClient: fakeclient,
+				Logger:   l,
+			}
 			if tt.noclient {
-				provider = &Provider{}
+				provider = &Provider{
+					Logger: l,
+				}
 			}
 			err := provider.GetCommitInfo(ctx, tt.event)
 			if tt.wantErr != "" {
@@ -1167,6 +1185,7 @@ func TestGithubSetClient(t *testing.T) {
 		expectedURL    string
 		isGHE          bool
 		installationID int64
+		wantErr        string
 	}{
 		{
 			name: "api url set",
@@ -1184,6 +1203,15 @@ func TestGithubSetClient(t *testing.T) {
 			expectedURL:    fmt.Sprintf("%s/", keys.PublicGithubAPIURL),
 			event:          info.NewEvent(),
 			installationID: 12345,
+		},
+		{
+			name: "invalid enterprise URL",
+			event: &info.Event{
+				Provider: &info.Provider{
+					URL: "%",
+				},
+			},
+			wantErr: "failed to create github enterprise client",
 		},
 	}
 	for _, tt := range tests {
@@ -1207,6 +1235,10 @@ func TestGithubSetClient(t *testing.T) {
 				},
 			}
 			err := v.SetClient(ctx, fakeRun, tt.event, repo, nil)
+			if tt.wantErr != "" {
+				assert.ErrorContains(t, err, tt.wantErr)
+				return
+			}
 			assert.NilError(t, err)
 			assert.Equal(t, tt.expectedURL, *v.APIURL)
 			assert.Equal(t, "https", v.Client().BaseURL.Scheme)
@@ -1756,7 +1788,12 @@ func TestListRepos(t *testing.T) {
 	})
 
 	ctx, _ := rtesting.SetupFakeContext(t)
-	provider := &Provider{ghClient: fakeclient, PaginedNumber: 1}
+	l, _ := logger.GetLogger()
+	provider := &Provider{
+		ghClient:      fakeclient,
+		PaginedNumber: 1,
+		Logger:        l,
+	}
 	data, err := ListRepos(ctx, provider)
 	assert.NilError(t, err)
 	assert.Equal(t, data[0], "https://matched/by/incoming")
@@ -1851,13 +1888,20 @@ func TestCreateToken(t *testing.T) {
 		})
 	}
 
-	provider := &Provider{ghClient: fakeclient}
+	provider := &Provider{ghClient: fakeclient, Logger: logger}
 	provider.Run = run
 	_, err := provider.CreateToken(ctx, urlData, info)
 	assert.Assert(t, len(provider.RepositoryIDs) == 2, "found repositoryIDs are %d which is less than expected", len(provider.RepositoryIDs))
 	if err != nil {
 		assert.ErrorContains(t, err, "could not refresh installation id 1234567's token")
 	}
+}
+
+func TestExpandGlobAndAddRepoIDsInvalidPattern(t *testing.T) {
+	provider := &Provider{}
+	cache := []*github.Repository{}
+	err := provider.expandGlobAndAddRepoIDs(context.Background(), "[", &cache)
+	assert.ErrorContains(t, err, "invalid repo glob pattern")
 }
 
 func TestGetPullRequest(t *testing.T) {
@@ -1954,7 +1998,8 @@ func TestGetPullRequest(t *testing.T) {
 					})
 			}
 
-			provider := &Provider{ghClient: fakeclient}
+			l, _ := logger.GetLogger()
+			provider := &Provider{ghClient: fakeclient, Logger: l}
 			got, err := provider.getPullRequest(ctx, tt.event)
 			if tt.wantErr {
 				assert.Assert(t, err != nil)
@@ -2007,7 +2052,8 @@ func TestGetPullRequestCaching(t *testing.T) {
 		Repository:        "repo",
 		PullRequestNumber: 1,
 	}
-	provider := &Provider{ghClient: fakeclient}
+	l, _ := logger.GetLogger()
+	provider := &Provider{ghClient: fakeclient, Logger: l}
 
 	_, err := provider.getPullRequest(ctx, event)
 	assert.NilError(t, err)
@@ -2055,7 +2101,8 @@ func TestIsHeadCommitOfBranch(t *testing.T) {
 			})
 
 			ctx, _ := rtesting.SetupFakeContext(t)
-			provider := &Provider{ghClient: fakeclient}
+			l, _ := logger.GetLogger()
+			provider := &Provider{ghClient: fakeclient, Logger: l}
 			err := provider.isHeadCommitOfBranch(ctx, runEvent, "test1")
 			assert.Equal(t, err != nil, tt.wantErr)
 		})
@@ -2193,7 +2240,7 @@ func TestCreateComment(t *testing.T) {
 					postAssert = tt.setup(t, mux)
 				}
 			} else {
-				provider = &Provider{} // nil client
+				provider = &Provider{Logger: fakelogger} // nil client
 			}
 
 			body := tt.commentBody
@@ -2598,6 +2645,7 @@ func TestFetchAppSlug(t *testing.T) {
 		name             string
 		privateKey       []byte
 		applicationID    int64
+		apiURL           string
 		setupMux         func(mux *http.ServeMux)
 		wantSlug         string
 		wantErrSubstring string
@@ -2654,6 +2702,13 @@ func TestFetchAppSlug(t *testing.T) {
 			},
 			wantErrSubstring: "failed to get app info",
 		},
+		{
+			name:             "invalid enterprise API URL",
+			privateKey:       []byte(fakePrivateKey),
+			applicationID:    testAppID,
+			apiURL:           "%",
+			wantErrSubstring: "failed to create github enterprise client",
+		},
 	}
 
 	for _, tt := range tests {
@@ -2696,7 +2751,8 @@ func TestFetchAppSlug(t *testing.T) {
 			stdata, _ := testclient.SeedTestData(t, ctx, tdata)
 
 			// Create a provider with mocked kubernetes client
-			provider := &Provider{}
+			l, _ := logger.GetLogger()
+			provider := &Provider{Logger: l}
 			provider.Run = &params.Run{
 				Clients: clients.Clients{
 					Kube: stdata.Kube,
@@ -2708,7 +2764,11 @@ func TestFetchAppSlug(t *testing.T) {
 				},
 			}
 
-			slug, err := provider.fetchAppSlug(ctx, serverURL)
+			apiURL := serverURL
+			if tt.apiURL != "" {
+				apiURL = tt.apiURL
+			}
+			slug, err := provider.fetchAppSlug(ctx, apiURL)
 
 			if tt.wantErrSubstring != "" {
 				assert.Assert(t, err != nil, "expected error but got none")
@@ -2718,6 +2778,234 @@ func TestFetchAppSlug(t *testing.T) {
 
 			assert.NilError(t, err)
 			assert.Equal(t, slug, tt.wantSlug)
+		})
+	}
+}
+
+func TestGetCommitStatuses(t *testing.T) {
+	defaultEvent := &info.Event{
+		Organization: "owner",
+		Repository:   "repo",
+		SHA:          "abc123",
+	}
+
+	appEvent := &info.Event{
+		Organization:   "owner",
+		Repository:     "repo",
+		SHA:            "abc123",
+		InstallationID: 12345,
+	}
+
+	tests := []struct {
+		name          string
+		event         *info.Event
+		wantErr       bool
+		wantStatuses  []provider.CommitStatusInfo
+		noClient      bool
+		clock         clockwork.Clock
+		checkRunsJSON string
+		statusesJSON  string
+		setupMux      func(t *testing.T, mux *http.ServeMux, event *info.Event)
+	}{
+		{
+			name:     "nil client returns error",
+			noClient: true,
+			event:    &info.Event{},
+			wantErr:  true,
+		},
+		{
+			name:  "check runs with mixed conclusions",
+			event: appEvent,
+			wantStatuses: []provider.CommitStatusInfo{
+				{Name: "Pipelines as Code CI / lint", Status: "success"},
+				{Name: "Pipelines as Code CI / test", Status: "failure"},
+				{Name: "Pipelines as Code CI / build", Status: "success"},
+			},
+			checkRunsJSON: `{"total_count": 3, "check_runs": [
+				{"name": "Pipelines as Code CI / lint", "status": "completed", "conclusion": "success"},
+				{"name": "Pipelines as Code CI / test", "status": "completed", "conclusion": "failure"},
+				{"name": "Pipelines as Code CI / build", "status": "completed", "conclusion": "success"}
+			]}`,
+		},
+		{
+			name:  "check runs with in progress status",
+			event: appEvent,
+			wantStatuses: []provider.CommitStatusInfo{
+				{Name: "Pipelines as Code CI / lint", Status: "success"},
+				{Name: "Pipelines as Code CI / test", Status: "in_progress"},
+			},
+			checkRunsJSON: `{"total_count": 2, "check_runs": [
+				{"name": "Pipelines as Code CI / lint", "status": "completed", "conclusion": "success"},
+				{"name": "Pipelines as Code CI / test", "status": "in_progress"}
+			]}`,
+		},
+		{
+			name:          "no check runs returns empty",
+			event:         appEvent,
+			wantStatuses:  nil,
+			checkRunsJSON: `{"total_count": 0, "check_runs": []}`,
+		},
+		{
+			name:    "check runs API error",
+			event:   appEvent,
+			wantErr: true,
+			clock:   clockwork.NewFakeClock(),
+			setupMux: func(t *testing.T, mux *http.ServeMux, event *info.Event) {
+				t.Helper()
+				mux.HandleFunc(fmt.Sprintf("/repos/%s/%s/commits/%s/check-runs",
+					event.Organization, event.Repository, event.SHA),
+					func(w http.ResponseWriter, _ *http.Request) {
+						w.WriteHeader(http.StatusInternalServerError)
+					})
+			},
+		},
+		{
+			name:  "check runs with pagination",
+			event: appEvent,
+			wantStatuses: []provider.CommitStatusInfo{
+				{Name: "Pipelines as Code CI / lint", Status: "success"},
+				{Name: "Pipelines as Code CI / test", Status: "failure"},
+			},
+			setupMux: func(t *testing.T, mux *http.ServeMux, event *info.Event) {
+				t.Helper()
+				urlPath := fmt.Sprintf("/repos/%s/%s/commits/%s/check-runs",
+					event.Organization, event.Repository, event.SHA)
+				mux.HandleFunc(urlPath, func(w http.ResponseWriter, r *http.Request) {
+					page := r.URL.Query().Get("page")
+					if page == "" || page == "1" {
+						w.Header().Add("Link", fmt.Sprintf(`<https://api.github.com%s?page=2&per_page=1>; rel="next"`, urlPath))
+						fmt.Fprint(w, `{
+							"total_count": 2,
+							"check_runs": [
+								{"name": "Pipelines as Code CI / lint", "status": "completed", "conclusion": "success"}
+							]
+						}`)
+					} else {
+						fmt.Fprint(w, `{
+							"total_count": 2,
+							"check_runs": [
+								{"name": "Pipelines as Code CI / test", "status": "completed", "conclusion": "failure"}
+							]
+						}`)
+					}
+				})
+			},
+		},
+		{
+			name:  "commit statuses webhook mode",
+			event: defaultEvent,
+			wantStatuses: []provider.CommitStatusInfo{
+				{Name: "Pipelines as Code CI / lint", Status: "success"},
+				{Name: "Pipelines as Code CI / test", Status: "failure"},
+			},
+			statusesJSON: `[
+				{"context": "Pipelines as Code CI / lint", "state": "success"},
+				{"context": "Pipelines as Code CI / test", "state": "failure"}
+			]`,
+		},
+		{
+			name:  "commit statuses with pagination webhook mode",
+			event: defaultEvent,
+			wantStatuses: []provider.CommitStatusInfo{
+				{Name: "Pipelines as Code CI / lint", Status: "success"},
+				{Name: "Pipelines as Code CI / test", Status: "failure"},
+			},
+			setupMux: func(t *testing.T, mux *http.ServeMux, event *info.Event) {
+				t.Helper()
+				urlPath := fmt.Sprintf("/repos/%s/%s/commits/%s/statuses",
+					event.Organization, event.Repository, event.SHA)
+				mux.HandleFunc(urlPath, func(w http.ResponseWriter, r *http.Request) {
+					page := r.URL.Query().Get("page")
+					if page == "" || page == "1" {
+						w.Header().Add("Link", fmt.Sprintf(`<https://api.github.com%s?page=2&per_page=1>; rel="next"`, urlPath))
+						fmt.Fprint(w, `[
+							{"context": "Pipelines as Code CI / lint", "state": "success"}
+						]`)
+					} else {
+						fmt.Fprint(w, `[
+							{"context": "Pipelines as Code CI / test", "state": "failure"}
+						]`)
+					}
+				})
+			},
+		},
+		{
+			name:    "commit statuses API error webhook mode",
+			event:   defaultEvent,
+			wantErr: true,
+			setupMux: func(t *testing.T, mux *http.ServeMux, event *info.Event) {
+				t.Helper()
+				mux.HandleFunc(fmt.Sprintf("/repos/%s/%s/commits/%s/statuses",
+					event.Organization, event.Repository, event.SHA),
+					func(w http.ResponseWriter, _ *http.Request) {
+						w.WriteHeader(http.StatusInternalServerError)
+					})
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, _ := rtesting.SetupFakeContext(t)
+			l, _ := logger.GetLogger()
+
+			if tt.noClient {
+				cnx := &Provider{Logger: l}
+				_, err := cnx.GetCommitStatuses(ctx, tt.event)
+				assert.Assert(t, err != nil)
+				return
+			}
+
+			fakeclient, mux, _, teardown := ghtesthelper.SetupGH()
+			defer teardown()
+
+			cnx := &Provider{
+				ghClient:      fakeclient,
+				PaginedNumber: defaultPaginedNumber,
+				Logger:        l,
+			}
+			if tt.clock != nil {
+				cnx.clock = tt.clock
+			}
+
+			if tt.checkRunsJSON != "" {
+				mux.HandleFunc(fmt.Sprintf("/repos/%s/%s/commits/%s/check-runs",
+					tt.event.Organization, tt.event.Repository, tt.event.SHA),
+					func(w http.ResponseWriter, _ *http.Request) {
+						fmt.Fprint(w, tt.checkRunsJSON)
+					})
+			}
+			if tt.statusesJSON != "" {
+				mux.HandleFunc(fmt.Sprintf("/repos/%s/%s/commits/%s/statuses",
+					tt.event.Organization, tt.event.Repository, tt.event.SHA),
+					func(w http.ResponseWriter, _ *http.Request) {
+						fmt.Fprint(w, tt.statusesJSON)
+					})
+			}
+			if tt.setupMux != nil {
+				tt.setupMux(t, mux, tt.event)
+			}
+
+			if fc, ok := tt.clock.(*clockwork.FakeClock); ok {
+				go func() {
+					for range checkRunsFetchMaxRetries {
+						fc.BlockUntilContext(ctx, 1) //nolint:errcheck
+						fc.Advance(time.Second)
+					}
+				}()
+			}
+
+			got, err := cnx.GetCommitStatuses(ctx, tt.event)
+			if tt.wantErr {
+				assert.Assert(t, err != nil)
+				return
+			}
+			assert.NilError(t, err)
+			assert.Equal(t, len(got), len(tt.wantStatuses))
+			for i, want := range tt.wantStatuses {
+				assert.Equal(t, got[i].Name, want.Name)
+				assert.Equal(t, got[i].Status, want.Status)
+			}
 		})
 	}
 }
