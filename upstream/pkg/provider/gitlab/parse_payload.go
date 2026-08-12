@@ -2,6 +2,7 @@ package gitlab
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -13,8 +14,8 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/pipelineascode"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/secrets"
 
 	gitlab "gitlab.com/gitlab-org/api/client-go"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -83,7 +84,7 @@ func (v *Provider) ParsePayload(ctx context.Context, run *params.Run, request *h
 		// GitLab sends same event for both Tag creation and deletion i.e. "Tag Push Hook".
 		// if gitEvent.After is containing all zeros and gitEvent.CheckoutSHA is empty
 		// it is Delete "Tag Push Hook".
-		if isZeroSHA(gitEvent.After) && gitEvent.CheckoutSHA == "" {
+		if provider.IsZeroSHA(gitEvent.After) && gitEvent.CheckoutSHA == "" {
 			return nil, fmt.Errorf("event Delete %s is not supported", event)
 		}
 
@@ -115,15 +116,22 @@ func (v *Provider) ParsePayload(ctx context.Context, run *params.Run, request *h
 		processedEvent.EventType = strings.ReplaceAll(event, " Hook", "")
 	case *gitlab.PushEvent:
 		if len(gitEvent.Commits) == 0 {
-			return nil, fmt.Errorf("no commits attached to this push event")
+			if !isBranchCreationPayload(gitEvent) {
+				return nil, fmt.Errorf("no commits attached to this push event")
+			}
+			// After is the immutable branch tip when GitLab creates a branch without adding commits.
+			processedEvent.SHA = gitEvent.After
+			processedEvent.CommitMetadataIncomplete = true
+			processedEvent.PipelineRunSourceRevision = gitEvent.After
+		} else {
+			lastCommitIdx := len(gitEvent.Commits) - 1
+			processedEvent.SHA = gitEvent.Commits[lastCommitIdx].ID
+			processedEvent.SHAURL = gitEvent.Commits[lastCommitIdx].URL
+			processedEvent.SHATitle = gitEvent.Commits[lastCommitIdx].Title
 		}
-		lastCommitIdx := len(gitEvent.Commits) - 1
 		processedEvent.Sender = gitEvent.UserUsername
 		processedEvent.DefaultBranch = gitEvent.Project.DefaultBranch
 		processedEvent.URL = gitEvent.Project.WebURL
-		processedEvent.SHA = gitEvent.Commits[lastCommitIdx].ID
-		processedEvent.SHAURL = gitEvent.Commits[lastCommitIdx].URL
-		processedEvent.SHATitle = gitEvent.Commits[lastCommitIdx].Title
 		processedEvent.HeadBranch = gitEvent.Ref
 		processedEvent.BaseBranch = gitEvent.Ref
 		processedEvent.HeadURL = gitEvent.Project.WebURL
@@ -172,6 +180,22 @@ func (v *Provider) ParsePayload(ctx context.Context, run *params.Run, request *h
 	return processedEvent, nil
 }
 
+func isBranchCreationPayload(event *gitlab.PushEvent) bool {
+	const branchRefPrefix = "refs/heads/"
+	return strings.HasPrefix(event.Ref, branchRefPrefix) &&
+		strings.TrimPrefix(event.Ref, branchRefPrefix) != "" &&
+		provider.IsZeroSHA(event.Before) &&
+		isValidCommitSHA(event.After)
+}
+
+func isValidCommitSHA(sha string) bool {
+	if len(sha) != 40 || provider.IsZeroSHA(sha) {
+		return false
+	}
+	_, err := hex.DecodeString(sha)
+	return err == nil
+}
+
 func (v *Provider) initGitLabClient(ctx context.Context, event *info.Event) (*info.Event, error) {
 	// This is to ensure the base URL of the client is not reinitialized during tests.
 	if v.gitlabClient != nil {
@@ -190,12 +214,14 @@ func (v *Provider) initGitLabClient(ctx context.Context, event *info.Event) (*in
 
 	// should check global repository for secrets
 	secretNS := repo.GetNamespace()
+	inheritedGlobalSecret := false
 	globalRepo, err := v.run.Clients.PipelineAsCode.PipelinesascodeV1alpha1().Repositories(v.run.Info.Kube.Namespace).Get(
 		ctx, v.run.Info.Controller.GlobalRepository, metav1.GetOptions{},
 	)
 	if err == nil && globalRepo != nil {
 		if repo.Spec.GitProvider != nil && repo.Spec.GitProvider.Secret == nil && globalRepo.Spec.GitProvider != nil && globalRepo.Spec.GitProvider.Secret != nil {
 			secretNS = globalRepo.GetNamespace()
+			inheritedGlobalSecret = true
 		}
 		repo.Spec.Merge(globalRepo.Spec)
 	}
@@ -205,20 +231,21 @@ func (v *Provider) initGitLabClient(ctx context.Context, event *info.Event) (*in
 		return event, err
 	}
 
-	scm := pipelineascode.SecretFromRepository{
-		K8int:       kubeInterface,
-		Config:      v.GetConfig(),
-		Event:       event,
-		Repo:        repo,
-		WebhookType: v.pacInfo.WebhookType,
-		Logger:      v.Logger,
-		Namespace:   secretNS,
+	scm := secrets.SecretFromRepository{
+		K8int:                 kubeInterface,
+		Config:                v.GetConfig(),
+		Event:                 event,
+		Repo:                  repo,
+		WebhookType:           v.pacInfo.WebhookType,
+		Logger:                v.Logger,
+		Namespace:             secretNS,
+		InheritedGlobalSecret: inheritedGlobalSecret,
 	}
 	if err := scm.Get(ctx); err != nil {
 		return event, fmt.Errorf("cannot get secret from repository: %w", err)
 	}
 
-	err = v.SetClient(ctx, v.run, event, repo, v.eventEmitter)
+	err = v.setClient(ctx, v.run, event, repo, v.eventEmitter, false)
 	if err != nil {
 		return event, err
 	}
@@ -318,8 +345,4 @@ func (v *Provider) handleCommitCommentEvent(ctx context.Context, event *gitlab.C
 	processedEvent.BaseBranch = branchName
 	v.Logger.Infof("gitlab commit_comment: pipelinerun %s has been requested on %s/%s#%s", action, processedEvent.Organization, processedEvent.Repository, processedEvent.SHA)
 	return processedEvent, nil
-}
-
-func isZeroSHA(sha string) bool {
-	return sha == "0000000000000000000000000000000000000000"
 }

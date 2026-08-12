@@ -21,15 +21,18 @@ import (
 )
 
 var (
-	defaultAPIURL = "/rest/api/1.0"
-	buildAPIURL   = "/rest/build-status/1.0"
+	defaultAPIURL      = "/rest/api/1.0"
+	buildAPIURL        = "/rest/build-status/1.0"
+	defaultApplinksURL = "/plugins/servlet/applinks"
 )
 
-func SetupBBDataCenterClient() (*scm.Client, *http.ServeMux, func(), string) {
+func SetupBBDataCenterClient(t *testing.T) (*scm.Client, *http.ServeMux, func(), string) {
+	t.Helper()
 	mux := http.NewServeMux()
 	apiHandler := http.NewServeMux()
 	apiHandler.Handle(defaultAPIURL+"/", http.StripPrefix(defaultAPIURL, mux))
 	apiHandler.Handle(buildAPIURL+"/", http.StripPrefix(buildAPIURL, mux))
+	apiHandler.Handle(defaultApplinksURL+"/", http.StripPrefix(defaultApplinksURL, mux))
 	apiHandler.HandleFunc("/", func(w http.ResponseWriter, req *http.Request) {
 		fmt.Fprintln(os.Stderr, "FAIL: Client.BaseURL path prefix is not preserved in the request URL:")
 		fmt.Fprintln(os.Stderr)
@@ -46,7 +49,10 @@ func SetupBBDataCenterClient() (*scm.Client, *http.ServeMux, func(), string) {
 		server.Close()
 	}
 
-	scmClient, _ := stash.New(server.URL)
+	scmClient, err := stash.New(server.URL)
+	if err != nil {
+		t.Fatalf("test setup: stash.New(%q): %v", server.URL, err)
+	}
 	scmClient.Client = server.Client()
 	return scmClient, mux, tearDown, server.URL
 }

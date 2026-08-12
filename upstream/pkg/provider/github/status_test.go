@@ -8,9 +8,11 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 
-	"github.com/google/go-github/v84/github"
+	"github.com/google/go-github/v85/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/clients"
@@ -29,6 +31,7 @@ import (
 func TestGithubProviderCreateCheckRun(t *testing.T) {
 	ctx, _ := rtesting.SetupFakeContext(t)
 	fakeclient, mux, _, teardown := ghtesthelper.SetupGH()
+	l, _ := logger.GetLogger()
 	cnx := Provider{
 		ghClient: fakeclient,
 		Run:      params.New(),
@@ -37,6 +40,7 @@ func TestGithubProviderCreateCheckRun(t *testing.T) {
 				ApplicationName: settings.PACApplicationNameDefaultValue,
 			},
 		},
+		Logger: l,
 	}
 	defer teardown()
 	mux.HandleFunc("/repos/check/info/check-runs", func(w http.ResponseWriter, _ *http.Request) {
@@ -63,10 +67,12 @@ func TestGithubProviderCreateCheckRun(t *testing.T) {
 func TestGetOrUpdateCheckRunStatusForMultipleFailedPipelineRun(t *testing.T) {
 	ctx, _ := rtesting.SetupFakeContext(t)
 	fakeclient, mux, _, teardown := ghtesthelper.SetupGH()
+	l, _ := logger.GetLogger()
 	cnx := Provider{
 		ghClient: fakeclient,
 		Run:      params.New(),
 		pacInfo:  &info.PacOpts{},
+		Logger:   l,
 	}
 	defer teardown()
 	statusOptionData := []providerstatus.StatusOpts{{
@@ -103,9 +109,11 @@ func TestGetExistingCheckRunIDFromMultiple(t *testing.T) {
 	client, mux, _, teardown := ghtesthelper.SetupGH()
 	defer teardown()
 
+	l, _ := logger.GetLogger()
 	cnx := &Provider{
 		ghClient:      client,
 		PaginedNumber: 1,
+		Logger:        l,
 	}
 	event := &info.Event{
 		Organization: "owner",
@@ -150,8 +158,10 @@ func TestGetExistingPendingApprovalCheckRunID(t *testing.T) {
 	client, mux, _, teardown := ghtesthelper.SetupGH()
 	defer teardown()
 
+	l, _ := logger.GetLogger()
 	cnx := New()
 	cnx.SetGithubClient(client)
+	cnx.SetLogger(l)
 
 	event := &info.Event{
 		Organization: "owner",
@@ -189,8 +199,10 @@ func TestGetExistingFailedCheckRunID(t *testing.T) {
 	client, mux, _, teardown := ghtesthelper.SetupGH()
 	defer teardown()
 
+	l, _ := logger.GetLogger()
 	cnx := New()
 	cnx.SetGithubClient(client)
+	cnx.SetLogger(l)
 
 	event := &info.Event{
 		Organization: "owner",
@@ -604,6 +616,7 @@ func TestGithubProvidercreateStatusCommit(t *testing.T) {
 			}
 
 			ctx, _ := rtesting.SetupFakeContext(t)
+			l, _ := logger.GetLogger()
 			provider := &Provider{
 				ghClient: fakeclient,
 				Run:      params.New(),
@@ -612,6 +625,7 @@ func TestGithubProvidercreateStatusCommit(t *testing.T) {
 						ApplicationName: settings.PACApplicationNameDefaultValue,
 					},
 				},
+				Logger: l,
 			}
 
 			if err := provider.createStatusCommit(ctx, tt.event, tt.status); (err != nil) != tt.wantErr {
@@ -666,8 +680,10 @@ func TestProviderGetExistingCheckRunID(t *testing.T) {
 				Repository:   "repository",
 				SHA:          "sha",
 			}
+			l, _ := logger.GetLogger()
 			v := &Provider{
 				ghClient: client,
+				Logger:   l,
 			}
 			mux.HandleFunc(fmt.Sprintf("/repos/%v/%v/commits/%v/check-runs", event.Organization, event.Repository, event.SHA), func(w http.ResponseWriter, _ *http.Request) {
 				_, _ = fmt.Fprintf(w, "%s", tt.jsonret)
@@ -683,6 +699,93 @@ func TestProviderGetExistingCheckRunID(t *testing.T) {
 			if !reflect.DeepEqual(got, tt.expectedID) {
 				t.Errorf("getExistingCheckRunID() got = %v, want %v", got, tt.expectedID)
 			}
+		})
+	}
+}
+
+func TestGetExistingCheckRunIDCache(t *testing.T) {
+	tests := []struct {
+		name            string
+		jsonret         string
+		failFirstN      int
+		goroutines      int
+		secondLookup    string
+		expectedID      int64
+		expectedAPIHits int64
+	}{
+		{
+			name:            "second call serves from cache",
+			jsonret:         `{"total_count": 2, "check_runs": [{"id": 55555, "external_id": "mypr"}, {"id": 55556, "external_id": "mypr2"}]}`,
+			secondLookup:    "mypr2",
+			expectedID:      55555,
+			expectedAPIHits: 1,
+		},
+		{
+			name:            "concurrent calls share single fetch",
+			jsonret:         `{"total_count": 2, "check_runs": [{"id": 55555, "external_id": "mypr"}, {"id": 55556, "external_id": "mypr2"}]}`,
+			goroutines:      10,
+			expectedAPIHits: 1,
+		},
+		{
+			name:            "retries on transient error",
+			jsonret:         `{"total_count": 1, "check_runs": [{"id": 77777, "external_id": "mypr"}]}`,
+			failFirstN:      1,
+			expectedID:      77777,
+			expectedAPIHits: 2,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, _ := rtesting.SetupFakeContext(t)
+			client, mux, _, teardown := ghtesthelper.SetupGH()
+			defer teardown()
+
+			event := &info.Event{
+				Organization: "owner",
+				Repository:   "repository",
+				SHA:          "sha",
+			}
+
+			var apiHits atomic.Int64
+			mux.HandleFunc(fmt.Sprintf("/repos/%v/%v/commits/%v/check-runs", event.Organization, event.Repository, event.SHA), func(w http.ResponseWriter, _ *http.Request) {
+				hit := apiHits.Add(1)
+				if int(hit) <= tt.failFirstN {
+					w.WriteHeader(http.StatusBadGateway)
+					return
+				}
+				fmt.Fprint(w, tt.jsonret)
+			})
+
+			l, _ := logger.GetLogger()
+			cnx := New()
+			cnx.SetGithubClient(client)
+			cnx.SetLogger(l)
+
+			if tt.goroutines > 1 {
+				var wg sync.WaitGroup
+				wg.Add(tt.goroutines)
+				for range tt.goroutines {
+					go func() {
+						defer wg.Done()
+						_, _ = cnx.getExistingCheckRunID(ctx, event, providerstatus.StatusOpts{PipelineRunName: "mypr"})
+					}()
+				}
+				wg.Wait()
+			} else {
+				id, err := cnx.getExistingCheckRunID(ctx, event, providerstatus.StatusOpts{PipelineRunName: "mypr"})
+				assert.NilError(t, err)
+				if tt.expectedID != 0 {
+					assert.Assert(t, id != nil)
+					assert.Equal(t, *id, tt.expectedID)
+				}
+				if tt.secondLookup != "" {
+					id2, err := cnx.getExistingCheckRunID(ctx, event, providerstatus.StatusOpts{PipelineRunName: tt.secondLookup})
+					assert.NilError(t, err)
+					assert.Assert(t, id2 != nil)
+				}
+			}
+
+			assert.Equal(t, apiHits.Load(), tt.expectedAPIHits)
 		})
 	}
 }

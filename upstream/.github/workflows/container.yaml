@@ -36,27 +36,31 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Set up Go
-        uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: "go.mod"
 
-      - uses: ko-build/setup-ko@d006021bd0c28d1ce33a07e7943d48b079944c8d # v0.9
+      - uses: ko-build/setup-ko@61b4d1d396f5b2e7d6bb6fefdce3dc38d1a13445 # v0.10
 
       - name: Build and push images
         shell: bash
         run: |
           set -x
           releaseBranchFormat='release-v'
-          if [[ ${{ github.ref_name }} == ${releaseBranchFormat}* ]]; then
-            tag=v$(echo ${{ github.ref_name }}|sed "s,${releaseBranchFormat},,")
-          elif [[ ${{ github.ref }} == refs/pull/* ]]; then
-            tag=pr-$(echo ${{ github.ref }} | cut -c11-|sed 's,/merge,,')
+          if [[ ${GITHUB_REF_NAME} == ${releaseBranchFormat}* ]]; then
+            tag=v$(echo ${GITHUB_REF_NAME}|sed "s,${releaseBranchFormat},,")
+          elif [[ ${GITHUB_REF} == refs/tags/v* ]]; then
+            tag=${GITHUB_REF_NAME}
+          elif [[ ${GITHUB_REF} == refs/pull/* ]]; then
+            tag=pr-$(echo ${GITHUB_REF} | cut -c11-|sed 's,/merge,,')
           else
             # Sanitize the tag by replacing invalid characters with hyphens
-            tag=$(echo ${{ github.ref_name }}|sed 's,/merge,,' | sed 's,[/.],-,g')
+            tag=$(echo ${GITHUB_REF_NAME}|sed 's,/merge,,' | sed 's,[/.],-,g')
           fi
           for image in ./cmd/*;do
             ko build -B -t "${tag}" --platform="${{ env.PLATFORMS }}" "${image}"

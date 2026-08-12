@@ -1,6 +1,7 @@
 package matcher
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -10,7 +11,6 @@ import (
 
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
-	hubtype "github.com/openshift-pipelines/pipelines-as-code/pkg/hub/vars"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/clients"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
@@ -31,6 +31,16 @@ const (
 	testHubURL         = "https://mybelovedhub"
 	testCatalogHubName = "tekton"
 )
+
+type revisionRecordingProvider struct {
+	*provider.TestProviderImp
+	fileInsideRepoRevision string
+}
+
+func (v *revisionRecordingProvider) GetFileInsideRepo(ctx context.Context, event *info.Event, file, revision string) (string, error) {
+	v.fileInsideRepoRevision = revision
+	return v.TestProviderImp.GetFileInsideRepo(ctx, event, file, revision)
+}
 
 func createArtifactHubResponse(t *testing.T, manifestContent string) string {
 	t.Helper()
@@ -203,42 +213,24 @@ func TestGrabPipelineFromAnnotation(t *testing.T) {
 	}
 }
 
+func makeTestHubCatalogs() *sync.Map {
+	catalogs := &sync.Map{}
+	catalogs.Store("default", settings.HubCatalog{Index: "default", URL: testHubURL, Name: testCatalogHubName})
+	catalogs.Store("anotherHub", settings.HubCatalog{Index: "1", URL: testHubURL, Name: testCatalogHubName})
+	catalogs.Store("artifactHub", settings.HubCatalog{Index: "2", URL: testHubURL, Name: testCatalogHubName})
+	catalogs.Store("artifactHubDefault", settings.HubCatalog{Index: "3", URL: testHubURL, Name: "default"})
+	return catalogs
+}
+
 func TestGetTaskFromAnnotationName(t *testing.T) {
-	var hubCatalogs sync.Map
-	hubCatalogs.Store(
-		"default", settings.HubCatalog{
-			Index: "default",
-			URL:   testHubURL,
-			Name:  testCatalogHubName,
-			Type:  hubtype.TektonHubType,
-		})
-	hubCatalogs.Store(
-		"anotherHub", settings.HubCatalog{
-			Index: "1",
-			URL:   testHubURL,
-			Name:  testCatalogHubName,
-			Type:  hubtype.TektonHubType,
-		})
-	hubCatalogs.Store(
-		"artifactHub", settings.HubCatalog{
-			Index: "2",
-			URL:   testHubURL,
-			Name:  testCatalogHubName,
-			Type:  hubtype.ArtifactHubType,
-		})
-	hubCatalogs.Store(
-		"artifactHubDefault", settings.HubCatalog{
-			Index: "3",
-			URL:   testHubURL,
-			Name:  "default",
-			Type:  hubtype.ArtifactHubType,
-		})
+	hubCatalogs := makeTestHubCatalogs()
 	tests := []struct {
 		task                   string
 		filesInsideRepo        map[string]string
 		gotTaskName            string
 		name                   string
 		remoteURLS             map[string]map[string]string
+		repositoryRevision     string
 		runevent               info.Event
 		wantErr                string
 		wantLog                string
@@ -321,6 +313,7 @@ func TestGetTaskFromAnnotationName(t *testing.T) {
 			filesInsideRepo: map[string]string{
 				"be/healthy": readTDfile(t, "task-good"),
 			},
+			repositoryRevision: "dc922f5ea0c57ef5fb1cbc0f3ea550dfe3b5786e",
 			runevent: info.Event{
 				SHA: "007",
 			},
@@ -351,12 +344,8 @@ func TestGetTaskFromAnnotationName(t *testing.T) {
 			task:        "anotherHub://chmouzie",
 			wantLog:     "successfully fetched task chmouzie from custom catalog Hub anotherHub on URL https://mybelovedhub",
 			remoteURLS: map[string]map[string]string{
-				testHubURL + "/resource/" + testCatalogHubName + "/task/chmouzie": {
-					"body": `{"data": {"LatestVersion": {"version": "0.1"}}}`,
-					"code": "200",
-				},
-				fmt.Sprintf("%s/resource/%s/task/chmouzie/0.1/raw", testHubURL, testCatalogHubName): {
-					"body": readTDfile(t, "task-good"),
+				fmt.Sprintf("%s/api/v1/packages/tekton-task/%s/chmouzie", testHubURL, testCatalogHubName): {
+					"body": createArtifactHubResponse(t, readTDfile(t, "task-good")),
 					"code": "200",
 				},
 			},
@@ -366,12 +355,8 @@ func TestGetTaskFromAnnotationName(t *testing.T) {
 			gotTaskName: "task",
 			task:        "chmouzie",
 			remoteURLS: map[string]map[string]string{
-				testHubURL + "/resource/" + testCatalogHubName + "/task/chmouzie": {
-					"body": `{"data": {"LatestVersion": {"version": "0.1"}}}`,
-					"code": "200",
-				},
-				fmt.Sprintf("%s/resource/%s/task/chmouzie/0.1/raw", testHubURL, testCatalogHubName): {
-					"body": readTDfile(t, "task-good"),
+				fmt.Sprintf("%s/api/v1/packages/tekton-task/%s/chmouzie", testHubURL, testCatalogHubName): {
+					"body": createArtifactHubResponse(t, readTDfile(t, "task-good")),
 					"code": "200",
 				},
 			},
@@ -381,12 +366,8 @@ func TestGetTaskFromAnnotationName(t *testing.T) {
 			gotTaskName: "task",
 			task:        "chmouzie:0.2",
 			remoteURLS: map[string]map[string]string{
-				testHubURL + "/resource/" + testCatalogHubName + "/task/chmouzie/0.2": {
-					"body": `{}`,
-					"code": "200",
-				},
-				fmt.Sprintf("%s/resource/%s/task/chmouzie/0.2/raw", testHubURL, testCatalogHubName): {
-					"body": readTDfile(t, "task-good"),
+				fmt.Sprintf("%s/api/v1/packages/tekton-task/%s/chmouzie/0.2", testHubURL, testCatalogHubName): {
+					"body": createArtifactHubResponse(t, readTDfile(t, "task-good")),
 					"code": "200",
 				},
 			},
@@ -438,20 +419,24 @@ func TestGetTaskFromAnnotationName(t *testing.T) {
 				Info: info.Info{
 					Pac: &info.PacOpts{
 						Settings: settings.Settings{
-							HubCatalogs: &hubCatalogs,
+							HubCatalogs: hubCatalogs,
 						},
 					},
 				},
 			}
 			ctx, _ := rtesting.SetupFakeContext(t)
-			rt := RemoteTasks{
-				Run:    cs,
-				Logger: logger,
-				ProviderInterface: &provider.TestProviderImp{
+			providerImp := &revisionRecordingProvider{
+				TestProviderImp: &provider.TestProviderImp{
 					FilesInsideRepo:        tt.filesInsideRepo,
 					WantProviderRemoteTask: tt.wantProviderRemoteTask,
 				},
-				Event: &tt.runevent,
+			}
+			rt := RemoteTasks{
+				Run:                cs,
+				Logger:             logger,
+				ProviderInterface:  providerImp,
+				Event:              &tt.runevent,
+				RepositoryRevision: tt.repositoryRevision,
 			}
 
 			got, err := rt.GetTaskFromAnnotationName(ctx, tt.task)
@@ -468,40 +453,15 @@ func TestGetTaskFromAnnotationName(t *testing.T) {
 			if tt.gotTaskName != "" {
 				assert.Equal(t, tt.gotTaskName, got.GetName())
 			}
+			if tt.repositoryRevision != "" {
+				assert.Equal(t, tt.repositoryRevision, providerImp.fileInsideRepoRevision)
+			}
 		})
 	}
 }
 
 func TestGetPipelineFromAnnotationName(t *testing.T) {
-	var hubCatalogs sync.Map
-	hubCatalogs.Store(
-		"default", settings.HubCatalog{
-			Index: "default",
-			URL:   testHubURL,
-			Name:  testCatalogHubName,
-			Type:  hubtype.TektonHubType,
-		})
-	hubCatalogs.Store(
-		"anotherHub", settings.HubCatalog{
-			Index: "1",
-			URL:   testHubURL,
-			Name:  testCatalogHubName,
-			Type:  hubtype.TektonHubType,
-		})
-	hubCatalogs.Store(
-		"artifactHub", settings.HubCatalog{
-			Index: "2",
-			URL:   testHubURL,
-			Name:  testCatalogHubName,
-			Type:  hubtype.ArtifactHubType,
-		})
-	hubCatalogs.Store(
-		"artifactHubDefault", settings.HubCatalog{
-			Index: "3",
-			URL:   testHubURL,
-			Name:  "default",
-			Type:  hubtype.ArtifactHubType,
-		})
+	hubCatalogs := makeTestHubCatalogs()
 	tests := []struct {
 		pipeline        string
 		filesInsideRepo map[string]string
@@ -610,12 +570,8 @@ func TestGetPipelineFromAnnotationName(t *testing.T) {
 			pipeline:        "anotherHub://chmouzie",
 			wantLog:         "successfully fetched pipeline chmouzie from custom catalog Hub anotherHub on URL https://mybelovedhub",
 			remoteURLS: map[string]map[string]string{
-				testHubURL + "/resource/" + testCatalogHubName + "/pipeline/chmouzie": {
-					"body": `{"data": {"LatestVersion": {"version": "0.1"}}}`,
-					"code": "200",
-				},
-				fmt.Sprintf("%s/resource/%s/pipeline/chmouzie/0.1/raw", testHubURL, testCatalogHubName): {
-					"body": readTDfile(t, "pipeline-good"),
+				fmt.Sprintf("%s/api/v1/packages/tekton-pipeline/%s/chmouzie", testHubURL, testCatalogHubName): {
+					"body": createArtifactHubResponse(t, readTDfile(t, "pipeline-good")),
 					"code": "200",
 				},
 			},
@@ -625,12 +581,8 @@ func TestGetPipelineFromAnnotationName(t *testing.T) {
 			gotPipelineName: "pipeline",
 			pipeline:        "chmouzie",
 			remoteURLS: map[string]map[string]string{
-				testHubURL + "/resource/" + testCatalogHubName + "/pipeline/chmouzie": {
-					"body": `{"data": {"LatestVersion": {"version": "0.1"}}}`,
-					"code": "200",
-				},
-				fmt.Sprintf("%s/resource/%s/pipeline/chmouzie/0.1/raw", testHubURL, testCatalogHubName): {
-					"body": readTDfile(t, "pipeline-good"),
+				fmt.Sprintf("%s/api/v1/packages/tekton-pipeline/%s/chmouzie", testHubURL, testCatalogHubName): {
+					"body": createArtifactHubResponse(t, readTDfile(t, "pipeline-good")),
 					"code": "200",
 				},
 			},
@@ -640,12 +592,8 @@ func TestGetPipelineFromAnnotationName(t *testing.T) {
 			gotPipelineName: "pipeline",
 			pipeline:        "chmouzie:0.2",
 			remoteURLS: map[string]map[string]string{
-				testHubURL + "/resource/" + testCatalogHubName + "/pipeline/chmouzie/0.2": {
-					"body": `{}`,
-					"code": "200",
-				},
-				fmt.Sprintf("%s/resource/%s/pipeline/chmouzie/0.2/raw", testHubURL, testCatalogHubName): {
-					"body": readTDfile(t, "pipeline-good"),
+				fmt.Sprintf("%s/api/v1/packages/tekton-pipeline/%s/chmouzie/0.2", testHubURL, testCatalogHubName): {
+					"body": createArtifactHubResponse(t, readTDfile(t, "pipeline-good")),
 					"code": "200",
 				},
 			},
@@ -698,7 +646,7 @@ func TestGetPipelineFromAnnotationName(t *testing.T) {
 				Info: info.Info{
 					Pac: &info.PacOpts{
 						Settings: settings.Settings{
-							HubCatalogs: &hubCatalogs,
+							HubCatalogs: hubCatalogs,
 						},
 					},
 				},

@@ -2,19 +2,25 @@ package adapter
 
 import (
 	"context"
+	"fmt"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/consoleui"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/kubeinteraction"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/clients"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/settings"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
+	providerstatus "github.com/openshift-pipelines/pipelines-as-code/pkg/provider/status"
 	testclient "github.com/openshift-pipelines/pipelines-as-code/pkg/test/clients"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/test/logger"
 	testprovider "github.com/openshift-pipelines/pipelines-as-code/pkg/test/provider"
 	testnewrepo "github.com/openshift-pipelines/pipelines-as-code/pkg/test/repository"
+	gitlab "gitlab.com/gitlab-org/api/client-go"
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -106,18 +112,6 @@ func TestSetupClientGitHubAppVsOther(t *testing.T) {
 			wantRepositoryIDsCount: 0, // No extra repos
 		},
 		{
-			name:                 "GitHub App with extra repos - IDs should be populated",
-			installationID:       12345,
-			hasGitProvider:       false,
-			extraReposConfigured: true,
-			extraRepoInstallIDs: map[string]int64{
-				"another/one":    789,
-				"andanother/two": 10112,
-			},
-			wantErr:                false,
-			wantRepositoryIDsCount: 2, // Should have 2 extra repo IDs
-		},
-		{
 			name:                   "Non-GitHub App requires git_provider",
 			installationID:         0,
 			hasGitProvider:         false,
@@ -162,37 +156,11 @@ func TestSetupClientGitHubAppVsOther(t *testing.T) {
 				}
 			}
 
-			// Setup extra repos if configured
-			extraRepos := []*v1alpha1.Repository{}
-			if tt.extraReposConfigured {
-				repo.Spec.Settings = &v1alpha1.Settings{
-					GithubAppTokenScopeRepos: []string{},
-				}
-				for repoName := range tt.extraRepoInstallIDs {
-					repo.Spec.Settings.GithubAppTokenScopeRepos = append(
-						repo.Spec.Settings.GithubAppTokenScopeRepos,
-						repoName,
-					)
-					// Create matching repository CRs for extra repos
-					extraRepo := testnewrepo.NewRepo(testnewrepo.RepoTestcreationOpts{
-						Name:             repoName,
-						URL:              "https://github.com/" + repoName,
-						InstallNamespace: "default",
-					})
-					extraRepos = append(extraRepos, extraRepo)
-				}
-			}
-
-			// Create test data with all repositories
-			allRepos := append([]*v1alpha1.Repository{repo}, extraRepos...)
-			run := setupTestData(t, allRepos)
+			run := setupTestData(t, []*v1alpha1.Repository{repo})
 
 			// Create a tracking provider to verify behavior
 			trackingProvider := &trackingProviderImpl{
-				TestProviderImp:     testprovider.TestProviderImp{AllowIT: true},
-				createTokenCalled:   false,
-				repositoryIDs:       []int64{},
-				extraRepoInstallIDs: tt.extraRepoInstallIDs,
+				TestProviderImp: testprovider.TestProviderImp{AllowIT: true},
 			}
 			trackingProvider.SetLogger(log)
 
@@ -229,32 +197,6 @@ func TestSetupClientGitHubAppVsOther(t *testing.T) {
 			} else {
 				assert.NilError(t, err, "unexpected error: %v", err)
 			}
-
-			// For GitHub Apps with extra repos, verify CreateToken was called
-			// and repository IDs were populated
-			if tt.extraReposConfigured && !tt.wantErr {
-				assert.Assert(t, trackingProvider.createTokenCalled,
-					"CreateToken should have been called for extra repos")
-
-				// Verify all expected repo IDs are present
-				for repoName, expectedID := range tt.extraRepoInstallIDs {
-					found := false
-					for _, id := range trackingProvider.repositoryIDs {
-						if id == expectedID {
-							found = true
-							break
-						}
-					}
-					assert.Assert(t, found,
-						"Repository ID %d for %s not found in provider.RepositoryIDs: %v",
-						expectedID, repoName, trackingProvider.repositoryIDs)
-				}
-
-				assert.Equal(t, len(trackingProvider.repositoryIDs), tt.wantRepositoryIDsCount,
-					"Expected %d repository IDs, got %d: %v",
-					tt.wantRepositoryIDsCount, len(trackingProvider.repositoryIDs),
-					trackingProvider.repositoryIDs)
-			}
 		})
 	}
 }
@@ -262,20 +204,239 @@ func TestSetupClientGitHubAppVsOther(t *testing.T) {
 // trackingProviderImpl wraps TestProviderImp to track CreateToken calls and repository IDs.
 type trackingProviderImpl struct {
 	testprovider.TestProviderImp
-	createTokenCalled   bool
-	repositoryIDs       []int64
-	extraRepoInstallIDs map[string]int64
 }
 
-func (t *trackingProviderImpl) CreateToken(_ context.Context, repositories []string, _ *info.Event) (string, error) {
-	t.createTokenCalled = true
-	// Simulate adding repository IDs like the real CreateToken does
-	for _, repo := range repositories {
-		if id, ok := t.extraRepoInstallIDs[repo]; ok {
-			t.repositoryIDs = append(t.repositoryIDs, id)
-		}
-	}
+func (t *trackingProviderImpl) CreateToken(_ context.Context, _ []string, _ *info.Event) (string, error) {
 	return "fake-token", nil
+}
+
+type commitInfoProvider struct {
+	testprovider.TestProviderImp
+	commitInfoCalls   int
+	commitTitle       string
+	commitMessage     string
+	commitInfoFailure bool
+	statusCalls       int
+	lastStatus        providerstatus.StatusOpts
+}
+
+func (p *commitInfoProvider) GetCommitInfo(_ context.Context, event *info.Event) error {
+	p.commitInfoCalls++
+	if p.commitInfoFailure {
+		return fmt.Errorf("commit lookup failed")
+	}
+	event.SHATitle = p.commitTitle
+	event.SHAMessage = p.commitMessage
+	event.HasSkipCommand = provider.SkipCI(p.commitMessage)
+	event.CommitMetadataIncomplete = false
+	return nil
+}
+
+func (p *commitInfoProvider) CreateStatus(_ context.Context, _ *info.Event, status providerstatus.StatusOpts) error {
+	p.statusCalls++
+	p.lastStatus = status
+	return nil
+}
+
+func TestShouldSkipPushEvent(t *testing.T) {
+	tests := []struct {
+		name              string
+		event             *info.Event
+		commitTitle       string
+		commitMessage     string
+		commitInfoFailure bool
+		nilRepo           bool
+		wantSkip          bool
+		wantErr           string
+		wantCalls         int
+	}{
+		{
+			name: "ordinary push with skip command uses payload metadata",
+			event: &info.Event{
+				EventType: "push",
+				SHA:       "abc123",
+				SHATitle:  "fix: bug [skip ci]",
+				SHAURL:    "https://gitlab.example/commit/abc123",
+			},
+			wantSkip: true,
+		},
+		{
+			name: "ordinary push without skip command makes no API call",
+			event: &info.Event{
+				EventType: "push",
+				SHA:       "abc123",
+				SHATitle:  "fix: bug",
+				SHAURL:    "https://gitlab.example/commit/abc123",
+			},
+		},
+		{
+			name: "push with missing metadata resolves skip command from full message",
+			event: &info.Event{
+				EventType:                "push",
+				SHA:                      "abc123",
+				CommitMetadataIncomplete: true,
+			},
+			commitTitle:   "fix: bug",
+			commitMessage: "fix: bug\n\n[skip ci]",
+			wantSkip:      true,
+			wantCalls:     1,
+		},
+		{
+			name: "push with missing metadata propagates lookup failure",
+			event: &info.Event{
+				EventType:                "push",
+				SHA:                      "abc123",
+				CommitMetadataIncomplete: true,
+			},
+			commitInfoFailure: true,
+			wantErr:           "commit lookup failed",
+			wantCalls:         1,
+		},
+		{
+			name: "ordinary push with empty payload metadata makes no API call",
+			event: &info.Event{
+				EventType:      "push",
+				SHA:            "abc123",
+				HasSkipCommand: true,
+			},
+		},
+		{
+			// Without a matched repository there are no credentials to authenticate the
+			// lookup, so the incomplete metadata is left alone instead of erroring.
+			name: "push with missing metadata and no matched repository makes no API call",
+			event: &info.Event{
+				EventType:                "push",
+				SHA:                      "abc123",
+				CommitMetadataIncomplete: true,
+			},
+			nilRepo:       true,
+			commitMessage: "fix: bug\n\n[skip ci]",
+		},
+		{
+			name: "non-push event makes no API call",
+			event: &info.Event{
+				EventType: "pull_request",
+				SHA:       "abc123",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			commitProvider := &commitInfoProvider{
+				commitTitle:       tt.commitTitle,
+				commitMessage:     tt.commitMessage,
+				commitInfoFailure: tt.commitInfoFailure,
+			}
+			s := &sinker{
+				vcx:   commitProvider,
+				event: tt.event,
+			}
+
+			repo := &v1alpha1.Repository{}
+			if tt.nilRepo {
+				repo = nil
+			}
+
+			got, err := s.shouldSkipPushEvent(ctx, repo)
+			if tt.wantErr != "" {
+				assert.ErrorContains(t, err, tt.wantErr)
+			} else {
+				assert.NilError(t, err)
+				assert.Equal(t, tt.wantSkip, got)
+			}
+			assert.Equal(t, tt.wantCalls, commitProvider.commitInfoCalls)
+		})
+	}
+}
+
+func TestProcessEventBranchCreation(t *testing.T) {
+	tests := []struct {
+		name              string
+		commitMessage     string
+		commitInfoFailure bool
+		wantErr           string
+		wantStatusCalls   int
+	}{
+		{
+			name:            "skip command in the resolved message skips the run",
+			commitMessage:   "fix: branch creation\n\n[skip ci]",
+			wantStatusCalls: 1,
+		},
+		{
+			// A failed lookup must abort processEvent rather than silently continue with
+			// the incomplete metadata the webhook delivered.
+			name:              "commit lookup failure aborts the event",
+			commitInfoFailure: true,
+			wantErr:           "could not get commit info",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, _ := rtesting.SetupFakeContext(t)
+			log, _ := logger.GetLogger()
+			repo := testnewrepo.NewRepo(testnewrepo.RepoTestcreationOpts{
+				Name:             "test-repo",
+				URL:              "https://gitlab.example/org/repo",
+				InstallNamespace: "default",
+			})
+			repo.Spec.GitProvider = &v1alpha1.GitProvider{
+				URL: "https://gitlab.example",
+				Secret: &v1alpha1.Secret{
+					Name: "test-secret",
+					Key:  "provider.token",
+				},
+				WebhookSecret: &v1alpha1.Secret{
+					Name: "test-secret",
+					Key:  "webhook.secret",
+				},
+			}
+			run := setupTestData(t, []*v1alpha1.Repository{repo})
+			run.Clients.SetConsoleUI(consoleui.FallBackConsole{})
+			event := &info.Event{
+				EventType:                "push",
+				URL:                      repo.Spec.URL,
+				SHA:                      "dc922f5ea0c57ef5fb1cbc0f3ea550dfe3b5786e",
+				Provider:                 &info.Provider{},
+				CommitMetadataIncomplete: true,
+				TriggerTarget:            triggertype.Push,
+				Event: &gitlab.PushEvent{
+					Before: "0000000000000000000000000000000000000000",
+					After:  "dc922f5ea0c57ef5fb1cbc0f3ea550dfe3b5786e",
+					Ref:    "refs/heads/release-0.1",
+				},
+			}
+			commitProvider := &commitInfoProvider{
+				TestProviderImp: testprovider.TestProviderImp{
+					AllowIT: true,
+					Event:   event,
+				},
+				commitTitle:       "fix: branch creation",
+				commitMessage:     tt.commitMessage,
+				commitInfoFailure: tt.commitInfoFailure,
+			}
+			s := &sinker{
+				run:     run,
+				vcx:     commitProvider,
+				kint:    &kubeinteraction.Interaction{Run: run},
+				event:   event,
+				logger:  log,
+				pacInfo: &info.PacOpts{},
+			}
+
+			err := s.processEvent(ctx, httptest.NewRequestWithContext(ctx, "POST", repo.Spec.URL, nil))
+			assert.Equal(t, 1, commitProvider.commitInfoCalls)
+			assert.Equal(t, tt.wantStatusCalls, commitProvider.statusCalls)
+			if tt.wantErr != "" {
+				assert.ErrorContains(t, err, tt.wantErr)
+				return
+			}
+			assert.NilError(t, err)
+			assert.Equal(t, providerstatus.ConclusionSkipped, commitProvider.lastStatus.Conclusion)
+		})
+	}
 }
 
 // TestGetCommitInfoError tests that GetCommitInfo errors work correctly with test provider.
@@ -614,8 +775,7 @@ func TestProcessEventSkipCIIntegration(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			// Simulate the skip-CI logic from sinker.go processEvent()
-			// Line 92-95: Push event skip-CI check
+			// Simulate the payload-based push decision. API-resolved metadata is covered by TestShouldSkipPushEvent.
 			pushSkip := tt.eventType == "push" && provider.SkipCI(tt.shaTitle)
 
 			// Line 99-108: PR event skip-CI check

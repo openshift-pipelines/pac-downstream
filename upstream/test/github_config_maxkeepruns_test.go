@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/go-github/v84/github"
+	"github.com/google/go-github/v85/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	tgithub "github.com/openshift-pipelines/pipelines-as-code/test/pkg/github"
 	twait "github.com/openshift-pipelines/pipelines-as-code/test/pkg/wait"
@@ -32,15 +32,14 @@ func TestGithubGHEMaxKeepRuns(t *testing.T) {
 		&github.IssueComment{Body: github.Ptr("/test")})
 	assert.NilError(t, err)
 
-	g.Cnx.Clients.Log.Infof("Wait for the second repository update to be updated")
+	g.Cnx.Clients.Log.Infof("Waiting for PipelineRuns to be created")
 	waitOpts := twait.Opts{
-		RepoName:        g.TargetNamespace,
 		Namespace:       g.TargetNamespace,
 		MinNumberStatus: 2,
 		PollTimeout:     twait.DefaultTimeout,
-		TargetSHA:       g.SHA,
+		TargetSHA:       []string{g.SHA},
 	}
-	_, err = twait.UntilRepositoryUpdated(ctx, g.Cnx.Clients, waitOpts)
+	_, err = twait.UntilPipelineRunCreated(ctx, g.Cnx.Clients, waitOpts)
 	assert.NilError(t, err)
 
 	count := 0

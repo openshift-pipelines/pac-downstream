@@ -46,6 +46,7 @@ func Setup(ctx context.Context, onGHE, viaDirectWebhook bool) (context.Context, 
 	}
 	gprovider := github.New()
 	gprovider.Run = run
+	gprovider.SetLogger(run.Clients.Log)
 	event := info.NewEvent()
 
 	if err := setupGithubAppToken(ctx, config, viaDirectWebhook, run, gprovider); err != nil {
@@ -80,7 +81,8 @@ func setupEnvVars(onGHE, viaDirectWebhook bool) (*envConfig, error) {
 
 	switch {
 	case onGHE && viaDirectWebhook:
-		requiredEnvs = append(requiredEnvs,
+		requiredEnvs = append(
+			requiredEnvs,
 			"TEST_EL_WEBHOOK_SECRET",
 			"TEST_GITHUB_SECOND_API_URL",
 			"TEST_GITHUB_SECOND_EL_URL",
@@ -99,7 +101,8 @@ func setupEnvVars(onGHE, viaDirectWebhook bool) (*envConfig, error) {
 		}
 		config.repoOwner = webhookOrg
 	case onGHE && !viaDirectWebhook:
-		requiredEnvs = append(requiredEnvs,
+		requiredEnvs = append(
+			requiredEnvs,
 			"TEST_GITHUB_SECOND_API_URL",
 			"TEST_GITHUB_SECOND_EL_URL",
 			"TEST_GITHUB_SECOND_TOKEN",
@@ -116,7 +119,8 @@ func setupEnvVars(onGHE, viaDirectWebhook bool) (*envConfig, error) {
 		config.repoOwner = os.Getenv("TEST_GITHUB_SECOND_REPO_OWNER_GITHUBAPP")
 
 	case !onGHE && viaDirectWebhook:
-		requiredEnvs = append(requiredEnvs,
+		requiredEnvs = append(
+			requiredEnvs,
 			"TEST_EL_URL",
 			"TEST_EL_WEBHOOK_SECRET",
 			"TEST_GITHUB_API_URL",
@@ -132,7 +136,8 @@ func setupEnvVars(onGHE, viaDirectWebhook bool) (*envConfig, error) {
 		config.repoOwner = os.Getenv("TEST_GITHUB_REPO_OWNER_WEBHOOK")
 
 	case !onGHE && !viaDirectWebhook:
-		requiredEnvs = append(requiredEnvs,
+		requiredEnvs = append(
+			requiredEnvs,
 			"TEST_EL_URL",
 			"TEST_GITHUB_API_URL",
 			"TEST_GITHUB_REPO_OWNER_GITHUBAPP",
