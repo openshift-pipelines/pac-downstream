@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/go-github/v84/github"
+	"github.com/google/go-github/v85/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	tgithub "github.com/openshift-pipelines/pipelines-as-code/test/pkg/github"
 	twait "github.com/openshift-pipelines/pipelines-as-code/test/pkg/wait"
@@ -39,26 +39,20 @@ func TestGithubGHEPullRequestGitopsCommentRetest(t *testing.T) {
 		&github.IssueComment{Body: github.Ptr("/retest")})
 	assert.NilError(t, err)
 
-	g.Cnx.Clients.Log.Infof("Wait for the second repository update to be updated")
+	g.Cnx.Clients.Log.Infof("Waiting for PipelineRun to succeed")
 	waitOpts := twait.Opts{
-		RepoName:        g.TargetNamespace,
 		Namespace:       g.TargetNamespace,
 		MinNumberStatus: 1,
 		PollTimeout:     twait.DefaultTimeout,
-		TargetSHA:       g.SHA,
+		TargetSHA:       []string{g.SHA},
 	}
-	_, err = twait.UntilRepositoryUpdated(ctx, g.Cnx.Clients, waitOpts)
+	_, err = twait.UntilPipelineRunHasReason(ctx, g.Cnx.Clients, tektonv1.PipelineRunReasonSuccessful, waitOpts)
 	assert.NilError(t, err)
-
-	g.Cnx.Clients.Log.Infof("Check if we have the repository set as succeeded")
-	repo, err := g.Cnx.Clients.PipelineAsCode.PipelinesascodeV1alpha1().Repositories(g.TargetNamespace).Get(ctx, g.TargetNamespace, metav1.GetOptions{})
-	assert.NilError(t, err)
-	assert.Equal(t, repo.Status[len(repo.Status)-1].Conditions[0].Status, corev1.ConditionTrue)
 }
 
 // TestGithubGHEPullRequestRetest tests the retest functionality of a GitHub pull request.
-// It sets up a pull request, triggers a retest comment, waits for the repository to be updated,
-// and verifies that the repository status is set to succeeded and the correct number of PipelineRuns are created.
+// It sets up a pull request, triggers a retest comment, waits for the PipelineRun to complete,
+// and verifies that the PipelineRun succeeded and the correct number of PipelineRuns are created.
 func TestGithubGHEPullRequestGitopsCommentCancel(t *testing.T) {
 	ctx := context.Background()
 	g := &tgithub.PRTest{
@@ -76,21 +70,21 @@ func TestGithubGHEPullRequestGitopsCommentCancel(t *testing.T) {
 	assert.Equal(t, len(pruns.Items), 2)
 
 	g.Cnx.Clients.Log.Info("/test pr-gitops-comment on Pull Request before canceling")
-	_, _, err = g.Provider.Client().Issues.CreateComment(ctx,
+	_, _, err = g.Provider.Client().Issues.CreateComment(
+		ctx,
 		g.Options.Organization,
 		g.Options.Repo,
 		g.PRNumber,
 		&github.IssueComment{Body: github.Ptr("/test pr-gitops-comment")},
 	)
 	waitOpts := twait.Opts{
-		RepoName:        g.TargetNamespace,
 		Namespace:       g.TargetNamespace,
 		MinNumberStatus: 3,
 		PollTimeout:     twait.DefaultTimeout,
-		TargetSHA:       g.SHA,
+		TargetSHA:       []string{g.SHA},
 	}
 	assert.NilError(t, err)
-	err = twait.UntilPipelineRunCreated(ctx, g.Cnx.Clients, waitOpts)
+	_, err = twait.UntilPipelineRunCreated(ctx, g.Cnx.Clients, waitOpts)
 	assert.NilError(t, err)
 
 	g.Cnx.Clients.Log.Infof("/cancel pr-gitops-comment on Pull Request")
@@ -101,19 +95,14 @@ func TestGithubGHEPullRequestGitopsCommentCancel(t *testing.T) {
 	assert.NilError(t, err)
 
 	cancelWaitOpts := twait.Opts{
-		RepoName:        g.TargetNamespace,
 		Namespace:       g.TargetNamespace,
 		MinNumberStatus: 1,
 		PollTimeout:     90 * time.Second,
-		TargetSHA:       g.SHA,
+		TargetSHA:       []string{g.SHA},
 	}
 
 	g.Cnx.Clients.Log.Info("Waiting for PipelineRun to be cancelled")
-	err = twait.UntilPipelineRunHasReason(ctx, g.Cnx.Clients, tektonv1.PipelineRunReasonCancelled, cancelWaitOpts)
-	assert.NilError(t, err)
-
-	g.Cnx.Clients.Log.Info("Waiting for Repository status to reflect cancellation")
-	_, err = twait.UntilRepositoryHasStatusReason(ctx, g.Cnx.Clients, cancelWaitOpts, tektonv1.PipelineRunReasonCancelled.String())
+	_, err = twait.UntilPipelineRunHasReason(ctx, g.Cnx.Clients, tektonv1.PipelineRunReasonCancelled, cancelWaitOpts)
 	assert.NilError(t, err)
 
 	pruns, err = g.Cnx.Clients.Tekton.TektonV1().PipelineRuns(g.TargetNamespace).List(ctx, metav1.ListOptions{
@@ -159,11 +148,10 @@ func TestGithubGHERetestWithMultipleFailedPipelineRuns(t *testing.T) {
 	g.RunPullRequest(ctx, t)
 	defer g.TearDown(ctx, t)
 
-	err := twait.UntilPipelineRunCreated(ctx, g.Cnx.Clients, twait.Opts{
-		RepoName:        g.TargetNamespace,
+	_, err := twait.UntilPipelineRunCreated(ctx, g.Cnx.Clients, twait.Opts{
 		Namespace:       g.TargetNamespace,
 		MinNumberStatus: 1,
-		TargetSHA:       g.SHA,
+		TargetSHA:       []string{g.SHA},
 		PollTimeout:     twait.DefaultTimeout,
 	})
 	assert.NilError(t, err)
@@ -174,7 +162,8 @@ func TestGithubGHERetestWithMultipleFailedPipelineRuns(t *testing.T) {
 	assert.NilError(t, err)
 	assert.Equal(t, len(pruns.Items), 1)
 
-	_, _, err = g.Provider.Client().Issues.CreateComment(ctx,
+	_, _, err = g.Provider.Client().Issues.CreateComment(
+		ctx,
 		g.Options.Organization,
 		g.Options.Repo,
 		g.PRNumber,
@@ -184,7 +173,8 @@ func TestGithubGHERetestWithMultipleFailedPipelineRuns(t *testing.T) {
 
 	// here we only need to check that we have two failed check runs and nothing is gone
 	// after making the retest comment.
-	res, _, err := g.Provider.Client().Checks.ListCheckRunsForRef(ctx,
+	res, _, err := g.Provider.Client().Checks.ListCheckRunsForRef(
+		ctx,
 		g.Options.Organization,
 		g.Options.Repo,
 		g.SHA,

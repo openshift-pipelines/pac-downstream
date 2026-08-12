@@ -7,7 +7,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"syscall"
 
 	"github.com/AlecAivazis/survey/v2"
 	"github.com/jonboulle/clockwork"
@@ -54,6 +53,7 @@ type logOption struct {
 	limit      int
 	webBrowser bool
 	useLastPR  bool
+	execFunc   func(string, []string, []string) error
 }
 
 func Command(run *params.Run, ioStreams *cli.IOStreams) *cobra.Command {
@@ -124,30 +124,37 @@ func Command(run *params.Run, ioStreams *cli.IOStreams) *cobra.Command {
 				webBrowser: webBrowser,
 				tknPath:    tknPath,
 				useLastPR:  useLastPR,
+				execFunc:   defaultExecFunc,
 			}
 			return log(ctx, lopts)
 		},
 	}
 
 	cmd.Flags().StringP(
-		tknPathFlag, "", "", fmt.Sprintf("Path to the %s binary (default to search for it in you $PATH)", settings.TknBinaryName))
+		tknPathFlag, "", "", fmt.Sprintf("Path to the %s binary (default to search for it in you $PATH)", settings.TknBinaryName),
+	)
 
 	cmd.Flags().StringP(
-		namespaceFlag, "n", "", "If present, the namespace scope for this CLI request")
-	_ = cmd.RegisterFlagCompletionFunc(namespaceFlag,
+		namespaceFlag, "n", "", "If present, the namespace scope for this CLI request",
+	)
+	_ = cmd.RegisterFlagCompletionFunc(
+		namespaceFlag,
 		func(_ *cobra.Command, args []string, _ string) ([]string, cobra.ShellCompDirective) {
 			return completion.BaseCompletion(namespaceFlag, args)
 		},
 	)
 
 	cmd.Flags().BoolP(
-		openWebBrowserFlag, "w", false, "Open Web browser to detected console instead of using tkn")
+		openWebBrowserFlag, "w", false, "Open Web browser to detected console instead of using tkn",
+	)
 
 	cmd.Flags().BoolP(
-		useLastPipelineRunFlag, "L", false, "show logs of the last PipelineRun")
+		useLastPipelineRunFlag, "L", false, "show logs of the last PipelineRun",
+	)
 
 	cmd.Flags().IntP(
-		limitFlag, "", defaultLimit, "Limit the number of PipelineRun to show (-1 is unlimited)")
+		limitFlag, "", defaultLimit, "Limit the number of PipelineRun to show (-1 is unlimited)",
+	)
 
 	return cmd
 }
@@ -240,7 +247,7 @@ func log(ctx context.Context, lo *logOption) error {
 	if lo.webBrowser {
 		return showLogsWithWebConsole(ctx, lo, replyName)
 	}
-	return showlogswithtkn(lo.tknPath, replyName, lo.cs.Info.Kube.Namespace)
+	return showlogswithtkn(lo.execFunc, lo.tknPath, replyName, lo.cs.Info.Kube.Namespace)
 }
 
 func showLogsWithWebConsole(ctx context.Context, lo *logOption, pr string) error {
@@ -257,11 +264,9 @@ func showLogsWithWebConsole(ctx context.Context, lo *logOption, pr string) error
 	return browser.OpenWebBrowser(ctx, lo.cs.Clients.ConsoleUI().DetailURL(prObj))
 }
 
-func showlogswithtkn(tknPath, pr, ns string) error {
-	//nolint: gosec
-	if err := syscall.Exec(tknPath, []string{tknPath, "pr", "logs", "-f", "-n", ns, pr}, os.Environ()); err != nil {
-		_, _ = fmt.Fprintf(os.Stderr, "Command finished with error: %v", err)
-		os.Exit(127)
+func showlogswithtkn(execFn func(string, []string, []string) error, tknPath, pr, ns string) error {
+	if err := execFn(tknPath, []string{tknPath, "pr", "logs", "-f", "-n", ns, pr}, os.Environ()); err != nil {
+		return fmt.Errorf("failed to exec tkn: %w", err)
 	}
 	return nil
 }

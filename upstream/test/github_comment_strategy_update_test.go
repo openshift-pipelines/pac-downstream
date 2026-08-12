@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/go-github/v84/github"
+	"github.com/google/go-github/v85/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
 	tgithub "github.com/openshift-pipelines/pipelines-as-code/test/pkg/github"
@@ -48,7 +48,8 @@ func TestGithubGHEWebhookCommentStrategyUpdateCELErrorReplacement(t *testing.T) 
 
 	comments, _, err := g.Provider.Client().Issues.ListComments(
 		ctx, g.Options.Organization, g.Options.Repo, g.PRNumber,
-		&github.IssueListCommentsOptions{})
+		&github.IssueListCommentsOptions{},
+	)
 	assert.NilError(t, err)
 	assert.Assert(t, len(comments) == 1, "There should be only 1 comment on the pull request.")
 
@@ -110,7 +111,8 @@ func TestGithubGHEWebhookCommentStrategyUpdateCELErrorReplacement(t *testing.T) 
 	time.Sleep(10 * time.Second)
 	updatedComments, _, err := g.Provider.Client().Issues.ListComments(
 		ctx, g.Options.Organization, g.Options.Repo, g.PRNumber,
-		&github.IssueListCommentsOptions{})
+		&github.IssueListCommentsOptions{},
+	)
 	assert.NilError(t, err)
 
 	var updatedComment *github.IssueComment
@@ -165,7 +167,6 @@ func TestGithubGHEWebhookCommentStrategyUpdateMultiplePLRs(t *testing.T) {
 		Title:           g.CommitTitle,
 		TargetNS:        g.TargetNamespace,
 		NumberofPRMatch: 2,
-		SHA:             g.SHA,
 		OnEvent:         "pull_request",
 	}
 	twait.Succeeded(ctx, t, g.Cnx, g.Options, sopt)
@@ -175,7 +176,8 @@ func TestGithubGHEWebhookCommentStrategyUpdateMultiplePLRs(t *testing.T) {
 
 	comments, _, err := g.Provider.Client().Issues.ListComments(
 		ctx, g.Options.Organization, g.Options.Repo, g.PRNumber,
-		&github.IssueListCommentsOptions{})
+		&github.IssueListCommentsOptions{},
+	)
 	assert.NilError(t, err)
 
 	// Find comments with pac-status markers
@@ -210,7 +212,9 @@ func TestGithubGHEWebhookCommentStrategyUpdateMultiplePLRs(t *testing.T) {
 	g.Cnx.Clients.Log.Infof("Pushed trigger commit: %s", sha)
 
 	sopt.NumberofPRMatch = 4
-	sopt.SHA = sha
+	// if there are multiple pipelineruns, we don't need to SHA because after a new commit is pushed,
+	// we cannot poll for the two SHA in Succeeded polling function.
+	// sopt.SHA = sha
 	sopt.Title = "test: trigger re-run"
 	twait.Succeeded(ctx, t, g.Cnx, g.Options, sopt)
 
@@ -219,7 +223,8 @@ func TestGithubGHEWebhookCommentStrategyUpdateMultiplePLRs(t *testing.T) {
 
 	updatedComments, _, err := g.Provider.Client().Issues.ListComments(
 		ctx, g.Options.Organization, g.Options.Repo, g.PRNumber,
-		&github.IssueListCommentsOptions{})
+		&github.IssueListCommentsOptions{},
+	)
 	assert.NilError(t, err)
 
 	updatedPLRComments := make(map[string]*github.IssueComment)
@@ -255,8 +260,9 @@ func TestGithubGHEWebhookCommentStrategyUpdateMarkerMatchingWithRegexChars(t *te
 			"testdata/pipelinerun-regex-name.yaml",
 			"testdata/pipelinerun2-regex-name.yaml",
 		},
-		GHE:     true,
-		Webhook: true,
+		GHE:           true,
+		Webhook:       true,
+		NoStatusCheck: true, // Succeeded is called so it will check the status of the pipelineruns.
 	}
 
 	commentStrategy := &v1alpha1.Settings{
@@ -282,7 +288,8 @@ func TestGithubGHEWebhookCommentStrategyUpdateMarkerMatchingWithRegexChars(t *te
 
 	comments, _, err := g.Provider.Client().Issues.ListComments(
 		ctx, g.Options.Organization, g.Options.Repo, g.PRNumber,
-		&github.IssueListCommentsOptions{})
+		&github.IssueListCommentsOptions{},
+	)
 	assert.NilError(t, err)
 
 	// Find comments with pac-status markers
@@ -346,7 +353,8 @@ func TestGithubGHEWebhookCommentStrategyUpdateMarkerMatchingWithRegexChars(t *te
 
 	updatedComments, _, err := g.Provider.Client().Issues.ListComments(
 		ctx, g.Options.Organization, g.Options.Repo, g.PRNumber,
-		&github.IssueListCommentsOptions{})
+		&github.IssueListCommentsOptions{},
+	)
 	assert.NilError(t, err)
 
 	for _, comment := range updatedComments {

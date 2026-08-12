@@ -49,7 +49,7 @@ pipelinesascode.tekton.dev/pipeline: "buildpacks:0.1"
 
 ### Custom hub support for Pipelines
 
-If your cluster administrator has [configured]({{< relref "/docs/api/configmap#hub-configuration" >}}) custom Hub catalogs beyond the default Artifact Hub and Tekton Hub, you can reference them from your template:
+If your cluster administrator has [configured]({{< relref "/docs/api/configmap#hub-configuration" >}}) custom Hub catalogs beyond the default Artifact Hub, you can reference them from your template.
 
 ```yaml
 pipelinesascode.tekton.dev/pipeline: "[customcatalog://buildpacks:0.1]" # this will install buildpacks from the custom catalog configured by the cluster administrator as customcatalog

@@ -9,8 +9,8 @@ This page explains how to choose the right LLM model for each analysis role and 
 
 Each analysis role can specify a different model. Choosing the right model lets you balance cost against analysis depth. If you do not specify a model, Pipelines-as-Code uses provider-specific defaults:
 
-- **OpenAI**: `gpt-5-mini`
-- **Gemini**: `gemini-2.5-flash-lite`
+- **OpenAI**: `gpt-5.4-mini`
+- **Gemini**: `gemini-3.1-flash-lite-preview`
 
 ### Specifying Models
 
@@ -37,7 +37,7 @@ settings:
         model: "gpt-5"
         prompt: "Analyze security failures..."
 
-      # Use default model (gpt-5-mini) for general analysis
+      # Use default model (gpt-5.4-mini) for general analysis
       - name: "general-failure"
         # No model specified - uses provider default
         prompt: "Analyze this failure..."
@@ -50,19 +50,19 @@ settings:
 
 ## CEL Expressions for Triggers
 
-By default, Pipelines-as-Code runs LLM analysis only for failed PipelineRuns. CEL (Common Expression Language) expressions in the `on_cel` field let you refine this behavior -- for example, restricting analysis to a specific branch or enabling it for successful runs too.
+By default, Pipelines-as-Code runs LLM analysis for completed PipelineRuns (both successful and failed). CEL (Common Expression Language) expressions in the `on_cel` field let you refine this behavior -- for example, restricting analysis to a specific branch, only successful runs, or only failed runs.
 
-If you omit `on_cel`, the role executes for all failed PipelineRuns.
+If you omit `on_cel`, the role executes for all completed PipelineRuns.
 
 ### Overriding the Default Behavior
 
-To run analysis for **all PipelineRuns** (both successful and failed), set `on_cel: 'true'`:
+To run analysis for **all completed PipelineRuns** (both successful and failed), set `on_cel: 'true'`:
 
 ```yaml
 roles:
   - name: "pipeline-summary"
     prompt: "Generate a summary of this pipeline run..."
-    on_cel: 'true'  # Runs for ALL pipeline runs, not just failures
+    on_cel: 'true'  # Runs for all completed pipeline runs
     output: "pr-comment"
 ```
 
@@ -76,13 +76,13 @@ This is useful when you want to:
 ### Example CEL Expressions
 
 ```yaml
-# Run on ALL pipeline runs (overrides default failed-only behavior)
+# Run on ALL pipeline runs (overrides default completed-only behavior)
 on_cel: 'true'
 
 # Only on successful runs (e.g., for generating success reports)
 on_cel: 'body.pipelineRun.status.conditions[0].reason == "Succeeded"'
 
-# Only on pull requests (in addition to default failed-only check)
+# Only on pull requests
 on_cel: 'body.event.event_type == "pull_request"'
 
 # Only on main branch

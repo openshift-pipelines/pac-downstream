@@ -4,15 +4,17 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"strings"
 	"testing"
 
-	"github.com/google/go-github/v84/github"
+	"github.com/google/go-github/v85/github"
 	"github.com/jonboulle/clockwork"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/consoleui"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/events"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/kubeinteraction"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/clients"
@@ -32,8 +34,11 @@ import (
 	"gotest.tools/v3/assert"
 	"gotest.tools/v3/golden"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	k8stesting "k8s.io/client-go/testing"
 	knativeapi "knative.dev/pkg/apis"
 	knativeduckv1 "knative.dev/pkg/apis/duck/v1"
 	rtesting "knative.dev/pkg/reconciler/testing"
@@ -44,6 +49,66 @@ var (
 	finalSuccessStatus = "success"
 	finalFailureStatus = "failure"
 )
+
+func TestCopyRepositoryForMergeCopiesMutableSpecPointers(t *testing.T) {
+	assert.Assert(t, copyRepositoryForMerge(nil) == nil)
+
+	repo := &v1alpha1.Repository{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "repo",
+			Namespace: "ns",
+		},
+		Spec: v1alpha1.RepositorySpec{
+			Settings: &v1alpha1.Settings{
+				GithubAppTokenScopeRepos: []string{"org/repo"},
+				Policy: &v1alpha1.Policy{
+					OkToTest:    []string{"alice"},
+					PullRequest: []string{"bob"},
+				},
+				Gitlab: &v1alpha1.GitlabSettings{
+					CommentStrategy: "update",
+				},
+				Github: &v1alpha1.GithubSettings{
+					CommentStrategy: "update",
+				},
+				Forgejo: &v1alpha1.ForgejoSettings{
+					UserAgent: "pac-test",
+				},
+				AIAnalysis: &v1alpha1.AIAnalysisConfig{
+					Enabled: true,
+				},
+			},
+			GitProvider: &v1alpha1.GitProvider{
+				Secret:        &v1alpha1.Secret{Name: "provider-secret"},
+				WebhookSecret: &v1alpha1.Secret{Name: "webhook-secret"},
+			},
+		},
+	}
+
+	copied := copyRepositoryForMerge(repo)
+	assert.Assert(t, copied != repo)
+	assert.Assert(t, copied.Spec.Settings != repo.Spec.Settings)
+	assert.Assert(t, copied.Spec.Settings.Policy != repo.Spec.Settings.Policy)
+	assert.Assert(t, copied.Spec.Settings.Gitlab != repo.Spec.Settings.Gitlab)
+	assert.Assert(t, copied.Spec.Settings.Github != repo.Spec.Settings.Github)
+	assert.Assert(t, copied.Spec.Settings.Forgejo != repo.Spec.Settings.Forgejo)
+	assert.Assert(t, copied.Spec.Settings.AIAnalysis != repo.Spec.Settings.AIAnalysis)
+	assert.Assert(t, copied.Spec.GitProvider != repo.Spec.GitProvider)
+	assert.Assert(t, copied.Spec.GitProvider.Secret != repo.Spec.GitProvider.Secret)
+	assert.Assert(t, copied.Spec.GitProvider.WebhookSecret != repo.Spec.GitProvider.WebhookSecret)
+
+	copied.Spec.Settings.GithubAppTokenScopeRepos[0] = "changed/repo"
+	copied.Spec.Settings.Policy.OkToTest[0] = "mallory"
+	copied.Spec.Settings.Policy.PullRequest[0] = "eve"
+	copied.Spec.GitProvider.Secret.Name = "changed-provider-secret"
+	copied.Spec.GitProvider.WebhookSecret.Name = "changed-webhook-secret"
+
+	assert.Equal(t, "org/repo", repo.Spec.Settings.GithubAppTokenScopeRepos[0])
+	assert.Equal(t, "alice", repo.Spec.Settings.Policy.OkToTest[0])
+	assert.Equal(t, "bob", repo.Spec.Settings.Policy.PullRequest[0])
+	assert.Equal(t, "provider-secret", repo.Spec.GitProvider.Secret.Name)
+	assert.Equal(t, "webhook-secret", repo.Spec.GitProvider.WebhookSecret.Name)
+}
 
 func testSetupGHReplies(t *testing.T, mux *http.ServeMux, runevent *info.Event, checkrunID, finalStatus string) {
 	t.Helper()
@@ -67,7 +132,8 @@ func TestReconcilerReconcileKind(t *testing.T) {
 	defer teardown()
 
 	vcx := &ghprovider.Provider{
-		Token: github.Ptr("None"),
+		Token:  github.Ptr("None"),
+		Logger: fakelogger,
 	}
 
 	vcx.SetGithubClient(fakeclient)
@@ -152,6 +218,17 @@ func TestReconcilerReconcileKind(t *testing.T) {
 					URL: randomURL,
 				},
 			}
+			globalRepo := &v1alpha1.Repository{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "global-repo",
+					Namespace: "ns",
+				},
+				Spec: v1alpha1.RepositorySpec{
+					Settings: &v1alpha1.Settings{
+						PipelineRunProvenance: "default_branch",
+					},
+				},
+			}
 
 			taskStatus := tektonv1.TaskRunStatusFields{
 				PodName: "task1",
@@ -167,7 +244,7 @@ func TestReconcilerReconcileKind(t *testing.T) {
 				},
 			}
 			testData := testclient.Data{
-				Repositories: []*v1alpha1.Repository{testRepo},
+				Repositories: []*v1alpha1.Repository{testRepo, globalRepo},
 				PipelineRuns: []*tektonv1.PipelineRun{pr},
 				TaskRuns: []*tektonv1.TaskRun{
 					tektontest.MakeTaskRunCompletion(clock, "task1", "ns", "pipeline-newest",
@@ -197,9 +274,12 @@ func TestReconcilerReconcileKind(t *testing.T) {
 						Kube:           stdata.Kube,
 					},
 					Info: info.Info{
-						Kube: &info.KubeOpts{},
+						Kube: &info.KubeOpts{
+							Namespace: "ns",
+						},
 						Controller: &info.ControllerInfo{
-							Secret: secretName,
+							Secret:           secretName,
+							GlobalRepository: "global-repo",
 						},
 					},
 				},
@@ -234,8 +314,93 @@ func TestReconcilerReconcileKind(t *testing.T) {
 
 			// state must be updated to completed
 			assert.Equal(t, got.Annotations[keys.State], kubeinteraction.StateCompleted)
+			cachedRepo, err := informers.Repository.Lister().Repositories(testRepo.Namespace).Get(testRepo.Name)
+			assert.NilError(t, err)
+			assert.Assert(t, cachedRepo.Spec.Settings == nil, "global settings should not mutate the cached Repository")
 		})
 	}
+}
+
+func TestInitGitProviderClientUsesGlobalSecretWithoutMutatingCache(t *testing.T) {
+	ctx, _ := rtesting.SetupFakeContext(t)
+	observer, _ := zapobserver.New(zap.InfoLevel)
+	logger := zap.New(observer).Sugar()
+
+	pr := &tektonv1.PipelineRun{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-pr",
+			Namespace: "test-ns",
+			Annotations: map[string]string{
+				keys.GitProvider:   "github",
+				keys.RepoURL:       "https://github.com/org/repo",
+				keys.URLOrg:        "org",
+				keys.URLRepository: "repo",
+				keys.SHA:           "abc123",
+			},
+		},
+	}
+	repo := &v1alpha1.Repository{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-repo",
+			Namespace: "test-ns",
+		},
+		Spec: v1alpha1.RepositorySpec{
+			URL:         "https://github.com/org/repo",
+			GitProvider: &v1alpha1.GitProvider{},
+		},
+	}
+	globalRepo := &v1alpha1.Repository{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "global-repo",
+			Namespace: "global",
+		},
+		Spec: v1alpha1.RepositorySpec{
+			GitProvider: &v1alpha1.GitProvider{
+				Secret: &v1alpha1.Secret{
+					Name: "global-provider-secret",
+				},
+			},
+		},
+	}
+	stdata, informers := testclient.SeedTestData(t, ctx, testclient.Data{
+		Repositories: []*v1alpha1.Repository{repo, globalRepo},
+	})
+	kint := &testkubernetestint.KinterfaceTest{
+		GetSecretResult: map[string]string{
+			"global-provider-secret": "test-token",
+		},
+	}
+	r := &Reconciler{
+		repoLister:   informers.Repository.Lister(),
+		kinteract:    kint,
+		eventEmitter: events.NewEventEmitter(stdata.Kube, logger),
+		run: &params.Run{
+			Clients: clients.Clients{
+				Kube:           stdata.Kube,
+				PipelineAsCode: stdata.PipelineAsCode,
+				Log:            logger,
+			},
+			Info: info.Info{
+				Kube: &info.KubeOpts{
+					Namespace: "global",
+				},
+				Controller: &info.ControllerInfo{
+					GlobalRepository: "global-repo",
+				},
+				Pac: info.NewPacOpts(),
+			},
+		},
+	}
+
+	cachedRepo, err := informers.Repository.Lister().Repositories(repo.Namespace).Get(repo.Name)
+	assert.NilError(t, err)
+	_, event, err := r.initGitProviderClient(ctx, logger, cachedRepo, pr)
+	assert.NilError(t, err)
+	assert.Equal(t, "test-token", event.Provider.Token)
+
+	cachedRepo, err = informers.Repository.Lister().Repositories(repo.Namespace).Get(repo.Name)
+	assert.NilError(t, err)
+	assert.Assert(t, cachedRepo.Spec.GitProvider.Secret == nil, "global secret should not mutate the cached Repository")
 }
 
 func TestUpdatePipelineRunState(t *testing.T) {
@@ -345,6 +510,7 @@ func TestReconcileKindSCMReportingLogic(t *testing.T) {
 						keys.SHA:           "123afc",
 						keys.URLOrg:        "random",
 						keys.URLRepository: "app",
+						keys.SecretCreated: "true",
 					},
 				},
 				Spec: tektonv1.PipelineRunSpec{},
@@ -377,6 +543,7 @@ func TestReconcileKindSCMReportingLogic(t *testing.T) {
 						keys.SHA:                    "123afc",
 						keys.URLOrg:                 "random",
 						keys.URLRepository:          "app",
+						keys.SecretCreated:          "true",
 					},
 				},
 				Spec: tektonv1.PipelineRunSpec{},
@@ -408,6 +575,7 @@ func TestReconcileKindSCMReportingLogic(t *testing.T) {
 						keys.SHA:           "123afc",
 						keys.URLOrg:        "random",
 						keys.URLRepository: "app",
+						keys.SecretCreated: "true",
 					},
 				},
 				Spec: tektonv1.PipelineRunSpec{
@@ -474,6 +642,9 @@ func TestReconcileKindSCMReportingLogic(t *testing.T) {
 					Pac: &info.PacOpts{
 						Settings: settings.Settings{},
 					},
+					Kube: &info.KubeOpts{
+						Namespace: "global",
+					},
 				},
 			}
 			cs.Clients.SetConsoleUI(consoleui.FallBackConsole{})
@@ -522,4 +693,272 @@ func TestReconcileKindSCMReportingLogic(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestCreateSecretForPipelineRun(t *testing.T) {
+	// Base annotations required by initGitProviderClient (detectProvider + buildEventFromPipelineRun)
+	baseAnnotations := map[string]string{
+		keys.GitProvider:   "github",
+		keys.RepoURL:       "https://github.com/org/repo",
+		keys.URLOrg:        "org",
+		keys.URLRepository: "repo",
+		keys.SHA:           "abc123",
+	}
+
+	providerSecretName := "pac-git-basic-auth-owner-repo"
+
+	tests := []struct {
+		name              string
+		prAnnotations     map[string]string
+		repoUser          string
+		createSecretError error
+		updateSecretError error
+		simulatePatchErr  bool
+		wantErr           string
+		wantLogSnippet    string
+		verifyPatched     bool
+	}{
+		{
+			name:          "missing git-auth-secret annotation",
+			prAnnotations: map[string]string{},
+			wantErr:       "cannot get annotation",
+		},
+		{
+			name: "MakeBasicAuthSecret failure with malformed URL",
+			prAnnotations: map[string]string{
+				keys.GitAuthSecret: "test-secret",
+				keys.RepoURL:       "http://[invalid",
+			},
+			wantErr: "making basic auth secret",
+		},
+		{
+			name: "CreateSecret generic failure",
+			prAnnotations: map[string]string{
+				keys.GitAuthSecret: "test-secret",
+			},
+			createSecretError: fmt.Errorf("connection timeout"),
+			wantErr:           "creating basic auth secret",
+		},
+		{
+			name: "CreateSecret AlreadyExists succeeds with warning",
+			prAnnotations: map[string]string{
+				keys.GitAuthSecret: "test-secret",
+			},
+			createSecretError: errors.NewAlreadyExists(schema.GroupResource{Group: "", Resource: "secrets"}, "test-secret"),
+			wantLogSnippet:    "already exists",
+			verifyPatched:     true,
+		},
+		{
+			name: "UpdateSecretWithOwnerRef failure",
+			prAnnotations: map[string]string{
+				keys.GitAuthSecret: "test-secret",
+			},
+			updateSecretError: fmt.Errorf("failed to update owner ref"),
+			wantErr:           "cannot update secret",
+		},
+		{
+			name: "PatchPipelineRun failure returns error",
+			prAnnotations: map[string]string{
+				keys.GitAuthSecret: "test-secret",
+			},
+			simulatePatchErr: true,
+			wantErr:          "failed to patch pipelinerun",
+		},
+		{
+			name: "happy path with default git user",
+			prAnnotations: map[string]string{
+				keys.GitAuthSecret: "test-secret",
+			},
+			verifyPatched: true,
+		},
+		{
+			name: "happy path with custom git user",
+			prAnnotations: map[string]string{
+				keys.GitAuthSecret: "test-secret",
+			},
+			repoUser:      "custom-user",
+			verifyPatched: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, _ := rtesting.SetupFakeContext(t)
+			observer, log := zapobserver.New(zap.InfoLevel)
+			logger := zap.New(observer).Sugar()
+
+			// Merge base annotations with test-specific annotations (test-specific overrides base)
+			annotations := maps.Clone(baseAnnotations)
+			maps.Copy(annotations, tt.prAnnotations)
+
+			pr := &tektonv1.PipelineRun{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        "test-pr",
+					Namespace:   "test-ns",
+					Annotations: annotations,
+				},
+			}
+
+			repo := &v1alpha1.Repository{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-repo",
+					Namespace: "test-ns",
+				},
+				Spec: v1alpha1.RepositorySpec{
+					GitProvider: &v1alpha1.GitProvider{
+						Secret: &v1alpha1.Secret{
+							Name: providerSecretName,
+						},
+						User: tt.repoUser,
+					},
+				},
+			}
+
+			testData := testclient.Data{
+				PipelineRuns: []*tektonv1.PipelineRun{pr},
+				Repositories: []*v1alpha1.Repository{repo},
+			}
+			stdata, informers := testclient.SeedTestData(t, ctx, testData)
+
+			if tt.simulatePatchErr {
+				stdata.Pipeline.PrependReactor("patch", "pipelineruns", func(_ k8stesting.Action) (bool, runtime.Object, error) {
+					return true, nil, fmt.Errorf("etcd unavailable")
+				})
+			}
+
+			kint := &testkubernetestint.KinterfaceTest{
+				GetSecretResult: map[string]string{
+					providerSecretName: "test-token",
+				},
+				CreateSecretError: tt.createSecretError,
+				UpdateSecretError: tt.updateSecretError,
+			}
+
+			r := &Reconciler{
+				run: &params.Run{
+					Clients: clients.Clients{
+						Tekton: stdata.Pipeline,
+						Log:    logger,
+					},
+					Info: info.Info{
+						Pac: &info.PacOpts{
+							Settings: settings.Settings{},
+						},
+						Kube: &info.KubeOpts{
+							Namespace: "global",
+						},
+						Controller: &info.ControllerInfo{
+							GlobalRepository: "global-repo",
+						},
+					},
+				},
+				repoLister:   informers.Repository.Lister(),
+				kinteract:    kint,
+				eventEmitter: events.NewEventEmitter(stdata.Kube, logger),
+			}
+
+			err := r.createSecretForPipelineRun(ctx, logger, pr, repo)
+
+			if tt.wantErr != "" {
+				assert.Assert(t, err != nil, "expected error containing: %s", tt.wantErr)
+				assert.ErrorContains(t, err, tt.wantErr)
+				return
+			}
+			assert.NilError(t, err)
+
+			if tt.wantLogSnippet != "" {
+				logEntries := log.FilterMessageSnippet(tt.wantLogSnippet).TakeAll()
+				assert.Assert(t, len(logEntries) > 0, "expected log snippet %q not found", tt.wantLogSnippet)
+			}
+
+			if tt.verifyPatched {
+				updatedPR, getErr := stdata.Pipeline.TektonV1().PipelineRuns(pr.Namespace).Get(ctx, pr.Name, metav1.GetOptions{})
+				assert.NilError(t, getErr)
+				assert.Equal(t, updatedPR.Annotations[keys.SecretCreated], "true")
+			}
+		})
+	}
+}
+
+func TestReconcileKindSecretCreationDoesNotLogOnSuccess(t *testing.T) {
+	observer, log := zapobserver.New(zap.ErrorLevel)
+	logger := zap.New(observer).Sugar()
+
+	ctx, _ := rtesting.SetupFakeContext(t)
+
+	pr := &tektonv1.PipelineRun{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: "test-ns",
+			Name:      "test-pr",
+			Annotations: map[string]string{
+				keys.State:         kubeinteraction.StateStarted,
+				keys.Repository:    "test-repo",
+				keys.SecretCreated: "false",
+				keys.GitAuthSecret: "pac-git-basic-auth-owner-repo",
+				keys.GitProvider:   "github",
+				keys.RepoURL:       "https://github.com/org/repo",
+				keys.URLOrg:        "org",
+				keys.URLRepository: "repo",
+				keys.SHA:           "abc123",
+			},
+		},
+	}
+
+	repo := &v1alpha1.Repository{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-repo",
+			Namespace: "test-ns",
+		},
+		Spec: v1alpha1.RepositorySpec{
+			GitProvider: &v1alpha1.GitProvider{
+				Secret: &v1alpha1.Secret{
+					Name: "pac-provider-secret",
+				},
+				User: "test-user",
+			},
+		},
+	}
+
+	testData := testclient.Data{
+		PipelineRuns: []*tektonv1.PipelineRun{pr},
+		Repositories: []*v1alpha1.Repository{repo},
+	}
+	stdata, informers := testclient.SeedTestData(t, ctx, testData)
+
+	r := &Reconciler{
+		repoLister: informers.Repository.Lister(),
+		run: &params.Run{
+			Clients: clients.Clients{
+				Tekton: stdata.Pipeline,
+				Log:    logger,
+			},
+			Info: info.Info{
+				Pac: &info.PacOpts{
+					Settings: settings.Settings{
+						SecretAutoCreation: true,
+					},
+				},
+				Kube: &info.KubeOpts{
+					Namespace: "global",
+				},
+				Controller: &info.ControllerInfo{
+					GlobalRepository: "global-repo",
+				},
+			},
+		},
+		kinteract: &testkubernetestint.KinterfaceTest{
+			GetSecretResult: map[string]string{
+				"pac-provider-secret": "test-token",
+			},
+		},
+	}
+
+	err := r.ReconcileKind(ctx, pr)
+	assert.NilError(t, err)
+
+	updatedPR, getErr := stdata.Pipeline.TektonV1().PipelineRuns(pr.Namespace).Get(ctx, pr.Name, metav1.GetOptions{})
+	assert.NilError(t, getErr)
+	assert.Equal(t, updatedPR.Annotations[keys.SecretCreated], "true")
+
+	logEntries := log.FilterMessageSnippet("failed to create secret for pipelineRun").TakeAll()
+	assert.Equal(t, len(logEntries), 0)
 }

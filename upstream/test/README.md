@@ -41,7 +41,7 @@ and search for **installation** which looks something like below
 - `TEST_GITHUB_REPO_OWNER_WEBHOOK` - A repository/owner github repo that is configured with github webhooks and
 this repo should differ from the one which is configured as part of `TEST_GITHUB_REPO_OWNER_GITHUBAPP` env.
 - `TEST_BITBUCKET_CLOUD_API_URL` - Bitbucket Cloud Api URL: probably: `https://api.bitbucket.org/2.0`
-- `TEST_BITBUCKET_CLOUD_USER` - Bitbucket Cloud Username (you can get from "Personal Bitbucket settings" in UI)
+- `TEST_BITBUCKET_CLOUD_USER` - Atlassian account email for Bitbucket Cloud API authentication
 - `TEST_BITBUCKET_CLOUD_E2E_REPOSITORY` - Bitbucket Cloud repository (i.e. `project/repo`)
 - `TEST_BITBUCKET_CLOUD_TOKEN` - Bitbucket Cloud token
 - `TEST_GITLAB_API_URL` - Gitlab API URL i.e: `https://gitlab.com`
@@ -55,11 +55,11 @@ this repo should differ from the one which is configured as part of `TEST_GITHUB
 - `TEST_GITEA_PASSWORD` - set password as **pac**
 - `TEST_GITEA_USERNAME` - set username as **pac**
 - `TEST_GITEA_REPO_OWNER` - set repo owner as **pac/pac**
-- `TEST_BITBUCKET_SERVER_USER` - Bitbucket Data Center Username
-- `TEST_BITBUCKET_SERVER_TOKEN` - Bitbucket Data Center token
-- `TEST_BITBUCKET_SERVER_E2E_REPOSITORY` - Bitbucket Data Center repository (i.e. `project/repo`)
-- `TEST_BITBUCKET_SERVER_API_URL` - URL where your Bitbucket Data Center instance is running.
-- `TEST_BITBUCKET_SERVER_WEBHOOK_SECRET` - Webhook secret
+- `TEST_BITBUCKET_DATA_CENTER_USER` - Bitbucket Data Center Username
+- `TEST_BITBUCKET_DATA_CENTER_TOKEN` - Bitbucket Data Center token
+- `TEST_BITBUCKET_DATA_CENTER_E2E_REPOSITORY` - Bitbucket Data Center repository (i.e. `project/repo`)
+- `TEST_BITBUCKET_DATA_CENTER_API_URL` - URL where your Bitbucket Data Center instance is running.
+- `TEST_BITBUCKET_DATA_CENTER_WEBHOOK_SECRET` - Webhook secret
 
 - `PAC_API_INSTRUMENTATION_DIR` - Optional. When set, E2E tests write per-test JSON reports of GitHub API calls parsed from controller logs to this directory. Useful for analyzing API usage and rate limits. Example: `export PAC_API_INSTRUMENTATION_DIR=/tmp/api-instrumentation`.
 
@@ -83,7 +83,7 @@ cp test/e2e-config.yaml.example test/e2e-config.yaml
 
 The YAML file groups settings by provider section (`common`, `github`,
 `github_enterprise`, `gitlab`, `gitea`, `bitbucket_cloud`,
-`bitbucket_server`). See `test/e2e-config.yaml.example` for the full list of
+`bitbucket_datacenter`). See `test/e2e-config.yaml.example` for the full list of
 fields.
 
 Environment variables always take precedence over YAML values, so you can use
@@ -124,7 +124,7 @@ instance to your local controller (the same pattern as Gitea tests).
    SMEE_URL=$(curl -s https://hook.pipelinesascode.com -o /dev/null -w '%{redirect_url}')
 
    # Start forwarding webhooks to your controller
-   gosmee client "${SMEE_URL}" "https://your-controller-url"
+   gosmee client --output json --log-level debug --target-connection-timeout 5 --target-retries 5 "${SMEE_URL}" "https://your-controller-url"
    ```
 
 3. Set the required environment variables (or use a

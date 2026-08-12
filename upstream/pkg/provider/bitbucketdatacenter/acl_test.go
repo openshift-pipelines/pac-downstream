@@ -124,7 +124,8 @@ func TestIsAllowed(t *testing.T) {
 				&info.Event{
 					AccountID: "0000",
 					Sender:    "NotAllowed",
-				}),
+				},
+			),
 			fields: fields{
 				projectMembers: []*bbv1test.UserPermission{
 					{
@@ -273,7 +274,7 @@ func TestIsAllowed(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx, _ := rtesting.SetupFakeContext(t)
-			client, mux, tearDown, tURL := bbv1test.SetupBBDataCenterClient()
+			client, mux, tearDown, tURL := bbv1test.SetupBBDataCenterClient(t)
 			defer tearDown()
 			bbv1test.MuxProjectMemberShip(t, mux, tt.event, tt.fields.projectMembers)
 			bbv1test.MuxRepoMemberShip(t, mux, tt.event, tt.fields.repoMembers)

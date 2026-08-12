@@ -27,7 +27,7 @@ linters:
     - gocritic
     - godot
     - goheader
-    - gomodguard
+    - gomodguard_v2
     - goprintffuncname
     - gosec
     - gosmopolitan
@@ -57,6 +57,9 @@ linters:
     - whitespace
     - zerologlint
   settings:
+    govet:
+      disable:
+        - inline
     misspell:
       ignore-rules:
         - cancelled
@@ -90,6 +93,8 @@ linters:
         path: _test\.go
       - path: pkg/resolve/resolve.go
         text: don't use `init` function
+      - path: pkg/llm/providers/
+        text: don't use `init` function
       - linters:
           - revive
         path: pkg/errors/
@@ -111,6 +116,7 @@ linters:
         text: "G115|G117|G702|G703|G704|G705|G706"
     paths:
       - vendor
+      - pkg/generated
       - pkg/provider/gitea/structs
       - third_party$
       - builtin$
@@ -126,6 +132,8 @@ formatters:
     generated: lax
     paths:
       - vendor
+      - go-build-cache
+      - pkg/generated
       - pkg/provider/gitea/structs
       - third_party$
       - builtin$

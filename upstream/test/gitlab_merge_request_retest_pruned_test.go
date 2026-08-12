@@ -3,7 +3,6 @@
 package test
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"testing"
@@ -17,9 +16,9 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/test/pkg/payload"
 	"github.com/openshift-pipelines/pipelines-as-code/test/pkg/scm"
 	twait "github.com/openshift-pipelines/pipelines-as-code/test/pkg/wait"
+	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 	"github.com/tektoncd/pipeline/pkg/names"
 	clientGitlab "gitlab.com/gitlab-org/api/client-go"
-	"go.uber.org/zap"
 	"gotest.tools/v3/assert"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -56,21 +55,19 @@ func TestGitlabRetestAfterPipelineRunPruning(t *testing.T) {
 	// Wait for both PipelineRuns to appear
 	topts.ParamsRun.Clients.Log.Infof("Waiting for 2 PipelineRuns to appear")
 	err = twait.UntilMinPRAppeared(ctx, topts.ParamsRun.Clients, twait.Opts{
-		RepoName:    topts.TargetNS,
 		Namespace:   topts.TargetNS,
 		PollTimeout: twait.DefaultTimeout,
-		TargetSHA:   formatting.CleanValueKubernetes(mr.SHA),
+		TargetSHA:   []string{formatting.CleanValueKubernetes(mr.SHA)},
 	}, 2)
 	assert.NilError(t, err)
 
-	// Wait for repository to have at least 2 status entries (both pipelines reported)
-	topts.ParamsRun.Clients.Log.Infof("Waiting for Repository status to have 2 entries")
-	_, err = twait.UntilRepositoryUpdated(ctx, topts.ParamsRun.Clients, twait.Opts{
-		RepoName:        topts.TargetNS,
+	// Wait for both PipelineRuns to finish (1 success + 1 failure)
+	topts.ParamsRun.Clients.Log.Infof("Waiting for 2 PipelineRuns to finish")
+	_, err = twait.UntilPipelineRunsFinished(ctx, topts.ParamsRun.Clients, twait.Opts{
 		Namespace:       topts.TargetNS,
 		MinNumberStatus: 2,
 		PollTimeout:     twait.DefaultTimeout,
-		TargetSHA:       mr.SHA,
+		TargetSHA:       []string{mr.SHA},
 	})
 	assert.NilError(t, err)
 
@@ -87,21 +84,29 @@ func TestGitlabRetestAfterPipelineRunPruning(t *testing.T) {
 		initialPRNames[pr.Name] = true
 	}
 
-	// Verify GitLab commit statuses: 1 success + 1 failure
-	commitStatuses, _, err := topts.GLProvider.Client().Commits.GetCommitStatuses(topts.ProjectID, mr.SHA, &clientGitlab.GetCommitStatusesOptions{})
-	assert.NilError(t, err)
-	assert.Assert(t, len(commitStatuses) >= 2, "expected at least 2 commit statuses, got %d", len(commitStatuses))
-
 	successCount := 0
 	failureCount := 0
-	for _, cs := range commitStatuses {
-		switch cs.Status {
-		case "success":
-			successCount++
-		case "failed":
-			failureCount++
+
+	// Verify GitLab commit statuses: 1 success + 1 failure
+	for i := 0; i < 5; i++ {
+		successCount = 0
+		failureCount = 0
+		commitStatuses, _, err := topts.GLProvider.Client().Commits.GetCommitStatuses(topts.ProjectID, mr.SHA, &clientGitlab.GetCommitStatusesOptions{})
+		assert.NilError(t, err)
+		assert.Assert(t, len(commitStatuses) >= 2, "expected at least 2 commit statuses, got %d", len(commitStatuses))
+
+		for _, cs := range commitStatuses {
+			switch cs.Status {
+			case "success":
+				successCount++
+			case "failed":
+				failureCount++
+			}
 		}
+		topts.ParamsRun.Clients.Log.Infof("waiting for commit statuses to be updated: %d success, %d failure", successCount, failureCount)
+		time.Sleep(1 * time.Second)
 	}
+
 	assert.Assert(t, successCount >= 1, "expected at least 1 successful commit status")
 	assert.Assert(t, failureCount >= 1, "expected at least 1 failed commit status")
 
@@ -138,23 +143,18 @@ func TestGitlabRetestAfterPipelineRunPruning(t *testing.T) {
 	// After /retest, we expect only 1 new PipelineRun (the failed one re-runs)
 	topts.ParamsRun.Clients.Log.Infof("Waiting for retest PipelineRun(s) to appear")
 	err = twait.UntilMinPRAppeared(ctx, topts.ParamsRun.Clients, twait.Opts{
-		RepoName:    topts.TargetNS,
 		Namespace:   topts.TargetNS,
 		PollTimeout: twait.DefaultTimeout,
-		TargetSHA:   formatting.CleanValueKubernetes(mr.SHA),
+		TargetSHA:   []string{formatting.CleanValueKubernetes(mr.SHA)},
 	}, 1)
 	assert.NilError(t, err)
 
-	// Wait for repository status to be updated with the retest result
-	// We expect the re-run pipeline to fail (it's pipelinerun-exit-1), so disable
-	// the default FailOnRepoCondition=False check by setting it to a no-match value.
-	_, err = twait.UntilRepositoryUpdated(ctx, topts.ParamsRun.Clients, twait.Opts{
-		RepoName:            topts.TargetNS,
-		Namespace:           topts.TargetNS,
-		MinNumberStatus:     3,
-		PollTimeout:         twait.DefaultTimeout,
-		TargetSHA:           mr.SHA,
-		FailOnRepoCondition: "no-match",
+	// Wait for the re-run pipeline to finish (it's pipelinerun-exit-1 so it will fail)
+	_, err = twait.UntilPipelineRunHasReason(ctx, topts.ParamsRun.Clients, tektonv1.PipelineRunReasonFailed, twait.Opts{
+		Namespace:       topts.TargetNS,
+		MinNumberStatus: 1,
+		PollTimeout:     twait.DefaultTimeout,
+		TargetSHA:       []string{formatting.CleanValueKubernetes(mr.SHA)},
 	})
 	assert.NilError(t, err)
 
@@ -206,6 +206,7 @@ func TestGitlabRetestAfterPipelineRunPruningFromFork(t *testing.T) {
 		topts.SecondGLProvider.Client(),
 		topts.ProjectID,
 		os.Getenv("TEST_GITLAB_SECOND_GROUP"),
+		true,
 		topts.ParamsRun.Clients.Log,
 	)
 	assert.NilError(t, err)
@@ -274,32 +275,49 @@ func TestGitlabRetestAfterPipelineRunPruningFromFork(t *testing.T) {
 
 	topts.ParamsRun.Clients.Log.Infof("Waiting for 2 PipelineRuns to appear for fork MR")
 	err = twait.UntilMinPRAppeared(ctx, topts.ParamsRun.Clients, twait.Opts{
-		RepoName:    topts.TargetNS,
 		Namespace:   topts.TargetNS,
 		PollTimeout: twait.DefaultTimeout,
-		TargetSHA:   formatting.CleanValueKubernetes(mr.SHA),
+		TargetSHA:   []string{formatting.CleanValueKubernetes(mr.SHA)},
 	}, 2)
 	assert.NilError(t, err)
 
-	topts.ParamsRun.Clients.Log.Infof("Waiting for Repository status to have 2 entries for fork MR")
-	_, err = twait.UntilRepositoryUpdated(ctx, topts.ParamsRun.Clients, twait.Opts{
-		RepoName:        topts.TargetNS,
+	topts.ParamsRun.Clients.Log.Infof("Waiting for 2 PipelineRuns to finish for fork MR")
+	_, err = twait.UntilPipelineRunsFinished(ctx, topts.ParamsRun.Clients, twait.Opts{
 		Namespace:       topts.TargetNS,
 		MinNumberStatus: 2,
 		PollTimeout:     twait.DefaultTimeout,
-		TargetSHA:       mr.SHA,
+		TargetSHA:       []string{mr.SHA},
 	})
 	assert.NilError(t, err)
 
 	topts.ParamsRun.Clients.Log.Infof("Verifying commit statuses on fork (source) project for fork MR")
-	sourceStatusCount, err := waitForGitLabCommitStatusCount(ctx, topts.SecondGLProvider.Client(), topts.ParamsRun.Clients.Log, int(forkProject.ID), mr.SHA, 2)
+	sourceSuccessCount, err := tgitlab.WaitForGitLabCommitStatusCount(
+		ctx,
+		topts.SecondGLProvider.Client(),
+		topts.ParamsRun.Clients.Log,
+		int(forkProject.ID),
+		mr.SHA,
+		"success",
+		1,
+	)
 	assert.NilError(t, err)
-	assert.Assert(t, sourceStatusCount >= 2, "expected at least 2 commit statuses on fork (source) project, got %d", sourceStatusCount)
+	assert.Assert(t, sourceSuccessCount >= 1, "expected at least 1 successful commit status on fork (source) project, got %d", sourceSuccessCount)
+	sourceFailureCount, err := tgitlab.WaitForGitLabCommitStatusCount(
+		ctx,
+		topts.SecondGLProvider.Client(),
+		topts.ParamsRun.Clients.Log,
+		int(forkProject.ID),
+		mr.SHA,
+		"failed",
+		1,
+	)
+	assert.NilError(t, err)
+	assert.Assert(t, sourceFailureCount >= 1, "expected at least 1 failed commit status on fork (source) project, got %d", sourceFailureCount)
 
 	topts.ParamsRun.Clients.Log.Infof("Verifying no commit statuses on target project for fork MR")
-	targetStatusCount, err := gitlabCommitStatusCount(topts.GLProvider.Client(), topts.ProjectID, mr.SHA)
+	targetStatuses, _, err := topts.GLProvider.Client().Commits.GetCommitStatuses(topts.ProjectID, mr.SHA, &clientGitlab.GetCommitStatusesOptions{})
 	assert.NilError(t, err)
-	assert.Equal(t, targetStatusCount, 0,
+	assert.Equal(t, len(targetStatuses), 0,
 		"expected no commit statuses on target project; with Developer access on fork, statuses are written directly to the source project")
 
 	topts.ParamsRun.Clients.Log.Infof("Verifying initial PipelineRuns for fork MR")
@@ -333,28 +351,25 @@ func TestGitlabRetestAfterPipelineRunPruningFromFork(t *testing.T) {
 		topts.ParamsRun.Clients.Log.Infof("Warning: PipelineRuns not fully deleted after polling: %v (proceeding anyway)", pollErr)
 	}
 
-	topts.ParamsRun.Clients.Log.Infof("Posting /retest comment on fork MR %d", topts.MRNumber)
+	topts.ParamsRun.Clients.Log.Infof("Posting /retest comment on fork MR %d", mr.IID)
 	_, _, err = topts.GLProvider.Client().Notes.CreateMergeRequestNote(topts.ProjectID, mr.IID,
 		&clientGitlab.CreateMergeRequestNoteOptions{Body: clientGitlab.Ptr("/retest")})
 	assert.NilError(t, err)
 
 	topts.ParamsRun.Clients.Log.Infof("Waiting for retest PipelineRun(s) to appear for fork MR")
 	err = twait.UntilMinPRAppeared(ctx, topts.ParamsRun.Clients, twait.Opts{
-		RepoName:    topts.TargetNS,
 		Namespace:   topts.TargetNS,
 		PollTimeout: twait.DefaultTimeout,
-		TargetSHA:   formatting.CleanValueKubernetes(mr.SHA),
+		TargetSHA:   []string{formatting.CleanValueKubernetes(mr.SHA)},
 	}, 1)
 	assert.NilError(t, err)
 
-	topts.ParamsRun.Clients.Log.Infof("Waiting for Repository status to be updated with retest result for fork MR")
-	_, err = twait.UntilRepositoryUpdated(ctx, topts.ParamsRun.Clients, twait.Opts{
-		RepoName:            topts.TargetNS,
-		Namespace:           topts.TargetNS,
-		MinNumberStatus:     3,
-		PollTimeout:         twait.DefaultTimeout,
-		TargetSHA:           mr.SHA,
-		FailOnRepoCondition: "no-match",
+	topts.ParamsRun.Clients.Log.Infof("Waiting for re-run PipelineRun to complete for fork MR")
+	_, err = twait.UntilPipelineRunsFinished(ctx, topts.ParamsRun.Clients, twait.Opts{
+		Namespace:       topts.TargetNS,
+		MinNumberStatus: 1,
+		PollTimeout:     twait.DefaultTimeout,
+		TargetSHA:       []string{formatting.CleanValueKubernetes(mr.SHA)},
 	})
 	assert.NilError(t, err)
 
@@ -372,26 +387,4 @@ func TestGitlabRetestAfterPipelineRunPruningFromFork(t *testing.T) {
 	}
 	assert.Equal(t, newCount, 1,
 		"expected only 1 new PipelineRun after /retest from a fork MR, but got %d", newCount)
-}
-
-func waitForGitLabCommitStatusCount(ctx context.Context, client *clientGitlab.Client, logger *zap.SugaredLogger, projectID int, sha string, minCount int) (int, error) {
-	var count int
-	err := kubeinteraction.PollImmediateWithContext(ctx, twait.DefaultTimeout, func() (bool, error) {
-		currentCount, err := gitlabCommitStatusCount(client, projectID, sha)
-		logger.Infof("Current GitLab commit status count: %d (waiting for at least %d)", currentCount, minCount)
-		if err != nil {
-			return false, err
-		}
-		count = currentCount
-		return count >= minCount, nil
-	})
-	return count, err
-}
-
-func gitlabCommitStatusCount(client *clientGitlab.Client, projectID int, sha string) (int, error) {
-	statuses, _, err := client.Commits.GetCommitStatuses(projectID, sha, &clientGitlab.GetCommitStatusesOptions{})
-	if err != nil {
-		return 0, err
-	}
-	return len(statuses), nil
 }

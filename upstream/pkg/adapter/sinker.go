@@ -3,10 +3,13 @@ package adapter
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/events"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/gitclient"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/kubeinteraction"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/matcher"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
@@ -14,7 +17,12 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/pipelineascode"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/status"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/secrets"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/tracing"
+	semconv "go.opentelemetry.io/otel/semconv/v1.41.0"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 )
 
 type sinker struct {
@@ -66,13 +74,16 @@ func (s *sinker) processEventPayload(ctx context.Context, request *http.Request)
 	return nil
 }
 
+func (s *sinker) handleEvent(ctx context.Context, request *http.Request) error {
+	err := s.processEvent(ctx, request)
+	if err != nil {
+		s.logger.Errorf("error handling event: %v", err)
+	}
+	return err
+}
+
 func (s *sinker) processEvent(ctx context.Context, request *http.Request) error {
-	if s.event.EventType == "incoming" {
-		if request.Header.Get("X-GitHub-Enterprise-Host") != "" {
-			s.event.Provider.URL = request.Header.Get("X-GitHub-Enterprise-Host")
-			s.event.GHEURL = request.Header.Get("X-GitHub-Enterprise-Host")
-		}
-	} else {
+	if s.event.EventType != "incoming" {
 		if err := s.processEventPayload(ctx, request); err != nil {
 			return err
 		}
@@ -90,14 +101,24 @@ func (s *sinker) processEvent(ctx context.Context, request *http.Request) error 
 			// We found the repository, now setup client with token scoping
 			// If setup fails here, it's a configuration error and we should fail fast
 			if err := s.setupClient(ctx, repo); err != nil {
+				if errors.Is(err, secrets.ErrSecretNotFound) {
+					events.NewEventEmitter(s.run.Clients.Kube, s.logger).EmitMessage(
+						repo,
+						zapcore.ErrorLevel,
+						"RepositorySecretMissing",
+						fmt.Sprintf("cannot process event, cannot setup vcs client: %v", err),
+					)
+				}
 				return fmt.Errorf("client setup failed: %w", err)
 			}
 			s.logger.Debugf("Client setup completed for event type: %s", s.event.EventType)
 		}
 
-		// For PUSH events: commit message is already in event.SHATitle from the webhook payload
-		// We can check immediately without any API calls or repository lookups
-		if s.event.EventType == "push" && provider.SkipCI(s.event.SHATitle) {
+		skipPush, err := s.shouldSkipPushEvent(ctx, repo)
+		if err != nil {
+			return err
+		}
+		if skipPush {
 			s.logger.Infof("CI skipped for push event: commit %s contains skip command in message", s.event.SHA)
 			return s.createSkipCIStatus(ctx)
 		}
@@ -117,8 +138,29 @@ func (s *sinker) processEvent(ctx context.Context, request *http.Request) error 
 		}
 	}
 
+	// Enrich span with VCS attributes — for incoming events these are
+	// pre-populated; for webhook events ParsePayload filled them in.
+	setVCSSpanAttributes(ctx, s.event)
+
 	p := pipelineascode.NewPacs(s.event, s.vcx, s.run, s.pacInfo, s.kint, s.logger, s.globalRepo)
 	return p.Run(ctx)
+}
+
+func (s *sinker) shouldSkipPushEvent(ctx context.Context, repo *v1alpha1.Repository) (bool, error) {
+	if s.event.EventType != "push" {
+		return false, nil
+	}
+
+	resolvedMetadata := false
+	if repo != nil && s.event.CommitMetadataIncomplete {
+		// GitLab branch creation payloads omit commits, so fetch metadata before the early skip-CI check.
+		if err := s.vcx.GetCommitInfo(ctx, s.event); err != nil {
+			return false, fmt.Errorf("could not get commit info: %w", err)
+		}
+		resolvedMetadata = true
+	}
+
+	return provider.SkipCI(s.event.SHATitle) || (resolvedMetadata && s.event.HasSkipCommand), nil
 }
 
 // findMatchingRepository finds the Repository CR that matches the event.
@@ -142,7 +184,7 @@ func (s *sinker) findMatchingRepository(ctx context.Context) (*v1alpha1.Reposito
 // Centralizing this here ensures consistent behavior across all events and enables early
 // optimizations like skip-CI detection before expensive processing.
 func (s *sinker) setupClient(ctx context.Context, repo *v1alpha1.Repository) error {
-	return pipelineascode.SetupAuthenticatedClient(
+	return gitclient.SetupAuthenticatedClient(
 		ctx,
 		s.vcx,
 		s.kint,
@@ -159,7 +201,7 @@ func (s *sinker) setupClient(ctx context.Context, repo *v1alpha1.Repository) err
 func (s *sinker) createSkipCIStatus(ctx context.Context) error {
 	statusOpts := status.StatusOpts{
 		Status:     "completed",
-		Conclusion: status.ConclusionNeutral,
+		Conclusion: status.ConclusionSkipped,
 		Title:      "CI Skipped",
 		Summary:    fmt.Sprintf("%s - CI has been skipped", s.pacInfo.ApplicationName),
 		Text:       "Commit contains a skip CI command. Use /test or /retest to manually trigger CI if needed.",
@@ -173,4 +215,18 @@ func (s *sinker) createSkipCIStatus(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+func setVCSSpanAttributes(ctx context.Context, event *info.Event) {
+	span := trace.SpanFromContext(ctx)
+	if !span.IsRecording() {
+		return
+	}
+	span.SetAttributes(tracing.PACEventTypeKey.String(event.EventType))
+	if event.URL != "" {
+		span.SetAttributes(semconv.VCSRepositoryURLFullKey.String(event.URL))
+	}
+	if event.SHA != "" {
+		span.SetAttributes(semconv.VCSRefHeadRevisionKey.String(event.SHA))
+	}
 }

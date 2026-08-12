@@ -11,8 +11,10 @@ import (
 	apipac "github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	pacerrors "github.com/openshift-pipelines/pipelines-as-code/pkg/errors"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/gitclient"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/matcher"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/opscomments"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
 	providerstatus "github.com/openshift-pipelines/pipelines-as-code/pkg/provider/status"
@@ -75,7 +77,7 @@ func (p *PacRun) verifyRepoAndUser(ctx context.Context) (*v1alpha1.Repository, e
 	// but we call it here as a safety net for edge cases (e.g., tests calling Run() directly,
 	// or if the early setup in sinker failed/was skipped). The call is idempotent.
 	// SetupAuthenticatedClient will merge global repo settings after determining secret namespace.
-	err = SetupAuthenticatedClient(ctx, p.vcx, p.k8int, p.run, p.event, repo, p.globalRepo, p.pacInfo, p.logger)
+	err = gitclient.SetupAuthenticatedClient(ctx, p.vcx, p.k8int, p.run, p.event, repo, p.globalRepo, p.pacInfo, p.logger)
 	if err != nil {
 		return repo, err
 	}
@@ -123,7 +125,9 @@ func (p *PacRun) verifyRepoAndUser(ctx context.Context) (*v1alpha1.Repository, e
 		}
 		// When /ok-to-test is approved, update the parent "Pipelines as Code CI" status to success
 		// to indicate the approval was successful before pipelines start running.
-		if p.event.EventType == opscomments.OkToTestCommentEventType.String() && p.vcx.GetConfig().Name == "gitea" {
+		// we only do this for all providers except github apps since github apps use the checkRun API to update the status
+		// checking installationID is <= 0 because sometime it's set to -1
+		if p.event.EventType == opscomments.OkToTestCommentEventType.String() && p.event.InstallationID <= 0 {
 			approvalStatus := providerstatus.StatusOpts{
 				Status:     CompletedStatus,
 				Title:      "Approved",
@@ -144,6 +148,7 @@ func (p *PacRun) getPipelineRunsFromRepo(ctx context.Context, repo *v1alpha1.Rep
 	if repo.Spec.Settings != nil && repo.Spec.Settings.PipelineRunProvenance != "" {
 		provenance = repo.Spec.Settings.PipelineRunProvenance
 	}
+	repositoryRevision := getRepositoryRevisionForProvenance(p.event, provenance)
 	p.debugf("getPipelineRunsFromRepo: repo=%s/%s provenance=%s", repo.GetNamespace(), repo.GetName(), provenance)
 	rawTemplates, err := p.vcx.GetTektonDir(ctx, p.event, tektonDir, provenance)
 	if err != nil && p.event.TriggerTarget == triggertype.PullRequest && strings.Contains(err.Error(), "error unmarshalling yaml file") {
@@ -153,7 +158,8 @@ func (p *PacRun) getPipelineRunsFromRepo(ctx context.Context, repo *v1alpha1.Rep
 		reg := regexp.MustCompile(`error unmarshalling yaml file\s([^:]*):\s*(yaml:\s*)?(.*)`)
 		matches := reg.FindStringSubmatch(err.Error())
 		if len(matches) == 4 {
-			p.reportValidationErrors(ctx, repo,
+			p.reportValidationErrors(
+				ctx, repo,
 				[]*pacerrors.PacYamlValidations{
 					{
 						Name:   matches[1],
@@ -349,8 +355,9 @@ func (p *PacRun) getPipelineRunsFromRepo(ctx context.Context, repo *v1alpha1.Rep
 		}
 		p.debugf("getPipelineRunsFromRepo: resolving remote tasks for pipelineRuns=%d", len(types.PipelineRuns))
 		pipelineRuns, err = resolve.Resolve(ctx, p.run, p.logger, p.vcx, types, p.event, &resolve.Opts{
-			GenerateName: true,
-			RemoteTasks:  true,
+			GenerateName:       true,
+			RemoteTasks:        true,
+			RepositoryRevision: repositoryRevision,
 		})
 		if err != nil {
 			p.eventEmitter.EmitMessage(repo, zap.ErrorLevel, "RepositoryFailedToMatch", fmt.Sprintf("failed to match pipelineRuns: %s", err.Error()))
@@ -394,6 +401,17 @@ func (p *PacRun) getPipelineRunsFromRepo(ctx context.Context, repo *v1alpha1.Rep
 	p.debugf("getPipelineRunsFromRepo: final match count=%d", len(matchedPRs))
 
 	return matchedPRs, nil
+}
+
+func getRepositoryRevisionForProvenance(event *info.Event, provenance string) string {
+	// Preserve existing provider behavior unless the event requires pinned repository resolution.
+	if event.PipelineRunSourceRevision == "" {
+		return ""
+	}
+	if provenance == "default_branch" {
+		return event.DefaultBranch
+	}
+	return event.PipelineRunSourceRevision
 }
 
 func filterRunningPipelineRunOnTargetTest(testPipeline string, prs []*tektonv1.PipelineRun) *tektonv1.PipelineRun {
