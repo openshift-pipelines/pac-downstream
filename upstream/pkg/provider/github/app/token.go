@@ -74,18 +74,18 @@ func (ip *Install) GetAndUpdateInstallationID(ctx context.Context) (string, stri
 		}
 	}
 
-	client, _, _, err := github.MakeClient(ctx, apiURL, jwtToken)
+	client, _, _, err := ip.ghClient.MakeClient(ctx, apiURL, jwtToken)
 	if err != nil {
 		return "", "", 0, err
 	}
 	// Directly get the installation for the repository
-	installation, _, err := client.Apps.FindRepositoryInstallation(ctx, owner, repoName)
+	installation, _, err := client.Apps.GetRepositoryInstallation(ctx, owner, repoName)
 	if err != nil {
 		// Fallback to finding organization installation if repository installation is not found
-		installation, _, err = client.Apps.FindOrganizationInstallation(ctx, owner)
+		installation, _, err = client.Apps.GetOrganizationInstallation(ctx, owner)
 		if err != nil {
 			// Fallback to finding user installation if organization installation is not found
-			installation, _, err = client.Apps.FindUserInstallation(ctx, owner)
+			installation, _, err = client.Apps.GetUserInstallation(ctx, owner)
 		}
 	}
 
