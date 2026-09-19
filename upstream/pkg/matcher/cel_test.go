@@ -1,13 +1,30 @@
 package matcher
 
 import (
+	"context"
+	"fmt"
+	"net/http"
 	"testing"
 
 	"cel.dev/cel-go/cel"
 	"cel.dev/cel-go/common/decls"
 	"cel.dev/cel-go/common/types"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/changedfiles"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
+	pacprovider "github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
+	testprovider "github.com/openshift-pipelines/pipelines-as-code/pkg/test/provider"
+	exprpb "google.golang.org/genproto/googleapis/api/expr/v1alpha1"
 	"gotest.tools/v3/assert"
 )
+
+type failingFilesProvider struct {
+	testprovider.TestProviderImp
+}
+
+func (v failingFilesProvider) GetFiles(context.Context, *info.Event) (changedfiles.ChangedFiles, error) {
+	return changedfiles.ChangedFiles{}, fmt.Errorf("failed to get files")
+}
 
 // parseAndCheckForLabelReferences is a test helper that parses a CEL expression
 // and checks if it references labels or event_type using the AST walker.
@@ -192,6 +209,322 @@ func TestWalkExprForLabelReferences(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			result := parseAndCheckForLabelReferences(tt.expr)
 			assert.Equal(t, tt.expected, result, "expression: %s", tt.expr)
+		})
+	}
+}
+
+func TestWalkExprASTNodeKinds(t *testing.T) {
+	needle := &exprpb.Expr{
+		ExprKind: &exprpb.Expr_IdentExpr{
+			IdentExpr: &exprpb.Expr_Ident{Name: "needle"},
+		},
+	}
+	other := &exprpb.Expr{
+		ExprKind: &exprpb.Expr_IdentExpr{
+			IdentExpr: &exprpb.Expr_Ident{Name: "other"},
+		},
+	}
+
+	tests := []struct {
+		name string
+		expr *exprpb.Expr
+		want bool
+	}{
+		{
+			name: "nil expression",
+			want: false,
+		},
+		{
+			name: "const expression has no children",
+			expr: &exprpb.Expr{
+				ExprKind: &exprpb.Expr_ConstExpr{
+					ConstExpr: &exprpb.Constant{ConstantKind: &exprpb.Constant_StringValue{StringValue: "needle"}},
+				},
+			},
+			want: false,
+		},
+		{
+			name: "identifier current node",
+			expr: needle,
+			want: true,
+		},
+		{
+			name: "select operand",
+			expr: &exprpb.Expr{
+				ExprKind: &exprpb.Expr_SelectExpr{
+					SelectExpr: &exprpb.Expr_Select{Operand: needle, Field: "field"},
+				},
+			},
+			want: true,
+		},
+		{
+			name: "call target",
+			expr: &exprpb.Expr{
+				ExprKind: &exprpb.Expr_CallExpr{
+					CallExpr: &exprpb.Expr_Call{Target: needle},
+				},
+			},
+			want: true,
+		},
+		{
+			name: "call argument",
+			expr: &exprpb.Expr{
+				ExprKind: &exprpb.Expr_CallExpr{
+					CallExpr: &exprpb.Expr_Call{Args: []*exprpb.Expr{other, needle}},
+				},
+			},
+			want: true,
+		},
+		{
+			name: "list element",
+			expr: &exprpb.Expr{
+				ExprKind: &exprpb.Expr_ListExpr{
+					ListExpr: &exprpb.Expr_CreateList{Elements: []*exprpb.Expr{other, needle}},
+				},
+			},
+			want: true,
+		},
+		{
+			name: "struct map key",
+			expr: &exprpb.Expr{
+				ExprKind: &exprpb.Expr_StructExpr{
+					StructExpr: &exprpb.Expr_CreateStruct{Entries: []*exprpb.Expr_CreateStruct_Entry{
+						{
+							KeyKind: &exprpb.Expr_CreateStruct_Entry_MapKey{MapKey: needle},
+							Value:   other,
+						},
+					}},
+				},
+			},
+			want: true,
+		},
+		{
+			name: "struct value",
+			expr: &exprpb.Expr{
+				ExprKind: &exprpb.Expr_StructExpr{
+					StructExpr: &exprpb.Expr_CreateStruct{Entries: []*exprpb.Expr_CreateStruct_Entry{
+						{
+							KeyKind: &exprpb.Expr_CreateStruct_Entry_MapKey{MapKey: other},
+							Value:   needle,
+						},
+					}},
+				},
+			},
+			want: true,
+		},
+		{
+			name: "comprehension result",
+			expr: &exprpb.Expr{
+				ExprKind: &exprpb.Expr_ComprehensionExpr{
+					ComprehensionExpr: &exprpb.Expr_Comprehension{
+						IterRange:     other,
+						AccuInit:      other,
+						LoopCondition: other,
+						LoopStep:      other,
+						Result:        needle,
+					},
+				},
+			},
+			want: true,
+		},
+		{
+			name: "no match",
+			expr: other,
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, walkExprAST(tt.expr, matchIdentifier("needle")))
+		})
+	}
+}
+
+func TestNodeMatchers(t *testing.T) {
+	stringKey := &exprpb.Expr{
+		ExprKind: &exprpb.Expr_ConstExpr{
+			ConstExpr: &exprpb.Constant{ConstantKind: &exprpb.Constant_StringValue{StringValue: "labels"}},
+		},
+	}
+
+	tests := []struct {
+		name    string
+		matcher NodeMatcher
+		expr    *exprpb.Expr
+		want    bool
+	}{
+		{
+			name:    "field access matches configured field",
+			matcher: matchFieldAccess("labels"),
+			expr: &exprpb.Expr{ExprKind: &exprpb.Expr_SelectExpr{
+				SelectExpr: &exprpb.Expr_Select{Field: "labels"},
+			}},
+			want: true,
+		},
+		{
+			name:    "field access ignores different field",
+			matcher: matchFieldAccess("labels"),
+			expr: &exprpb.Expr{ExprKind: &exprpb.Expr_SelectExpr{
+				SelectExpr: &exprpb.Expr_Select{Field: "title"},
+			}},
+			want: false,
+		},
+		{
+			name:    "bracket access matches string key",
+			matcher: matchBracketAccess("labels"),
+			expr: &exprpb.Expr{ExprKind: &exprpb.Expr_CallExpr{
+				CallExpr: &exprpb.Expr_Call{Function: "_[_]", Args: []*exprpb.Expr{{}, stringKey}},
+			}},
+			want: true,
+		},
+		{
+			name:    "bracket access ignores wrong function",
+			matcher: matchBracketAccess("labels"),
+			expr: &exprpb.Expr{ExprKind: &exprpb.Expr_CallExpr{
+				CallExpr: &exprpb.Expr_Call{Function: "_+_", Args: []*exprpb.Expr{{}, stringKey}},
+			}},
+			want: false,
+		},
+		{
+			name:    "bracket access ignores wrong arg count",
+			matcher: matchBracketAccess("labels"),
+			expr: &exprpb.Expr{ExprKind: &exprpb.Expr_CallExpr{
+				CallExpr: &exprpb.Expr_Call{Function: "_[_]", Args: []*exprpb.Expr{stringKey}},
+			}},
+			want: false,
+		},
+		{
+			name:    "combined matcher returns true on any match",
+			matcher: combinedMatcher(matchIdentifier("other"), matchIdentifier("needle")),
+			expr: &exprpb.Expr{ExprKind: &exprpb.Expr_IdentExpr{
+				IdentExpr: &exprpb.Expr_Ident{Name: "needle"},
+			}},
+			want: true,
+		},
+		{
+			name:    "combined matcher returns false when none match",
+			matcher: combinedMatcher(matchIdentifier("other"), matchIdentifier("needle")),
+			expr: &exprpb.Expr{ExprKind: &exprpb.Expr_IdentExpr{
+				IdentExpr: &exprpb.Expr_Ident{Name: "unknown"},
+			}},
+			want: false,
+		},
+		{
+			name:    "refs heads literal is detected",
+			matcher: func(expr *exprpb.Expr) bool { return containsRefsHeadsLiteral(expr) },
+			expr: &exprpb.Expr{ExprKind: &exprpb.Expr_ConstExpr{
+				ConstExpr: &exprpb.Constant{ConstantKind: &exprpb.Constant_StringValue{StringValue: "refs/heads/main"}},
+			}},
+			want: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, tt.matcher(tt.expr))
+		})
+	}
+}
+
+func TestCelEvaluateErrorBranches(t *testing.T) {
+	tests := []struct {
+		name           string
+		expr           string
+		event          *info.Event
+		vcx            pacprovider.Interface
+		wantErrContain string
+	}{
+		{
+			name: "event body marshal error",
+			expr: `event == "push"`,
+			event: &info.Event{
+				Event:   map[string]any{"bad": make(chan int)},
+				Request: &info.Request{Header: http.Header{}},
+			},
+			vcx:            &testprovider.TestProviderImp{},
+			wantErrContain: "unsupported type",
+		},
+		{
+			name: "parse error",
+			expr: `event ==`,
+			event: &info.Event{
+				Request: &info.Request{Header: http.Header{}},
+			},
+			vcx:            &testprovider.TestProviderImp{},
+			wantErrContain: "failed to parse expression",
+		},
+		{
+			name: "check error",
+			expr: `missing == "value"`,
+			event: &info.Event{
+				Request: &info.Request{Header: http.Header{}},
+			},
+			vcx:            &testprovider.TestProviderImp{},
+			wantErrContain: "check failed",
+		},
+		{
+			name: "changed files error",
+			expr: `files.all.exists(x, x.matches(".*"))`,
+			event: &info.Event{
+				Request: &info.Request{Header: http.Header{}},
+			},
+			vcx:            &failingFilesProvider{},
+			wantErrContain: "failed to get files",
+		},
+		{
+			name: "evaluation error",
+			expr: `1 / 0 == 0`,
+			event: &info.Event{
+				Request: &info.Request{Header: http.Header{}},
+			},
+			vcx:            &testprovider.TestProviderImp{},
+			wantErrContain: "failed to evaluate",
+		},
+		{
+			name: "labeled event without label reference returns false",
+			expr: `event == "pull_request"`,
+			event: &info.Event{
+				TriggerTarget: triggertype.PullRequest,
+				EventType:     string(triggertype.PullRequestLabeled),
+				Request:       &info.Request{Header: http.Header{}},
+			},
+			vcx: &testprovider.TestProviderImp{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			out, err := celEvaluate(context.Background(), tt.expr, tt.event, tt.vcx, nil, nil, nil)
+			if tt.wantErrContain != "" {
+				assert.ErrorContains(t, err, tt.wantErrContain)
+				return
+			}
+			assert.NilError(t, err)
+			assert.Equal(t, types.False, out)
+		})
+	}
+}
+
+func TestPathChangedReturnsFalseWhenFilesCannotBeFetched(t *testing.T) {
+	tests := []struct {
+		name string
+		val  types.String
+	}{
+		{
+			name: "get files error",
+			val:  types.String("*.go"),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pac := celPac{
+				vcx:   &failingFilesProvider{},
+				ctx:   context.Background(),
+				event: &info.Event{},
+			}
+			assert.Equal(t, types.Bool(false), pac.pathChanged(tt.val))
 		})
 	}
 }

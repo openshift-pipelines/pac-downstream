@@ -72,6 +72,7 @@ type Provider struct {
 	cachedChangedFiles *changedfiles.ChangedFiles
 	cachedOrgTeams     map[string][]*forgejo.Team
 	clock              clockwork.Clock
+	provenance         string
 }
 
 func (v *Provider) Client() *forgejo.Client {
@@ -461,6 +462,7 @@ func (v *Provider) GetCommitStatuses(_ context.Context, event *info.Event) ([]pr
 }
 
 func (v *Provider) GetTektonDir(_ context.Context, event *info.Event, path, provenance string) (string, error) {
+	v.provenance = provenance
 	// default set provenance from the SHA
 	revision := event.SHA
 	if provenance == "default_branch" {
@@ -468,6 +470,11 @@ func (v *Provider) GetTektonDir(_ context.Context, event *info.Event, path, prov
 		v.Logger.Infof("Using PipelineRun definition from default_branch: %s", event.DefaultBranch)
 	} else {
 		v.Logger.Infof("Using PipelineRun definition from source %s commit SHA: %s", event.TriggerTarget.String(), event.SHA)
+	}
+
+	if revision == "" {
+		return "", fmt.Errorf("cannot fetch %s directory: no revision to resolve (provenance %q, sha %q, default branch %q)",
+			path, provenance, event.SHA, event.DefaultBranch)
 	}
 
 	tektonDirSha := ""
@@ -548,7 +555,9 @@ func (v *Provider) getObject(sha string, event *info.Event) ([]byte, error) {
 func (v *Provider) GetFileInsideRepo(_ context.Context, runevent *info.Event, path, target string) (string, error) {
 	ref := runevent.SHA
 	if target != "" {
-		ref = runevent.BaseBranch
+		ref = target
+	} else if v.provenance == "default_branch" {
+		ref = runevent.DefaultBranch
 	}
 
 	content, _, err := v.Client().GetContents(runevent.Organization, runevent.Repository, ref, path)
@@ -624,6 +633,21 @@ func (v *Provider) GetCommitInfo(_ context.Context, runevent *info.Event) error 
 		}
 	}
 	runevent.HasSkipCommand = provider.SkipCI(commit.RepoCommit.Message)
+
+	// Incoming webhooks carry no payload to parse the default branch from, so
+	// fetch it from the API when it is missing.
+	if runevent.DefaultBranch == "" {
+		repoInfo, _, err := v.Client().GetRepo(runevent.Organization, runevent.Repository)
+		if err != nil {
+			return fmt.Errorf("getting default branch for %s/%s: %w",
+				runevent.Organization, runevent.Repository, err)
+		}
+		if repoInfo.DefaultBranch == "" {
+			return fmt.Errorf("repository %s/%s reports no default branch",
+				runevent.Organization, runevent.Repository)
+		}
+		runevent.DefaultBranch = repoInfo.DefaultBranch
+	}
 
 	return nil
 }

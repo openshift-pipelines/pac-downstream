@@ -12,7 +12,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/google/go-github/v90/github"
+	"github.com/google/go-github/v91/github"
 	apipac "github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/consoleui"
@@ -23,6 +23,7 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/settings"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
 	ghprovider "github.com/openshift-pipelines/pipelines-as-code/pkg/provider/github"
 	testclient "github.com/openshift-pipelines/pipelines-as-code/pkg/test/clients"
 	ghtesthelper "github.com/openshift-pipelines/pipelines-as-code/pkg/test/github"
@@ -200,6 +201,313 @@ func TestFilterRunningPipelineRunOnTargetTest(t *testing.T) {
 	prs = []*tektonv1.PipelineRun{}
 	ret = filterRunningPipelineRunOnTargetTest(testPipeline, prs)
 	assert.Assert(t, ret == nil)
+}
+
+func TestPipelineRunIdentifier(t *testing.T) {
+	tests := []struct {
+		name string
+		pr   *tektonv1.PipelineRun
+		want string
+	}{
+		{
+			name: "nil pipelinerun",
+			want: "<nil>",
+		},
+		{
+			name: "uses name first",
+			pr: &tektonv1.PipelineRun{
+				ObjectMeta: metav1.ObjectMeta{Name: "named", GenerateName: "generated-"},
+			},
+			want: "named",
+		},
+		{
+			name: "uses generate name when name is empty",
+			pr: &tektonv1.PipelineRun{
+				ObjectMeta: metav1.ObjectMeta{GenerateName: "generated-"},
+			},
+			want: "generated-",
+		},
+		{
+			name: "unnamed pipelinerun",
+			pr:   &tektonv1.PipelineRun{},
+			want: "<unnamed>",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, pipelineRunIdentifier(tt.pr))
+		})
+	}
+}
+
+func TestResolveTargetNamespaceRepo(t *testing.T) {
+	tests := []struct {
+		name          string
+		fallbackRepo  *v1alpha1.Repository
+		pr            *tektonv1.PipelineRun
+		repositories  []*v1alpha1.Repository
+		wantNil       bool
+		wantNamespace string
+	}{
+		{
+			name:    "nil fallback returns nil",
+			pr:      &tektonv1.PipelineRun{},
+			wantNil: true,
+		},
+		{
+			name: "nil pipelinerun returns fallback",
+			fallbackRepo: &v1alpha1.Repository{
+				ObjectMeta: metav1.ObjectMeta{Name: "foo", Namespace: "foo"},
+			},
+			wantNamespace: "foo",
+		},
+		{
+			name: "missing target namespace returns fallback",
+			fallbackRepo: &v1alpha1.Repository{
+				ObjectMeta: metav1.ObjectMeta{Name: "foo", Namespace: "foo"},
+			},
+			pr:            &tektonv1.PipelineRun{},
+			wantNamespace: "foo",
+		},
+		{
+			name: "same target namespace returns fallback",
+			fallbackRepo: &v1alpha1.Repository{
+				ObjectMeta: metav1.ObjectMeta{Name: "foo", Namespace: "foo"},
+			},
+			pr: &tektonv1.PipelineRun{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{apipac.TargetNamespace: "foo"},
+				},
+			},
+			wantNamespace: "foo",
+		},
+		{
+			name: "missing target namespace repo returns nil",
+			fallbackRepo: &v1alpha1.Repository{
+				ObjectMeta: metav1.ObjectMeta{Name: "foo", Namespace: "foo"},
+				Spec:       v1alpha1.RepositorySpec{URL: "https://example.com/owner/repo"},
+			},
+			pr: &tektonv1.PipelineRun{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{apipac.TargetNamespace: "bar"},
+				},
+			},
+			repositories: []*v1alpha1.Repository{
+				{
+					ObjectMeta: metav1.ObjectMeta{Name: "foo", Namespace: "foo"},
+					Spec:       v1alpha1.RepositorySpec{URL: "https://example.com/owner/repo"},
+				},
+			},
+			wantNil: true,
+		},
+		{
+			name: "matching target namespace repo is returned",
+			fallbackRepo: &v1alpha1.Repository{
+				ObjectMeta: metav1.ObjectMeta{Name: "foo", Namespace: "foo"},
+				Spec:       v1alpha1.RepositorySpec{URL: "https://example.com/owner/repo"},
+			},
+			pr: &tektonv1.PipelineRun{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{apipac.TargetNamespace: "bar"},
+				},
+			},
+			repositories: []*v1alpha1.Repository{
+				{
+					ObjectMeta: metav1.ObjectMeta{Name: "foo", Namespace: "foo"},
+					Spec:       v1alpha1.RepositorySpec{URL: "https://example.com/owner/repo"},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{Name: "bar", Namespace: "bar"},
+					Spec:       v1alpha1.RepositorySpec{URL: "https://example.com/owner/repo"},
+				},
+			},
+			wantNamespace: "bar",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			observerCore, _ := zapobserver.New(zap.InfoLevel)
+			logger := zap.New(observerCore).Sugar()
+			ctx, _ := rtesting.SetupFakeContext(t)
+			stdata, _ := testclient.SeedTestData(t, ctx, testclient.Data{Repositories: tt.repositories})
+			run := &params.Run{
+				Clients: clients.Clients{
+					PipelineAsCode: stdata.PipelineAsCode,
+					Log:            logger,
+				},
+			}
+			p := NewPacs(
+				&info.Event{URL: "https://example.com/owner/repo"},
+				&testprovider.TestProviderImp{},
+				run,
+				&info.PacOpts{},
+				nil,
+				logger,
+				nil,
+			)
+
+			got := p.resolveTargetNamespaceRepo(ctx, tt.fallbackRepo, tt.pr)
+			if tt.wantNil {
+				assert.Assert(t, got == nil)
+				return
+			}
+			assert.Assert(t, got != nil)
+			assert.Equal(t, tt.wantNamespace, got.GetNamespace())
+		})
+	}
+}
+
+type getTektonDirErrorProvider struct {
+	testprovider.TestProviderImp
+	err error
+}
+
+func (p *getTektonDirErrorProvider) GetTektonDir(context.Context, *info.Event, string, string) (string, error) {
+	return "", p.err
+}
+
+func TestGetPipelineRunsFromRepoTektonDirBranches(t *testing.T) {
+	tests := []struct {
+		name          string
+		event         *info.Event
+		provider      provider.Interface
+		wantErr       string
+		wantLogSubstr string
+	}{
+		{
+			name: "pull request yaml error without parseable filename returns error",
+			event: &info.Event{
+				EventType:     triggertype.PullRequest.String(),
+				TriggerTarget: triggertype.PullRequest,
+			},
+			provider: &getTektonDirErrorProvider{err: fmt.Errorf("error unmarshalling yaml file")},
+			wantErr:  "error unmarshalling yaml file",
+		},
+		{
+			name: "push yaml error is logged and treated as no match",
+			event: &info.Event{
+				EventType:     triggertype.Push.String(),
+				TriggerTarget: triggertype.Push,
+			},
+			provider:      &getTektonDirErrorProvider{err: fmt.Errorf("error unmarshalling yaml file pr.yaml: yaml: bad")},
+			wantLogSubstr: "PipelineRun YAML validation err: error unmarshalling yaml file pr.yaml: yaml: bad",
+		},
+		{
+			name: "ok to test empty tekton dir reports status error and returns no match",
+			event: &info.Event{
+				EventType:     opscomments.OkToTestCommentEventType.String(),
+				TriggerTarget: triggertype.PullRequest,
+				URL:           "https://example.com/owner/repo",
+			},
+			provider:      &testprovider.TestProviderImp{CreateStatusErorring: true},
+			wantLogSubstr: "failed to run create status",
+		},
+		{
+			name: "incoming event with unknown target pipelinerun returns no match",
+			event: &info.Event{
+				EventType:         "incoming",
+				TriggerTarget:     triggertype.Push,
+				TargetPipelineRun: "missing",
+				HeadBranch:        "main",
+				BaseBranch:        "main",
+			},
+			provider: &testprovider.TestProviderImp{TektonDirTemplate: `apiVersion: tekton.dev/v1beta1
+kind: PipelineRun
+metadata:
+  name: present
+  annotations:
+    pipelinesascode.tekton.dev/on-target-branch: "[main]"
+    pipelinesascode.tekton.dev/on-event: "[incoming]"
+spec:
+  pipelineSpec:
+    tasks:
+    - name: task
+      taskSpec:
+        steps:
+        - name: task
+          image: quay.io/prometheus/busybox
+          script: |
+            exit 0
+`},
+			wantLogSubstr: "cannot find pipelinerun missing for matching an incoming event in this repository",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			observerCore, logCatcher := zapobserver.New(zap.InfoLevel)
+			logger := zap.New(observerCore).Sugar()
+			ctx, _ := rtesting.SetupFakeContext(t)
+			stdata, _ := testclient.SeedTestData(t, ctx, testclient.Data{})
+			run := &params.Run{
+				Clients: clients.Clients{
+					Kube:   stdata.Kube,
+					Tekton: stdata.Pipeline,
+					Log:    logger,
+				},
+			}
+			run.Clients.SetConsoleUI(consoleui.FallBackConsole{})
+			repo := &v1alpha1.Repository{
+				ObjectMeta: metav1.ObjectMeta{Name: "repo", Namespace: "namespace"},
+				Spec:       v1alpha1.RepositorySpec{URL: "https://example.com/owner/repo"},
+			}
+			p := NewPacs(tt.event, tt.provider, run, &info.PacOpts{}, nil, logger, nil)
+			p.eventEmitter = events.NewEventEmitter(stdata.Kube, logger)
+
+			matchedPRs, err := p.getPipelineRunsFromRepo(ctx, repo)
+			if tt.wantErr != "" {
+				assert.ErrorContains(t, err, tt.wantErr)
+				return
+			}
+			assert.NilError(t, err)
+			assert.Equal(t, 0, len(matchedPRs))
+			if tt.wantLogSubstr != "" {
+				assert.Assert(t, logCatcher.FilterMessageSnippet(tt.wantLogSubstr).Len() > 0, logCatcher.All())
+			}
+		})
+	}
+}
+
+func TestCreateNeutralStatusError(t *testing.T) {
+	tests := []struct {
+		name    string
+		errored bool
+		wantErr string
+	}{
+		{
+			name: "status creation succeeds",
+		},
+		{
+			name:    "status creation error is wrapped",
+			errored: true,
+			wantErr: "failed to run create status",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			observerCore, _ := zapobserver.New(zap.InfoLevel)
+			logger := zap.New(observerCore).Sugar()
+			p := NewPacs(
+				&info.Event{URL: "https://example.com/owner/repo"},
+				&testprovider.TestProviderImp{CreateStatusErorring: tt.errored},
+				&params.Run{Clients: clients.Clients{}},
+				&info.PacOpts{},
+				nil,
+				logger,
+				nil,
+			)
+
+			err := p.createNeutralStatus(context.Background(), "title", "text")
+			if tt.wantErr != "" {
+				assert.ErrorContains(t, err, tt.wantErr)
+				return
+			}
+			assert.NilError(t, err)
+		})
+	}
 }
 
 func TestGetPipelineRunsFromRepoExplicitTestUsesTargetNamespaceRepo(t *testing.T) {
@@ -737,7 +1045,7 @@ func TestGetPipelineRunsFromRepo(t *testing.T) {
 				ConsoleURL: "https://console.url",
 			}
 			vcx := &ghprovider.Provider{
-				Token:  github.Ptr("None"),
+				Token:  new("None"),
 				Logger: logger,
 			}
 			vcx.SetGithubClient(fakeclient)
@@ -1007,7 +1315,7 @@ func TestVerifyRepoAndUser(t *testing.T) {
 				},
 			)
 
-			vcx := &ghprovider.Provider{Token: github.Ptr("token"), Logger: logger}
+			vcx := &ghprovider.Provider{Token: new("token"), Logger: logger}
 			vcx.SetGithubClient(ghClient)
 			vcx.SetPacInfo(pacInfo)
 

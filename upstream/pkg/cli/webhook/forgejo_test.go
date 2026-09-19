@@ -93,6 +93,14 @@ func TestAskForgejoWebhookConfig(t *testing.T) {
 			wantRepoOwner: "pac",
 			wantRepoName:  "demo",
 		},
+		{
+			name:          "reject detected controller URL and ask manual controller",
+			answers:       []any{false, "https://manual-controller.url", "webhook-secret", "token", "https://forgejo.example.com"},
+			repoURL:       "https://forgejo.example.com/pac/demo",
+			controllerURL: "https://detected-controller.url",
+			wantRepoOwner: "pac",
+			wantRepoName:  "demo",
+		},
 	}
 
 	for _, tt := range tests {
@@ -126,6 +134,7 @@ func TestParseForgejoRepositoryURL(t *testing.T) {
 		wantOwner    string
 		wantRepo     string
 		wantInstance string
+		wantErrSub   string
 	}{
 		{
 			name:         "HTTPS URL",
@@ -153,15 +162,69 @@ func TestParseForgejoRepositoryURL(t *testing.T) {
 			wantOwner: "pac",
 			wantRepo:  "demo",
 		},
+		{
+			name:       "invalid URL is rejected",
+			repoURL:    "https://forgejo.example.com/%zz",
+			wantErrSub: "invalid URL escape",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			gotOwner, gotRepo, gotInstance, err := parseForgejoRepositoryURL(tt.repoURL)
+			if tt.wantErrSub != "" {
+				assert.ErrorContains(t, err, tt.wantErrSub)
+				return
+			}
 			assert.NilError(t, err)
 			assert.Equal(t, tt.wantOwner, gotOwner)
 			assert.Equal(t, tt.wantRepo, gotRepo)
 			assert.Equal(t, tt.wantInstance, gotInstance)
+		})
+	}
+}
+
+func TestForgejoNewClient(t *testing.T) {
+	existingClient, _, tearDown := giteatest.Setup(t)
+	defer tearDown()
+	serverURL, _, serverTearDown := setupForgejoServer()
+	defer serverTearDown()
+
+	tests := []struct {
+		name           string
+		existingClient *forgejo.Client
+		apiURL         string
+		wantErrContain string
+	}{
+		{
+			name:           "existing client is reused",
+			existingClient: existingClient,
+		},
+		{
+			name:   "new client from url",
+			apiURL: serverURL,
+		},
+		{
+			name:           "invalid url",
+			apiURL:         "://bad-url",
+			wantErrContain: "missing protocol scheme",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fg := forgejoConfig{
+				Client:              tt.existingClient,
+				APIURL:              tt.apiURL,
+				personalAccessToken: "token",
+			}
+			client, err := fg.newClient()
+			if tt.wantErrContain != "" {
+				assert.ErrorContains(t, err, tt.wantErrContain)
+				return
+			}
+			assert.NilError(t, err)
+			assert.Assert(t, client != nil)
 		})
 	}
 }
