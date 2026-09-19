@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/configutil"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/vcshost"
 	"go.uber.org/zap"
 )
 
@@ -25,6 +26,18 @@ const (
 	CustomConsoleNamespaceURLKey = "custom-console-url-namespace"
 
 	SecretGhAppTokenRepoScopedKey = "secret-github-app-token-scoped" //nolint: gosec
+
+	// TrustedProviderHostnamesKey is the ConfigMap key holding the comma
+	// separated list of hosted VCS hostnames this controller is allowed to send
+	// credentials to.
+	TrustedProviderHostnamesKey = "trusted-provider-hostnames"
+
+	// DefaultAPIRetryMaxAttempts is the fallback number of attempts (initial
+	// request included) used when api-retry-max-attempts is unset or invalid.
+	DefaultAPIRetryMaxAttempts = 4
+	// DefaultAPIRetryMaxWaitSeconds is the fallback cap on the wait between
+	// attempts used when api-retry-max-wait-seconds is unset or invalid.
+	DefaultAPIRetryMaxWaitSeconds = 120
 )
 
 var (
@@ -54,6 +67,17 @@ type Settings struct {
 	AutoConfigureRepoNamespaceTemplate  string `json:"auto-configure-repo-namespace-template"`
 	AutoConfigureRepoRepositoryTemplate string `json:"auto-configure-repo-repository-template"`
 
+	// TrustedProviderHostnames is the comma separated allowlist of hosted VCS
+	// hostnames this controller may send credentials to.
+	//
+	// It is here so that the value is validated on every ConfigMap change and
+	// surfaced with the rest of the settings. The security gate in
+	// pkg/hostpolicy deliberately does NOT read this field: it reads the
+	// ConfigMap live, because the informer cache may lag behind an administrator
+	// narrowing the allowlist, and because trust on first use has to update the
+	// learned-host annotation under a read-modify-write it can retry on conflict.
+	TrustedProviderHostnames string `json:"trusted-provider-hostnames"`
+
 	SecretAutoCreation               bool   `default:"true"                             json:"secret-auto-create"`
 	SecretGHAppRepoScoped            bool   `default:"true"                             json:"secret-github-app-token-scoped"`
 	SecretGhAppTokenScopedExtraRepos string `json:"secret-github-app-scope-extra-repos"`
@@ -77,6 +101,12 @@ type Settings struct {
 
 	RememberOKToTest   bool `json:"remember-ok-to-test"`
 	RequireOkToTestSHA bool `json:"require-ok-to-test-sha"`
+
+	// Retry Git provider API requests on rate limits and transient errors.
+	// Disabled by default.
+	EnableAPIRetry         bool `default:"false" json:"enable-api-retry"`
+	APIRetryMaxAttempts    int  `default:"4"     json:"api-retry-max-attempts"`
+	APIRetryMaxWaitSeconds int  `default:"120"   json:"api-retry-max-wait-seconds"`
 
 	// Tracing label names. Defaults in config/302-pac-configmap.yaml.
 	TracingLabelAction      string `json:"tracing-label-action"`
@@ -109,7 +139,20 @@ func DefaultValidators() map[string]func(string) error {
 		"CustomConsoleURL":           isValidURL,
 		"CustomConsolePRTaskLog":     startWithHTTPorHTTPS,
 		"CustomConsolePRDetail":      startWithHTTPorHTTPS,
+		"TrustedProviderHostnames":   isValidTrustedProviderHostnames,
 	}
+}
+
+// isValidTrustedProviderHostnames validates the hosted VCS allowlist. An empty
+// value is accepted and means the allowlist has not been configured yet.
+func isValidTrustedProviderHostnames(raw string) error {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	if _, err := vcshost.ParseAllowlist(raw); err != nil {
+		return fmt.Errorf("invalid value for %s: %w", TrustedProviderHostnamesKey, err)
+	}
+	return nil
 }
 
 func SyncConfig(logger *zap.SugaredLogger, setting *Settings, config map[string]string, validators map[string]func(string) error) error {
