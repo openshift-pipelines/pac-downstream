@@ -26,6 +26,7 @@ func TestAskBBWebhookConfig(t *testing.T) {
 		wantAccountEmail    string
 		wantAPIToken        string
 		wantControllerURL   string
+		wantAPIURL          string
 	}{
 		{
 			name: "invalid repo format",
@@ -75,6 +76,22 @@ func TestAskBBWebhookConfig(t *testing.T) {
 			wantAPIToken:        "Yzg5NzhlYmNkNTQwNzYzN2E2ZGExYzhkMTc4NjU0MjY3ZmQ2NmMeZg==",
 			wantControllerURL:   "https://test",
 		},
+		{
+			name: "reject detected controller URL and ask enterprise API URL",
+			askStubs: func(as *prompt.AskStubber) {
+				as.StubOne("user@example.com")
+				as.StubOne("token")
+				as.StubOne(false)
+				as.StubOne("https://manual-controller.url")
+				as.StubOne("https://bitbucket.example.com/2.0")
+			},
+			repoURL:           "https://bitbucket.example.com/pac/demo",
+			controllerURL:     "https://detected-controller.url",
+			wantAccountEmail:  "user@example.com",
+			wantAPIToken:      "token",
+			wantControllerURL: "https://manual-controller.url",
+			wantAPIURL:        "https://bitbucket.example.com/2.0",
+		},
 	}
 
 	for _, tt := range tests {
@@ -94,6 +111,7 @@ func TestAskBBWebhookConfig(t *testing.T) {
 			assert.Equal(t, tt.wantAccountEmail, bb.accountEmail)
 			assert.Equal(t, tt.wantAPIToken, bb.apiToken)
 			assert.Equal(t, tt.wantControllerURL, bb.controllerURL)
+			assert.Equal(t, tt.wantAPIURL, bb.APIURL)
 		})
 	}
 }
@@ -163,6 +181,13 @@ func TestBBCreate(t *testing.T) {
 			wantErr:   true,
 			apiURL:    "https://api.bitbucket.org/2.0",
 		},
+		{
+			name:      "invalid api url",
+			repoOwner: "pac",
+			repoName:  "repo",
+			wantErr:   true,
+			apiURL:    "://bad-url",
+		},
 	}
 
 	for _, tt := range tests {
@@ -178,6 +203,8 @@ func TestBBCreate(t *testing.T) {
 			err := bb.create()
 			if !tt.wantErr {
 				assert.NilError(t, err)
+			} else {
+				assert.Assert(t, err != nil)
 			}
 		})
 	}

@@ -1,23 +1,159 @@
 package context
 
 import (
+	stdcontext "context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/jonboulle/clockwork"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/kubeinteraction"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
+	paramclients "github.com/openshift-pipelines/pipelines-as-code/pkg/params/clients"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
+	testclient "github.com/openshift-pipelines/pipelines-as-code/pkg/test/clients"
+	kitesthelper "github.com/openshift-pipelines/pipelines-as-code/pkg/test/kubernetestint"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/test/logger"
+	tprovider "github.com/openshift-pipelines/pipelines-as-code/pkg/test/provider"
+	tektontest "github.com/openshift-pipelines/pipelines-as-code/pkg/test/tekton"
 	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"knative.dev/pkg/apis"
+	knativeduckv1 "knative.dev/pkg/apis/duck/v1"
 	rtesting "knative.dev/pkg/reconciler/testing"
 )
+
+type recordingPodLogsInterface struct {
+	kitesthelper.KinterfaceTest
+	tailLines int64
+}
+
+func (r *recordingPodLogsInterface) GetPodLogs(_ stdcontext.Context, _, pod, _ string, tailLines int64) (string, error) {
+	r.tailLines = tailLines
+	return r.GetPodLogsOutput[pod], nil
+}
+
+type errorPodLogsInterface struct {
+	kitesthelper.KinterfaceTest
+	err error
+}
+
+func (e *errorPodLogsInterface) GetPodLogs(_ stdcontext.Context, _, _, _ string, _ int64) (string, error) {
+	return "", e.err
+}
+
+type buildErrorContentFailedTaskCase struct {
+	name           string
+	podOutput      string
+	kinteract      kubeinteraction.Interface
+	wantLogSnippet string
+	setup          func(t *testing.T, tt *buildErrorContentFailedTaskCase)
+}
+
+type buildContainerLogsFailedTaskCase struct {
+	name          string
+	podOutput     string
+	maxLines      int
+	kinteract     kubeinteraction.Interface
+	wantLogLines  []string
+	wantMaxLength int
+	setup         func(t *testing.T, tt *buildContainerLogsFailedTaskCase)
+}
+
+type buildContextBranchCase struct {
+	name         string
+	config       *v1alpha1.ContextConfig
+	event        *info.Event
+	wantCommit   bool
+	wantErrors   bool
+	wantLogs     bool
+	wantLogLines []string
+	wantMaxLines int
+	setup        func(t *testing.T, tt *buildContextBranchCase) (*Assembler, stdcontext.Context, *tektonv1.PipelineRun)
+}
+
+func setupFailedPipelineContext(t *testing.T, kinteract kubeinteraction.Interface) (*Assembler, stdcontext.Context, *tektonv1.PipelineRun) {
+	t.Helper()
+
+	testLogger, _ := logger.GetLogger()
+	clock := clockwork.NewFakeClock()
+	namespace := "test-ns"
+	pipelineRunName := "failed-pipeline"
+	pipelineTaskName := "build"
+	taskRunName := "build-run"
+	podName := "build-pod"
+
+	pr := tektontest.MakePRCompletion(clock, pipelineRunName, namespace,
+		tektonv1.PipelineRunReasonFailed.String(), nil, map[string]string{}, 10)
+	pr.Status.Conditions[0].Message = "pipeline failed"
+	pr.Status.ChildReferences = []tektonv1.ChildStatusReference{
+		{
+			TypeMeta: runtime.TypeMeta{
+				Kind: "TaskRun",
+			},
+			Name:             taskRunName,
+			PipelineTaskName: pipelineTaskName,
+		},
+	}
+	pr.Spec.PipelineSpec = &tektonv1.PipelineSpec{
+		Tasks: []tektonv1.PipelineTask{
+			{
+				Name:        pipelineTaskName,
+				DisplayName: "Build task",
+			},
+		},
+	}
+
+	taskStatus := tektonv1.TaskRunStatusFields{
+		PodName:  podName,
+		TaskSpec: &tektonv1.TaskSpec{},
+		Steps: []tektonv1.StepState{
+			{
+				Name:      "step1",
+				Container: "step1",
+				ContainerState: corev1.ContainerState{
+					Terminated: &corev1.ContainerStateTerminated{
+						ExitCode: 1,
+					},
+				},
+			},
+		},
+	}
+
+	ctx, _ := rtesting.SetupFakeContext(t)
+	stdata, _ := testclient.SeedTestData(t, ctx, testclient.Data{
+		Namespaces: []*corev1.Namespace{
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: namespace},
+			},
+		},
+		TaskRuns: []*tektonv1.TaskRun{
+			tektontest.MakeTaskRunCompletion(clock, taskRunName, namespace, "Failed",
+				map[string]string{}, taskStatus, knativeduckv1.Conditions{
+					{
+						Type:    apis.ConditionSucceeded,
+						Status:  corev1.ConditionFalse,
+						Reason:  tektonv1.TaskRunReasonFailed.String(),
+						Message: "task failed",
+					},
+				},
+				10),
+		},
+	})
+	run := &params.Run{Clients: paramclients.Clients{
+		Kube:   stdata.Kube,
+		Tekton: stdata.Pipeline,
+		Log:    testLogger,
+	}}
+
+	return NewAssembler(run, kinteract, testLogger), ctx, pr
+}
 
 func TestBuildCELContext(t *testing.T) {
 	logger, _ := logger.GetLogger()
@@ -431,6 +567,21 @@ func TestBuildCommitContent(t *testing.T) {
 		assert.DeepEqual(t, committer["date"], committerDate)
 	})
 
+	t.Run("provider commit info error still returns base data", func(t *testing.T) {
+		event := &info.Event{
+			SHA:      "abc123",
+			SHATitle: "fix: keep base data",
+		}
+
+		commitData, err := assembler.buildCommitContent(ctx, event, &tprovider.TestProviderImp{
+			FailGetCommitInfo:  true,
+			CommitInfoErrorMsg: "provider unavailable",
+		})
+		assert.NilError(t, err)
+		assert.Equal(t, commitData["sha"], "abc123")
+		assert.Equal(t, commitData["message"], "fix: keep base data")
+	})
+
 	t.Run("when full_message equals title, don't duplicate", func(t *testing.T) {
 		event := &info.Event{
 			SHA:        "abc123",
@@ -583,6 +734,57 @@ func TestBuildErrorContent(t *testing.T) {
 	})
 }
 
+func TestBuildErrorContentFailedTasks(t *testing.T) {
+	tests := []buildErrorContentFailedTaskCase{
+		{
+			name:           "failed task includes pod logs and metadata",
+			podOutput:      "compile failed\nsee details",
+			wantLogSnippet: "compile failed\nsee details",
+			setup: func(t *testing.T, tt *buildErrorContentFailedTaskCase) {
+				t.Helper()
+				tt.kinteract = &recordingPodLogsInterface{
+					KinterfaceTest: kitesthelper.KinterfaceTest{
+						GetPodLogsOutput: map[string]string{"build-pod": tt.podOutput},
+					},
+				}
+			},
+		},
+		{
+			name:           "log fetch error falls back to task message",
+			wantLogSnippet: "task failed",
+			setup: func(t *testing.T, tt *buildErrorContentFailedTaskCase) {
+				t.Helper()
+				tt.kinteract = &errorPodLogsInterface{err: errors.New("logs unavailable")}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.setup != nil {
+				tt.setup(t, &tt)
+			}
+			assembler, ctx, pr := setupFailedPipelineContext(t, tt.kinteract)
+
+			data := assembler.buildErrorContent(ctx, pr)
+			assert.Assert(t, data != nil)
+			assert.Equal(t, data["condition_reason"], "Failed")
+			assert.Equal(t, data["condition_message"], "pipeline failed")
+
+			failedTasks, ok := data["failed_tasks"].([]map[string]any)
+			assert.Assert(t, ok, "failed_tasks should be []map[string]any")
+			assert.Equal(t, len(failedTasks), 1)
+			assert.Equal(t, failedTasks[0]["name"], "build")
+			assert.Equal(t, failedTasks[0]["display_name"], "Build task")
+			assert.Equal(t, failedTasks[0]["reason"], "Failed")
+			assert.Equal(t, failedTasks[0]["message"], "task failed")
+			assert.Equal(t, failedTasks[0]["log_snippet"], tt.wantLogSnippet)
+			_, hasCompletionTime := failedTasks[0]["completion_time"]
+			assert.Assert(t, hasCompletionTime, "completion_time should be set")
+		})
+	}
+}
+
 func TestBuildContainerLogs(t *testing.T) {
 	logger, _ := logger.GetLogger()
 	run := &params.Run{}
@@ -594,6 +796,83 @@ func TestBuildContainerLogs(t *testing.T) {
 		data := assembler.buildContainerLogs(ctx, pr, 50)
 		assert.Assert(t, data == nil)
 	})
+}
+
+func TestBuildContainerLogsFailedTasks(t *testing.T) {
+	tests := []buildContainerLogsFailedTaskCase{
+		{
+			name:         "failed task includes pod log lines",
+			podOutput:    "line one\nline two",
+			maxLines:     2,
+			wantLogLines: []string{"line one", "line two"},
+			setup: func(t *testing.T, tt *buildContainerLogsFailedTaskCase) {
+				t.Helper()
+				tt.kinteract = &recordingPodLogsInterface{
+					KinterfaceTest: kitesthelper.KinterfaceTest{
+						GetPodLogsOutput: map[string]string{"build-pod": tt.podOutput},
+					},
+				}
+			},
+		},
+		{
+			name:         "log fetch error uses task message",
+			maxLines:     5,
+			wantLogLines: []string{"task failed"},
+			setup: func(t *testing.T, tt *buildContainerLogsFailedTaskCase) {
+				t.Helper()
+				tt.kinteract = &errorPodLogsInterface{err: errors.New("logs unavailable")}
+			},
+		},
+		{
+			name:          "long pod logs are truncated safely",
+			podOutput:     strings.Repeat("x", 70000),
+			maxLines:      3,
+			wantMaxLength: 65535,
+			setup: func(t *testing.T, tt *buildContainerLogsFailedTaskCase) {
+				t.Helper()
+				tt.kinteract = &recordingPodLogsInterface{
+					KinterfaceTest: kitesthelper.KinterfaceTest{
+						GetPodLogsOutput: map[string]string{"build-pod": tt.podOutput},
+					},
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.setup != nil {
+				tt.setup(t, &tt)
+			}
+			assembler, ctx, pr := setupFailedPipelineContext(t, tt.kinteract)
+
+			data := assembler.buildContainerLogs(ctx, pr, tt.maxLines)
+			assert.Assert(t, data != nil)
+			assert.Equal(t, data["max_lines"], tt.maxLines)
+
+			failedTasksLogs, ok := data["failed_tasks_logs"].([]map[string]any)
+			assert.Assert(t, ok, "failed_tasks_logs should be []map[string]any")
+			assert.Equal(t, len(failedTasksLogs), 1)
+			assert.Equal(t, failedTasksLogs[0]["task_name"], "build")
+			assert.Equal(t, failedTasksLogs[0]["display_name"], "Build task")
+
+			logLines, ok := failedTasksLogs[0]["log_lines"].([]string)
+			assert.Assert(t, ok, "log_lines should be []string")
+			if tt.wantLogLines != nil {
+				assert.DeepEqual(t, logLines, tt.wantLogLines)
+			}
+			if tt.wantMaxLength > 0 {
+				logContent := strings.Join(logLines, "\n")
+				assert.Assert(t, len(logContent) <= tt.wantMaxLength,
+					"expected log content length at most %d, got %d", tt.wantMaxLength, len(logContent))
+				assert.Assert(t, len(logContent) < len(tt.podOutput),
+					"expected truncated logs to be shorter than original output")
+			}
+			if recorder, ok := tt.kinteract.(*recordingPodLogsInterface); ok {
+				assert.Equal(t, recorder.tailLines, int64(tt.maxLines))
+			}
+		})
+	}
 }
 
 func TestBuildContext(t *testing.T) {
@@ -645,4 +924,112 @@ func TestBuildContext(t *testing.T) {
 		assert.Assert(t, ok, "pull_request data should be present")
 		assert.Equal(t, prData["number"], 7)
 	})
+}
+
+func TestBuildContextErrorAndLogBranches(t *testing.T) {
+	tests := []buildContextBranchCase{
+		{
+			name: "commit content error continues without commit",
+			config: &v1alpha1.ContextConfig{
+				CommitContent: true,
+			},
+			setup: func(t *testing.T, _ *buildContextBranchCase) (*Assembler, stdcontext.Context, *tektonv1.PipelineRun) {
+				t.Helper()
+				testLogger, _ := logger.GetLogger()
+				return NewAssembler(&params.Run{}, &kubeinteraction.Interaction{}, testLogger),
+					stdcontext.Background(),
+					&tektonv1.PipelineRun{ObjectMeta: metav1.ObjectMeta{Name: "basic", Namespace: "test-ns"}}
+			},
+		},
+		{
+			name: "failed pipeline adds errors and default logs",
+			config: &v1alpha1.ContextConfig{
+				ErrorContent: true,
+				ContainerLogs: &v1alpha1.ContainerLogsConfig{
+					Enabled: true,
+				},
+			},
+			event:        &info.Event{EventType: "push", SHA: "abc123"},
+			wantErrors:   true,
+			wantLogs:     true,
+			wantLogLines: []string{"failure line"},
+			wantMaxLines: DefaultMaxLogLines,
+			setup: func(t *testing.T, _ *buildContextBranchCase) (*Assembler, stdcontext.Context, *tektonv1.PipelineRun) {
+				t.Helper()
+				return setupFailedPipelineContext(t, &recordingPodLogsInterface{
+					KinterfaceTest: kitesthelper.KinterfaceTest{
+						GetPodLogsOutput: map[string]string{"build-pod": "failure line"},
+					},
+				})
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assembler, ctx, pr := tt.setup(t, &tt)
+			data, err := assembler.BuildContext(ctx, pr, tt.event, tt.config, nil)
+			assert.NilError(t, err)
+
+			_, hasCommit := data["commit"]
+			assert.Equal(t, hasCommit, tt.wantCommit)
+
+			_, hasErrors := data["errors"]
+			assert.Equal(t, hasErrors, tt.wantErrors)
+
+			logData, hasLogs := data["logs"].(map[string]any)
+			assert.Equal(t, hasLogs, tt.wantLogs)
+			if tt.wantLogs {
+				assert.Equal(t, logData["max_lines"], tt.wantMaxLines)
+				failedTasksLogs, ok := logData["failed_tasks_logs"].([]map[string]any)
+				assert.Assert(t, ok)
+				logLines, ok := failedTasksLogs[0]["log_lines"].([]string)
+				assert.Assert(t, ok)
+				assert.DeepEqual(t, logLines, tt.wantLogLines)
+			}
+
+			pipelineData, ok := data["pipeline"].(map[string]any)
+			assert.Assert(t, ok)
+			assert.Equal(t, pipelineData["namespace"], "test-ns")
+		})
+	}
+}
+
+func TestMapConvertersNilInput(t *testing.T) {
+	logger, _ := logger.GetLogger()
+	assembler := NewAssembler(&params.Run{}, &kubeinteraction.Interaction{}, logger)
+
+	tests := []struct {
+		name      string
+		convert   func() (map[string]any, error)
+		wantNil   bool
+		wantError bool
+	}{
+		{
+			name: "nil pipelinerun returns nil map",
+			convert: func() (map[string]any, error) {
+				return assembler.pipelineRunToMap(nil)
+			},
+			wantNil: true,
+		},
+		{
+			name: "nil repository returns nil map",
+			convert: func() (map[string]any, error) {
+				return assembler.repositoryToMap(nil)
+			},
+			wantNil: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := tt.convert()
+			if tt.wantError {
+				assert.Assert(t, err != nil, "expected error but got none")
+				return
+			}
+			assert.NilError(t, err)
+			assert.Equal(t, got == nil, tt.wantNil)
+		})
+	}
 }

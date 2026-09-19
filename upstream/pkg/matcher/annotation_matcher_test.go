@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/go-github/v90/github"
+	"github.com/google/go-github/v91/github"
 	"github.com/jonboulle/clockwork"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
@@ -1624,7 +1624,7 @@ func TestMatchPipelinerunAnnotationAndRepositories(t *testing.T) {
 			fakeclient, mux, ghTestServerURL, teardown := ghtesthelper.SetupGH()
 			defer teardown()
 			vcx := &ghprovider.Provider{
-				Token: github.Ptr("None"),
+				Token: new("None"),
 			}
 			vcx.SetGithubClient(fakeclient)
 			if tt.args.runevent.Request == nil {
@@ -1634,8 +1634,8 @@ func TestMatchPipelinerunAnnotationAndRepositories(t *testing.T) {
 				commitFiles := make([]*github.CommitFile, len(tt.args.fileChanged))
 				for i, v := range tt.args.fileChanged {
 					commitFiles[i] = &github.CommitFile{
-						Filename: github.Ptr(v.FileName),
-						Status:   github.Ptr(v.Status),
+						Filename: new(v.FileName),
+						Status:   new(v.Status),
 					}
 				}
 				if tt.args.runevent.TriggerTarget == "push" {
@@ -2475,6 +2475,116 @@ func TestGetAnnotationValues(t *testing.T) {
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("getAnnotationValues() got = %v, want %v", got, tt.want)
 			}
+		})
+	}
+}
+
+func TestNoFailedPipelineToRetestErrorIs(t *testing.T) {
+	tests := []struct {
+		name   string
+		err    error
+		target error
+		want   bool
+	}{
+		{
+			name:   "same error type matches",
+			err:    NoFailedPipelineToRetestError("/pac "),
+			target: NoFailedPipelineToRetestError("/"),
+			want:   true,
+		},
+		{
+			name:   "different error type does not match",
+			err:    NoFailedPipelineToRetestError("/pac "),
+			target: fmt.Errorf("other"),
+			want:   false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.want {
+				assert.Assert(t, strings.Contains(tt.err.Error(), "All PipelineRuns for this commit have already succeeded"))
+			}
+			assert.Equal(t, tt.want, errors.Is(tt.err, tt.target))
+		})
+	}
+}
+
+func TestMatchOnAnnotation(t *testing.T) {
+	tests := []struct {
+		name           string
+		annotations    string
+		eventTypes     []string
+		branchMatching bool
+		want           bool
+		wantErrContain string
+	}{
+		{
+			name:        "matches exact event",
+			annotations: "[pull_request,push]",
+			eventTypes:  []string{"push"},
+			want:        true,
+		},
+		{
+			name:           "matches branch glob",
+			annotations:    "[refs/heads/release-*]",
+			eventTypes:     []string{"release-1.0"},
+			branchMatching: true,
+			want:           true,
+		},
+		{
+			name:        "returns false when no target matches",
+			annotations: "[pull_request]",
+			eventTypes:  []string{"push"},
+			want:        false,
+		},
+		{
+			name:           "invalid annotation returns error",
+			annotations:    "[pull_request",
+			eventTypes:     []string{"pull_request"},
+			wantErrContain: "wrong format",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := matchOnAnnotation(tt.annotations, tt.eventTypes, tt.branchMatching)
+			if tt.wantErrContain != "" {
+				assert.ErrorContains(t, err, tt.wantErrContain)
+				return
+			}
+			assert.NilError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestResolveCustomParamsForCELNilRepo(t *testing.T) {
+	tests := []struct {
+		name string
+		repo *v1alpha1.Repository
+	}{
+		{
+			name: "nil repo",
+		},
+		{
+			name: "repo without params",
+			repo: &v1alpha1.Repository{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := resolveCustomParamsForCEL(
+				context.Background(),
+				tt.repo,
+				&info.Event{},
+				&params.Run{},
+				&testprovider.TestProviderImp{},
+				nil,
+				zap.NewNop().Sugar(),
+			)
+			assert.Equal(t, 0, len(got))
 		})
 	}
 }

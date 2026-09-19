@@ -29,6 +29,7 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/test/logger"
 	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	kubefake "k8s.io/client-go/kubernetes/fake"
 
 	gitlab "gitlab.com/gitlab-org/api/client-go"
 	"go.opentelemetry.io/otel"
@@ -52,6 +53,17 @@ func setupPipelineIDStatusHandler(t *testing.T, mux *http.ServeMux, path string,
 		assert.Assert(t, !hasPID, "request should not have pipeline_id for %s", path)
 		rw.WriteHeader(http.StatusCreated)
 		fmt.Fprintf(rw, `{"id": 1, "pipeline_id": %d}`, responsePID)
+	})
+}
+
+func setupFailingCommitStatusHandlers(mux *http.ServeMux, sourceProjectID, targetProjectID int64, sha string) {
+	mux.HandleFunc(fmt.Sprintf("/projects/%d/statuses/%s", sourceProjectID, sha), func(rw http.ResponseWriter, _ *http.Request) {
+		rw.WriteHeader(http.StatusBadRequest)
+		fmt.Fprint(rw, `{"message":"source failed"}`)
+	})
+	mux.HandleFunc(fmt.Sprintf("/projects/%d/statuses/%s", targetProjectID, sha), func(rw http.ResponseWriter, _ *http.Request) {
+		rw.WriteHeader(http.StatusBadRequest)
+		fmt.Fprint(rw, `{"message":"target failed"}`)
 	})
 }
 
@@ -795,6 +807,197 @@ func TestCreateStatusPipelineIDSharedAcrossPipelineRuns(t *testing.T) {
 	assert.Equal(t, secondCallPID, int64(9999))
 }
 
+func TestCreateStatusCommentStrategies(t *testing.T) {
+	tests := []struct {
+		name              string
+		commentStrategy   string
+		eventType         string
+		setup             func(t *testing.T, mux *http.ServeMux, commentCalled *bool)
+		wantErr           string
+		wantCommentCalled bool
+		wantEventReason   string
+	}{
+		{
+			name:            "update strategy creates marked comment",
+			commentStrategy: provider.UpdateCommentStrategy,
+			setup: func(t *testing.T, mux *http.ServeMux, commentCalled *bool) {
+				t.Helper()
+				mux.HandleFunc("/projects/902/merge_requests/5/notes", func(rw http.ResponseWriter, r *http.Request) {
+					switch r.Method {
+					case http.MethodGet:
+						fmt.Fprint(rw, `[]`)
+					case http.MethodPost:
+						*commentCalled = true
+						body, err := io.ReadAll(r.Body)
+						assert.NilError(t, err)
+						assert.Assert(t, strings.Contains(string(body), "pac-status-pr-test"))
+						rw.WriteHeader(http.StatusCreated)
+						fmt.Fprint(rw, `{}`)
+					default:
+						t.Errorf("unexpected method %s", r.Method)
+					}
+				})
+			},
+			wantCommentCalled: true,
+		},
+		{
+			name:            "update strategy updates existing pac comment",
+			commentStrategy: provider.UpdateCommentStrategy,
+			setup: func(t *testing.T, mux *http.ServeMux, commentCalled *bool) {
+				t.Helper()
+				mux.HandleFunc("/user", func(rw http.ResponseWriter, _ *http.Request) {
+					fmt.Fprint(rw, `{"id":321}`)
+				})
+				mux.HandleFunc("/projects/902/merge_requests/5/notes", func(rw http.ResponseWriter, r *http.Request) {
+					assert.Equal(t, http.MethodGet, r.Method)
+					fmt.Fprint(rw, `[{"id":11,"body":"<!-- pac-status-pr-test --> old","author":{"id":321}}]`)
+				})
+				mux.HandleFunc("/projects/902/merge_requests/5/notes/11", func(rw http.ResponseWriter, r *http.Request) {
+					assert.Equal(t, http.MethodPut, r.Method)
+					*commentCalled = true
+					body, err := io.ReadAll(r.Body)
+					assert.NilError(t, err)
+					assert.Assert(t, strings.Contains(string(body), "Full log available"))
+					rw.WriteHeader(http.StatusOK)
+					fmt.Fprint(rw, `{}`)
+				})
+			},
+			wantCommentCalled: true,
+		},
+		{
+			name:            "update strategy returns update error and emits event",
+			commentStrategy: provider.UpdateCommentStrategy,
+			setup: func(t *testing.T, mux *http.ServeMux, commentCalled *bool) {
+				t.Helper()
+				mux.HandleFunc("/user", func(rw http.ResponseWriter, _ *http.Request) {
+					fmt.Fprint(rw, `{"id":321}`)
+				})
+				mux.HandleFunc("/projects/902/merge_requests/5/notes", func(rw http.ResponseWriter, r *http.Request) {
+					assert.Equal(t, http.MethodGet, r.Method)
+					fmt.Fprint(rw, `[{"id":11,"body":"<!-- pac-status-pr-test --> old","author":{"id":321}}]`)
+				})
+				mux.HandleFunc("/projects/902/merge_requests/5/notes/11", func(rw http.ResponseWriter, r *http.Request) {
+					assert.Equal(t, http.MethodPut, r.Method)
+					*commentCalled = true
+					rw.WriteHeader(http.StatusInternalServerError)
+					fmt.Fprint(rw, `{"message":"boom"}`)
+				})
+			},
+			wantErr:           "unable to update merge request note",
+			wantCommentCalled: true,
+			wantEventReason:   "PipelineRunCommentCreationError",
+		},
+		{
+			name:            "disable all strategy skips merge request comment",
+			commentStrategy: provider.DisableAllCommentStrategy,
+			setup: func(t *testing.T, mux *http.ServeMux, _ *bool) {
+				t.Helper()
+				mux.HandleFunc("/projects/902/merge_requests/5/notes", func(rw http.ResponseWriter, _ *http.Request) {
+					t.Error("comment endpoint should not be called")
+					rw.WriteHeader(http.StatusInternalServerError)
+				})
+			},
+		},
+		{
+			name:      "default strategy comments for ops event on pull request",
+			eventType: opscomments.TestAllCommentEventType.String(),
+			setup: func(t *testing.T, mux *http.ServeMux, commentCalled *bool) {
+				t.Helper()
+				mux.HandleFunc("/projects/902/merge_requests/5/notes", func(rw http.ResponseWriter, r *http.Request) {
+					assert.Equal(t, http.MethodPost, r.Method)
+					*commentCalled = true
+					body, err := io.ReadAll(r.Body)
+					assert.NilError(t, err)
+					assert.Assert(t, strings.Contains(string(body), "has successfully validated your commit"))
+					rw.WriteHeader(http.StatusCreated)
+					fmt.Fprint(rw, `{}`)
+				})
+			},
+			wantCommentCalled: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, _ := rtesting.SetupFakeContext(t)
+			observer, observedLogs := zapobserver.New(zap.DebugLevel)
+			log := zap.New(observer).Sugar()
+			client, mux, tearDown := thelp.Setup(t)
+			defer tearDown()
+
+			const (
+				sourceProjectID = int64(901)
+				targetProjectID = int64(902)
+				sha             = "abc123status"
+			)
+			setupFailingCommitStatusHandlers(mux, sourceProjectID, targetProjectID, sha)
+
+			commentCalled := false
+			if tt.setup != nil {
+				tt.setup(t, mux, &commentCalled)
+			}
+
+			fakeKube := kubefake.NewSimpleClientset()
+			repo := &v1alpha1.Repository{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "repo",
+					Namespace: "default",
+				},
+				Spec: v1alpha1.RepositorySpec{
+					Settings: &v1alpha1.Settings{
+						Gitlab: &v1alpha1.GitlabSettings{
+							CommentStrategy: tt.commentStrategy,
+						},
+					},
+				},
+			}
+			if tt.commentStrategy == "" {
+				repo.Spec.Settings = nil
+			}
+
+			v := &Provider{
+				gitlabClient: client,
+				Logger:       log,
+				pacInfo: &info.PacOpts{
+					Settings: settings.Settings{
+						ApplicationName: settings.PACApplicationNameDefaultValue,
+					},
+				},
+				repo:         repo,
+				eventEmitter: events.NewEventEmitter(fakeKube, log),
+			}
+			eventType := tt.eventType
+			if eventType == "" {
+				eventType = triggertype.PullRequest.String()
+			}
+			event := &info.Event{
+				TriggerTarget:     triggertype.PullRequest,
+				EventType:         eventType,
+				SourceProjectID:   sourceProjectID,
+				TargetProjectID:   targetProjectID,
+				PullRequestNumber: 5,
+				SHA:               sha,
+			}
+			statusOpts := providerstatus.StatusOpts{
+				Conclusion:              providerstatus.ConclusionSuccess,
+				OriginalPipelineRunName: "pr-test",
+				Text:                    "status body",
+				DetailsURL:              "https://console.example/log",
+			}
+
+			err := v.CreateStatus(ctx, event, statusOpts)
+			if tt.wantErr != "" {
+				assert.ErrorContains(t, err, tt.wantErr)
+			} else {
+				assert.NilError(t, err)
+			}
+			assert.Equal(t, tt.wantCommentCalled, commentCalled)
+			if tt.wantEventReason != "" {
+				assert.Assert(t, observedLogs.FilterMessageSnippet("failed to create comment").Len() > 0)
+			}
+		})
+	}
+}
+
 func TestGetCommitInfo(t *testing.T) {
 	tests := []struct {
 		name                string
@@ -1150,6 +1353,152 @@ func TestGetConfig(t *testing.T) {
 	v := &Provider{}
 	assert.Assert(t, v.GetConfig().APIURL != "")
 	assert.Assert(t, v.GetConfig().TaskStatusTMPL != "")
+}
+
+func TestSetPacInfo(t *testing.T) {
+	tests := []struct {
+		name    string
+		pacInfo *info.PacOpts
+	}{
+		{
+			name: "stores pac info",
+			pacInfo: &info.PacOpts{
+				Settings: settings.Settings{ApplicationName: "custom app"},
+			},
+		},
+		{
+			name: "stores nil pac info",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			v := &Provider{}
+			v.SetPacInfo(tt.pacInfo)
+			assert.Equal(t, tt.pacInfo, v.pacInfo)
+		})
+	}
+}
+
+func TestCheckPolicyAllowing(t *testing.T) {
+	tests := []struct {
+		name         string
+		filesChanged []string
+		wantAllowed  bool
+		wantMessage  string
+	}{
+		{
+			name:         "policy allowing is not implemented",
+			filesChanged: []string{"README.md"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			v := &Provider{}
+			gotAllowed, gotMessage := v.CheckPolicyAllowing(t.Context(), info.NewEvent(), tt.filesChanged)
+			assert.Equal(t, tt.wantAllowed, gotAllowed)
+			assert.Equal(t, tt.wantMessage, gotMessage)
+		})
+	}
+}
+
+func TestCreateToken(t *testing.T) {
+	tests := []struct {
+		name      string
+		scopes    []string
+		wantToken string
+	}{
+		{
+			name:   "returns empty token",
+			scopes: []string{"api"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			v := &Provider{}
+			got, err := v.CreateToken(t.Context(), tt.scopes, info.NewEvent())
+			assert.NilError(t, err)
+			assert.Equal(t, tt.wantToken, got)
+		})
+	}
+}
+
+func TestGetTemplate(t *testing.T) {
+	tests := []struct {
+		name        string
+		commentType provider.CommentType
+		wantEmpty   bool
+	}{
+		{
+			name:        "starting pipeline template",
+			commentType: provider.StartingPipelineType,
+		},
+		{
+			name:        "unknown template",
+			commentType: provider.CommentType(999),
+			wantEmpty:   true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			v := &Provider{}
+			got := v.GetTemplate(tt.commentType)
+			assert.Equal(t, tt.wantEmpty, got == "")
+		})
+	}
+}
+
+func TestFormatPipelineComment(t *testing.T) {
+	tests := []struct {
+		name       string
+		conclusion providerstatus.Conclusion
+		wantEmoji  string
+	}{
+		{
+			name:       "api cancel spelling conclusion",
+			conclusion: providerstatus.Conclusion("cancel" + "ed"),
+			wantEmoji:  "⚠️",
+		},
+		{
+			name:       "failed conclusion",
+			conclusion: providerstatus.Conclusion("failed"),
+			wantEmoji:  "❌",
+		},
+		{
+			name:       "success conclusion",
+			conclusion: providerstatus.ConclusionSuccess,
+			wantEmoji:  "✅",
+		},
+		{
+			name:       "running conclusion",
+			conclusion: providerstatus.Conclusion("running"),
+			wantEmoji:  "🚀",
+		},
+		{
+			name:       "default conclusion",
+			conclusion: providerstatus.ConclusionNeutral,
+			wantEmoji:  "ℹ️",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			v := &Provider{
+				pacInfo: &info.PacOpts{
+					Settings: settings.Settings{ApplicationName: "PAC"},
+				},
+			}
+			got := v.formatPipelineComment("abcdef", providerstatus.StatusOpts{
+				Conclusion:              tt.conclusion,
+				Title:                   "result",
+				OriginalPipelineRunName: "pr-test",
+				Text:                    "details",
+				DetailsURL:              "https://console.example/log",
+			})
+			assert.Assert(t, strings.HasPrefix(got, tt.wantEmoji), "comment %q does not start with %q", got, tt.wantEmoji)
+			assert.Assert(t, strings.Contains(got, "result: PAC/pr-test for abcdef"))
+			assert.Assert(t, strings.Contains(got, "details"))
+			assert.Assert(t, strings.Contains(got, "https://console.example/log"))
+		})
+	}
 }
 
 func TestSetClient(t *testing.T) {
