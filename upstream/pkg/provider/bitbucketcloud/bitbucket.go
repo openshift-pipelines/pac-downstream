@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/google/go-github/v85/github"
+	"github.com/google/go-github/v91/github"
 	"github.com/ktrysmt/go-bitbucket"
 	"github.com/mitchellh/mapstructure"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
@@ -180,8 +180,35 @@ func (v *Provider) CreateStatus(_ context.Context, event *info.Event, statusopts
 	return nil
 }
 
-func (v *Provider) GetCommitStatuses(_ context.Context, _ *info.Event) ([]provider.CommitStatusInfo, error) {
-	return nil, nil
+func (v *Provider) GetCommitStatuses(_ context.Context, event *info.Event) ([]provider.CommitStatusInfo, error) {
+	if v.bbClient == nil {
+		return nil, fmt.Errorf("no token has been set, cannot get commit statuses")
+	}
+
+	response, err := v.Client().Repositories.Commits.GetCommitStatuses(&bitbucket.CommitsOptions{
+		Owner:    event.Organization,
+		RepoSlug: event.Repository,
+		Revision: event.SHA,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	statuses := &types.Statuses{}
+	err = mapstructure.Decode(response, statuses)
+	if err != nil {
+		return nil, err
+	}
+
+	var result []provider.CommitStatusInfo
+	for _, s := range statuses.Values {
+		result = append(result, provider.CommitStatusInfo{
+			Name:   s.Key,
+			Status: strings.ToLower(s.State),
+		})
+	}
+
+	return result, nil
 }
 
 func (v *Provider) GetTektonDir(_ context.Context, event *info.Event, path, provenance string) (string, error) {
