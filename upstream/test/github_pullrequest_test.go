@@ -5,6 +5,7 @@ package test
 import (
 	"context"
 	"fmt"
+	"os"
 	"regexp"
 	"strings"
 	"testing"
@@ -20,9 +21,10 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/test/pkg/configmap"
 	tgithub "github.com/openshift-pipelines/pipelines-as-code/test/pkg/github"
 	"github.com/openshift-pipelines/pipelines-as-code/test/pkg/options"
+	"github.com/openshift-pipelines/pipelines-as-code/test/pkg/payload"
 	twait "github.com/openshift-pipelines/pipelines-as-code/test/pkg/wait"
 
-	"github.com/google/go-github/v90/github"
+	"github.com/google/go-github/v91/github"
 	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 	"github.com/tektoncd/pipeline/pkg/names"
 	"gotest.tools/v3/assert"
@@ -212,7 +214,7 @@ func TestGithubGHEPullRequestInvalidSpecValues(t *testing.T) {
 	for {
 		res, resp, err = g.Provider.Client().Checks.ListCheckRunsForRef(ctx, g.Options.Organization, g.Options.Repo, g.SHA, &github.ListCheckRunsOptions{
 			AppID:       g.Provider.ApplicationID,
-			Status:      github.Ptr("completed"),
+			Status:      new("completed"),
 			ListOptions: opt,
 		})
 		assert.NilError(t, err)
@@ -252,7 +254,7 @@ func TestGithubGHETestExplicitlyNoMatchedPipelineRun(t *testing.T) {
 	_, _, err := g.Provider.Client().Issues.CreateComment(ctx,
 		g.Options.Organization,
 		g.Options.Repo, g.PRNumber,
-		&github.IssueComment{Body: github.Ptr("/test no-match")})
+		github.IssueCommentRequest{Body: "/test no-match"})
 	assert.NilError(t, err)
 	sopt := twait.SuccessOpt{
 		Title:           fmt.Sprintf("Testing %s with Github APPS integration on %s", g.Label, g.TargetNamespace),
@@ -287,7 +289,7 @@ func TestGithubGHECancelInProgress(t *testing.T) {
 
 	g.Cnx.Clients.Log.Infof("Creating /test on PullRequest to create a second run")
 	_, _, err = g.Provider.Client().Issues.CreateComment(ctx, g.Options.Organization, g.Options.Repo, g.PRNumber,
-		&github.IssueComment{Body: github.Ptr("/test")})
+		github.IssueCommentRequest{Body: "/test"})
 	assert.NilError(t, err)
 
 	g.Cnx.Clients.Log.Infof("Waiting for the two pipelinerun to be created")
@@ -356,7 +358,7 @@ func TestGithubGHECancelInProgressPRClosed(t *testing.T) {
 
 	g.Cnx.Clients.Log.Infof("Closing the PullRequest")
 	_, _, err = g.Provider.Client().PullRequests.Edit(ctx, g.Options.Organization, g.Options.Repo, g.PRNumber, &github.PullRequest{
-		State: github.Ptr("closed"),
+		State: new("closed"),
 	})
 	assert.NilError(t, err)
 
@@ -498,7 +500,7 @@ func TestGithubGHEPullRequestNoPipelineRunCancelledOnPRClosed(t *testing.T) {
 
 	g.Cnx.Clients.Log.Infof("Closing the PullRequest")
 	_, _, err = g.Provider.Client().PullRequests.Edit(ctx, g.Options.Organization, g.Options.Repo, g.PRNumber, &github.PullRequest{
-		State: github.Ptr("closed"),
+		State: new("closed"),
 	})
 	assert.NilError(t, err)
 
@@ -560,7 +562,7 @@ func TestGithubGHECancelInProgressSettingFromConfigMapOnPR(t *testing.T) {
 	_, _, err = g.Provider.Client().Issues.CreateComment(ctx,
 		g.Options.Organization,
 		g.Options.Repo, g.PRNumber,
-		&github.IssueComment{Body: github.Ptr("/test")})
+		github.IssueCommentRequest{Body: "/test"})
 	assert.NilError(t, err)
 
 	g.Cnx.Clients.Log.Infof("Waiting for the two pipelinerun to be created")
@@ -606,7 +608,7 @@ func TestGithubGHECancelInProgressSettingFromConfigMapOnPush(t *testing.T) {
 	_, _, err = g.Provider.Client().Repositories.CreateComment(ctx,
 		g.Options.Organization,
 		g.Options.Repo, g.SHA,
-		&github.RepositoryComment{Body: github.Ptr(comment)})
+		&github.RepositoryComment{Body: new(comment)})
 	assert.NilError(t, err)
 
 	g.Cnx.Clients.Log.Infof("Waiting for the two pipelinerun to be created")
@@ -785,6 +787,266 @@ func TestGithubGHEPullRequestCELJoin(t *testing.T) {
 		nil,
 	)
 	assert.NilError(t, err)
+}
+
+func TestGithubGHEPullRequestEventTimeLogged(t *testing.T) {
+	ctx := context.Background()
+	g := &tgithub.PRTest{
+		Label:     "Github PullRequest Event Time Logged",
+		YamlFiles: []string{"testdata/pipelinerun.yaml"},
+		GHE:       true,
+	}
+	g.RunPullRequest(ctx, t)
+	defer g.TearDown(ctx, t)
+
+	globalNs, _, err := params.GetInstallLocation(ctx, g.Cnx)
+	assert.NilError(t, err)
+	ctx = info.StoreNS(ctx, globalNs)
+
+	reg := regexp.MustCompile("controller responded to event .* in .*ms")
+	maxLines := int64(1000)
+	err = twait.RegexpMatchingInControllerLog(ctx, g.Cnx, *reg, 20, "ghe-controller", &maxLines, nil)
+	assert.NilError(t, err)
+}
+
+func TestGithubGHEPRSkippedStatusReported(t *testing.T) {
+	ctx := context.Background()
+	g := &tgithub.PRTest{
+		Label: "Github Skipped Status",
+		GHE:   true,
+	}
+	targetNS := names.SimpleNameGenerator.RestrictLengthWithRandomSuffix("pac-e2e-ns")
+	targetRefName := fmt.Sprintf("refs/heads/%s", targetNS)
+
+	ctx, runcnx, opts, ghcnx, err := tgithub.Setup(ctx, true, false)
+	assert.NilError(t, err)
+	g.Cnx = runcnx
+	g.Options = opts
+	g.Provider = ghcnx
+	g.TargetNamespace = targetNS
+	g.Logger = runcnx.Clients.Log
+
+	repoinfo, _, err := ghcnx.Client().Repositories.Get(ctx, opts.Organization, opts.Repo)
+	assert.NilError(t, err)
+
+	opts.Settings = &v1alpha1.Settings{
+		StatusChecks: &v1alpha1.StatusChecks{
+			Enabled: true,
+			Mode:    v1alpha1.StatusCheckModePerPipelineRun,
+		},
+	}
+	err = tgithub.CreateCRD(ctx, t, repoinfo, runcnx, opts, ghcnx, targetNS)
+	assert.NilError(t, err)
+
+	entries, err := payload.GetEntries(
+		map[string]string{".tekton/pipelinerun-matching.yaml": "testdata/pipelinerun.yaml"},
+		targetNS, options.MainBranch, triggertype.PullRequest.String(), map[string]string{},
+	)
+	assert.NilError(t, err)
+
+	// this is not going to match as it's targeting main branch on push event while we're gonna raise a pull request
+	skipEntry, err := payload.GetEntries(
+		map[string]string{".tekton/pipelinerun-skipped.yaml": "testdata/pipelinerun.yaml"},
+		targetNS, options.MainBranch, triggertype.Push.String(), map[string]string{},
+	)
+	assert.NilError(t, err)
+	entries[".tekton/pipelinerun-skipped.yaml"] = skipEntry[".tekton/pipelinerun-skipped.yaml"]
+
+	commitTitle := fmt.Sprintf("Testing skipped status on %s", targetNS)
+	g.CommitTitle = commitTitle
+	g.TargetRefName = targetRefName
+
+	sha, _, err := tgithub.PushFilesToRef(ctx, ghcnx.Client(), commitTitle,
+		repoinfo.GetDefaultBranch(), targetRefName, opts.Organization, opts.Repo, entries)
+	assert.NilError(t, err)
+	g.SHA = sha
+
+	number, err := tgithub.PRCreate(ctx, runcnx, ghcnx, opts.Organization,
+		opts.Repo, targetRefName, repoinfo.GetDefaultBranch(), commitTitle)
+	assert.NilError(t, err)
+	g.PRNumber = number
+	defer g.TearDown(ctx, t)
+
+	sopt := twait.SuccessOpt{
+		Title:           commitTitle,
+		OnEvent:         triggertype.PullRequest.String(),
+		TargetNS:        targetNS,
+		NumberofPRMatch: 1,
+		SHA:             sha,
+	}
+	twait.Succeeded(ctx, t, runcnx, opts, sopt)
+
+	opt := github.ListOptions{}
+	res := &github.ListCheckRunsResults{}
+	resp := &github.Response{}
+	counter := 0
+	for {
+		res, resp, err = ghcnx.Client().Checks.ListCheckRunsForRef(ctx, opts.Organization, opts.Repo, sha, &github.ListCheckRunsOptions{
+			AppID:       ghcnx.ApplicationID,
+			ListOptions: opt,
+		})
+		assert.NilError(t, err)
+		assert.Equal(t, resp.StatusCode, 200)
+		if len(res.CheckRuns) >= 2 {
+			break
+		}
+		runcnx.Clients.Log.Infof("Waiting for the check runs to be created (%d/2)", len(res.CheckRuns))
+		if counter > 20 {
+			t.Fatalf("Check runs not created after 20 tries, got %d", len(res.CheckRuns))
+		}
+		time.Sleep(5 * time.Second)
+		counter++
+	}
+
+	foundStatus := false
+	for _, cr := range res.CheckRuns {
+		if cr.GetConclusion() == "skipped" && strings.Contains(cr.GetName(), "pipelinerun-skipped") {
+			foundStatus = true
+			break
+		}
+	}
+	assert.Equal(t, foundStatus, true, "should have found a check run with skipped conclusion for the non-matching pipeline run")
+}
+
+func TestGithubGHEWebhookPRSkippedStatusReported(t *testing.T) {
+	ctx := context.Background()
+	g := &tgithub.PRTest{
+		Label:   "Github Webhook Skipped Status",
+		GHE:     true,
+		Webhook: true,
+	}
+	targetNS := names.SimpleNameGenerator.RestrictLengthWithRandomSuffix("pac-e2e-ns")
+	targetRefName := fmt.Sprintf("refs/heads/%s", targetNS)
+
+	ctx, runcnx, opts, ghcnx, err := tgithub.Setup(ctx, true, true)
+	assert.NilError(t, err)
+	g.Cnx = runcnx
+	g.Provider = ghcnx
+	g.TargetNamespace = targetNS
+	g.Logger = runcnx.Clients.Log
+
+	repoName := names.SimpleNameGenerator.RestrictLengthWithRandomSuffix("pac-e2e-test")
+	smeeURL := os.Getenv("TEST_GITHUB_SECOND_WEBHOOK_SMEE_URL")
+	webhookSecret := os.Getenv("TEST_EL_WEBHOOK_SECRET")
+
+	repoinfo, err := tgithub.CreateGHERepo(ctx, ghcnx.Client(), opts.Organization, repoName, smeeURL, webhookSecret, runcnx.Clients.Log)
+	assert.NilError(t, err)
+	opts.Repo = repoName
+	opts.Settings = &v1alpha1.Settings{
+		StatusChecks: &v1alpha1.StatusChecks{
+			Enabled: true,
+			Mode:    v1alpha1.StatusCheckModePerPipelineRun,
+		},
+	}
+	g.Options = opts
+	g.DynamicRepoName = repoName
+
+	err = tgithub.CreateCRD(ctx, t, repoinfo, runcnx, opts, ghcnx, targetNS)
+	assert.NilError(t, err)
+
+	entries, err := payload.GetEntries(
+		map[string]string{".tekton/pipelinerun-matching.yaml": "testdata/pipelinerun.yaml"},
+		targetNS, options.MainBranch, triggertype.PullRequest.String(), map[string]string{},
+	)
+	assert.NilError(t, err)
+
+	// this is not going to match as it's targeting main branch on push event while we're gonna raise a pull request
+	skipEntry, err := payload.GetEntries(
+		map[string]string{".tekton/pipelinerun-skipped.yaml": "testdata/pipelinerun.yaml"},
+		targetNS, options.MainBranch, triggertype.Push.String(), map[string]string{},
+	)
+	assert.NilError(t, err)
+	entries[".tekton/pipelinerun-skipped.yaml"] = skipEntry[".tekton/pipelinerun-skipped.yaml"]
+
+	commitTitle := fmt.Sprintf("Testing webhook skipped status on %s", targetNS)
+	g.CommitTitle = commitTitle
+	g.TargetRefName = targetRefName
+
+	sha, _, err := tgithub.PushFilesToRef(ctx, ghcnx.Client(), commitTitle,
+		repoinfo.GetDefaultBranch(), targetRefName, opts.Organization, opts.Repo, entries)
+	assert.NilError(t, err)
+	g.SHA = sha
+
+	number, err := tgithub.PRCreate(ctx, runcnx, ghcnx, opts.Organization,
+		opts.Repo, targetRefName, repoinfo.GetDefaultBranch(), commitTitle)
+	assert.NilError(t, err)
+	g.PRNumber = number
+	defer g.TearDown(ctx, t)
+
+	sopt := twait.SuccessOpt{
+		Title:           commitTitle,
+		OnEvent:         triggertype.PullRequest.String(),
+		TargetNS:        targetNS,
+		NumberofPRMatch: 1,
+		SHA:             sha,
+	}
+	twait.Succeeded(ctx, t, runcnx, opts, sopt)
+
+	statuses, _, err := ghcnx.Client().Repositories.ListStatuses(ctx, opts.Organization, opts.Repo, sha, &github.ListOptions{})
+	assert.NilError(t, err)
+
+	foundStatus := false
+	for _, status := range statuses {
+		if status.GetState() == "success" && status.GetDescription() == "Skipped" && strings.Contains(status.GetContext(), "pipelinerun-skipped") {
+			foundStatus = true
+			break
+		}
+	}
+	assert.Equal(t, foundStatus, true, "should have found a commit status with success state and Skipped description for the non-matching pipeline run")
+}
+
+// TestGithubGHEPullRequestErrorDetectionStripsANSI checks that terminal color
+// codes printed by a failing step are removed from the check run output and
+// from the error detection annotations.
+func TestGithubGHEPullRequestErrorDetectionStripsANSI(t *testing.T) {
+	ctx := context.Background()
+	g := &tgithub.PRTest{
+		Label:         "Github error detection strips ANSI",
+		YamlFiles:     []string{"testdata/pipelinerun-error-snippet-ansi.yaml"},
+		GHE:           true,
+		NoStatusCheck: true,
+	}
+	g.RunPullRequest(ctx, t)
+	defer g.TearDown(ctx, t)
+
+	_, err := twait.UntilPipelineRunsFinished(ctx, g.Cnx.Clients, twait.Opts{
+		Namespace:       g.TargetNamespace,
+		MinNumberStatus: 1,
+		PollTimeout:     twait.DefaultTimeout,
+		TargetSHA:       []string{g.SHA},
+	})
+	assert.NilError(t, err)
+
+	var checkRun *github.CheckRun
+	for counter := 0; counter <= 10; counter++ {
+		res, resp, err := g.Provider.Client().Checks.ListCheckRunsForRef(ctx, g.Options.Organization, g.Options.Repo, g.SHA, &github.ListCheckRunsOptions{
+			AppID:  g.Provider.ApplicationID,
+			Status: new("completed"),
+		})
+		assert.NilError(t, err)
+		assert.Equal(t, resp.StatusCode, 200)
+		if len(res.CheckRuns) > 0 {
+			checkRun = res.CheckRuns[0]
+			break
+		}
+		g.Cnx.Clients.Log.Infof("Waiting for the check run to be completed")
+		time.Sleep(5 * time.Second)
+	}
+	assert.Assert(t, checkRun != nil, "check run was not completed")
+	assert.Equal(t, checkRun.GetConclusion(), "failure")
+
+	text := checkRun.GetOutput().GetText()
+	assert.Assert(t, strings.Contains(text, "error: colored failure for ansi stripping"), "failure snippet not found in check run text: %s", text)
+	assert.Assert(t, !strings.Contains(text, "\x1b"), "check run text contains terminal escape codes: %q", text)
+
+	annotations, _, err := g.Provider.Client().Checks.ListCheckRunAnnotations(ctx, g.Options.Organization, g.Options.Repo, checkRun.GetID(), &github.ListOptions{})
+	assert.NilError(t, err)
+	assert.Equal(t, len(annotations), 1, "expected one error detection annotation")
+	assert.Equal(t, annotations[0].GetPath(), ".tekton/pipelinerun-error-snippet-ansi.yaml")
+	assert.Equal(t, annotations[0].GetStartLine(), 1)
+	message := annotations[0].GetMessage()
+	assert.Assert(t, strings.Contains(message, "error: colored failure for ansi stripping"), "unexpected annotation message: %q", message)
+	assert.Assert(t, !strings.Contains(message, "\x1b"), "annotation message contains terminal escape codes: %q", message)
 }
 
 // Local Variables:

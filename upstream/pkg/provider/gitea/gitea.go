@@ -29,6 +29,7 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/versiondata"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
 	providerMetrics "github.com/openshift-pipelines/pipelines-as-code/pkg/provider/providermetrics"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/retryhttp"
 	providerstatus "github.com/openshift-pipelines/pipelines-as-code/pkg/provider/status"
 	"go.uber.org/zap"
 )
@@ -72,6 +73,7 @@ type Provider struct {
 	cachedChangedFiles *changedfiles.ChangedFiles
 	cachedOrgTeams     map[string][]*forgejo.Team
 	clock              clockwork.Clock
+	provenance         string
 }
 
 func (v *Provider) Client() *forgejo.Client {
@@ -273,14 +275,33 @@ func (v *Provider) SetClient(_ context.Context, run *params.Run, runevent *info.
 	if repo != nil && repo.Spec.Settings != nil && repo.Spec.Settings.Forgejo != nil && repo.Spec.Settings.Forgejo.UserAgent != "" {
 		userAgent = repo.Spec.Settings.Forgejo.UserAgent
 	}
+
+	clientOpts := []forgejo.ClientOption{forgejo.SetUserAgent(userAgent)}
+
+	// Configure retry transport before creating the client so the initial version
+	// check is also protected against transient failures
+	if v.pacInfo != nil && v.pacInfo.EnableAPIRetry {
+		retryOpts := retryhttp.Options{
+			MaxAttempts: v.pacInfo.APIRetryMaxAttempts,
+			MaxWait:     time.Duration(v.pacInfo.APIRetryMaxWaitSeconds) * time.Second,
+			Logger:      v.Logger,
+		}
+		httpClient := &http.Client{
+			Transport: retryhttp.Wrap(http.DefaultTransport, retryOpts),
+		}
+		clientOpts = append(clientOpts, forgejo.SetHTTPClient(httpClient))
+	}
+
 	// password is not exposed to CRD, it's only used from the e2e tests
 	if v.Password != "" && runevent.Provider.User != "" {
-		v.giteaClient, err = forgejo.NewClient(apiURL, forgejo.SetBasicAuth(runevent.Provider.User, v.Password), forgejo.SetUserAgent(userAgent))
+		clientOpts = append(clientOpts, forgejo.SetBasicAuth(runevent.Provider.User, v.Password))
+		v.giteaClient, err = forgejo.NewClient(apiURL, clientOpts...)
 	} else {
 		if runevent.Provider.Token == "" {
 			return fmt.Errorf("no git_provider.secret has been set in the repo crd")
 		}
-		v.giteaClient, err = forgejo.NewClient(apiURL, forgejo.SetToken(runevent.Provider.Token), forgejo.SetUserAgent(userAgent))
+		clientOpts = append(clientOpts, forgejo.SetToken(runevent.Provider.Token))
+		v.giteaClient, err = forgejo.NewClient(apiURL, clientOpts...)
 	}
 	if err != nil {
 		return err
@@ -318,7 +339,10 @@ func (v *Provider) CreateStatus(ctx context.Context, event *info.Event, statusOp
 	case providerstatus.ConclusionNeutral:
 		statusOpts.Title = "Unknown"
 		statusOpts.Summary = "doesn't know what happened with this commit."
-	case providerstatus.ConclusionCancelled, providerstatus.ConclusionCompleted, providerstatus.ConclusionSkipped:
+	case providerstatus.ConclusionSkipped:
+		statusOpts.Title = "Skipped"
+		statusOpts.Summary = "has <b>skipped</b>."
+	case providerstatus.ConclusionCancelled, providerstatus.ConclusionCompleted:
 	}
 
 	if statusOpts.Status == "in_progress" {
@@ -340,7 +364,9 @@ func (v *Provider) createStatusCommit(ctx context.Context, event *info.Event, pa
 	state := forgejo.StatusState(status.Conclusion)
 	switch status.Conclusion {
 	case providerstatus.ConclusionNeutral:
-		state = forgejo.StatusSuccess // We don't have a choice than setting as success, no pending here.c
+		state = forgejo.StatusSuccess // We don't have a choice than setting as success, no pending here.
+	case providerstatus.ConclusionSkipped:
+		state = forgejo.StatusSuccess // We don't have a choice than setting as success, skipped is neither pending nor failure.
 	case providerstatus.ConclusionPending:
 		if status.Title != "" {
 			state = forgejo.StatusPending
@@ -393,7 +419,7 @@ func (v *Provider) createStatusCommit(ctx context.Context, event *info.Event, pa
 		v.Logger.Warn("Comments related to PipelineRuns status have been disabled for Gitea/Forgejo pull requests")
 		return nil
 	case provider.UpdateCommentStrategy:
-		if eventType == triggertype.PullRequest || event.TriggerTarget == triggertype.PullRequest {
+		if !status.IsUnmatchedReport && (eventType == triggertype.PullRequest || event.TriggerTarget == triggertype.PullRequest) {
 			status.Text = strings.ReplaceAll(strings.TrimSpace(status.Text), "<br>", "\n")
 			statusComment := v.formatPipelineComment(event.SHA, status)
 			// Creating the prefix that is added to the status comment for a pipeline run.
@@ -412,7 +438,7 @@ func (v *Provider) createStatusCommit(ctx context.Context, event *info.Event, pa
 			}
 		}
 	default:
-		if status.Text != "" && (eventType == triggertype.PullRequest || event.TriggerTarget == triggertype.PullRequest) {
+		if !status.IsUnmatchedReport && status.Text != "" && (eventType == triggertype.PullRequest || event.TriggerTarget == triggertype.PullRequest) {
 			status.Text = strings.ReplaceAll(strings.TrimSpace(status.Text), "<br>", "\n")
 			_, _, err := v.Client().CreateIssueComment(
 				event.Organization, event.Repository,
@@ -461,6 +487,7 @@ func (v *Provider) GetCommitStatuses(_ context.Context, event *info.Event) ([]pr
 }
 
 func (v *Provider) GetTektonDir(_ context.Context, event *info.Event, path, provenance string) (string, error) {
+	v.provenance = provenance
 	// default set provenance from the SHA
 	revision := event.SHA
 	if provenance == "default_branch" {
@@ -468,6 +495,11 @@ func (v *Provider) GetTektonDir(_ context.Context, event *info.Event, path, prov
 		v.Logger.Infof("Using PipelineRun definition from default_branch: %s", event.DefaultBranch)
 	} else {
 		v.Logger.Infof("Using PipelineRun definition from source %s commit SHA: %s", event.TriggerTarget.String(), event.SHA)
+	}
+
+	if revision == "" {
+		return "", fmt.Errorf("cannot fetch %s directory: no revision to resolve (provenance %q, sha %q, default branch %q)",
+			path, provenance, event.SHA, event.DefaultBranch)
 	}
 
 	tektonDirSha := ""
@@ -548,7 +580,9 @@ func (v *Provider) getObject(sha string, event *info.Event) ([]byte, error) {
 func (v *Provider) GetFileInsideRepo(_ context.Context, runevent *info.Event, path, target string) (string, error) {
 	ref := runevent.SHA
 	if target != "" {
-		ref = runevent.BaseBranch
+		ref = target
+	} else if v.provenance == "default_branch" {
+		ref = runevent.DefaultBranch
 	}
 
 	content, _, err := v.Client().GetContents(runevent.Organization, runevent.Repository, ref, path)
@@ -624,6 +658,21 @@ func (v *Provider) GetCommitInfo(_ context.Context, runevent *info.Event) error 
 		}
 	}
 	runevent.HasSkipCommand = provider.SkipCI(commit.RepoCommit.Message)
+
+	// Incoming webhooks carry no payload to parse the default branch from, so
+	// fetch it from the API when it is missing.
+	if runevent.DefaultBranch == "" {
+		repoInfo, _, err := v.Client().GetRepo(runevent.Organization, runevent.Repository)
+		if err != nil {
+			return fmt.Errorf("getting default branch for %s/%s: %w",
+				runevent.Organization, runevent.Repository, err)
+		}
+		if repoInfo.DefaultBranch == "" {
+			return fmt.Errorf("repository %s/%s reports no default branch",
+				runevent.Organization, runevent.Repository)
+		}
+		runevent.DefaultBranch = repoInfo.DefaultBranch
+	}
 
 	return nil
 }

@@ -13,7 +13,6 @@ import (
 
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 
-	"github.com/google/go-github/v90/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/formatting"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/opscomments"
@@ -151,7 +150,7 @@ func TestGitlabOnComment(t *testing.T) {
 	defer cleanup()
 
 	note, _, err := topts.GLProvider.Client().Notes.CreateMergeRequestNote(topts.ProjectID, int64(topts.MRNumber), &clientGitlab.CreateMergeRequestNoteOptions{
-		Body: github.Ptr(triggerComment),
+		Body: new(triggerComment),
 	})
 	assert.NilError(t, err)
 	topts.ParamsRun.Clients.Log.Infof("Note %s/-/merge_requests/%d/notes/%d has been created", topts.GitHTMLURL, int64(topts.MRNumber), note.ID)
@@ -900,6 +899,73 @@ func TestGitlabMergeRequestCommentStrategyUpdateCELErrorReplacement(t *testing.T
 	assert.Equal(t, celErrorNoteID, updatedNoteID,
 		"Comment should be updated (ID %d), not a new one created (got ID %d)",
 		celErrorNoteID, updatedNoteID)
+}
+
+func TestGitlabMRSkippedStatusReported(t *testing.T) {
+	topts := &tgitlab.TestOpts{
+		NoMRCreation:    true,
+		SkipEventsCheck: true,
+		Settings: &v1alpha1.Settings{
+			StatusChecks: &v1alpha1.StatusChecks{
+				Enabled: true,
+				Mode:    v1alpha1.StatusCheckModePerPipelineRun,
+			},
+		},
+	}
+	ctx, cleanup := tgitlab.TestMR(t, topts)
+	defer cleanup()
+
+	entries, err := payload.GetEntries(
+		map[string]string{".tekton/pipelinerun-matching.yaml": "testdata/pipelinerun.yaml"},
+		topts.TargetNS, topts.DefaultBranch, triggertype.PullRequest.String(), map[string]string{},
+	)
+	assert.NilError(t, err)
+
+	// this is not going to match as it's targeting main branch on push event while we're gonna raise a pull request
+	skipEntry, err := payload.GetEntries(
+		map[string]string{".tekton/pipelinerun-skipped.yaml": "testdata/pipelinerun.yaml"},
+		topts.TargetNS, topts.DefaultBranch, triggertype.Push.String(), map[string]string{},
+	)
+	assert.NilError(t, err)
+	entries[".tekton/pipelinerun-skipped.yaml"] = skipEntry[".tekton/pipelinerun-skipped.yaml"]
+
+	scmOpts := &scm.Opts{
+		GitURL:        topts.GitCloneURL,
+		Log:           topts.ParamsRun.Clients.Log,
+		WebURL:        topts.GitHTMLURL,
+		TargetRefName: topts.TargetRefName,
+		BaseRefName:   topts.DefaultBranch,
+	}
+	topts.SHA = scm.PushFilesToRefGit(t, scmOpts, entries)
+
+	mrTitle := "TestMergeRequest - " + topts.TargetRefName
+	mrID, err := tgitlab.CreateMR(topts.GLProvider.Client(), topts.ProjectID, topts.TargetRefName, topts.DefaultBranch, mrTitle)
+	assert.NilError(t, err)
+	topts.MRNumber = mrID
+	topts.ParamsRun.Clients.Log.Infof("MergeRequest %s/-/merge_requests/%d has been created", topts.GitHTMLURL, mrID)
+
+	sopt := twait.SuccessOpt{
+		TargetNS:        topts.TargetNS,
+		OnEvent:         "Merge Request",
+		NumberofPRMatch: 1,
+		MinNumberStatus: 1,
+	}
+	twait.Succeeded(ctx, t, topts.ParamsRun, topts.Opts, sopt)
+
+	mr, _, err := topts.GLProvider.Client().MergeRequests.GetMergeRequest(topts.ProjectID, int64(topts.MRNumber), nil)
+	assert.NilError(t, err)
+
+	commitStatuses, _, err := topts.GLProvider.Client().Commits.GetCommitStatuses(topts.ProjectID, mr.SHA, &clientGitlab.GetCommitStatusesOptions{})
+	assert.NilError(t, err)
+
+	foundStatus := false
+	for _, cs := range commitStatuses {
+		if cs.Status == "skipped" && strings.Contains(cs.Name, "pipelinerun-skipped") {
+			foundStatus = true
+			break
+		}
+	}
+	assert.Equal(t, foundStatus, true, "should have found the skipped status for the non-matching pipeline run")
 }
 
 // Local Variables:

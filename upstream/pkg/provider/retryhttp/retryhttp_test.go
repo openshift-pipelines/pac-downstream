@@ -1,6 +1,7 @@
 package retryhttp
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -239,6 +240,83 @@ func TestGetBodyFailureDoesNotReturnClosedResponse(t *testing.T) {
 	assert.Equal(t, int64(1), atomic.LoadInt64(&calls))
 }
 
+func TestRoundTripContextCancelledWhileWaiting(t *testing.T) {
+	var calls int64
+	ctx, cancel := context.WithCancel(t.Context())
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		atomic.AddInt64(&calls, 1)
+		w.Header().Set("Retry-After", "1")
+		w.WriteHeader(http.StatusTooManyRequests)
+		cancel()
+	}))
+	defer server.Close()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL, nil)
+	assert.NilError(t, err)
+
+	client := &http.Client{Transport: Wrap(nil, Options{MaxAttempts: 2, MaxWait: 2 * time.Second})}
+	resp, err := client.Do(req)
+	assert.Assert(t, errors.Is(err, ctx.Err()))
+	if resp != nil {
+		resp.Body.Close()
+	}
+	assert.Assert(t, resp == nil)
+	assert.Equal(t, int64(1), atomic.LoadInt64(&calls))
+}
+
+func TestShouldRetry(t *testing.T) {
+	tests := []struct {
+		name   string
+		method string
+		resp   *http.Response
+		err    error
+		want   bool
+	}{
+		{
+			name:   "network error retries get",
+			method: http.MethodGet,
+			err:    errors.New("temporary network error"),
+			want:   true,
+		},
+		{
+			name:   "network error does not retry post",
+			method: http.MethodPost,
+			err:    errors.New("temporary network error"),
+			want:   false,
+		},
+		{
+			name:   "forbidden with retry after is rate limited",
+			method: http.MethodGet,
+			resp: &http.Response{
+				StatusCode: http.StatusForbidden,
+				Header:     http.Header{"Retry-After": []string{"1"}},
+			},
+			want: true,
+		},
+		{
+			name:   "not implemented does not retry",
+			method: http.MethodGet,
+			resp: &http.Response{
+				StatusCode: http.StatusNotImplemented,
+				Header:     http.Header{},
+			},
+			want: false,
+		},
+	}
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "https://example.test/path", nil)
+	tr := &transport{}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req.Method = tt.method
+
+			got := tr.shouldRetry(req, tt.resp, tt.err)
+
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
 func TestBackoffLargeAttemptDoesNotOverflow(t *testing.T) {
 	maxWait := 2 * time.Second
 	tr := &transport{opts: Options{MaxWait: maxWait}}
@@ -247,4 +325,108 @@ func TestBackoffLargeAttemptDoesNotOverflow(t *testing.T) {
 	assert.Assert(t, ok)
 	assert.Assert(t, wait >= 0)
 	assert.Assert(t, wait <= maxWait)
+}
+
+func TestBackoffHeadersAndJitter(t *testing.T) {
+	tests := []struct {
+		name    string
+		maxWait time.Duration
+		attempt int
+		resp    *http.Response
+		wantOK  bool
+		minWait time.Duration
+	}{
+		{
+			name:    "retry after within max wait",
+			maxWait: 2 * time.Second,
+			attempt: 1,
+			resp: &http.Response{
+				Header: http.Header{"Retry-After": []string{"1"}},
+			},
+			wantOK:  true,
+			minWait: time.Second,
+		},
+		{
+			name:    "rate limit reset beyond max wait gives up",
+			maxWait: time.Second,
+			attempt: 1,
+			resp: &http.Response{
+				Header: http.Header{
+					"X-Ratelimit-Remaining": []string{"0"},
+					"X-Ratelimit-Reset":     []string{fmt.Sprintf("%d", time.Now().Add(time.Hour).Unix())},
+				},
+			},
+			wantOK: false,
+		},
+		{
+			name:    "past rate limit reset waits with jitter only",
+			maxWait: time.Second,
+			attempt: 1,
+			resp: &http.Response{
+				Header: http.Header{
+					"X-Ratelimit-Remaining": []string{"0"},
+					"X-Ratelimit-Reset":     []string{fmt.Sprintf("%d", time.Now().Add(-time.Hour).Unix())},
+				},
+			},
+			wantOK: true,
+		},
+		{
+			name:    "exponential backoff caps at max wait",
+			maxWait: 1500 * time.Millisecond,
+			attempt: 3,
+			resp:    nil,
+			wantOK:  true,
+			minWait: time.Second,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tr := &transport{opts: Options{MaxWait: tt.maxWait}}
+
+			wait, ok := tr.backoff(tt.attempt, tt.resp)
+
+			assert.Equal(t, tt.wantOK, ok)
+			if !tt.wantOK {
+				return
+			}
+			assert.Assert(t, wait >= tt.minWait)
+			assert.Assert(t, wait <= tt.maxWait)
+		})
+	}
+}
+
+func TestAddJitter(t *testing.T) {
+	tests := []struct {
+		name      string
+		maxWait   time.Duration
+		wait      time.Duration
+		maxJitter time.Duration
+		want      time.Duration
+	}{
+		{
+			name:      "no room for jitter returns max wait",
+			maxWait:   time.Second,
+			wait:      time.Second,
+			maxJitter: time.Second,
+			want:      time.Second,
+		},
+		{
+			name:      "zero max jitter returns wait",
+			maxWait:   2 * time.Second,
+			wait:      time.Second,
+			maxJitter: 0,
+			want:      time.Second,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tr := &transport{opts: Options{MaxWait: tt.maxWait}}
+
+			got := tr.addJitter(tt.wait, tt.maxJitter)
+
+			assert.Equal(t, tt.want, got)
+		})
+	}
 }

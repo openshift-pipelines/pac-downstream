@@ -17,7 +17,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/go-github/v90/github"
+	"github.com/google/go-github/v91/github"
 	"github.com/jonboulle/clockwork"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
@@ -378,9 +378,9 @@ func TestGetTektonDir(t *testing.T) {
 					tt.event.Organization, tt.event.Repository, tt.event.DefaultBranch),
 					func(rw http.ResponseWriter, _ *http.Request) {
 						branch := &github.Branch{
-							Name: github.Ptr(tt.event.DefaultBranch),
+							Name: new(tt.event.DefaultBranch),
 							Commit: &github.RepositoryCommit{
-								SHA: github.Ptr(shaDir),
+								SHA: new(shaDir),
 							},
 						}
 						b, _ := json.Marshal(branch)
@@ -467,9 +467,9 @@ func TestGetTektonDirGraphQL(t *testing.T) {
 							SHA: &event.SHA,
 							Entries: []*github.TreeEntry{
 								{
-									Path: github.Ptr(".tekton"),
-									Type: github.Ptr("tree"),
-									SHA:  github.Ptr("tektondirsha"),
+									Path: new(".tekton"),
+									Type: new("tree"),
+									SHA:  new("tektondirsha"),
 								},
 							},
 						}
@@ -485,14 +485,14 @@ func TestGetTektonDirGraphQL(t *testing.T) {
 							SHA: &tektonDirSha,
 							Entries: []*github.TreeEntry{
 								{
-									Path: github.Ptr("pipeline.yaml"),
-									Type: github.Ptr("blob"),
-									SHA:  github.Ptr("pipelinesha"),
+									Path: new("pipeline.yaml"),
+									Type: new("blob"),
+									SHA:  new("pipelinesha"),
 								},
 								{
-									Path: github.Ptr("pipelinerun.yaml"),
-									Type: github.Ptr("blob"),
-									SHA:  github.Ptr("pipelinerunsha"),
+									Path: new("pipelinerun.yaml"),
+									Type: new("blob"),
+									SHA:  new("pipelinerunsha"),
 								},
 							},
 						}
@@ -523,9 +523,9 @@ func TestGetTektonDirGraphQL(t *testing.T) {
 
 				mux.HandleFunc("/repos/tekton/cat/branches/main", func(rw http.ResponseWriter, _ *http.Request) {
 					branch := &github.Branch{
-						Name: github.Ptr("main"),
+						Name: new("main"),
 						Commit: &github.RepositoryCommit{
-							SHA: github.Ptr(resolvedSHA),
+							SHA: new(resolvedSHA),
 						},
 					}
 					b, _ := json.Marshal(branch)
@@ -533,12 +533,12 @@ func TestGetTektonDirGraphQL(t *testing.T) {
 				})
 				mux.HandleFunc("/repos/tekton/cat/git/trees/"+resolvedSHA, func(rw http.ResponseWriter, _ *http.Request) {
 					tree := &github.Tree{
-						SHA: github.Ptr(resolvedSHA),
+						SHA: new(resolvedSHA),
 						Entries: []*github.TreeEntry{
 							{
-								Path: github.Ptr(".tekton"),
-								Type: github.Ptr("tree"),
-								SHA:  github.Ptr(tektonDirSHA),
+								Path: new(".tekton"),
+								Type: new("tree"),
+								SHA:  new(tektonDirSHA),
 							},
 						},
 					}
@@ -547,17 +547,17 @@ func TestGetTektonDirGraphQL(t *testing.T) {
 				})
 				mux.HandleFunc("/repos/tekton/cat/git/trees/"+tektonDirSHA, func(rw http.ResponseWriter, _ *http.Request) {
 					tree := &github.Tree{
-						SHA: github.Ptr(tektonDirSHA),
+						SHA: new(tektonDirSHA),
 						Entries: []*github.TreeEntry{
 							{
-								Path: github.Ptr("pipeline.yaml"),
-								Type: github.Ptr("blob"),
-								SHA:  github.Ptr("pipeline-sha"),
+								Path: new("pipeline.yaml"),
+								Type: new("blob"),
+								SHA:  new("pipeline-sha"),
 							},
 							{
-								Path: github.Ptr("pipelinerun.yaml"),
-								Type: github.Ptr("blob"),
-								SHA:  github.Ptr("pipelinerun-sha"),
+								Path: new("pipelinerun.yaml"),
+								Type: new("blob"),
+								SHA:  new("pipelinerun-sha"),
 							},
 						},
 					}
@@ -2169,6 +2169,244 @@ func TestExpandGlobAndAddRepoIDsInvalidPattern(t *testing.T) {
 	assert.ErrorContains(t, err, "invalid repo glob pattern")
 }
 
+func TestExpandGlobAndAddRepoIDs(t *testing.T) {
+	tests := []struct {
+		name        string
+		pattern     string
+		cachedRepos []*github.Repository
+		setup       func(t *testing.T, mux *http.ServeMux, calls *atomic.Int32)
+		wantIDs     []int64
+		wantCalls   int32
+		wantErr     string
+	}{
+		{
+			name:    "paginates app repositories",
+			pattern: "owner/*",
+			setup: func(t *testing.T, mux *http.ServeMux, calls *atomic.Int32) {
+				t.Helper()
+				mux.HandleFunc("/installation/repositories", func(rw http.ResponseWriter, r *http.Request) {
+					calls.Add(1)
+					switch r.URL.Query().Get("page") {
+					case "", "1":
+						rw.Header().Add("Link", `<https://api.github.com/installation/repositories?page=2&per_page=1>; rel="next"`)
+						fmt.Fprint(rw, `{"total_count":2,"repositories":[{"id":1,"full_name":"owner/one"}]}`)
+					case "2":
+						fmt.Fprint(rw, `{"total_count":2,"repositories":[{"id":2,"full_name":"owner/two"},{"id":3,"full_name":"other/three"}]}`)
+					default:
+						t.Fatalf("unexpected page %q", r.URL.Query().Get("page"))
+					}
+				})
+			},
+			wantIDs:   []int64{1, 2},
+			wantCalls: 2,
+		},
+		{
+			name:    "returns list app repos error",
+			pattern: "owner/*",
+			setup: func(t *testing.T, mux *http.ServeMux, calls *atomic.Int32) {
+				t.Helper()
+				mux.HandleFunc("/installation/repositories", func(rw http.ResponseWriter, _ *http.Request) {
+					calls.Add(1)
+					rw.WriteHeader(http.StatusInternalServerError)
+					fmt.Fprint(rw, `{"message":"boom"}`)
+				})
+			},
+			wantCalls: 1,
+			wantErr:   "failed to list app repos",
+		},
+		{
+			name:    "uses populated cache without api call",
+			pattern: "cached/*",
+			cachedRepos: []*github.Repository{
+				testGitHubRepository("cached/one", 10),
+				testGitHubRepository("cached/two", 11),
+				testGitHubRepository("other/three", 12),
+			},
+			wantIDs: []int64{10, 11},
+		},
+		{
+			name:    "invalid glob pattern",
+			pattern: "[",
+			wantErr: "invalid repo glob pattern",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, _ := rtesting.SetupFakeContext(t)
+			fakeclient, mux, _, teardown := ghtesthelper.SetupGH()
+			defer teardown()
+
+			var calls atomic.Int32
+			if tt.setup != nil {
+				tt.setup(t, mux, &calls)
+			}
+
+			log, _ := logger.GetLogger()
+			provider := &Provider{
+				ghClient:      fakeclient,
+				PaginedNumber: 1,
+				Logger:        log,
+			}
+			cache := tt.cachedRepos
+			err := provider.expandGlobAndAddRepoIDs(ctx, tt.pattern, &cache)
+			if tt.wantErr != "" {
+				assert.ErrorContains(t, err, tt.wantErr)
+				assert.Equal(t, tt.wantCalls, calls.Load())
+				return
+			}
+
+			assert.NilError(t, err)
+			assert.DeepEqual(t, tt.wantIDs, provider.RepositoryIDs)
+			assert.Equal(t, tt.wantCalls, calls.Load())
+		})
+	}
+}
+
+func testGitHubRepository(fullName string, id int64) *github.Repository {
+	return &github.Repository{
+		ID:       &id,
+		FullName: &fullName,
+	}
+}
+
+func TestGetUserLogin(t *testing.T) {
+	tests := []struct {
+		name      string
+		event     *info.Event
+		cached    string
+		setup     func(t *testing.T, mux *http.ServeMux)
+		run       *params.Run
+		wantLogin string
+		wantErr   string
+	}{
+		{
+			name:      "cached login skips api calls",
+			event:     info.NewEvent(),
+			cached:    "already-known",
+			wantLogin: "already-known",
+		},
+		{
+			name:  "pat user endpoint error",
+			event: info.NewEvent(),
+			setup: func(t *testing.T, mux *http.ServeMux) {
+				t.Helper()
+				mux.HandleFunc("/user", func(rw http.ResponseWriter, _ *http.Request) {
+					rw.WriteHeader(http.StatusInternalServerError)
+					fmt.Fprint(rw, `{"message":"boom"}`)
+				})
+			},
+			wantErr: "unable to fetch user info",
+		},
+		{
+			name: "app slug error",
+			event: &info.Event{
+				InstallationID: 123,
+				Provider:       &info.Provider{URL: keys.PublicGithubAPIURL},
+			},
+			run:     newTestRun(t, "github.com"),
+			wantErr: "failed to fetch app slug",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, _ := rtesting.SetupFakeContext(t)
+			fakeclient, mux, _, teardown := ghtesthelper.SetupGH()
+			defer teardown()
+			if tt.setup != nil {
+				tt.setup(t, mux)
+			}
+
+			log, _ := logger.GetLogger()
+			provider := &Provider{
+				ghClient:     fakeclient,
+				Logger:       log,
+				Run:          tt.run,
+				pacUserLogin: tt.cached,
+			}
+			err := provider.getUserLogin(ctx, tt.event)
+			if tt.wantErr != "" {
+				assert.ErrorContains(t, err, tt.wantErr)
+				return
+			}
+
+			assert.NilError(t, err)
+			assert.Equal(t, tt.wantLogin, provider.pacUserLogin)
+		})
+	}
+}
+
+func TestResponseStatusCodeAndGithubRequestID(t *testing.T) {
+	tests := []struct {
+		name          string
+		resp          *github.Response
+		wantStatus    int
+		wantRequestID string
+		skipStatus    bool
+	}{
+		{
+			name: "nil response",
+		},
+		{
+			name:       "nil embedded response",
+			resp:       &github.Response{},
+			skipStatus: true,
+		},
+		{
+			name: "response has status and request id",
+			resp: &github.Response{
+				Response: &http.Response{
+					StatusCode: http.StatusAccepted,
+					Header: http.Header{
+						"X-Github-Request-Id": []string{"rid-123"},
+					},
+				},
+			},
+			wantStatus:    http.StatusAccepted,
+			wantRequestID: "rid-123",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if !tt.skipStatus {
+				assert.Equal(t, tt.wantStatus, responseStatusCode(tt.resp))
+			}
+			assert.Equal(t, tt.wantRequestID, githubRequestID(tt.resp))
+		})
+	}
+}
+
+func TestGetTemplate(t *testing.T) {
+	tests := []struct {
+		name        string
+		commentType provider.CommentType
+		wantEmpty   bool
+	}{
+		{
+			name:        "starting pipeline template",
+			commentType: provider.StartingPipelineType,
+		},
+		{
+			name:        "pipeline run status template",
+			commentType: provider.PipelineRunStatusType,
+		},
+		{
+			name:        "queueing pipeline template",
+			commentType: provider.QueueingPipelineType,
+		},
+		{
+			name:        "unknown template",
+			commentType: provider.CommentType(99),
+			wantEmpty:   true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := (&Provider{}).GetTemplate(tt.commentType)
+			assert.Equal(t, tt.wantEmpty, got == "")
+		})
+	}
+}
+
 func TestGetPullRequest(t *testing.T) {
 	const (
 		org   = "owner"
@@ -2730,11 +2968,11 @@ func TestSkipPushEventForPRCommits(t *testing.T) {
 			pacInfoEnabled: true,
 			pushEvent: &github.PushEvent{
 				Repo: &github.PushEventRepository{
-					Name:  github.Ptr("testRepo"),
-					Owner: &github.User{Login: github.Ptr("testOrg")},
+					Name:  new("testRepo"),
+					Owner: &github.User{Login: new("testOrg")},
 				},
 				HeadCommit: &github.HeadCommit{
-					ID: github.Ptr("abc123"),
+					ID: new("abc123"),
 				},
 			},
 			mockAPIs: map[string]func(rw http.ResponseWriter, r *http.Request){
@@ -2752,19 +2990,19 @@ func TestSkipPushEventForPRCommits(t *testing.T) {
 			pacInfoEnabled: true,
 			pushEvent: &github.PushEvent{
 				Repo: &github.PushEventRepository{
-					Name:          github.Ptr("testRepo"),
-					Owner:         &github.User{Login: github.Ptr("testOrg")},
-					DefaultBranch: github.Ptr("main"),
-					HTMLURL:       github.Ptr("https://github.com/testOrg/testRepo"),
-					ID:            github.Ptr(iid),
+					Name:          new("testRepo"),
+					Owner:         &github.User{Login: new("testOrg")},
+					DefaultBranch: new("main"),
+					HTMLURL:       new("https://github.com/testOrg/testRepo"),
+					ID:            new(iid),
 				},
 				HeadCommit: &github.HeadCommit{
-					ID:      github.Ptr("abc123"),
-					URL:     github.Ptr("https://github.com/testOrg/testRepo/commit/abc123"),
-					Message: github.Ptr("Test commit message"),
+					ID:      new("abc123"),
+					URL:     new("https://github.com/testOrg/testRepo/commit/abc123"),
+					Message: new("Test commit message"),
 				},
-				Ref:    github.Ptr("refs/heads/main"),
-				Sender: &github.User{Login: github.Ptr("testUser")},
+				Ref:    new("refs/heads/main"),
+				Sender: &github.User{Login: new("testUser")},
 			},
 			mockAPIs: map[string]func(rw http.ResponseWriter, r *http.Request){
 				"/repos/testOrg/testRepo/pulls": func(rw http.ResponseWriter, r *http.Request) {
@@ -2785,19 +3023,19 @@ func TestSkipPushEventForPRCommits(t *testing.T) {
 			pacInfoEnabled: false,
 			pushEvent: &github.PushEvent{
 				Repo: &github.PushEventRepository{
-					Name:          github.Ptr("testRepo"),
-					Owner:         &github.User{Login: github.Ptr("testOrg")},
-					DefaultBranch: github.Ptr("main"),
-					HTMLURL:       github.Ptr("https://github.com/testOrg/testRepo"),
-					ID:            github.Ptr(iid),
+					Name:          new("testRepo"),
+					Owner:         &github.User{Login: new("testOrg")},
+					DefaultBranch: new("main"),
+					HTMLURL:       new("https://github.com/testOrg/testRepo"),
+					ID:            new(iid),
 				},
 				HeadCommit: &github.HeadCommit{
-					ID:      github.Ptr("abc123"),
-					URL:     github.Ptr("https://github.com/testOrg/testRepo/commit/abc123"),
-					Message: github.Ptr("Test commit message"),
+					ID:      new("abc123"),
+					URL:     new("https://github.com/testOrg/testRepo/commit/abc123"),
+					Message: new("Test commit message"),
 				},
-				Ref:    github.Ptr("refs/heads/main"),
-				Sender: &github.User{Login: github.Ptr("testUser")},
+				Ref:    new("refs/heads/main"),
+				Sender: &github.User{Login: new("testUser")},
 			},
 			isPartOfPR: false, // This should not be checked when feature is disabled
 			wantErr:    false,
@@ -2807,11 +3045,11 @@ func TestSkipPushEventForPRCommits(t *testing.T) {
 			pacInfoEnabled: true,
 			pushEvent: &github.PushEvent{
 				Repo: &github.PushEventRepository{
-					Name:  github.Ptr("testRepo"),
-					Owner: &github.User{Login: github.Ptr("testOrg")},
+					Name:  new("testRepo"),
+					Owner: &github.User{Login: new("testOrg")},
 				},
 				HeadCommit: &github.HeadCommit{
-					ID: github.Ptr("1234"),
+					ID: new("1234"),
 				},
 			},
 			mockAPIs: map[string]func(rw http.ResponseWriter, r *http.Request){
