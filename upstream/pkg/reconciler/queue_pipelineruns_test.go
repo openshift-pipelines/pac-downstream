@@ -7,6 +7,7 @@ import (
 
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	pacv1alpha1 "github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
+	pacapi "github.com/openshift-pipelines/pipelines-as-code/pkg/generated/listers/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/clients"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
@@ -20,10 +21,39 @@ import (
 	"gotest.tools/v3/assert"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	k8stesting "k8s.io/client-go/testing"
 	rtesting "knative.dev/pkg/reconciler/testing"
 )
+
+type errorRepositoryLister struct {
+	err error
+}
+
+var _ pacapi.RepositoryLister = (*errorRepositoryLister)(nil)
+
+func (l *errorRepositoryLister) List(_ labels.Selector) ([]*pacv1alpha1.Repository, error) {
+	return nil, l.err
+}
+
+func (l *errorRepositoryLister) Repositories(_ string) pacapi.RepositoryNamespaceLister {
+	return &errorRepositoryNamespaceLister{err: l.err}
+}
+
+type errorRepositoryNamespaceLister struct {
+	err error
+}
+
+var _ pacapi.RepositoryNamespaceLister = (*errorRepositoryNamespaceLister)(nil)
+
+func (l *errorRepositoryNamespaceLister) List(_ labels.Selector) ([]*pacv1alpha1.Repository, error) {
+	return nil, l.err
+}
+
+func (l *errorRepositoryNamespaceLister) Get(_ string) (*pacv1alpha1.Repository, error) {
+	return nil, l.err
+}
 
 func TestQueuePipelineRun(t *testing.T) {
 	tests := []struct {
@@ -216,6 +246,112 @@ func TestQueuePipelineRun(t *testing.T) {
 				assert.NilError(t, err)
 				assert.Assert(t, cachedRepo.Spec.Settings == nil, "global settings should not mutate the cached Repository")
 			}
+		})
+	}
+}
+
+func TestQueuePipelineRunAdditionalBranches(t *testing.T) {
+	const ns = "test"
+
+	tests := []struct {
+		name          string
+		repoLister    pacapi.RepositoryLister
+		repositories  []*pacv1alpha1.Repository
+		pipelineRuns  []*tektonv1.PipelineRun
+		runningQueue  []string
+		wantErrString string
+		wantReleased  bool
+	}{
+		{
+			name: "repository lister error is returned",
+			repoLister: &errorRepositoryLister{
+				err: fmt.Errorf("cache failed"),
+			},
+			wantErrString: "error getting PipelineRun",
+		},
+		{
+			name: "zero concurrency update error is returned",
+			repositories: []*pacv1alpha1.Repository{{
+				ObjectMeta: metav1.ObjectMeta{Name: "test-repo", Namespace: ns},
+				Spec: pacv1alpha1.RepositorySpec{
+					ConcurrencyLimit: new(int),
+				},
+			}},
+			pipelineRuns: []*tektonv1.PipelineRun{{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "queued",
+					Namespace: ns,
+					Annotations: map[string]string{
+						keys.ExecutionOrder: ns + "/queued",
+						keys.Repository:     "test-repo",
+						keys.State:          "queued",
+					},
+				},
+				Spec: tektonv1.PipelineRunSpec{Status: tektonv1.PipelineRunSpecStatusPending},
+			}},
+			wantErrString: "failed to update PipelineRun to in_progress",
+		},
+		{
+			name: "invalid acquired queue key is dropped",
+			repositories: []*pacv1alpha1.Repository{{
+				ObjectMeta: metav1.ObjectMeta{Name: "test-repo", Namespace: ns},
+			}},
+			runningQueue:  []string{"invalid-key"},
+			wantErrString: "max iterations reached",
+			wantReleased:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, _ := rtesting.SetupFakeContext(t)
+			observer, _ := zapobserver.New(zap.InfoLevel)
+			fakelogger := zap.New(observer).Sugar()
+
+			testData := testclient.Data{
+				Repositories: tt.repositories,
+				PipelineRuns: tt.pipelineRuns,
+			}
+			stdata, informers := testclient.SeedTestData(t, ctx, testData)
+			repoLister := tt.repoLister
+			if repoLister == nil {
+				repoLister = informers.Repository.Lister()
+			}
+			released := []string{}
+			r := &Reconciler{
+				qm: testconcurrency.TestQMI{
+					RunningQueue: tt.runningQueue,
+					Removed:      &released,
+				},
+				repoLister: repoLister,
+				run: &params.Run{
+					Info: info.Info{
+						Kube:       &info.KubeOpts{Namespace: "global"},
+						Controller: &info.ControllerInfo{},
+						Pac:        &info.PacOpts{},
+					},
+					Clients: clients.Clients{
+						PipelineAsCode: stdata.PipelineAsCode,
+						Tekton:         stdata.Pipeline,
+						Kube:           stdata.Kube,
+						Log:            fakelogger,
+					},
+				},
+			}
+
+			trigger := &tektonv1.PipelineRun{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "trigger",
+					Namespace: ns,
+					Annotations: map[string]string{
+						keys.ExecutionOrder: ns + "/queued",
+						keys.Repository:     "test-repo",
+					},
+				},
+			}
+			err := r.queuePipelineRun(ctx, fakelogger, trigger)
+			assert.ErrorContains(t, err, tt.wantErrString)
+			assert.Equal(t, len(released) > 0, tt.wantReleased)
 		})
 	}
 }

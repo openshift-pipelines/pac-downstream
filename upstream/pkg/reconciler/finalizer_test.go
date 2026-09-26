@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
@@ -17,6 +18,7 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/settings"
 	queuepkg "github.com/openshift-pipelines/pipelines-as-code/pkg/queue"
 	testclient "github.com/openshift-pipelines/pipelines-as-code/pkg/test/clients"
+	testconcurrency "github.com/openshift-pipelines/pipelines-as-code/pkg/test/concurrency"
 	ghtesthelper "github.com/openshift-pipelines/pipelines-as-code/pkg/test/github"
 	testkubernetestint "github.com/openshift-pipelines/pipelines-as-code/pkg/test/kubernetestint"
 	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
@@ -203,6 +205,164 @@ func TestFinalizeKindControllerInfoHandling(t *testing.T) {
 				assert.DeepEqual(t, r.run.Info.Controller, tt.wantControl)
 				assert.Assert(t, r.run.Info.Controller == controller, "finalize must keep the shared controller pointer")
 			}
+		})
+	}
+}
+
+func TestFinalizeKindErrorBranches(t *testing.T) {
+	tests := []struct {
+		name         string
+		repoLister   *errorRepositoryLister
+		repositories []*v1alpha1.Repository
+		nextInQueue  []string
+		wantErrSub   string
+		wantLogSub   string
+	}{
+		{
+			name: "repository lister error is returned",
+			repoLister: &errorRepositoryLister{
+				err: fmt.Errorf("cache failed"),
+			},
+			wantErrSub: "cache failed",
+		},
+		{
+			name: "cancel reporting error is logged and ignored",
+			repositories: []*v1alpha1.Repository{{
+				ObjectMeta: metav1.ObjectMeta{Name: "test-repo", Namespace: "test-ns"},
+			}},
+			wantLogSub: "failed to report deleted pipeline run as cancelled",
+		},
+		{
+			name: "next queued pipelinerun get error is returned",
+			repositories: []*v1alpha1.Repository{{
+				ObjectMeta: metav1.ObjectMeta{Name: "test-repo", Namespace: "test-ns"},
+			}},
+			nextInQueue: []string{"test-ns/missing"},
+			wantErrSub:  "not found",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, _ := rtesting.SetupFakeContext(t)
+			observer, log := zapobserver.New(zap.ErrorLevel)
+			logger := zap.New(observer).Sugar()
+			ctx = logging.WithLogger(ctx, logger)
+
+			pr := &tektonv1.PipelineRun{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-pr",
+					Namespace: "test-ns",
+					Annotations: map[string]string{
+						keys.State:      kubeinteraction.StateQueued,
+						keys.Repository: "test-repo",
+					},
+				},
+			}
+			stdata, informers := testclient.SeedTestData(t, ctx, testclient.Data{
+				Repositories: tt.repositories,
+			})
+			repoLister := informers.Repository.Lister()
+			if tt.repoLister != nil {
+				repoLister = tt.repoLister
+			}
+			nextInQueue := append([]string{}, tt.nextInQueue...)
+			r := Reconciler{
+				repoLister: repoLister,
+				qm: testconcurrency.TestQMI{
+					NextInQueue: &nextInQueue,
+				},
+				run: &params.Run{
+					Clients: clients.Clients{
+						Tekton: stdata.Pipeline,
+						Kube:   stdata.Kube,
+						Log:    logger,
+					},
+					Info: info.Info{
+						Kube:       &info.KubeOpts{Namespace: "global"},
+						Controller: &info.ControllerInfo{GlobalRepository: "global-repo"},
+						Pac:        info.NewPacOpts(),
+					},
+				},
+			}
+
+			err := r.FinalizeKind(ctx, pr)
+			if tt.wantErrSub != "" {
+				assert.ErrorContains(t, err, tt.wantErrSub)
+			} else {
+				assert.NilError(t, err)
+			}
+			if tt.wantLogSub != "" {
+				assert.Assert(t, log.FilterMessageSnippet(tt.wantLogSub).Len() > 0, "expected log %q", tt.wantLogSub)
+			}
+		})
+	}
+}
+
+func TestReportPipelineRunAsCancelledStatusError(t *testing.T) {
+	tests := []struct {
+		name string
+	}{
+		{name: "provider status error is returned"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, _ := rtesting.SetupFakeContext(t)
+			ctx = info.StoreNS(ctx, system.Namespace())
+			observer, _ := zapobserver.New(zap.InfoLevel)
+			logger := zap.New(observer).Sugar()
+			ctx = logging.WithLogger(ctx, logger)
+
+			_, mux, mockServerURL, teardown := ghtesthelper.SetupGH()
+			defer teardown()
+			mux.HandleFunc("/repos/org/repo/statuses/123afc", func(rw http.ResponseWriter, _ *http.Request) {
+				http.Error(rw, "provider failed", http.StatusInternalServerError)
+			})
+
+			oldBackoffSchedule := backoffSchedule
+			backoffSchedule = []time.Duration{time.Millisecond}
+			defer func() { backoffSchedule = oldBackoffSchedule }()
+
+			repo := finalizeTestRepo.DeepCopy()
+			repo.Spec.GitProvider.URL = mockServerURL
+			testData := testclient.Data{
+				Repositories: []*v1alpha1.Repository{repo},
+				ConfigMap: []*corev1.ConfigMap{{
+					ObjectMeta: metav1.ObjectMeta{Name: "pipelines-as-code", Namespace: system.Namespace()},
+					Data: map[string]string{
+						settings.TrustedProviderHostnamesKey: strings.TrimPrefix(mockServerURL, "http://"),
+					},
+				}},
+			}
+			stdata, informers := testclient.SeedTestData(t, ctx, testData)
+
+			run := &params.Run{
+				Clients: clients.Clients{
+					PipelineAsCode: stdata.PipelineAsCode,
+					Kube:           stdata.Kube,
+					Log:            logger,
+				},
+				Info: info.Info{
+					Kube:       &info.KubeOpts{Namespace: "pac"},
+					Controller: &info.ControllerInfo{GlobalRepository: "global-repo"},
+					Pac:        info.NewPacOpts(),
+				},
+			}
+			run.Clients.SetConsoleUI(consoleui.FallBackConsole{})
+			r := Reconciler{
+				repoLister: informers.Repository.Lister(),
+				qm:         queuepkg.NewManager(logger),
+				run:        run,
+				kinteract: &testkubernetestint.KinterfaceTest{
+					GetSecretResult: map[string]string{
+						"pac-git-basic-auth-owner-repo": "test-token",
+					},
+				},
+			}
+
+			err := r.reportPipelineRunAsCancelled(ctx, repo, getTestPR("test-pr", kubeinteraction.StateStarted))
+			assert.ErrorContains(t, err, "failed to report cancelled status to provider")
 		})
 	}
 }
