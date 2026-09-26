@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/go-github/v85/github"
+	"github.com/google/go-github/v91/github"
 	"github.com/jonboulle/clockwork"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
@@ -1624,7 +1624,7 @@ func TestMatchPipelinerunAnnotationAndRepositories(t *testing.T) {
 			fakeclient, mux, ghTestServerURL, teardown := ghtesthelper.SetupGH()
 			defer teardown()
 			vcx := &ghprovider.Provider{
-				Token: github.Ptr("None"),
+				Token: new("None"),
 			}
 			vcx.SetGithubClient(fakeclient)
 			if tt.args.runevent.Request == nil {
@@ -1634,8 +1634,8 @@ func TestMatchPipelinerunAnnotationAndRepositories(t *testing.T) {
 				commitFiles := make([]*github.CommitFile, len(tt.args.fileChanged))
 				for i, v := range tt.args.fileChanged {
 					commitFiles[i] = &github.CommitFile{
-						Filename: github.Ptr(v.FileName),
-						Status:   github.Ptr(v.Status),
+						Filename: new(v.FileName),
+						Status:   new(v.Status),
 					}
 				}
 				if tt.args.runevent.TriggerTarget == "push" {
@@ -2199,6 +2199,26 @@ func TestMatchPipelinerunByAnnotation(t *testing.T) {
 				},
 			},
 			wantErr: false,
+		},
+		{
+			name: "on-comment-annotation-with-invalid-regexp-match",
+			args: args{
+				runevent: info.Event{TriggerTarget: "push", EventType: "push", BaseBranch: "refs/heads/main"},
+				pruns: []*tektonv1.PipelineRun{
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: "on-comment-annotation-with-invalid-regexp-match",
+							Annotations: map[string]string{
+								keys.OnComment: "^/(help|rebase",
+							},
+						},
+					},
+				},
+			},
+			wantErr: true,
+			wantLog: []string{
+				"could not compile regexp ^/(help|rebase from on-comment annotation in pipelineRun on-comment-annotation-with-invalid-regexp-match",
+			},
 		},
 		{
 			name: "ref-heads-*--allow-any-branch",
@@ -3365,6 +3385,8 @@ func TestFilterSuccessfulTemplatesFallbackToCommitStatuses(t *testing.T) {
 
 	tests := []struct {
 		name           string
+		providerName   string
+		nilPac         bool
 		commitStatuses []provider.CommitStatusInfo
 		matchedPRs     []Match
 		expectedNames  []string
@@ -3415,6 +3437,54 @@ func TestFilterSuccessfulTemplatesFallbackToCommitStatuses(t *testing.T) {
 			},
 			expectedNames: []string{"template-a", "template-b"},
 		},
+		{
+			name:         "BB Cloud truncated key matched via GetBBCloudStatusKey",
+			providerName: "bitbucket-cloud",
+			commitStatuses: []provider.CommitStatusInfo{
+				{Name: "this-is-a-long-pipelinerun-name-t-989318", Status: "successful"},
+				{Name: "Pipelines as Code CI / pipelinerun-exit-1", Status: "failed"},
+			},
+			matchedPRs: []Match{
+				createMatchedPR("this-is-a-long-pipelinerun-name-that-exceeds-forty-characters"),
+				createMatchedPR("pipelinerun-exit-1"),
+			},
+			expectedNames: []string{"pipelinerun-exit-1"},
+		},
+		{
+			name:         "BB Cloud key without prefix matched via GetBBCloudStatusKey",
+			providerName: "bitbucket-cloud",
+			commitStatuses: []provider.CommitStatusInfo{
+				{Name: "my-long-pipeline-run-name-abcdef", Status: "successful"},
+			},
+			matchedPRs: []Match{
+				createMatchedPR("my-long-pipeline-run-name-abcdef"),
+			},
+			expectedNames: []string{},
+		},
+		{
+			name:         "Non BB Cloud provider skips GetBBCloudStatusKey fallback",
+			providerName: "github",
+			commitStatuses: []provider.CommitStatusInfo{
+				{Name: "this-is-a-long-pipelinerun-name-t-989318", Status: "successful"},
+				{Name: "Pipelines as Code CI / this-is-a-long-pipelinerun-name-that-exceeds-forty-characters", Status: "failed"},
+			},
+			matchedPRs: []Match{
+				createMatchedPR("this-is-a-long-pipelinerun-name-that-exceeds-forty-characters"),
+			},
+			expectedNames: []string{"this-is-a-long-pipelinerun-name-that-exceeds-forty-characters"},
+		},
+		{
+			name:   "Nil Pac uses default ApplicationName for status matching",
+			nilPac: true,
+			commitStatuses: []provider.CommitStatusInfo{
+				{Name: "Pipelines as Code CI / template-a", Status: "success"},
+			},
+			matchedPRs: []Match{
+				createMatchedPR("template-a"),
+				createMatchedPR("template-b"),
+			},
+			expectedNames: []string{"template-b"},
+		},
 	}
 
 	for _, tt := range tests {
@@ -3425,9 +3495,21 @@ func TestFilterSuccessfulTemplatesFallbackToCommitStatuses(t *testing.T) {
 			}
 			vcx := &testprovider.TestProviderImp{
 				CommitStatuses: tt.commitStatuses,
+				ProviderName:   tt.providerName,
 			}
 
-			filtered := filterSuccessfulTemplates(ctx, logger, cs, event, repo, vcx, tt.matchedPRs)
+			testCS := cs
+			if tt.nilPac {
+				testCS = &params.Run{
+					Clients: clients.Clients{
+						Log:    logger,
+						Tekton: stdata.Pipeline,
+						Kube:   stdata.Kube,
+					},
+				}
+			}
+
+			filtered := filterSuccessfulTemplates(ctx, logger, testCS, event, repo, vcx, tt.matchedPRs)
 
 			assert.Equal(t, len(tt.expectedNames), len(filtered),
 				"Expected %d templates but got %d", len(tt.expectedNames), len(filtered))

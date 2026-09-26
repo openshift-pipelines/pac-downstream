@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/google/go-github/v85/github"
+	"github.com/google/go-github/v91/github"
 	"github.com/jonboulle/clockwork"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
@@ -42,6 +42,7 @@ import (
 	knativeapi "knative.dev/pkg/apis"
 	knativeduckv1 "knative.dev/pkg/apis/duck/v1"
 	rtesting "knative.dev/pkg/reconciler/testing"
+	"knative.dev/pkg/system"
 )
 
 var (
@@ -132,7 +133,7 @@ func TestReconcilerReconcileKind(t *testing.T) {
 	defer teardown()
 
 	vcx := &ghprovider.Provider{
-		Token:  github.Ptr("None"),
+		Token:  new("None"),
 		Logger: fakelogger,
 	}
 
@@ -216,6 +217,9 @@ func TestReconcilerReconcileKind(t *testing.T) {
 				},
 				Spec: v1alpha1.RepositorySpec{
 					URL: randomURL,
+					GitProvider: &v1alpha1.GitProvider{
+						URL: "https://another.example.com",
+					},
 				},
 			}
 			globalRepo := &v1alpha1.Repository{
@@ -226,6 +230,12 @@ func TestReconcilerReconcileKind(t *testing.T) {
 				Spec: v1alpha1.RepositorySpec{
 					Settings: &v1alpha1.Settings{
 						PipelineRunProvenance: "default_branch",
+					},
+					GitProvider: &v1alpha1.GitProvider{
+						URL: "https://github.com",
+						Secret: &v1alpha1.Secret{
+							Name: "global-provider-secret",
+						},
 					},
 				},
 			}
@@ -317,6 +327,7 @@ func TestReconcilerReconcileKind(t *testing.T) {
 			cachedRepo, err := informers.Repository.Lister().Repositories(testRepo.Namespace).Get(testRepo.Name)
 			assert.NilError(t, err)
 			assert.Assert(t, cachedRepo.Spec.Settings == nil, "global settings should not mutate the cached Repository")
+			assert.Assert(t, cachedRepo.Spec.GitProvider.Secret == nil, "global secret should not mutate the cached Repository")
 		})
 	}
 }
@@ -364,7 +375,9 @@ func TestInitGitProviderClientUsesGlobalSecretWithoutMutatingCache(t *testing.T)
 	}
 	stdata, informers := testclient.SeedTestData(t, ctx, testclient.Data{
 		Repositories: []*v1alpha1.Repository{repo, globalRepo},
+		ConfigMap:    []*corev1.ConfigMap{defaultPolicyConfigMap()},
 	})
+	ctx = info.StoreNS(ctx, system.Namespace())
 	kint := &testkubernetestint.KinterfaceTest{
 		GetSecretResult: map[string]string{
 			"global-provider-secret": "test-token",
@@ -408,9 +421,10 @@ func TestUpdatePipelineRunState(t *testing.T) {
 	fakelogger := zap.New(observer).Sugar()
 
 	tests := []struct {
-		name        string
-		pipelineRun *tektonv1.PipelineRun
-		state       string
+		name          string
+		pipelineRun   *tektonv1.PipelineRun
+		state         string
+		wantSpecPatch bool
 	}{
 		{
 			name: "queued to started",
@@ -427,7 +441,8 @@ func TestUpdatePipelineRunState(t *testing.T) {
 				},
 				Status: tektonv1.PipelineRunStatus{},
 			},
-			state: kubeinteraction.StateStarted,
+			state:         kubeinteraction.StateStarted,
+			wantSpecPatch: true,
 		},
 		{
 			name: "started to completed",
@@ -444,6 +459,26 @@ func TestUpdatePipelineRunState(t *testing.T) {
 			},
 			state: kubeinteraction.StateCompleted,
 		},
+		{
+			name: "already running reported as started should not repatch spec",
+			pipelineRun: &tektonv1.PipelineRun{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: "test",
+					Name:      "test",
+					Annotations: map[string]string{
+						keys.State: kubeinteraction.StateQueued,
+					},
+				},
+				// Tekton already cleared the pending status and started the
+				// PipelineRun before PAC got a chance to report it (see the
+				// "Running reason without SCMReportingPLRStarted" scenario in
+				// TestReconcileKindSCMReportingLogic).
+				Spec:   tektonv1.PipelineRunSpec{},
+				Status: tektonv1.PipelineRunStatus{},
+			},
+			state:         kubeinteraction.StateStarted,
+			wantSpecPatch: false,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -452,6 +487,15 @@ func TestUpdatePipelineRunState(t *testing.T) {
 				PipelineRuns: []*tektonv1.PipelineRun{tt.pipelineRun},
 			}
 			stdata, _ := testclient.SeedTestData(t, ctx, testData)
+
+			var gotPatch []byte
+			stdata.Pipeline.PrependReactor("patch", "pipelineruns", func(action k8stesting.Action) (bool, runtime.Object, error) {
+				if patch, ok := action.(k8stesting.PatchAction); ok {
+					gotPatch = patch.GetPatch()
+				}
+				return false, nil, nil
+			})
+
 			r := &Reconciler{
 				run: &params.Run{
 					Clients: clients.Clients{
@@ -466,6 +510,11 @@ func TestUpdatePipelineRunState(t *testing.T) {
 			assert.Equal(t, updatedPR.Annotations[keys.State], tt.state)
 			assert.Equal(t, updatedPR.Spec.Status, tektonv1.PipelineRunSpecStatus(""))
 
+			var patchBody map[string]any
+			assert.NilError(t, json.Unmarshal(gotPatch, &patchBody))
+			_, hasSpec := patchBody["spec"]
+			assert.Equal(t, hasSpec, tt.wantSpecPatch, "unexpected spec field in patch %s", string(gotPatch))
+
 			// Test SCMReportingPLRStarted annotation for started state
 			if tt.state == kubeinteraction.StateStarted {
 				scmStarted, exists := updatedPR.GetAnnotations()[keys.SCMReportingPLRStarted]
@@ -474,6 +523,96 @@ func TestUpdatePipelineRunState(t *testing.T) {
 			} else {
 				_, exists := updatedPR.GetAnnotations()[keys.SCMReportingPLRStarted]
 				assert.Assert(t, !exists, "SCMReportingPLRStarted annotation should not exist for non-started states")
+			}
+		})
+	}
+}
+
+func TestReconcileKindControllerInfoHandling(t *testing.T) {
+	tests := []struct {
+		name        string
+		annotation  string
+		wantErrSub  string
+		wantControl *info.ControllerInfo
+	}{
+		{
+			name:       "invalid controller annotation",
+			annotation: "{",
+			wantErrSub: "failed to parse controllerInfo",
+		},
+		{
+			name:       "null controller annotation",
+			annotation: "null",
+			wantErrSub: "value must not be null",
+		},
+		{
+			name:        "controller annotation does not mutate shared run",
+			annotation:  `{"name":"secondary","configmap":"secondary-config","secret":"secondary-secret","gRepo":"secondary-global"}`,
+			wantControl: &info.ControllerInfo{Name: "default", Secret: "default-secret", GlobalRepository: "default-global"},
+		},
+		{
+			name:        "fallback controller is copied",
+			wantControl: &info.ControllerInfo{Name: "default", Secret: "default-secret", GlobalRepository: "default-global"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, _ := rtesting.SetupFakeContext(t)
+			observer, _ := zapobserver.New(zap.InfoLevel)
+			logger := zap.New(observer).Sugar()
+			controller := &info.ControllerInfo{Name: "default", Secret: "default-secret", GlobalRepository: "default-global"}
+			annotations := map[string]string{
+				keys.State:         kubeinteraction.StateStarted,
+				keys.Repository:    "test-repo",
+				keys.SecretCreated: "true",
+			}
+			if tt.annotation != "" {
+				annotations[keys.ControllerInfo] = tt.annotation
+			}
+			pr := &tektonv1.PipelineRun{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        "test-pr",
+					Namespace:   "test-ns",
+					Annotations: annotations,
+				},
+			}
+			repo := &v1alpha1.Repository{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-repo",
+					Namespace: "test-ns",
+				},
+			}
+			stdata, informers := testclient.SeedTestData(t, ctx, testclient.Data{
+				PipelineRuns: []*tektonv1.PipelineRun{pr},
+				Repositories: []*v1alpha1.Repository{repo},
+			})
+			r := &Reconciler{
+				repoLister: informers.Repository.Lister(),
+				run: &params.Run{
+					Clients: clients.Clients{
+						Tekton: stdata.Pipeline,
+						Log:    logger,
+					},
+					Info: info.Info{
+						Pac: &info.PacOpts{
+							Settings: settings.Settings{},
+						},
+						Kube:       &info.KubeOpts{Namespace: "global"},
+						Controller: controller,
+					},
+				},
+			}
+
+			err := r.ReconcileKind(ctx, pr)
+			if tt.wantErrSub != "" {
+				assert.ErrorContains(t, err, tt.wantErrSub)
+			} else {
+				assert.NilError(t, err)
+			}
+			if tt.wantControl != nil {
+				assert.DeepEqual(t, r.run.Info.Controller, tt.wantControl)
+				assert.Assert(t, r.run.Info.Controller == controller, "reconcile must keep the shared controller pointer")
 			}
 		})
 	}
@@ -618,11 +757,20 @@ func TestReconcileKindSCMReportingLogic(t *testing.T) {
 				},
 			}
 
+			// The controller only sends credentials to hostnames its ConfigMap
+			// trusts, so the test server has to be listed like any self hosted
+			// instance would be.
+			testServerHost := strings.TrimPrefix(ghTestServerURL, "http://")
 			testData := testclient.Data{
 				Repositories: []*v1alpha1.Repository{testRepo},
 				PipelineRuns: []*tektonv1.PipelineRun{tt.pipelineRun},
+				ConfigMap: []*corev1.ConfigMap{{
+					ObjectMeta: metav1.ObjectMeta{Name: "pipelines-as-code", Namespace: system.Namespace()},
+					Data:       map[string]string{settings.TrustedProviderHostnamesKey: testServerHost},
+				}},
 			}
 			stdata, informers := testclient.SeedTestData(t, ctx, testData)
+			ctx = info.StoreNS(ctx, system.Namespace())
 
 			// Track if updatePipelineRunToInProgress was called by checking state changes
 			originalState := tt.pipelineRun.GetAnnotations()[keys.State]
@@ -636,6 +784,7 @@ func TestReconcileKindSCMReportingLogic(t *testing.T) {
 			cs := &params.Run{
 				Clients: clients.Clients{
 					Tekton: stdata.Pipeline,
+					Kube:   stdata.Kube,
 					Log:    logger,
 				},
 				Info: info.Info{
@@ -656,6 +805,7 @@ func TestReconcileKindSCMReportingLogic(t *testing.T) {
 			}
 
 			err := r.ReconcileKind(ctx, tt.pipelineRun)
+			assert.Assert(t, cs.Info.Controller == nil, "reconciliation must not mutate shared controller state")
 
 			// For test cases that should call updatePipelineRunToInProgress,
 			// we expect no error and the state should be updated
@@ -816,8 +966,10 @@ func TestCreateSecretForPipelineRun(t *testing.T) {
 			testData := testclient.Data{
 				PipelineRuns: []*tektonv1.PipelineRun{pr},
 				Repositories: []*v1alpha1.Repository{repo},
+				ConfigMap:    []*corev1.ConfigMap{defaultPolicyConfigMap()},
 			}
 			stdata, informers := testclient.SeedTestData(t, ctx, testData)
+			ctx = info.StoreNS(ctx, system.Namespace())
 
 			if tt.simulatePatchErr {
 				stdata.Pipeline.PrependReactor("patch", "pipelineruns", func(_ k8stesting.Action) (bool, runtime.Object, error) {
@@ -837,6 +989,7 @@ func TestCreateSecretForPipelineRun(t *testing.T) {
 				run: &params.Run{
 					Clients: clients.Clients{
 						Tekton: stdata.Pipeline,
+						Kube:   stdata.Kube,
 						Log:    logger,
 					},
 					Info: info.Info{
@@ -921,14 +1074,17 @@ func TestReconcileKindSecretCreationDoesNotLogOnSuccess(t *testing.T) {
 	testData := testclient.Data{
 		PipelineRuns: []*tektonv1.PipelineRun{pr},
 		Repositories: []*v1alpha1.Repository{repo},
+		ConfigMap:    []*corev1.ConfigMap{defaultPolicyConfigMap()},
 	}
 	stdata, informers := testclient.SeedTestData(t, ctx, testData)
+	ctx = info.StoreNS(ctx, system.Namespace())
 
 	r := &Reconciler{
 		repoLister: informers.Repository.Lister(),
 		run: &params.Run{
 			Clients: clients.Clients{
 				Tekton: stdata.Pipeline,
+				Kube:   stdata.Kube,
 				Log:    logger,
 			},
 			Info: info.Info{
@@ -961,4 +1117,79 @@ func TestReconcileKindSecretCreationDoesNotLogOnSuccess(t *testing.T) {
 
 	logEntries := log.FilterMessageSnippet("failed to create secret for pipelineRun").TakeAll()
 	assert.Equal(t, len(logEntries), 0)
+}
+
+// defaultPolicyConfigMap is a controller ConfigMap with no configured allowlist,
+// which is the state every stock install starts in: the public instances are
+// trusted and nothing else is.
+func defaultPolicyConfigMap() *corev1.ConfigMap {
+	return &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: "pipelines-as-code", Namespace: system.Namespace()},
+	}
+}
+
+// The watcher resolves the provider secret on its own, so the guard that stops a
+// tenant Repository from inheriting the shared controller credential while
+// pointing it somewhere else has to apply here too, not only on the adapter path.
+func TestInitGitProviderClientRefusesInheritedSecretWithOwnProviderURL(t *testing.T) {
+	ctx, _ := rtesting.SetupFakeContext(t)
+	ctx = info.StoreNS(ctx, system.Namespace())
+	observer, _ := zapobserver.New(zap.InfoLevel)
+	logger := zap.New(observer).Sugar()
+
+	pr := &tektonv1.PipelineRun{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-pr",
+			Namespace: "test-ns",
+			Annotations: map[string]string{
+				keys.GitProvider:   "github",
+				keys.RepoURL:       "https://github.com/org/repo",
+				keys.URLOrg:        "org",
+				keys.URLRepository: "repo",
+				keys.SHA:           "abc123",
+			},
+		},
+	}
+	repo := &v1alpha1.Repository{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-repo", Namespace: "test-ns"},
+		Spec: v1alpha1.RepositorySpec{
+			URL:         "https://github.com/org/repo",
+			GitProvider: &v1alpha1.GitProvider{URL: "https://gitea.com"},
+		},
+	}
+	globalRepo := &v1alpha1.Repository{
+		ObjectMeta: metav1.ObjectMeta{Name: "global-repo", Namespace: "global"},
+		Spec: v1alpha1.RepositorySpec{
+			GitProvider: &v1alpha1.GitProvider{
+				URL:    "https://github.com",
+				Secret: &v1alpha1.Secret{Name: "global-provider-secret"},
+			},
+		},
+	}
+	stdata, informers := testclient.SeedTestData(t, ctx, testclient.Data{
+		Repositories: []*v1alpha1.Repository{repo, globalRepo},
+		ConfigMap:    []*corev1.ConfigMap{defaultPolicyConfigMap()},
+	})
+	r := &Reconciler{
+		repoLister:   informers.Repository.Lister(),
+		kinteract:    &testkubernetestint.KinterfaceTest{GetSecretResult: map[string]string{"global-provider-secret": "test-token"}},
+		eventEmitter: events.NewEventEmitter(stdata.Kube, logger),
+		run: &params.Run{
+			Clients: clients.Clients{
+				Kube:           stdata.Kube,
+				PipelineAsCode: stdata.PipelineAsCode,
+				Log:            logger,
+			},
+			Info: info.Info{
+				Kube:       &info.KubeOpts{Namespace: "global"},
+				Controller: &info.ControllerInfo{GlobalRepository: "global-repo"},
+				Pac:        info.NewPacOpts(),
+			},
+		},
+	}
+
+	cachedRepo, err := informers.Repository.Lister().Repositories(repo.Namespace).Get(repo.Name)
+	assert.NilError(t, err)
+	_, _, err = r.initGitProviderClient(ctx, logger, cachedRepo, pr)
+	assert.ErrorContains(t, err, "must not be sent to an endpoint chosen by another namespace")
 }
