@@ -3,11 +3,13 @@ package adapter
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/consoleui"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/events"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/kubeinteraction"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/clients"
@@ -24,6 +26,8 @@ import (
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	k8sruntime "k8s.io/apimachinery/pkg/runtime"
+	k8stesting "k8s.io/client-go/testing"
 	rtesting "knative.dev/pkg/reconciler/testing"
 )
 
@@ -210,12 +214,39 @@ func (t *trackingProviderImpl) CreateToken(_ context.Context, _ []string, _ *inf
 	return "fake-token", nil
 }
 
+type sinkerProvider struct {
+	testprovider.TestProviderImp
+	parseErr     error
+	setClientErr error
+	statusErr    error
+	statusCalls  int
+	lastStatus   providerstatus.StatusOpts
+}
+
+func (p *sinkerProvider) ParsePayload(ctx context.Context, run *params.Run, request *http.Request, payload string) (*info.Event, error) {
+	if p.parseErr != nil {
+		return nil, p.parseErr
+	}
+	return p.TestProviderImp.ParsePayload(ctx, run, request, payload)
+}
+
+func (p *sinkerProvider) SetClient(context.Context, *params.Run, *info.Event, *v1alpha1.Repository, *events.EventEmitter) error {
+	return p.setClientErr
+}
+
+func (p *sinkerProvider) CreateStatus(_ context.Context, _ *info.Event, status providerstatus.StatusOpts) error {
+	p.statusCalls++
+	p.lastStatus = status
+	return p.statusErr
+}
+
 type commitInfoProvider struct {
 	testprovider.TestProviderImp
 	commitInfoCalls   int
 	commitTitle       string
 	commitMessage     string
 	commitInfoFailure bool
+	statusFailure     bool
 	statusCalls       int
 	lastStatus        providerstatus.StatusOpts
 }
@@ -235,7 +266,308 @@ func (p *commitInfoProvider) GetCommitInfo(_ context.Context, event *info.Event)
 func (p *commitInfoProvider) CreateStatus(_ context.Context, _ *info.Event, status providerstatus.StatusOpts) error {
 	p.statusCalls++
 	p.lastStatus = status
+	if p.statusFailure {
+		return fmt.Errorf("status failed")
+	}
 	return nil
+}
+
+func TestProcessEventPayloadBranches(t *testing.T) {
+	tests := []struct {
+		name          string
+		providerEvent *info.Event
+		parseErr      error
+		wantErr       string
+		wantNilEvent  bool
+	}{
+		{
+			name:     "parse payload error is returned",
+			parseErr: fmt.Errorf("parse failed"),
+			wantErr:  "parse failed",
+		},
+		{
+			name:         "nil parsed event returns without request",
+			wantNilEvent: true,
+		},
+		{
+			name: "parsed event stores request and branch metadata",
+			providerEvent: &info.Event{
+				EventType:  "pull_request",
+				SHA:        "abc123",
+				URL:        "https://example.com/owner/repo",
+				BaseBranch: "main",
+				HeadBranch: "feature",
+			},
+		},
+		{
+			name: "same head and base branch omits source branch metadata",
+			providerEvent: &info.Event{
+				EventType:  "push",
+				SHA:        "abc123",
+				URL:        "https://example.com/owner/repo",
+				BaseBranch: "main",
+				HeadBranch: "main",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			log, _ := logger.GetLogger()
+			provider := &sinkerProvider{
+				TestProviderImp: testprovider.TestProviderImp{Event: tt.providerEvent},
+				parseErr:        tt.parseErr,
+			}
+			s := &sinker{
+				run:     &params.Run{},
+				vcx:     provider,
+				event:   &info.Event{EventType: "push"},
+				logger:  log,
+				payload: []byte("  payload  "),
+			}
+
+			req := httptest.NewRequestWithContext(context.Background(), "POST", "https://example.com", nil)
+			err := s.processEventPayload(context.Background(), req)
+			if tt.wantErr != "" {
+				assert.ErrorContains(t, err, tt.wantErr)
+				return
+			}
+			assert.NilError(t, err)
+			if tt.wantNilEvent {
+				assert.Assert(t, s.event == nil)
+				return
+			}
+			assert.Assert(t, s.event != nil)
+			assert.Assert(t, s.event.Request != nil)
+			assert.Equal(t, "payload", string(s.event.Request.Payload))
+		})
+	}
+}
+
+func TestProcessEventBranches(t *testing.T) {
+	tests := []struct {
+		name            string
+		repositories    []*v1alpha1.Repository
+		event           *info.Event
+		provider        provider.Interface
+		setup           func(*testing.T, *testclient.Clients)
+		wantErr         string
+		wantStatusCalls int
+	}{
+		{
+			name: "repository lookup error falls through to pac run no match",
+			event: &info.Event{
+				EventType:     "push",
+				TriggerTarget: triggertype.Push,
+				URL:           "https://example.com/owner/missing",
+				Repository:    "missing",
+				SHA:           "abc123",
+				SHATitle:      "commit title",
+				SHAURL:        "https://example.com/commit/abc123",
+				Provider:      &info.Provider{},
+			},
+			provider: &sinkerProvider{TestProviderImp: testprovider.TestProviderImp{AllowIT: true}},
+		},
+		{
+			name: "client setup error fails fast",
+			repositories: []*v1alpha1.Repository{
+				testnewrepo.NewRepo(testnewrepo.RepoTestcreationOpts{
+					Name:             "repo",
+					URL:              "https://example.com/owner/repo",
+					InstallNamespace: "default",
+				}),
+			},
+			event: &info.Event{
+				EventType:      "push",
+				TriggerTarget:  triggertype.Push,
+				URL:            "https://example.com/owner/repo",
+				Repository:     "repo",
+				SHA:            "abc123",
+				SHATitle:       "commit title",
+				SHAURL:         "https://example.com/commit/abc123",
+				InstallationID: 1,
+				Provider:       &info.Provider{},
+			},
+			provider: &sinkerProvider{
+				TestProviderImp: testprovider.TestProviderImp{AllowIT: true},
+				setClientErr:    fmt.Errorf("set client failed"),
+			},
+			wantErr: "client setup failed: failed to set client: set client failed",
+		},
+		{
+			name: "pull request commit lookup error aborts event",
+			repositories: []*v1alpha1.Repository{
+				testnewrepo.NewRepo(testnewrepo.RepoTestcreationOpts{
+					Name:             "repo",
+					URL:              "https://example.com/owner/repo",
+					InstallNamespace: "default",
+				}),
+			},
+			event: &info.Event{
+				EventType:      "pull_request",
+				TriggerTarget:  triggertype.PullRequest,
+				URL:            "https://example.com/owner/repo",
+				Repository:     "repo",
+				SHA:            "abc123",
+				InstallationID: 1,
+				Provider:       &info.Provider{},
+			},
+			provider: &commitInfoProvider{
+				TestProviderImp:   testprovider.TestProviderImp{AllowIT: true},
+				commitInfoFailure: true,
+			},
+			wantErr: "could not get commit info",
+		},
+		{
+			name: "pull request skip command creates skipped status",
+			repositories: []*v1alpha1.Repository{
+				testnewrepo.NewRepo(testnewrepo.RepoTestcreationOpts{
+					Name:             "repo",
+					URL:              "https://example.com/owner/repo",
+					InstallNamespace: "default",
+				}),
+			},
+			event: &info.Event{
+				EventType:      "pull_request",
+				TriggerTarget:  triggertype.PullRequest,
+				URL:            "https://example.com/owner/repo",
+				Repository:     "repo",
+				SHA:            "abc123",
+				InstallationID: 1,
+				Provider:       &info.Provider{},
+			},
+			provider: &commitInfoProvider{
+				TestProviderImp: testprovider.TestProviderImp{AllowIT: true},
+				commitMessage:   "docs: update [skip ci]",
+			},
+			wantStatusCalls: 1,
+		},
+		{
+			name: "closed pull request run error is returned",
+			repositories: []*v1alpha1.Repository{
+				testnewrepo.NewRepo(testnewrepo.RepoTestcreationOpts{
+					Name:             "repo",
+					URL:              "https://example.com/owner/repo",
+					InstallNamespace: "default",
+				}),
+			},
+			event: &info.Event{
+				EventType:         "incoming",
+				TriggerTarget:     triggertype.PullRequestClosed,
+				URL:               "https://example.com/owner/repo",
+				Repository:        "repo",
+				SHA:               "abc123",
+				SHAURL:            "https://example.com/commit/abc123",
+				SHATitle:          "commit title",
+				PullRequestNumber: 42,
+				InstallationID:    1,
+				Provider:          &info.Provider{},
+			},
+			provider: &testprovider.TestProviderImp{AllowIT: true},
+			setup: func(_ *testing.T, stdata *testclient.Clients) {
+				stdata.Pipeline.PrependReactor("list", "pipelineruns", func(_ k8stesting.Action) (bool, k8sruntime.Object, error) {
+					return true, nil, fmt.Errorf("list failed")
+				})
+			},
+			wantErr: "error cancelling in progress pipelineRuns belonging to pull request 42: failed to list pipelineRuns : list failed",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, _ := rtesting.SetupFakeContext(t)
+			ctx = info.StoreNS(ctx, "pipelines-as-code")
+			log, _ := logger.GetLogger()
+			stdata, _ := testclient.SeedTestData(t, ctx, testclient.Data{Repositories: tt.repositories})
+			if tt.setup != nil {
+				tt.setup(t, &stdata)
+			}
+			switch provider := tt.provider.(type) {
+			case *sinkerProvider:
+				if provider.Event == nil {
+					provider.Event = tt.event
+				}
+			case *commitInfoProvider:
+				if provider.Event == nil {
+					provider.Event = tt.event
+				}
+			case *testprovider.TestProviderImp:
+				if provider.Event == nil {
+					provider.Event = tt.event
+				}
+			}
+			run := &params.Run{
+				Clients: clients.Clients{
+					PipelineAsCode: stdata.PipelineAsCode,
+					Kube:           stdata.Kube,
+					Tekton:         stdata.Pipeline,
+					Log:            log,
+				},
+				Info: info.Info{
+					Controller: &info.ControllerInfo{Secret: info.DefaultPipelinesAscodeSecretName},
+					Kube:       &info.KubeOpts{Namespace: "pipelines-as-code"},
+				},
+			}
+			run.Clients.SetConsoleUI(consoleui.FallBackConsole{})
+			s := &sinker{
+				run:     run,
+				vcx:     tt.provider,
+				kint:    &kubeinteraction.Interaction{Run: run},
+				event:   tt.event,
+				logger:  log,
+				pacInfo: &info.PacOpts{},
+			}
+
+			err := s.processEvent(ctx, httptest.NewRequestWithContext(ctx, "POST", tt.event.URL, nil))
+			if tt.wantErr != "" {
+				assert.ErrorContains(t, err, tt.wantErr)
+				return
+			}
+			assert.NilError(t, err)
+			if tt.wantStatusCalls != 0 {
+				commitProvider, ok := tt.provider.(*commitInfoProvider)
+				assert.Assert(t, ok)
+				assert.Equal(t, tt.wantStatusCalls, commitProvider.statusCalls)
+				assert.Equal(t, providerstatus.ConclusionSkipped, commitProvider.lastStatus.Conclusion)
+			}
+		})
+	}
+}
+
+func TestCreateSkipCIStatus(t *testing.T) {
+	tests := []struct {
+		name          string
+		statusFailure bool
+	}{
+		{
+			name: "status creation succeeds",
+		},
+		{
+			name:          "status creation error is logged and ignored",
+			statusFailure: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			log, _ := logger.GetLogger()
+			provider := &commitInfoProvider{statusFailure: tt.statusFailure}
+			run := &params.Run{Clients: clients.Clients{}}
+			run.Clients.SetConsoleUI(consoleui.FallBackConsole{})
+			s := &sinker{
+				run:     run,
+				vcx:     provider,
+				event:   &info.Event{},
+				logger:  log,
+				pacInfo: &info.PacOpts{Settings: settings.Settings{ApplicationName: "Pipelines as Code CI"}},
+			}
+
+			err := s.createSkipCIStatus(context.Background())
+			assert.NilError(t, err)
+			assert.Equal(t, 1, provider.statusCalls)
+			assert.Equal(t, providerstatus.ConclusionSkipped, provider.lastStatus.Conclusion)
+		})
+	}
 }
 
 func TestShouldSkipPushEvent(t *testing.T) {

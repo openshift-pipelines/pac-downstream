@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 
@@ -15,6 +16,7 @@ import (
 	tprovider "github.com/openshift-pipelines/pipelines-as-code/pkg/test/provider"
 	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 	"gotest.tools/v3/assert"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
 	"knative.dev/pkg/apis"
 )
@@ -33,8 +35,102 @@ func (n *nilResponseClient) ValidateConfig() error {
 	return nil
 }
 
+type staticAnalysisClient struct {
+	response      *AnalysisResponse
+	err           error
+	beforeAnalyze func()
+	requests      []*AnalysisRequest
+}
+
+func (s *staticAnalysisClient) Analyze(_ context.Context, request *AnalysisRequest) (*AnalysisResponse, error) {
+	s.requests = append(s.requests, request)
+	if s.beforeAnalyze != nil {
+		s.beforeAnalyze()
+	}
+	return s.response, s.err
+}
+
+func (s *staticAnalysisClient) GetProviderName() string {
+	return string(ProviderOpenAI)
+}
+
+func (s *staticAnalysisClient) ValidateConfig() error {
+	return nil
+}
+
+type recordingCommentProvider struct {
+	tprovider.TestProviderImp
+	err      error
+	calls    int
+	comments []string
+	markers  []string
+}
+
+func (r *recordingCommentProvider) CreateComment(_ context.Context, _ *info.Event, comment, marker string) error {
+	r.calls++
+	r.comments = append(r.comments, comment)
+	r.markers = append(r.markers, marker)
+	return r.err
+}
+
+func registerOpenAITestClient(t *testing.T, client Client) {
+	t.Helper()
+	originalFactory, hadOriginal := registry[ProviderOpenAI]
+	registry[ProviderOpenAI] = func(_ *ProviderConfig) (Client, error) {
+		return client, nil
+	}
+	t.Cleanup(func() {
+		if hadOriginal && originalFactory != nil {
+			registry[ProviderOpenAI] = originalFactory
+			return
+		}
+		delete(registry, ProviderOpenAI)
+	})
+}
+
+func makeAnalysisRepository(roles ...v1alpha1.AnalysisRole) *v1alpha1.Repository {
+	return &v1alpha1.Repository{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-repo",
+			Namespace: "test-ns",
+		},
+		Spec: v1alpha1.RepositorySpec{
+			Settings: &v1alpha1.Settings{
+				AIAnalysis: &v1alpha1.AIAnalysisConfig{
+					Enabled:  true,
+					Provider: string(ProviderOpenAI),
+					TokenSecretRef: &v1alpha1.Secret{
+						Name: "llm-token",
+					},
+					Roles: roles,
+				},
+			},
+		},
+	}
+}
+
+func makeCompletedPipelineRun() *tektonv1.PipelineRun {
+	pr := &tektonv1.PipelineRun{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-pr",
+			Namespace: "test-ns",
+		},
+	}
+	pr.Status.Conditions = append(pr.Status.Conditions, apis.Condition{
+		Type:   apis.ConditionSucceeded,
+		Status: "False",
+		Reason: "Failed",
+	})
+	return pr
+}
+
 func TestAnalyze(t *testing.T) {
 	testLogger, _ := logger.GetLogger()
+	originalRetryDelay := analysisRetryDelay
+	analysisRetryDelay = 0
+	t.Cleanup(func() {
+		analysisRetryDelay = originalRetryDelay
+	})
 
 	fakeClient := fake.NewClientset()
 	run := &params.Run{
@@ -105,13 +201,7 @@ func TestAnalyze(t *testing.T) {
 }
 
 func TestAnalyzeNilResponse(t *testing.T) {
-	originalFactory := registry[ProviderOpenAI]
-	registry[ProviderOpenAI] = func(_ *ProviderConfig) (Client, error) {
-		return &nilResponseClient{}, nil
-	}
-	t.Cleanup(func() {
-		registry[ProviderOpenAI] = originalFactory
-	})
+	registerOpenAITestClient(t, &nilResponseClient{})
 
 	testLogger, _ := logger.GetLogger()
 	kinteract := &kitesthelper.KinterfaceTest{
@@ -143,6 +233,128 @@ func TestAnalyzeNilResponse(t *testing.T) {
 	assert.NilError(t, err)
 	assert.Equal(t, len(results), 1)
 	assert.ErrorContains(t, results[0].Error, "LLM client returned no response")
+}
+
+func TestAnalyzeRoleOutcomes(t *testing.T) {
+	testLogger, _ := logger.GetLogger()
+	pr := makeCompletedPipelineRun()
+	event := &info.Event{EventType: "pull_request"}
+
+	tests := []struct {
+		name          string
+		roles         []v1alpha1.AnalysisRole
+		kinteract     kubeinteraction.Interface
+		client        *staticAnalysisClient
+		cancelContext bool
+		wantResults   int
+		wantResultErr string
+		wantContent   string
+		setup         func(t *testing.T, client *staticAnalysisClient)
+	}{
+		{
+			name: "cel evaluation failure appends role error",
+			roles: []v1alpha1.AnalysisRole{
+				{Name: "broken-cel", Prompt: "analyze", OnCEL: "body.event.event_type ="},
+			},
+			kinteract:     &kitesthelper.KinterfaceTest{GetSecretResult: map[string]string{"llm-token": "token"}},
+			wantResults:   1,
+			wantResultErr: "CEL evaluation failed",
+		},
+		{
+			name: "false cel skips role",
+			roles: []v1alpha1.AnalysisRole{
+				{Name: "skipped", Prompt: "analyze", OnCEL: "false"},
+			},
+			kinteract:   &kitesthelper.KinterfaceTest{GetSecretResult: map[string]string{"llm-token": "token"}},
+			wantResults: 0,
+		},
+		{
+			name: "missing secret appends client creation error",
+			roles: []v1alpha1.AnalysisRole{
+				{Name: "review", Prompt: "analyze", OnCEL: "true"},
+			},
+			kinteract:     &kitesthelper.KinterfaceTest{GetSecretResult: map[string]string{}},
+			client:        &staticAnalysisClient{response: &AnalysisResponse{Content: "unused"}},
+			wantResults:   1,
+			wantResultErr: "client creation failed",
+			setup: func(t *testing.T, client *staticAnalysisClient) {
+				registerOpenAITestClient(t, client)
+			},
+		},
+		{
+			name: "analysis error appends role error after cancelled retry backoff",
+			roles: []v1alpha1.AnalysisRole{
+				{Name: "review", Prompt: "analyze", OnCEL: "true"},
+			},
+			kinteract:     &kitesthelper.KinterfaceTest{GetSecretResult: map[string]string{"llm-token": "token"}},
+			client:        &staticAnalysisClient{err: errors.New("temporary failure")},
+			cancelContext: true,
+			wantResults:   1,
+			wantResultErr: "context cancelled",
+			setup: func(t *testing.T, client *staticAnalysisClient) {
+				registerOpenAITestClient(t, client)
+			},
+		},
+		{
+			name: "analysis error retries before returning role error",
+			roles: []v1alpha1.AnalysisRole{
+				{Name: "review", Prompt: "analyze", OnCEL: "true"},
+			},
+			kinteract:     &kitesthelper.KinterfaceTest{GetSecretResult: map[string]string{"llm-token": "token"}},
+			client:        &staticAnalysisClient{err: errors.New("temporary failure")},
+			wantResults:   1,
+			wantResultErr: "temporary failure",
+			setup: func(t *testing.T, client *staticAnalysisClient) {
+				registerOpenAITestClient(t, client)
+			},
+		},
+		{
+			name: "successful roles return responses",
+			roles: []v1alpha1.AnalysisRole{
+				{Name: "review", Prompt: "analyze", OnCEL: "true"},
+				{Name: "summary", Prompt: "summarize", OnCEL: "true"},
+			},
+			kinteract:   &kitesthelper.KinterfaceTest{GetSecretResult: map[string]string{"llm-token": "token"}},
+			client:      &staticAnalysisClient{response: &AnalysisResponse{Content: "analysis complete", TokensUsed: 7}},
+			wantResults: 2,
+			wantContent: "analysis complete",
+			setup: func(t *testing.T, client *staticAnalysisClient) {
+				registerOpenAITestClient(t, client)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.setup != nil {
+				tt.setup(t, tt.client)
+			}
+			ctx := context.Background()
+			if tt.cancelContext {
+				cancelledCtx, cancel := context.WithCancel(ctx)
+				cancel()
+				ctx = cancelledCtx
+			}
+
+			results, err := analyze(ctx, &params.Run{}, tt.kinteract, testLogger,
+				makeAnalysisRepository(tt.roles...), pr, event, &tprovider.TestProviderImp{})
+			assert.NilError(t, err)
+			assert.Equal(t, len(results), tt.wantResults)
+
+			if tt.wantResultErr != "" {
+				assert.ErrorContains(t, results[0].Error, tt.wantResultErr)
+			}
+			if tt.wantContent != "" {
+				for _, result := range results {
+					assert.Assert(t, result.Response != nil, "expected response for role %s", result.Role)
+					assert.Equal(t, result.Response.Content, tt.wantContent)
+				}
+				assert.Equal(t, len(tt.client.requests), tt.wantResults)
+				assert.Equal(t, tt.client.requests[0].MaxTokens, DefaultMaxTokens)
+				assert.Equal(t, tt.client.requests[0].TimeoutSeconds, DefaultTimeoutSeconds)
+			}
+		})
+	}
 }
 
 func TestExecuteAnalysis(t *testing.T) {
@@ -230,32 +442,166 @@ func TestExecuteAnalysis(t *testing.T) {
 	}
 }
 
-func TestPostPRComment(t *testing.T) {
+func TestExecuteAnalysisProcessesResults(t *testing.T) {
 	testLogger, _ := logger.GetLogger()
-	prov := &tprovider.TestProviderImp{}
+	pr := makeCompletedPipelineRun()
 
 	tests := []struct {
-		name  string
-		event *info.Event
+		name             string
+		repo             *v1alpha1.Repository
+		event            *info.Event
+		client           *staticAnalysisClient
+		provider         *recordingCommentProvider
+		wantErr          string
+		wantCommentCalls int
+		setup            func(t *testing.T, repo *v1alpha1.Repository, client *staticAnalysisClient)
+	}{
+		{
+			name: "no matching roles returns no results",
+			repo: makeAnalysisRepository(v1alpha1.AnalysisRole{
+				Name: "skipped", Prompt: "analyze", OnCEL: "false",
+			}),
+			event:    &info.Event{PullRequestNumber: 42},
+			provider: &recordingCommentProvider{},
+		},
+		{
+			name: "role error result is logged and skipped",
+			repo: makeAnalysisRepository(v1alpha1.AnalysisRole{
+				Name: "broken-cel", Prompt: "analyze", OnCEL: "body.event.pull_request_number =",
+			}),
+			event:    &info.Event{PullRequestNumber: 42},
+			provider: &recordingCommentProvider{},
+		},
+		{
+			name: "successful result posts pull request comment",
+			repo: makeAnalysisRepository(v1alpha1.AnalysisRole{
+				Name: "review", Prompt: "analyze", OnCEL: "true",
+			}),
+			event:            &info.Event{PullRequestNumber: 42},
+			client:           &staticAnalysisClient{response: &AnalysisResponse{Content: "looks good", TokensUsed: 12}},
+			provider:         &recordingCommentProvider{},
+			wantCommentCalls: 1,
+			setup: func(t *testing.T, _ *v1alpha1.Repository, client *staticAnalysisClient) {
+				registerOpenAITestClient(t, client)
+			},
+		},
+		{
+			name: "pull request comment error is swallowed",
+			repo: makeAnalysisRepository(v1alpha1.AnalysisRole{
+				Name: "review", Prompt: "analyze", OnCEL: "true",
+			}),
+			event:            &info.Event{PullRequestNumber: 42},
+			client:           &staticAnalysisClient{response: &AnalysisResponse{Content: "needs work"}},
+			provider:         &recordingCommentProvider{err: errors.New("comment failed")},
+			wantCommentCalls: 1,
+			setup: func(t *testing.T, _ *v1alpha1.Repository, client *staticAnalysisClient) {
+				registerOpenAITestClient(t, client)
+			},
+		},
+		{
+			name: "unsupported output after analysis skips comment",
+			repo: makeAnalysisRepository(v1alpha1.AnalysisRole{
+				Name: "review", Prompt: "analyze", OnCEL: "true",
+			}),
+			event:    &info.Event{PullRequestNumber: 42},
+			client:   &staticAnalysisClient{response: &AnalysisResponse{Content: "skip output"}},
+			provider: &recordingCommentProvider{},
+			setup: func(t *testing.T, repo *v1alpha1.Repository, client *staticAnalysisClient) {
+				client.beforeAnalyze = func() {
+					repo.Spec.Settings.AIAnalysis.Roles[0].Output = "check-run"
+				}
+				registerOpenAITestClient(t, client)
+			},
+		},
+		{
+			name: "invalid analysis config returns wrapped error",
+			repo: &v1alpha1.Repository{
+				Spec: v1alpha1.RepositorySpec{
+					Settings: &v1alpha1.Settings{
+						AIAnalysis: &v1alpha1.AIAnalysisConfig{
+							Enabled:  true,
+							Provider: string(ProviderOpenAI),
+						},
+					},
+				},
+			},
+			event:    &info.Event{PullRequestNumber: 42},
+			provider: &recordingCommentProvider{},
+			wantErr:  "LLM analysis failed",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.setup != nil {
+				tt.setup(t, tt.repo, tt.client)
+			}
+			err := ExecuteAnalysis(context.Background(), &params.Run{},
+				&kitesthelper.KinterfaceTest{GetSecretResult: map[string]string{"llm-token": "token"}},
+				testLogger, tt.repo, pr, tt.event, tt.provider)
+
+			if tt.wantErr != "" {
+				assert.ErrorContains(t, err, tt.wantErr)
+				return
+			}
+
+			assert.NilError(t, err)
+			assert.Equal(t, tt.provider.calls, tt.wantCommentCalls)
+			if tt.wantCommentCalls > 0 {
+				assert.Assert(t, len(tt.provider.comments) > 0)
+				assert.Assert(t, len(tt.provider.markers) > 0)
+			}
+		})
+	}
+}
+
+func TestPostPRComment(t *testing.T) {
+	testLogger, _ := logger.GetLogger()
+
+	tests := []struct {
+		name        string
+		event       *info.Event
+		providerErr error
+		wantErr     string
+		wantCalls   int
 	}{
 		{
 			name:  "no pull request number, skipped",
 			event: &info.Event{PullRequestNumber: 0},
 		},
 		{
-			name:  "with pull request number",
-			event: &info.Event{PullRequestNumber: 42},
+			name:      "with pull request number",
+			event:     &info.Event{PullRequestNumber: 42},
+			wantCalls: 1,
+		},
+		{
+			name:        "create comment error",
+			event:       &info.Event{PullRequestNumber: 42},
+			providerErr: errors.New("provider rejected comment"),
+			wantErr:     "failed to create PR comment",
+			wantCalls:   1,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			prov := &recordingCommentProvider{err: tt.providerErr}
 			result := AnalysisResult{
 				Role:     "test-role",
 				Response: &AnalysisResponse{Content: "analysis content"},
 			}
 			err := postPRComment(context.Background(), result, tt.event, prov, testLogger)
+			if tt.wantErr != "" {
+				assert.ErrorContains(t, err, tt.wantErr)
+				assert.Equal(t, prov.calls, tt.wantCalls)
+				return
+			}
 			assert.NilError(t, err)
+			assert.Equal(t, prov.calls, tt.wantCalls)
+			if tt.wantCalls > 0 {
+				assert.Assert(t, len(prov.comments) == 1)
+				assert.Assert(t, len(prov.markers) == 1)
+			}
 		})
 	}
 }
@@ -679,6 +1025,13 @@ func TestShouldTriggerRole(t *testing.T) {
 		{
 			name:       "invalid cel expression",
 			role:       v1alpha1.AnalysisRole{Name: "test-role", OnCEL: "invalid syntax ("},
+			celContext: map[string]any{},
+			pr:         failedPR,
+			wantError:  true,
+		},
+		{
+			name:       "non boolean cel expression errors",
+			role:       v1alpha1.AnalysisRole{Name: "test-role", OnCEL: `"not-a-bool"`},
 			celContext: map[string]any{},
 			pr:         failedPR,
 			wantError:  true,
