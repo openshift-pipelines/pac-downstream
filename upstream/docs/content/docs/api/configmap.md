@@ -377,10 +377,10 @@ skip-push-event-for-pr-commits: "true"
 
 ### API Retry
 
-{{< tech_preview "Provider API Retry for GitHub and GitLab" >}}
+{{< tech_preview "Provider API Retry for GitHub, GitLab, and Gitea/Forgejo" >}}
 
 {{< param name="enable-api-retry" type="boolean" default="false" id="param-enable-api-retry" >}}
-Enables retrying GitHub and GitLab API requests when Pipelines-as-Code
+Enables retrying GitHub, GitLab, and Gitea/Forgejo API requests when Pipelines-as-Code
 encounters a temporary provider failure. This includes rate limits, temporary
 server errors, and selected network failures.
 
@@ -393,11 +393,19 @@ The setting is disabled by default. Enabling it affects API operations made
 while processing an event, including temporary clients and GitHub App setup.
 
 When disabled, the GitLab client keeps the retry behaviour built into the
-upstream GitLab Go client, and the GitHub client performs no retries.
+upstream GitLab Go client, the GitHub client performs no retries, and the
+Gitea/Forgejo client performs no retries except for a single specific transient
+error.
 
 Pipelines-as-Code only repeats an operation when it can do so safely. It does
 not repeat provider changes after an uncertain network or server failure when
 doing so could create duplicate comments, statuses, or other mutations.
+
+Independently of this setting, Pipelines-as-Code always retries a GitHub
+check-run update that returns a 404 when the check-run id comes from the
+annotation on a PipelineRun. Another reconcile may have created that check run
+moments earlier and GitHub can still report it as missing, so the update is
+retried a few times with a short backoff before the error is reported.
 
 ```yaml
 enable-api-retry: "false"

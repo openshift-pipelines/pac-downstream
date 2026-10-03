@@ -28,7 +28,9 @@ spec:
     - name: git_auth_secret
       value: "{{git_auth_secret}}"
     - name: model
-      value: "google-vertex-anthropic/claude-sonnet-5@default"
+      value: "google-vertex-anthropic/claude-sonnet-4-6@default"
+    - name: reasoning_effort
+      value: "high"
     - name: vertex_credentials_secret
       value: "paco-vertex-credentials"
     - name: vertex_credentials_key
@@ -47,7 +49,9 @@ spec:
         default: ""
       - name: git_auth_secret
       - name: model
-        default: "google-vertex-anthropic/claude-sonnet-5@default"
+        default: "google-vertex-anthropic/claude-sonnet-4-6@default"
+      - name: reasoning_effort
+        default: "high"
       - name: vertex_credentials_secret
         default: "paco-vertex-credentials"
       - name: vertex_credentials_key
@@ -103,7 +107,8 @@ spec:
                 mkdir -p "${HOME}"
                 paco review \
                   --workspace "$(workspaces.source.path)" \
-                  --model "$(params.model)"
+                  --model "$(params.model)" \
+                  --reasoning-effort "$(params.reasoning_effort)"
 
             - name: post-review
               displayName: "Post review to the pull request"
