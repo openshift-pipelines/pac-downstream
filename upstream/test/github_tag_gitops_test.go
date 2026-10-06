@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/google/go-github/v85/github"
+	"github.com/google/go-github/v84/github"
 	tgithub "github.com/openshift-pipelines/pipelines-as-code/test/pkg/github"
 	"github.com/openshift-pipelines/pipelines-as-code/test/pkg/payload"
 	"github.com/openshift-pipelines/pipelines-as-code/test/pkg/scm"
@@ -112,13 +112,14 @@ func TestGithubGHEGitOpsCommentOnTag(t *testing.T) {
 		assert.NilError(t, err)
 
 		waitOpts := twait.Opts{
+			RepoName:        targetNS,
 			Namespace:       targetNS,
 			MinNumberStatus: numberOfPRs,
 			PollTimeout:     twait.DefaultTimeout,
-			TargetSHA:       []string{sha}, // this is the commit sha of the tag v1.0.0
+			TargetSHA:       sha, // this is the commit sha of the tag v1.0.0
 		}
 		runcnx.Clients.Log.Info("Waiting for PipelineRun to be created")
-		_, err = twait.UntilPipelineRunCreated(ctx, runcnx.Clients, waitOpts)
+		err = twait.UntilPipelineRunCreated(ctx, runcnx.Clients, waitOpts)
 		assert.NilError(t, err)
 	}
 }

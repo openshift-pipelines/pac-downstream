@@ -45,8 +45,7 @@ func withInformerFactory(ctx context.Context) context.Context {
 	untyped := ctx.Value(filtered.LabelKey{})
 	if untyped == nil {
 		logging.FromContext(ctx).Panic(
-			"Unable to fetch labelkey from context.",
-		)
+			"Unable to fetch labelkey from context.")
 	}
 	labelSelectors := untyped.([]string)
 	for _, selector := range labelSelectors {

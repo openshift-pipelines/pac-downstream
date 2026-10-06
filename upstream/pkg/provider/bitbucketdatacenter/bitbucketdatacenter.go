@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/google/go-github/v85/github"
+	"github.com/google/go-github/v84/github"
 	"github.com/jenkins-x/go-scm/scm"
 	"github.com/jenkins-x/go-scm/scm/driver/stash"
 	"github.com/jenkins-x/go-scm/scm/transport/oauth2"
@@ -41,7 +41,6 @@ type Provider struct {
 	apiURL                    string
 	provenance                string
 	projectKey                string
-	previousHeadCommit        string
 	repo                      *v1alpha1.Repository
 	triggerEvent              string
 	cachedChangedFiles        *changedfiles.ChangedFiles
@@ -257,10 +256,7 @@ func (v *Provider) GetFileInsideRepo(ctx context.Context, event *info.Event, pat
 }
 
 func removeLastSegment(urlStr string) string {
-	u, err := url.Parse(urlStr)
-	if err != nil {
-		return urlStr
-	}
+	u, _ := url.Parse(urlStr)
 	segments := strings.Split(u.Path, "/")
 	switch {
 	case len(segments) > 1:
@@ -279,6 +275,9 @@ func removeLastSegment(urlStr string) string {
 }
 
 func (v *Provider) SetClient(ctx context.Context, run *params.Run, event *info.Event, repo *v1alpha1.Repository, _ *events.EventEmitter) error {
+	if event.Provider.User == "" {
+		return fmt.Errorf("no spec.git_provider.user has been set in the repo crd")
+	}
 	if event.Provider.Token == "" {
 		return fmt.Errorf("no spec.git_provider.secret has been set in the repo crd")
 	}
@@ -312,30 +311,18 @@ func (v *Provider) SetClient(ctx context.Context, run *params.Run, event *info.E
 		v.client = client
 
 		// Added for security audit purposes to log client access when a token is used
-		v.Logger.Infof("bitbucket-datacenter: initialized client with provided token for user=%s providerURL=%s", event.Provider.User, event.Provider.URL)
+		run.Clients.Log.Infof("bitbucket-datacenter: initialized client with provided token for user=%s providerURL=%s", event.Provider.User, event.Provider.URL)
 	}
 	v.run = run
 	v.repo = repo
 	v.triggerEvent = event.EventType
-
-	var resp *scm.Response
-	var err error
-	// we only need a valid token to access rest api
-	_, resp, err = v.Client().Users.Find(ctx)
+	_, resp, err := v.Client().Users.FindLogin(ctx, event.Provider.User)
 	if resp != nil && resp.Status == http.StatusUnauthorized {
-		return fmt.Errorf("token validation failed: unauthorized")
-	}
-	if resp != nil && resp.Status == http.StatusInternalServerError {
-		return fmt.Errorf("token validation failed: Internal Server Error")
+		return fmt.Errorf("cannot get user %s with token: %w", event.Provider.User, err)
 	}
 	if err != nil {
-		if resp != nil {
-			return fmt.Errorf("token validation failed: http status: %d : %w", resp.Status, err)
-		}
-		return fmt.Errorf("token validation failed: %w", err)
+		return fmt.Errorf("cannot get user %s: %w", event.Provider.User, err)
 	}
-
-	// the token must have admin permissions at project or repository level
 
 	return nil
 }
@@ -435,13 +422,7 @@ func (v *Provider) fetchChangedFiles(ctx context.Context, runevent *info.Event) 
 	case triggertype.Push:
 		opts := &scm.ListOptions{Page: 1, Size: apiResponseLimit}
 		for {
-			var changes []*scm.Change
-			var err error
-			if v.previousHeadCommit != "" {
-				changes, _, err = v.getMergeCommitChanges(ctx, runevent.Organization, runevent.Repository, v.previousHeadCommit, runevent.SHA, opts)
-			} else {
-				changes, _, err = v.Client().Git.ListChanges(ctx, orgAndRepo, runevent.SHA, opts)
-			}
+			changes, _, err := v.Client().Git.ListChanges(ctx, orgAndRepo, runevent.SHA, opts)
 			if err != nil {
 				return changedfiles.ChangedFiles{}, fmt.Errorf("failed to list changes for commit %s: %w", runevent.SHA, err)
 			}

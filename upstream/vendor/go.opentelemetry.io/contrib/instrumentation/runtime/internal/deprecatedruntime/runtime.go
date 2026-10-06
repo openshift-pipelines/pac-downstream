@@ -290,9 +290,6 @@ func recordGCPauses(
 	recorder metric.Int64Histogram,
 	pauses []uint64,
 ) {
-	if !recorder.Enabled(ctx) {
-		return
-	}
 	for _, pause := range pauses {
 		recorder.Record(ctx, clampUint64(pause))
 	}

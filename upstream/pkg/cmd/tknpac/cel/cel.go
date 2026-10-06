@@ -458,11 +458,7 @@ func pacParamsFromEvent(event *info.Event) map[string]string {
 func detectProvider(headers map[string]string, body []byte) (string, error) {
 	// Check for GitHub provider (most common)
 	if getHeaderCaseInsensitive(headers, "X-GitHub-Event") != "" {
-		// Forgejo sets X-Forgejo-Event-Type, X-Gitea-Event-Type, and X-GitHub-Event
-		if getHeaderCaseInsensitive(headers, "X-Forgejo-Event-Type") != "" {
-			return "forgejo", nil
-		}
-		// Gitea sets X-Gitea-Event-Type and X-GitHub-Event (but not X-Forgejo-Event-Type)
+		// Check if it's actually Gitea (which also sets X-GitHub-Event)
 		if getHeaderCaseInsensitive(headers, "X-Gitea-Event-Type") != "" {
 			return "gitea", nil
 		}
@@ -495,12 +491,7 @@ func detectProvider(headers map[string]string, body []byte) (string, error) {
 		}
 	}
 
-	// Check for Forgejo provider
-	if getHeaderCaseInsensitive(headers, "X-Forgejo-Event-Type") != "" {
-		return "forgejo", nil
-	}
-
-	// Check for Gitea provider
+	// Check for Gitea provider (backup check in case header is missing)
 	if getHeaderCaseInsensitive(headers, "X-Gitea-Event-Type") != "" {
 		return "gitea", nil
 	}
@@ -555,7 +546,7 @@ func Command(ioStreams *cli.IOStreams) *cobra.Command {
 		Long: `Evaluate CEL expressions interactively with webhook payloads.
 
 The command automatically detects the git provider from the webhook headers and payload structure.
-Supported providers: GitHub, GitLab, Bitbucket Cloud, Bitbucket Data Center, Gitea, and Forgejo.
+Supported providers: GitHub, GitLab, Bitbucket Cloud, Bitbucket Data Center, and Gitea.
 
 You can provide webhook payload and headers from files to test CEL expressions
 that would be used in PipelineRun configurations.`,
@@ -645,14 +636,8 @@ that would be used in PipelineRun configurations.`,
 					return err
 				}
 				pacParams = pacParamsFromEvent(event)
-			case "gitea":
+			case "gitea", "forgejo":
 				event, err := eventFromGitea(bodyBytes, headers)
-				if err != nil {
-					return err
-				}
-				pacParams = pacParamsFromEvent(event)
-			case "forgejo":
-				event, err := eventFromForgejo(bodyBytes, headers)
 				if err != nil {
 					return err
 				}

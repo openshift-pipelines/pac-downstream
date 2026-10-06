@@ -45,13 +45,14 @@ func TestGitlabGitOpsCommandTestOnPush(t *testing.T) {
 	assert.NilError(t, err)
 
 	waitOpts := wait.Opts{
+		RepoName:        topts.TargetNS,
 		Namespace:       topts.TargetNS,
 		MinNumberStatus: 1,
 		PollTimeout:     wait.DefaultTimeout,
-		TargetSHA:       []string{branch.Commit.ID},
+		TargetSHA:       branch.Commit.ID,
 	}
 
-	_, err = wait.UntilPipelineRunCreated(ctx, topts.ParamsRun.Clients, waitOpts)
+	err = wait.UntilPipelineRunCreated(ctx, topts.ParamsRun.Clients, waitOpts)
 	assert.NilError(t, err)
 
 	commentOpts := &gitlab.PostCommitCommentOptions{
@@ -109,13 +110,14 @@ func TestGitlabGitOpsCommandCancelOnPush(t *testing.T) {
 
 	numberOfStatus := 2
 	waitOpts := wait.Opts{
+		RepoName:        topts.TargetNS,
 		Namespace:       topts.TargetNS,
 		MinNumberStatus: numberOfStatus,
 		PollTimeout:     wait.DefaultTimeout,
-		TargetSHA:       []string{branch.Commit.ID},
+		TargetSHA:       branch.Commit.ID,
 	}
 
-	_, err = wait.UntilPipelineRunCreated(ctx, topts.ParamsRun.Clients, waitOpts)
+	err = wait.UntilPipelineRunCreated(ctx, topts.ParamsRun.Clients, waitOpts)
 	assert.NilError(t, err)
 
 	prsNew, err := topts.ParamsRun.Clients.Tekton.TektonV1().PipelineRuns(topts.TargetNS).List(ctx, metav1.ListOptions{})
@@ -129,7 +131,7 @@ func TestGitlabGitOpsCommandCancelOnPush(t *testing.T) {
 	assert.NilError(t, err)
 	topts.ParamsRun.Clients.Log.Infof("Commit comment %s has been created", cc.Note)
 
-	_, err = wait.UntilPipelineRunHasReason(ctx, topts.ParamsRun.Clients, v1.PipelineRunReasonCancelled, waitOpts)
+	err = wait.UntilPipelineRunHasReason(ctx, topts.ParamsRun.Clients, v1.PipelineRunReasonCancelled, waitOpts)
 	assert.NilError(t, err)
 }
 
@@ -179,13 +181,14 @@ func TestGitlabGitOpsCommandTestOnTag(t *testing.T) {
 	topts.ParamsRun.Clients.Log.Infof("Commit comment %s has been created", cc.Note)
 
 	waitOpts := wait.Opts{
+		RepoName:        topts.TargetNS,
 		Namespace:       topts.TargetNS,
 		MinNumberStatus: numberOfPRs,
 		PollTimeout:     wait.DefaultTimeout,
-		TargetSHA:       []string{sha},
+		TargetSHA:       sha,
 	}
 
-	_, err = wait.UntilPipelineRunCreated(ctx, topts.ParamsRun.Clients, waitOpts)
+	err = wait.UntilPipelineRunCreated(ctx, topts.ParamsRun.Clients, waitOpts)
 	assert.NilError(t, err)
 
 	prsNew, err := topts.ParamsRun.Clients.Tekton.TektonV1().PipelineRuns(topts.TargetNS).List(ctx, metav1.ListOptions{})

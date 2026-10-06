@@ -15,18 +15,10 @@ spec:
           steps:
             - name: fetch-repo-with-stepaction
               ref:
-                resolver: hub
+                resolver: http
                 params:
-                  - name: catalog
-                    value: git-clone-stepaction
-                  - name: type
-                    value: artifact
-                  - name: kind
-                    value: stepaction
-                  - name: name
-                    value: git-clone
-                  - name: version
-                    value: "1.7.0"
+                  - name: url
+                    value: https://raw.githubusercontent.com/tektoncd/pipelines-as-code/refs/heads/main/.tekton/stepactions/git-clone.yaml
               params:
                 - name: output-path
                   value: "/tmp/output"

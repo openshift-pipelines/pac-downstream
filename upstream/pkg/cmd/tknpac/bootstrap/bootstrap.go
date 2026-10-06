@@ -207,7 +207,7 @@ func GithubApp(run *params.Run, ioStreams *cli.IOStreams) *cobra.Command {
 				return err
 			}
 			// installed but there is error for missing resources
-			if installed && !opts.forceInstall && !opts.skipInstall {
+			if installed && !opts.forceInstall {
 				return fmt.Errorf("pipelines as Code is already installed, please pass --force-install to override existing")
 			}
 
@@ -271,12 +271,18 @@ func DetectPacInstallation(ctx context.Context, wantedNS string, run *params.Run
 	if err == nil {
 		return installed, cm.Namespace, nil
 	}
-	return installed, "", fmt.Errorf("could not detect Pipelines as Code configmap on the cluster, please specify the namespace in which pac is installed: %w", err)
+	return installed, "", fmt.Errorf("could not detect Pipelines as Code configmap on the cluster, please specify the namespace in which pac is installed: %s", err.Error())
 }
 
 func getConfigMap(ctx context.Context, run *params.Run) (*corev1.ConfigMap, error) {
+	var (
+		err            error
+		configMap      *corev1.ConfigMap
+		foundConfigmap bool
+	)
+
 	for _, n := range defaultNamespaces {
-		configMap, err := run.Clients.Kube.CoreV1().ConfigMaps(n).Get(ctx, infoConfigMap, metav1.GetOptions{})
+		configMap, err = run.Clients.Kube.CoreV1().ConfigMaps(n).Get(ctx, infoConfigMap, metav1.GetOptions{})
 		if err != nil {
 			if kapierror.IsNotFound(err) {
 				continue
@@ -287,10 +293,14 @@ func getConfigMap(ctx context.Context, run *params.Run) (*corev1.ConfigMap, erro
 			return nil, err
 		}
 		if configMap != nil && configMap.GetName() != "" {
-			return configMap, nil
+			foundConfigmap = true
+			break
 		}
 	}
-	return nil, fmt.Errorf("ConfigMap not found in default namespaces (\"openshift-pipelines\", \"pipelines-as-code\")")
+	if !foundConfigmap {
+		return nil, fmt.Errorf("ConfigMap not found in default namespaces (\"openshift-pipelines\", \"pipelines-as-code\")")
+	}
+	return configMap, nil
 }
 
 func addGithubAppFlag(cmd *cobra.Command, opts *bootstrapOpts) {

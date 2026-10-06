@@ -6,14 +6,12 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/google/go-github/v85/github"
+	"github.com/google/go-github/v84/github"
 	providerMetrics "github.com/openshift-pipelines/pipelines-as-code/pkg/provider/providermetrics"
-	"go.uber.org/zap"
 )
 
 const (
 	// Rate limit warning thresholds.
-	rateLimitExceeded = 0   // Error when remaining calls are 0
 	rateLimitCritical = 50  // Warn when remaining calls < 50
 	rateLimitWarning  = 100 // Warn when remaining calls < 100
 	rateLimitInfo     = 500 // Info when remaining calls < 500
@@ -71,14 +69,6 @@ func (v *Provider) checkRateLimit(resp *github.Response) (remaining string) {
 		"reset", reset,
 	}
 	switch {
-	case remainingCount == rateLimitExceeded:
-		v.Logger.Errorw("GitHub API rate limit exceeded", logFields...)
-		if v.eventEmitter != nil {
-			v.eventEmitter.EmitMessage(
-				v.repo, zap.ErrorLevel, "GitHubRateLimitExceeded",
-				fmt.Sprintf("GitHub API rate limit exceeded, limit: %s, resets at: %s", limit, reset),
-			)
-		}
 	case remainingCount < rateLimitCritical:
 		v.Logger.Errorw("GitHub API rate limit critically low", logFields...)
 	case remainingCount < rateLimitWarning:
@@ -92,6 +82,11 @@ func (v *Provider) checkRateLimit(resp *github.Response) (remaining string) {
 
 // wrapAPI wraps a GitHub API call with logging, metrics, and operation context.
 func wrapAPI[T any](v *Provider, operation string, call func() (T, *github.Response, error)) (T, *github.Response, error) {
+	// This check ensures we only profile if a logger is available.
+	if v.Logger == nil {
+		return call()
+	}
+
 	start := time.Now()
 	data, resp, err := call()
 	duration := time.Since(start)
@@ -119,8 +114,7 @@ func (v *Provider) logAPICall(operation string, duration time.Duration, resp *gi
 	// Add response context if available
 	if resp != nil {
 		remaining := v.checkRateLimit(resp)
-		logFields = append(
-			logFields,
+		logFields = append(logFields,
 			"url_path", resp.Request.URL.Path,
 			"rate_limit_remaining", remaining,
 			"github_request_id", resp.Header.Get("X-GitHub-Request-Id"),
@@ -129,15 +123,11 @@ func (v *Provider) logAPICall(operation string, duration time.Duration, resp *gi
 			logFields = append(logFields, "status_code", resp.StatusCode)
 		}
 	}
-	// Log success/failure appropriately; 404 is debug-only
-	// since a missing OWNERS file, for example, is a valid/expected state
+
+	// Log based on success/failure with appropriate level
 	if err != nil {
 		logFields = append(logFields, "error", err.Error())
-		if resp != nil && resp.Response != nil && resp.StatusCode == http.StatusNotFound {
-			v.Logger.Debugw("GitHub API call returned not found", logFields...)
-		} else {
-			v.Logger.Errorw("GitHub API call failed", logFields...)
-		}
+		v.Logger.Errorw("GitHub API call failed", logFields...)
 	} else {
 		v.Logger.Debugw("GitHub API call completed", logFields...)
 	}
@@ -145,6 +135,11 @@ func (v *Provider) logAPICall(operation string, duration time.Duration, resp *gi
 
 // wrapAPIGetContents wraps the GetContents API call with operation context.
 func wrapAPIGetContents(v *Provider, operation string, call func() (*github.RepositoryContent, []*github.RepositoryContent, *github.Response, error)) (*github.RepositoryContent, []*github.RepositoryContent, *github.Response, error) {
+	// This check ensures we only profile if a logger is available.
+	if v.Logger == nil {
+		return call()
+	}
+
 	start := time.Now()
 	file, dir, resp, err := call()
 	duration := time.Since(start)

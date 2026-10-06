@@ -20,8 +20,6 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/test/pkg/payload"
 	"github.com/openshift-pipelines/pipelines-as-code/test/pkg/scm"
 	twait "github.com/openshift-pipelines/pipelines-as-code/test/pkg/wait"
-	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
-	"github.com/tektoncd/pipeline/pkg/names"
 	"gotest.tools/v3/assert"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -86,7 +84,7 @@ func TestGiteaPolicyPullRequest(t *testing.T) {
 	assert.NilError(t, err)
 	topts.ParamsRun.Clients.Log.Infof("User %s has been added to team %s", pullRequesterUser.UserName, pullRequesterTeam.Name)
 	tgitea.CreateForkPullRequest(t, topts, pullRequesterUserCnx, "")
-	topts.Regexp = tgitea.SuccessRegexp
+	topts.Regexp = successRegexp
 	tgitea.WaitForPullRequestCommentMatch(t, topts)
 	topts.GiteaCNX = adminCnx
 }
@@ -157,7 +155,7 @@ func TestGiteaPolicyOkToTestRetest(t *testing.T) {
 	topts.GiteaCNX = okToTestUserCnx
 	topts.ParamsRun.Clients.Log.Infof("Sending a /ok-to-test comment as a user belonging to an allowed team in Repo CR policy")
 	tgitea.PostCommentOnPullRequest(t, topts, "/ok-to-test")
-	topts.Regexp = tgitea.SuccessRegexp
+	topts.Regexp = successRegexp
 	tgitea.WaitForPullRequestCommentMatch(t, topts)
 
 	prs, err := topts.ParamsRun.Clients.Tekton.TektonV1().PipelineRuns(topts.TargetNS).List(context.Background(), metav1.ListOptions{})
@@ -190,40 +188,8 @@ func TestGiteaACLOrgAllowed(t *testing.T) {
 	secondcnx, _, err := tgitea.CreateGiteaUserSecondCnx(topts, topts.TargetRefName, topts.GiteaPassword)
 	assert.NilError(t, err)
 
-	tgitea.CreateForkPullRequest(t, topts, secondcnx, "write")
+	tgitea.CreateForkPullRequest(t, topts, secondcnx, "read")
 	topts.CheckForStatus = "success"
-	tgitea.WaitForStatus(t, topts, "heads/"+topts.TargetRefName, "", false)
-	topts.GiteaCNX = adminCnx
-}
-
-func TestGiteaACLOrgWriteAndAdminAccess(t *testing.T) {
-	topts := &tgitea.TestOpts{
-		TargetEvent: triggertype.PullRequest.String(),
-		YAMLFiles: map[string]string{
-			".tekton/pr.yaml": "testdata/pipelinerun.yaml",
-		},
-		ExpectEvents:         false,
-		CheckForNumberStatus: 2,
-	}
-	_, f := tgitea.TestPR(t, topts)
-	defer f()
-	adminCnx := topts.GiteaCNX
-
-	topts.SecondUserName = topts.TargetRefName
-	secondcnx, _, err := tgitea.CreateGiteaUserSecondCnx(topts, topts.SecondUserName, topts.GiteaPassword)
-	assert.NilError(t, err)
-	tgitea.CreateForkPullRequest(t, topts, secondcnx, "write")
-	topts.CheckForStatus = "success"
-	tgitea.WaitForStatus(t, topts, "heads/"+topts.TargetRefName, "", false)
-
-	// third user setup to give it admin access to the repo and check the pipeline run are created.
-	thirdUserName := names.SimpleNameGenerator.RestrictLengthWithRandomSuffix("pac-e2e-test")
-	topts.SecondUserName = thirdUserName
-	thirdcnx, _, err := tgitea.CreateGiteaUserSecondCnx(topts, topts.SecondUserName, topts.GiteaPassword)
-	assert.NilError(t, err)
-	tgitea.CreateForkPullRequest(t, topts, thirdcnx, "admin")
-	topts.CheckForStatus = "success"
-	topts.CheckForNumberStatus = 3
 	tgitea.WaitForStatus(t, topts, "heads/"+topts.TargetRefName, "", false)
 	topts.GiteaCNX = adminCnx
 }
@@ -324,7 +290,7 @@ func TestGiteaACLCommentsAllowing(t *testing.T) {
 			tgitea.WaitForPullRequestCommentMatch(t, topts)
 
 			tgitea.PostCommentOnPullRequest(t, topts, tt.comment)
-			topts.Regexp = tgitea.SuccessRegexp
+			topts.Regexp = successRegexp
 			tgitea.WaitForPullRequestCommentMatch(t, topts)
 			tgitea.WaitForStatus(t, topts, topts.PullRequest.Head.Sha, "", false)
 			// checking the pod log to make sure /test <prname> works
@@ -377,7 +343,7 @@ func TestGiteaACLCommentsAllowingRememberOkToTestFalse(t *testing.T) {
 
 	tgitea.PostCommentOnPullRequest(t, topts, okToTestComment)
 	// status of CI is success because comment /ok-to-test added by authorized user
-	topts.Regexp = tgitea.SuccessRegexp
+	topts.Regexp = successRegexp
 	tgitea.WaitForPullRequestCommentMatch(t, topts)
 
 	// push to PR
@@ -396,7 +362,7 @@ func TestGiteaACLCommentsAllowingRememberOkToTestFalse(t *testing.T) {
 	tgitea.PostCommentOnPullRequest(t, topts, okToTestComment)
 
 	// status of CI is success because comment /ok-to-test added by authorized user
-	topts.Regexp = tgitea.SuccessRegexp
+	topts.Regexp = successRegexp
 	tgitea.WaitForPullRequestCommentMatch(t, topts)
 	topts.GiteaCNX = adminCnx
 }
@@ -432,14 +398,14 @@ func TestGiteaACLCommentsAllowingRememberOkToTestTrue(t *testing.T) {
 
 	tgitea.PostCommentOnPullRequest(t, topts, okToTestComment)
 	// status of CI is success because comment /ok-to-test added by authorized user
-	topts.Regexp = tgitea.SuccessRegexp
+	topts.Regexp = successRegexp
 	tgitea.WaitForPullRequestCommentMatch(t, topts)
 
 	// push to PR
 	tgitea.PushToPullRequest(t, topts, secondcnx, "echo Hello from user "+topts.TargetRefName)
 
 	// status of CI is success because comment /ok-to-test added by authorized user before
-	topts.Regexp = tgitea.SuccessRegexp
+	topts.Regexp = successRegexp
 	tgitea.WaitForPullRequestCommentMatch(t, topts)
 	topts.GiteaCNX = adminCnx
 }
@@ -502,12 +468,13 @@ func TestGiteaPolicyAllowedOwnerFiles(t *testing.T) {
 
 	npr := tgitea.CreateForkPullRequest(t, topts, allowedCnx, "")
 	waitOpts := twait.Opts{
+		RepoName:        topts.TargetNS,
 		Namespace:       topts.TargetNS,
 		MinNumberStatus: 1,
 		PollTimeout:     twait.DefaultTimeout,
-		TargetSHA:       []string{npr.Head.Sha},
+		TargetSHA:       npr.Head.Sha,
 	}
-	_, err = twait.UntilPipelineRunHasReason(context.Background(), topts.ParamsRun.Clients, tektonv1.PipelineRunReasonSuccessful, waitOpts)
+	_, err = twait.UntilRepositoryUpdated(context.Background(), topts.ParamsRun.Clients, waitOpts)
 	assert.NilError(t, err)
 	time.Sleep(5 * time.Second) // “Evil does not sleep. It waits.” - Galadriel
 
@@ -573,7 +540,7 @@ func TestGiteaPolicyOnComment(t *testing.T) {
 	topts.ParamsRun.Clients.Log.Infof("User %s has been added to team %s", pullRequesterUser.UserName, pullRequesterTeam.Name)
 	topts.GiteaCNX = pullRequesterUserCnx
 	tgitea.PostCommentOnPullRequest(t, topts, "/hello-world")
-	topts.Regexp = tgitea.SuccessRegexp
+	topts.Regexp = successRegexp
 	tgitea.WaitForPullRequestCommentMatch(t, topts)
 	topts.GiteaCNX = adminCnx
 }

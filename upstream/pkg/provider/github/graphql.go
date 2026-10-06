@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/go-github/v85/github"
+	"github.com/google/go-github/v84/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	providerMetrics "github.com/openshift-pipelines/pipelines-as-code/pkg/provider/providermetrics"
 	"go.uber.org/zap"
@@ -198,8 +198,7 @@ func (c *graphQLClient) fetchFilesBatch(ctx context.Context, owner, repo, ref st
 
 	if err != nil {
 		if c.logger != nil {
-			c.logger.Debugw(
-				"GraphQL request failed",
+			c.logger.Debugw("GraphQL request failed",
 				"error", err.Error(),
 				"duration_ms", duration.Milliseconds(),
 			)
@@ -217,8 +216,7 @@ func (c *graphQLClient) fetchFilesBatch(ctx context.Context, owner, repo, ref st
 
 	if resp.StatusCode != http.StatusOK {
 		if c.logger != nil {
-			c.logger.Debugw(
-				"GraphQL request returned non-200 status",
+			c.logger.Debugw("GraphQL request returned non-200 status",
 				"status_code", resp.StatusCode,
 				"response", string(body),
 				"rate_limit", rateLimit.limit,
@@ -240,8 +238,7 @@ func (c *graphQLClient) fetchFilesBatch(ctx context.Context, owner, repo, ref st
 			errorMsgs[i] = e.Message
 		}
 		if c.logger != nil {
-			c.logger.Debugw(
-				"GraphQL returned errors",
+			c.logger.Debugw("GraphQL returned errors",
 				"errors", strings.Join(errorMsgs, "; "),
 			)
 		}
@@ -264,8 +261,7 @@ func (c *graphQLClient) fetchFilesBatch(ctx context.Context, owner, repo, ref st
 	}
 
 	if c.logger != nil {
-		c.logger.Debugw(
-			"GraphQL batch fetch completed",
+		c.logger.Debugw("GraphQL batch fetch completed",
 			"files_requested", len(paths),
 			"duration_ms", duration.Milliseconds(),
 			"rate_limit", rateLimit.limit,

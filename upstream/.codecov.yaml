@@ -20,7 +20,5 @@ ignore:
   - "pkg/apis"
   - "cmd/*"
   - "test"
-  - "pkg/test"
-  - "pkg/provider/**/test"
   - "third_party"
   - "vendor"

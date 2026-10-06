@@ -32,9 +32,8 @@ type ManualReader struct {
 	isShutdown        bool
 	externalProducers atomic.Value
 
-	temporalitySelector      TemporalitySelector
-	aggregationSelector      AggregationSelector
-	cardinalityLimitSelector CardinalityLimitSelector
+	temporalitySelector TemporalitySelector
+	aggregationSelector AggregationSelector
 
 	inst *observ.Instrumentation
 }
@@ -46,9 +45,8 @@ var _ = map[Reader]struct{}{&ManualReader{}: {}}
 func NewManualReader(opts ...ManualReaderOption) *ManualReader {
 	cfg := newManualReaderConfig(opts)
 	r := &ManualReader{
-		temporalitySelector:      cfg.temporalitySelector,
-		aggregationSelector:      cfg.aggregationSelector,
-		cardinalityLimitSelector: cfg.cardinalityLimitSelector,
+		temporalitySelector: cfg.temporalitySelector,
+		aggregationSelector: cfg.aggregationSelector,
 	}
 	r.externalProducers.Store(cfg.producers)
 
@@ -89,11 +87,6 @@ func (mr *ManualReader) aggregation(
 	kind InstrumentKind,
 ) Aggregation { // nolint:revive  // import-shadow for method scoped by type.
 	return mr.aggregationSelector(kind)
-}
-
-// cardinalityLimit returns the cardinality limit for kind.
-func (mr *ManualReader) cardinalityLimit(kind InstrumentKind) (int, bool) {
-	return mr.cardinalityLimitSelector(kind)
 }
 
 // Shutdown closes any connections and frees any resources used by the reader.
@@ -169,35 +162,33 @@ func (mr *ManualReader) Collect(ctx context.Context, rm *metricdata.ResourceMetr
 }
 
 // MarshalLog returns logging data about the ManualReader.
-func (mr *ManualReader) MarshalLog() any {
-	mr.mu.Lock()
-	down := mr.isShutdown
-	mr.mu.Unlock()
+func (r *ManualReader) MarshalLog() any {
+	r.mu.Lock()
+	down := r.isShutdown
+	r.mu.Unlock()
 	return struct {
 		Type       string
 		Registered bool
 		Shutdown   bool
 	}{
 		Type:       "ManualReader",
-		Registered: mr.sdkProducer.Load() != nil,
+		Registered: r.sdkProducer.Load() != nil,
 		Shutdown:   down,
 	}
 }
 
 // manualReaderConfig contains configuration options for a ManualReader.
 type manualReaderConfig struct {
-	temporalitySelector      TemporalitySelector
-	aggregationSelector      AggregationSelector
-	cardinalityLimitSelector CardinalityLimitSelector
-	producers                []Producer
+	temporalitySelector TemporalitySelector
+	aggregationSelector AggregationSelector
+	producers           []Producer
 }
 
 // newManualReaderConfig returns a manualReaderConfig configured with options.
 func newManualReaderConfig(opts []ManualReaderOption) manualReaderConfig {
 	cfg := manualReaderConfig{
-		temporalitySelector:      DefaultTemporalitySelector,
-		aggregationSelector:      DefaultAggregationSelector,
-		cardinalityLimitSelector: defaultCardinalityLimitSelector,
+		temporalitySelector: DefaultTemporalitySelector,
+		aggregationSelector: DefaultAggregationSelector,
 	}
 	for _, opt := range opts {
 		cfg = opt.applyManual(cfg)

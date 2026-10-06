@@ -47,15 +47,15 @@ func formatError(cs *cli.ColorScheme, log string) string {
 	return n
 }
 
-func formatRunStatus(rs status.RunStatus, cs *cli.ColorScheme, c clockwork.Clock) string {
+func formatStatus(status v1alpha1.RepositoryRunStatus, cs *cli.ColorScheme, c clockwork.Clock) string {
 	return fmt.Sprintf("%s\t%s\t%s\t%s\t%s\t%s\t%s",
-		cs.ColorStatus(rs.Reason),
-		rs.EventType,
-		formatting.SanitizeBranch(rs.TargetBranch),
-		cs.HyperLink(formatting.ShortSHA(rs.SHA), rs.SHAURL),
-		formatting.Age(rs.StartTime, c),
-		formatting.PRDuration(rs.StartTime, rs.CompletionTime),
-		cs.HyperLink(rs.PipelineRunName, rs.LogURL))
+		cs.ColorStatus(status.Status.Conditions[0].Reason),
+		*status.EventType,
+		formatting.SanitizeBranch(*status.TargetBranch),
+		cs.HyperLink(formatting.ShortSHA(*status.SHA), *status.SHAURL),
+		formatting.Age(status.StartTime, c),
+		formatting.PRDuration(status),
+		cs.HyperLink(status.PipelineRunName, *status.LogURL))
 }
 
 type describeOpts struct {
@@ -128,38 +128,34 @@ func Root(run *params.Run, ioStreams *cli.IOStreams) *cobra.Command {
 	}
 
 	cmd.Flags().StringP(
-		targetPRFlag, "t", "", "Show this PipelineRun information",
-	)
-	_ = cmd.RegisterFlagCompletionFunc(
-		targetPRFlag,
+		targetPRFlag, "t", "", "Show this PipelineRun information")
+	_ = cmd.RegisterFlagCompletionFunc(targetPRFlag,
 		func(_ *cobra.Command, args []string, _ string) ([]string, cobra.ShellCompDirective) {
 			return completion.BaseCompletion("pipelinerun", args)
 		},
 	)
 
 	cmd.Flags().StringP(
-		namespaceFlag, "n", "", "If present, the namespace scope for this CLI request",
-	)
-	_ = cmd.RegisterFlagCompletionFunc(
-		namespaceFlag,
+		namespaceFlag, "n", "", "If present, the namespace scope for this CLI request")
+	_ = cmd.RegisterFlagCompletionFunc(namespaceFlag,
 		func(_ *cobra.Command, args []string, _ string) ([]string, cobra.ShellCompDirective) {
 			return completion.BaseCompletion(namespaceFlag, args)
 		},
 	)
 
 	cmd.Flags().BoolP(
-		showEventflag, "", false, "show kubernetes events associated with this repository, useful if you have an error that cannot be reported on the git provider interface",
-	)
+		showEventflag, "", false, "show kubernetes events associated with this repository, useful if you have an error that cannot be reported on the git provider interface")
 	cmd.PersistentFlags().BoolVarP(&useRealTime, useRealTimeFlag, "", false,
 		"display the time as RFC3339 instead of a relative time")
 	return cmd
 }
 
-func filterOnlyToPipelineRun(opts *describeOpts, statuses []status.RunStatus) []status.RunStatus {
-	var ret []status.RunStatus
-	for _, rs := range statuses {
-		if rs.PipelineRunName == opts.TargetPipelineRun {
-			ret = append(ret, rs)
+func filterOnlyToPipelineRun(opts *describeOpts, statuses []v1alpha1.RepositoryRunStatus) []v1alpha1.RepositoryRunStatus {
+	ret := []v1alpha1.RepositoryRunStatus{}
+
+	for _, rrs := range statuses {
+		if rrs.PipelineRunName == opts.TargetPipelineRun {
+			ret = append(ret, rrs)
 		}
 	}
 	return ret
@@ -191,11 +187,7 @@ func describe(ctx context.Context, cs *params.Run, clock clockwork.Clock, opts *
 		if err != nil {
 			return err
 		}
-		events, err := kinteract.GetEvents(ctx, repository.GetNamespace(), "Repository", repository.GetName())
-		if err != nil {
-			fmt.Fprintf(ioStreams.ErrOut, "warning: could not fetch repository events: %v\n", err)
-			events = &corev1.EventList{}
-		}
+		events, _ := kinteract.GetEvents(ctx, repository.GetNamespace(), "Repository", repository.GetName())
 
 		// events to runtime obj
 		runTimeObj := []runtime.Object{}
@@ -237,7 +229,7 @@ func describe(ctx context.Context, cs *params.Run, clock clockwork.Clock, opts *
 	colorScheme := ioStreams.ColorScheme()
 	funcMap := template.FuncMap{
 		"formatError":     formatError,
-		"formatStatus":    formatRunStatus,
+		"formatStatus":    formatStatus,
 		"formatEventType": formatting.CamelCasit,
 		"formatDuration":  formatting.PRDuration,
 		"formatTime":      formatting.Age,
@@ -245,7 +237,7 @@ func describe(ctx context.Context, cs *params.Run, clock clockwork.Clock, opts *
 		"shortSHA":        formatting.ShortSHA,
 	}
 
-	statuses := status.GetRunStatus(ctx, cs, *repository)
+	statuses := status.MixLivePRandRepoStatus(ctx, cs, *repository)
 
 	if opts.TargetPipelineRun != "" {
 		statuses = filterOnlyToPipelineRun(opts, statuses)
@@ -256,7 +248,7 @@ func describe(ctx context.Context, cs *params.Run, clock clockwork.Clock, opts *
 
 	data := struct {
 		Repository  *v1alpha1.Repository
-		Statuses    []status.RunStatus
+		Statuses    []v1alpha1.RepositoryRunStatus
 		ColorScheme *cli.ColorScheme
 		Clock       clockwork.Clock
 		Opts        *describeOpts

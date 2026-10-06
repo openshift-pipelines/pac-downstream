@@ -26,9 +26,8 @@ func DecodeError(e map[string]interface{}) error {
 // returned from the API, along with the body, if it could be read. If the body
 // could not be read, the body contains the error message trying to read it.
 type UnexpectedResponseStatusError struct {
-	Status     string
-	StatusCode int
-	Body       []byte
+	Status string
+	Body   []byte
 }
 
 func (e *UnexpectedResponseStatusError) Error() string {

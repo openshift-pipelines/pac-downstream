@@ -16,7 +16,7 @@ import (
 
 	"github.com/gobwas/glob"
 	"github.com/golang-jwt/jwt/v4"
-	"github.com/google/go-github/v85/github"
+	"github.com/google/go-github/v84/github"
 	"github.com/jonboulle/clockwork"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
@@ -41,30 +41,24 @@ const (
 	publicRawURLHost = "raw.githubusercontent.com"
 
 	defaultPaginedNumber = 100
-	// maxCommentPages caps the number of pages fetched when scanning PR
-	// comments (e.g. for /ok-to-test). With defaultPaginedNumber=100 this
-	// allows up to 1000 comments, which is generous for legitimate use while
-	// preventing rate-limit exhaustion from comment flooding.
-	maxCommentPages = 10
 )
 
 var _ provider.Interface = (*Provider)(nil)
 
 type Provider struct {
-	ghClient        *github.Client
-	Logger          *zap.SugaredLogger
-	Run             *params.Run
-	pacInfo         *info.PacOpts
-	Token, APIURL   *string
-	ApplicationID   *int64
-	providerName    string
-	provenance      string
-	RepositoryIDs   []int64
-	RepositoryNames []string
-	repo            *v1alpha1.Repository
-	eventEmitter    *events.EventEmitter
-	PaginedNumber   int
-	userType        string // The type of user i.e bot or not
+	ghClient      *github.Client
+	Logger        *zap.SugaredLogger
+	Run           *params.Run
+	pacInfo       *info.PacOpts
+	Token, APIURL *string
+	ApplicationID *int64
+	providerName  string
+	provenance    string
+	RepositoryIDs []int64
+	repo          *v1alpha1.Repository
+	eventEmitter  *events.EventEmitter
+	PaginedNumber int
+	userType      string // The type of user i.e bot or not
 	skippedRun
 	triggerEvent       string
 	cachedChangedFiles *changedfiles.ChangedFiles
@@ -73,20 +67,11 @@ type Provider struct {
 	pacUserLogin       string // user/bot login used by PAC
 	clock              clockwork.Clock
 	graphQLClient      *graphQLClient
-	checkRunsCache     checkRunsCache
 }
 
 type skippedRun struct {
 	mutex      *sync.Mutex
 	checkRunID int64
-}
-
-type checkRunsCache struct {
-	mu        sync.Mutex
-	runs      []*github.CheckRun
-	loading   bool
-	done      chan struct{}
-	populated bool
 }
 
 func New() *Provider {
@@ -96,8 +81,7 @@ func New() *Provider {
 		skippedRun: skippedRun{
 			mutex: &sync.Mutex{},
 		},
-		clock:          clockwork.NewRealClock(),
-		checkRunsCache: checkRunsCache{},
+		clock: clockwork.NewRealClock(),
 	}
 }
 
@@ -235,7 +219,7 @@ func (v *Provider) GetConfig() *info.ProviderConfig {
 	}
 }
 
-func MakeClient(ctx context.Context, apiURL, token string) (*github.Client, string, *string, error) {
+func MakeClient(ctx context.Context, apiURL, token string) (*github.Client, string, *string) {
 	var client *github.Client
 	ts := oauth2.StaticTokenSource(
 		&oauth2.Token{AccessToken: token},
@@ -252,17 +236,13 @@ func MakeClient(ctx context.Context, apiURL, token string) (*github.Client, stri
 	if apiURL != "" && apiURL != apiPublicURL {
 		providerName = "github-enterprise"
 		uploadURL := apiURL + "/api/uploads"
-		var err error
-		client, err = github.NewClient(tc).WithEnterpriseURLs(apiURL, uploadURL)
-		if err != nil {
-			return nil, providerName, nil, fmt.Errorf("failed to create github enterprise client for %s: %w", apiURL, err)
-		}
+		client, _ = github.NewClient(tc).WithEnterpriseURLs(apiURL, uploadURL)
 	} else {
 		client = github.NewClient(tc)
 		apiURL = client.BaseURL.String()
 	}
 
-	return client, providerName, github.Ptr(apiURL), nil
+	return client, providerName, github.Ptr(apiURL)
 }
 
 func parseTS(headerTS string) (time.Time, error) {
@@ -326,10 +306,7 @@ func (v *Provider) checkWebhookSecretValidity(ctx context.Context, cw clockwork.
 }
 
 func (v *Provider) SetClient(ctx context.Context, run *params.Run, event *info.Event, repo *v1alpha1.Repository, eventsEmitter *events.EventEmitter) error {
-	client, providerName, apiURL, err := MakeClient(ctx, event.Provider.URL, event.Provider.Token)
-	if err != nil {
-		return err
-	}
+	client, providerName, apiURL := MakeClient(ctx, event.Provider.URL, event.Provider.Token)
 	v.providerName = providerName
 	v.Run = run
 	v.repo = repo
@@ -350,7 +327,7 @@ func (v *Provider) SetClient(ctx context.Context, run *params.Run, event *info.E
 	if event.InstallationID != 0 {
 		integration = "github-app"
 	}
-	v.Logger.Infof(integration+": initialized OAuth2 client for providerName=%s providerURL=%s", v.providerName, event.Provider.URL)
+	run.Clients.Log.Infof(integration+": initialized OAuth2 client for providerName=%s providerURL=%s", v.providerName, event.Provider.URL)
 
 	v.APIURL = apiURL
 
@@ -361,77 +338,11 @@ func (v *Provider) SetClient(ctx context.Context, run *params.Run, event *info.E
 		}
 	}
 
-	// Handle GitHub App token scoping for both global and repo-level configuration
-	if event.InstallationID > 0 {
-		v.Logger.Debugf("setupAuthenticatedClient: scoping github app token")
-		token, err := ScopeTokenToListOfRepos(ctx, v, v.pacInfo, repo, run, event, v.eventEmitter, v.Logger)
-		if err != nil {
-			return fmt.Errorf("failed to scope token: %w", err)
-		}
-		switch {
-		case token != "":
-			event.Provider.Token = token
-		case len(v.RepositoryIDs) > 0 || len(v.RepositoryNames) > 0:
-			// Defer scoping until after ScopeTokenToListOfRepos so CreateToken can
-			// look up extra repos from the configmap first.  When no additional repos
-			// are configured, scope the token to only the triggering repo.
-			ns := info.GetNS(ctx)
-			scopedToken, err := v.GetAppToken(ctx, run.Clients.Kube, event.Provider.URL, event.InstallationID, ns)
-			if err != nil {
-				return fmt.Errorf("failed to scope token to triggering repository: %w", err)
-			}
-			event.Provider.Token = scopedToken
-		}
-	}
-
 	return nil
 }
 
-func (v *Provider) GetCommitStatuses(ctx context.Context, event *info.Event) ([]provider.CommitStatusInfo, error) {
-	if v.ghClient == nil {
-		return nil, fmt.Errorf("no github client has been initialized")
-	}
-
-	var result []provider.CommitStatusInfo
-
-	if event.InstallationID > 0 {
-		checkRuns, err := v.fetchAllCheckRunPagesWithRetry(ctx, event)
-		if err != nil {
-			return nil, err
-		}
-		for _, cr := range checkRuns {
-			status := cr.GetStatus()
-			if status == "completed" {
-				status = cr.GetConclusion()
-			}
-			result = append(result, provider.CommitStatusInfo{
-				Name:   cr.GetName(),
-				Status: status,
-			})
-		}
-	} else {
-		opt := &github.ListOptions{PerPage: v.PaginedNumber}
-		for {
-			statuses, resp, err := wrapAPI(v, "list_statuses", func() ([]*github.RepoStatus, *github.Response, error) {
-				return v.Client().Repositories.ListStatuses(ctx, event.Organization, event.Repository, event.SHA, opt)
-			})
-			if err != nil {
-				return nil, err
-			}
-			for _, s := range statuses {
-				result = append(result, provider.CommitStatusInfo{
-					Name:   s.GetContext(),
-					Status: s.GetState(),
-				})
-			}
-			if resp == nil || resp.NextPage == 0 {
-				break
-			}
-			opt.Page = resp.NextPage
-		}
-	}
-
-	return result, nil
+func (v *Provider) GetCommitStatuses(_ context.Context, _ *info.Event) ([]provider.CommitStatusInfo, error) {
+	return nil, nil
 }
 
 // GetTektonDir retrieves all YAML files from the .tekton directory and returns them as a single concatenated multi-document YAML file.
@@ -576,7 +487,7 @@ func (v *Provider) GetCommitInfo(ctx context.Context, runevent *info.Event) erro
 func (v *Provider) GetFileInsideRepo(ctx context.Context, runevent *info.Event, path, target string) (string, error) {
 	ref := runevent.SHA
 	if target != "" {
-		ref = target
+		ref = runevent.BaseBranch
 	} else if v.provenance == "default_branch" {
 		ref = runevent.DefaultBranch
 	}
@@ -738,7 +649,7 @@ func (v *Provider) fetchChangedFiles(ctx context.Context, runevent *info.Event) 
 					changedFiles.Renamed = append(changedFiles.Renamed, *repoCommit[j].Filename)
 				}
 			}
-			if resp == nil || resp.NextPage == 0 {
+			if resp.NextPage == 0 {
 				break
 			}
 			opt.Page = resp.NextPage
@@ -806,7 +717,7 @@ func ListRepos(ctx context.Context, v *Provider) ([]string, error) {
 		for i := range repoList.Repositories {
 			repoURLs = append(repoURLs, *repoList.Repositories[i].HTMLURL)
 		}
-		if resp == nil || resp.NextPage == 0 {
+		if resp.NextPage == 0 {
 			break
 		}
 		opt.Page = resp.NextPage
@@ -851,10 +762,9 @@ func (v *Provider) CreateToken(ctx context.Context, repository []string, event *
 }
 
 func (v *Provider) expandGlobAndAddRepoIDs(ctx context.Context, repoPattern string, cache *[]*github.Repository) error {
-	reposToScope, err := glob.Compile(repoPattern)
-	if err != nil {
-		return fmt.Errorf("invalid repo glob pattern %q: %w", repoPattern, err)
-	}
+	// We can skip error check here as all the glob compilation has been checked
+	// before this method is called.
+	reposToScope, _ := glob.Compile(repoPattern)
 
 	if *cache == nil {
 		repos, err := v.listAppRepos(ctx)
@@ -888,7 +798,7 @@ func (v *Provider) listAppRepos(ctx context.Context) ([]*github.Repository, erro
 
 		allRepos = append(allRepos, repoList.Repositories...)
 
-		if resp == nil || resp.NextPage == 0 {
+		if resp.NextPage == 0 {
 			break
 		}
 		opt.Page = resp.NextPage
@@ -1024,6 +934,10 @@ func (v *Provider) newCommentTraceLogContext(ctx context.Context, event *info.Ev
 }
 
 func (v *Provider) debugCommentPhase(event *info.Event, trace commentTraceLogContext, phase string, kv ...any) {
+	if v.Logger == nil {
+		return
+	}
+
 	org := "unknown"
 	repo := "unknown"
 	pr := 0
@@ -1034,8 +948,7 @@ func (v *Provider) debugCommentPhase(event *info.Event, trace commentTraceLogCon
 	}
 
 	baseFields := make([]any, 0, 18+len(kv))
-	baseFields = append(
-		baseFields,
+	baseFields = append(baseFields,
 		"phase", phase,
 		"organization", org,
 		"repository", repo,
@@ -1086,15 +999,13 @@ func (v *Provider) listCommentsByMarker(
 	}
 
 	if len(comments) == v.PaginedNumber {
-		v.debugCommentPhase(
-			event, trace, phase+"_pagination_warning",
+		v.debugCommentPhase(event, trace, phase+"_pagination_warning",
 			"fetched_count", len(comments),
 			"note", "response returned exactly PerPage comments; marker matches beyond page 1 may be missed",
 		)
 	}
 
-	v.debugCommentPhase(
-		event, trace, phase,
+	v.debugCommentPhase(event, trace, phase,
 		"fetched_count", len(comments),
 		"matched_count", len(matchedComments),
 		"matched_comments", compactCommentIDs(matchedComments),
@@ -1121,8 +1032,7 @@ func (v *Provider) CreateComment(ctx context.Context, event *info.Event, commit,
 		}
 
 		if len(existingComments) > 1 {
-			v.debugCommentPhase(
-				event, trace, "duplicate_detected",
+			v.debugCommentPhase(event, trace, "duplicate_detected",
 				"matched_count", len(existingComments),
 				"matched_comments", compactCommentIDs(existingComments),
 			)
@@ -1161,16 +1071,14 @@ func (v *Provider) CreateComment(ctx context.Context, event *info.Event, commit,
 		})
 	})
 	if err != nil {
-		v.debugCommentPhase(
-			event, trace, "create_comment_done",
+		v.debugCommentPhase(event, trace, "create_comment_done",
 			"status_code", responseStatusCode(createResp),
 			"github_request_id", githubRequestID(createResp),
 			"create_error", err.Error(),
 		)
 		return err
 	}
-	v.debugCommentPhase(
-		event, trace, "create_comment_done",
+	v.debugCommentPhase(event, trace, "create_comment_done",
 		"status_code", responseStatusCode(createResp),
 		"github_request_id", githubRequestID(createResp),
 		"created_comment_id", createdComment.GetID(),
@@ -1244,10 +1152,7 @@ func (v *Provider) fetchAppSlug(ctx context.Context, apiURL string) (string, err
 		return "", err
 	}
 
-	client, _, _, err := MakeClient(ctx, apiURL, tokenString)
-	if err != nil {
-		return "", err
-	}
+	client, _, _ := MakeClient(ctx, apiURL, tokenString)
 	app, _, err := client.Apps.Get(ctx, "")
 	if err != nil {
 		return "", fmt.Errorf("failed to get app info: %w", err)

@@ -10,67 +10,80 @@ import (
 	"strings"
 	"time"
 
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/llm"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/llm/ltypes"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/llm/providers"
 )
 
 const (
 	defaultBaseURL = "https://generativelanguage.googleapis.com/v1beta"
-	defaultModel   = "gemini-3.1-flash-lite-preview"
+	defaultModel   = "gemini-2.5-flash-lite"
+
+	// Default configuration values.
+	defaultTimeoutSeconds = 30
+	defaultMaxTokens      = 1000
 )
 
-func init() {
-	llm.RegisterProvider(llm.ProviderGemini, newClient)
+// Config holds the configuration for Gemini client.
+type Config struct {
+	APIKey         string
+	BaseURL        string
+	Model          string
+	TimeoutSeconds int
+	MaxTokens      int
 }
 
 // Client implements the LLM interface for Google Gemini.
 type Client struct {
-	config     *llm.ProviderConfig
+	config     *Config
 	httpClient *http.Client
 }
 
-func newClient(cfg *llm.ProviderConfig) (llm.Client, error) {
-	if cfg == nil {
+// NewClient creates a new Gemini client.
+func NewClient(config *Config) (*Client, error) {
+	if config == nil {
 		return nil, fmt.Errorf("config is required")
 	}
-	if cfg.APIKey == "" {
+
+	if config.APIKey == "" {
 		return nil, fmt.Errorf("API key is required")
 	}
 
-	c := &llm.ProviderConfig{
-		APIKey:         cfg.APIKey,
-		BaseURL:        cfg.BaseURL,
-		Model:          cfg.Model,
-		TimeoutSeconds: cfg.TimeoutSeconds,
-		MaxTokens:      cfg.MaxTokens,
+	commonCfg := &providers.CommonConfig{
+		APIKey:         config.APIKey,
+		TimeoutSeconds: config.TimeoutSeconds,
+		MaxTokens:      config.MaxTokens,
 	}
-	if c.TimeoutSeconds == 0 {
-		c.TimeoutSeconds = llm.DefaultTimeoutSeconds
-	}
-	if c.MaxTokens == 0 {
-		c.MaxTokens = llm.DefaultMaxTokens
-	}
-	if c.BaseURL == "" {
-		c.BaseURL = defaultBaseURL
-	}
-	if c.Model == "" {
-		c.Model = defaultModel
+	if err := providers.ApplyDefaults(commonCfg); err != nil {
+		return nil, err
 	}
 
-	return &Client{
-		config: c,
+	config.TimeoutSeconds = commonCfg.TimeoutSeconds
+	config.MaxTokens = commonCfg.MaxTokens
+
+	if config.BaseURL == "" {
+		config.BaseURL = defaultBaseURL
+	}
+	if config.Model == "" {
+		config.Model = defaultModel
+	}
+
+	client := &Client{
+		config: config,
 		httpClient: &http.Client{
-			Timeout: time.Duration(c.TimeoutSeconds) * time.Second,
+			Timeout: time.Duration(config.TimeoutSeconds) * time.Second,
 		},
-	}, nil
+	}
+
+	return client, nil
 }
 
 // Analyze sends an analysis request to Gemini and returns the response.
-func (c *Client) Analyze(ctx context.Context, request *llm.AnalysisRequest) (*llm.AnalysisResponse, error) {
+func (c *Client) Analyze(ctx context.Context, request *ltypes.AnalysisRequest) (*ltypes.AnalysisResponse, error) {
 	startTime := time.Now()
 
-	fullPrompt, err := llm.BuildPrompt(request)
+	fullPrompt, err := providers.BuildPrompt(request)
 	if err != nil {
-		return nil, &llm.AnalysisError{
+		return nil, &ltypes.AnalysisError{
 			Provider:  c.GetProviderName(),
 			Type:      "prompt_build_error",
 			Message:   fmt.Sprintf("failed to build prompt: %v", err),
@@ -82,7 +95,9 @@ func (c *Client) Analyze(ctx context.Context, request *llm.AnalysisRequest) (*ll
 		Contents: []geminiContent{
 			{
 				Parts: []geminiPart{
-					{Text: fullPrompt},
+					{
+						Text: fullPrompt,
+					},
 				},
 			},
 		},
@@ -93,7 +108,7 @@ func (c *Client) Analyze(ctx context.Context, request *llm.AnalysisRequest) (*ll
 
 	requestBody, err := json.Marshal(apiRequest)
 	if err != nil {
-		return nil, &llm.AnalysisError{
+		return nil, &ltypes.AnalysisError{
 			Provider:  c.GetProviderName(),
 			Type:      "request_marshal_error",
 			Message:   fmt.Sprintf("failed to marshal request: %v", err),
@@ -104,7 +119,7 @@ func (c *Client) Analyze(ctx context.Context, request *llm.AnalysisRequest) (*ll
 	url := fmt.Sprintf("%s/models/%s:generateContent?key=%s", c.config.BaseURL, c.config.Model, c.config.APIKey)
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewBuffer(requestBody))
 	if err != nil {
-		return nil, &llm.AnalysisError{
+		return nil, &ltypes.AnalysisError{
 			Provider:  c.GetProviderName(),
 			Type:      "http_request_error",
 			Message:   fmt.Sprintf("failed to create HTTP request: %v", err),
@@ -116,7 +131,7 @@ func (c *Client) Analyze(ctx context.Context, request *llm.AnalysisRequest) (*ll
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
-		return nil, &llm.AnalysisError{
+		return nil, &ltypes.AnalysisError{
 			Provider:  c.GetProviderName(),
 			Type:      "http_error",
 			Message:   fmt.Sprintf("HTTP request failed: %v", err),
@@ -127,7 +142,7 @@ func (c *Client) Analyze(ctx context.Context, request *llm.AnalysisRequest) (*ll
 
 	var apiResponse geminiResponse
 	if err := json.NewDecoder(resp.Body).Decode(&apiResponse); err != nil {
-		return nil, &llm.AnalysisError{
+		return nil, &ltypes.AnalysisError{
 			Provider:  c.GetProviderName(),
 			Type:      "response_parse_error",
 			Message:   fmt.Sprintf("failed to parse response: %v", err),
@@ -156,7 +171,7 @@ func (c *Client) Analyze(ctx context.Context, request *llm.AnalysisRequest) (*ll
 			errorMsg = fmt.Sprintf("Gemini API error: %s", apiResponse.Error.Message)
 		}
 
-		return nil, &llm.AnalysisError{
+		return nil, &ltypes.AnalysisError{
 			Provider:  c.GetProviderName(),
 			Type:      errorType,
 			Message:   errorMsg,
@@ -165,7 +180,7 @@ func (c *Client) Analyze(ctx context.Context, request *llm.AnalysisRequest) (*ll
 	}
 
 	if len(apiResponse.Candidates) == 0 {
-		return nil, &llm.AnalysisError{
+		return nil, &ltypes.AnalysisError{
 			Provider:  c.GetProviderName(),
 			Type:      "empty_response",
 			Message:   "no candidates in API response",
@@ -175,7 +190,7 @@ func (c *Client) Analyze(ctx context.Context, request *llm.AnalysisRequest) (*ll
 
 	candidate := apiResponse.Candidates[0]
 	if len(candidate.Content.Parts) == 0 {
-		return nil, &llm.AnalysisError{
+		return nil, &ltypes.AnalysisError{
 			Provider:  c.GetProviderName(),
 			Type:      "empty_response",
 			Message:   "no content parts in API response",
@@ -184,40 +199,44 @@ func (c *Client) Analyze(ctx context.Context, request *llm.AnalysisRequest) (*ll
 	}
 
 	content := candidate.Content.Parts[0].Text
+
 	tokensUsed := len(strings.Fields(content + fullPrompt))
 
-	return &llm.AnalysisResponse{
+	response := &ltypes.AnalysisResponse{
 		Content:    content,
 		TokensUsed: tokensUsed,
 		Provider:   c.GetProviderName(),
 		Timestamp:  time.Now(),
 		Duration:   time.Since(startTime),
-	}, nil
+	}
+
+	return response, nil
 }
 
 // GetProviderName returns the provider name.
 func (c *Client) GetProviderName() string {
-	return string(llm.ProviderGemini)
+	return string(ltypes.LLMProviderGemini)
 }
 
 // ValidateConfig validates the client configuration.
 func (c *Client) ValidateConfig() error {
-	if c.config.APIKey == "" {
-		return fmt.Errorf("API key is required")
+	commonCfg := &providers.CommonConfig{
+		APIKey:         c.config.APIKey,
+		TimeoutSeconds: c.config.TimeoutSeconds,
+		MaxTokens:      c.config.MaxTokens,
 	}
-	if c.config.TimeoutSeconds < 0 {
-		return fmt.Errorf("timeout seconds must be non-negative")
+	if err := providers.ValidateCommonConfig(commonCfg); err != nil {
+		return err
 	}
-	if c.config.MaxTokens < 0 {
-		return fmt.Errorf("max tokens must be non-negative")
+
+	if err := providers.ValidateBaseURL(c.config.BaseURL); err != nil {
+		return err
 	}
-	if c.config.BaseURL == "" {
-		return fmt.Errorf("base URL is required")
-	}
-	return llm.ValidateURL(c.config.BaseURL)
+
+	return nil
 }
 
-// Gemini API request/response structures.
+// Gemini API request/response structures
 
 type geminiRequest struct {
 	Contents         []geminiContent         `json:"contents"`

@@ -2,18 +2,13 @@ package github
 
 import (
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
-	"strconv"
 	"testing"
 	"time"
 
-	"github.com/google/go-github/v85/github"
+	"github.com/google/go-github/v84/github"
 	"github.com/jonboulle/clockwork"
 	"gotest.tools/v3/assert"
 	"gotest.tools/v3/env"
@@ -76,12 +71,6 @@ var samplePRevent = github.PullRequestEvent{
 		Title: github.Ptr("my first PR"),
 	},
 	Repo: sampleRepo,
-}
-
-func githubSHA256Signature(secret string, payload []byte) string {
-	hm := hmac.New(sha256.New, []byte(secret))
-	hm.Write(payload)
-	return "sha256=" + hex.EncodeToString(hm.Sum(nil))
 }
 
 var samplePR = github.PullRequest{
@@ -347,132 +336,6 @@ func TestGetPullRequestsWithCommit(t *testing.T) {
 	}
 }
 
-func TestFindOpenPullRequestBySHA(t *testing.T) {
-	tests := []struct {
-		name         string
-		sha          string
-		setup        func(t *testing.T, mux *http.ServeMux)
-		wantPRNumber int
-		wantErr      string
-	}{
-		{
-			name: "single matching open PR",
-			sha:  "forkPRsha",
-			setup: func(t *testing.T, mux *http.ServeMux) {
-				t.Helper()
-				mux.HandleFunc("/repos/owner/reponame/pulls", func(rw http.ResponseWriter, _ *http.Request) {
-					fmt.Fprint(rw, `[
-						{"number": 101, "state": "open", "head": {"sha": "otherSHA"}},
-						{"number": 202, "state": "open", "head": {"sha": "forkPRsha"}}
-					]`)
-				})
-			},
-			wantPRNumber: 202,
-		},
-		{
-			name: "multiple matching open PRs across pages returns ambiguity error",
-			sha:  "ambiguousSHA",
-			setup: func(t *testing.T, mux *http.ServeMux) {
-				t.Helper()
-				mux.HandleFunc("/repos/owner/reponame/pulls", func(rw http.ResponseWriter, r *http.Request) {
-					switch r.URL.Query().Get("page") {
-					case "", "1":
-						rw.Header().Set("Link", `<https://api.github.com/repos/owner/reponame/pulls?page=2>; rel="next"`)
-						fmt.Fprint(rw, `[{"number": 101, "state": "open", "head": {"sha": "ambiguousSHA"}}]`)
-					case "2":
-						fmt.Fprint(rw, `[{"number": 202, "state": "open", "head": {"sha": "ambiguousSHA"}}]`)
-					default:
-						t.Fatalf("unexpected page %q", r.URL.Query().Get("page"))
-					}
-				})
-			},
-			wantErr: "found 2 open pull requests associated with the commit",
-		},
-		{
-			name: "matching open PR after ten pages",
-			sha:  "lateSHA",
-			setup: func(t *testing.T, mux *http.ServeMux) {
-				t.Helper()
-				mux.HandleFunc("/repos/owner/reponame/pulls", func(rw http.ResponseWriter, r *http.Request) {
-					page := r.URL.Query().Get("page")
-					if page == "" {
-						page = "1"
-					}
-					pageNumber, err := strconv.Atoi(page)
-					assert.NilError(t, err)
-
-					switch {
-					case pageNumber < 11:
-						rw.Header().Set("Link", fmt.Sprintf(`<https://api.github.com/repos/owner/reponame/pulls?page=%d>; rel="next"`, pageNumber+1))
-						fmt.Fprintf(rw, `[{"number": %d, "state": "open", "head": {"sha": "otherSHA"}}]`, pageNumber)
-					case pageNumber == 11:
-						fmt.Fprint(rw, `[{"number": 303, "state": "open", "head": {"sha": "lateSHA"}}]`)
-					default:
-						t.Fatalf("unexpected page %q", page)
-					}
-				})
-			},
-			wantPRNumber: 303,
-		},
-		{
-			name: "matching open PR before and after ten pages returns ambiguity error",
-			sha:  "lateAmbiguousSHA",
-			setup: func(t *testing.T, mux *http.ServeMux) {
-				t.Helper()
-				mux.HandleFunc("/repos/owner/reponame/pulls", func(rw http.ResponseWriter, r *http.Request) {
-					page := r.URL.Query().Get("page")
-					if page == "" {
-						page = "1"
-					}
-					pageNumber, err := strconv.Atoi(page)
-					assert.NilError(t, err)
-
-					switch {
-					case pageNumber < 11:
-						rw.Header().Set("Link", fmt.Sprintf(`<https://api.github.com/repos/owner/reponame/pulls?page=%d>; rel="next"`, pageNumber+1))
-						headSHA := "otherSHA"
-						if pageNumber == 1 {
-							headSHA = "lateAmbiguousSHA"
-						}
-						fmt.Fprintf(rw, `[{"number": %d, "state": "open", "head": {"sha": %q}}]`, pageNumber, headSHA)
-					case pageNumber == 11:
-						fmt.Fprint(rw, `[{"number": 303, "state": "open", "head": {"sha": "lateAmbiguousSHA"}}]`)
-					default:
-						t.Fatalf("unexpected page %q", page)
-					}
-				})
-			},
-			wantErr: "found 2 open pull requests associated with the commit",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			ctx, _ := rtesting.SetupFakeContext(t)
-			fakeclient, mux, _, teardown := ghtesthelper.SetupGH()
-			defer teardown()
-
-			tt.setup(t, mux)
-
-			logger, _ := logger.GetLogger()
-			provider := &Provider{
-				ghClient: fakeclient,
-				Logger:   logger,
-			}
-
-			pr, err := provider.findOpenPullRequestBySHA(ctx, "owner", "reponame", tt.sha)
-			if tt.wantErr != "" {
-				assert.ErrorContains(t, err, tt.wantErr)
-				return
-			}
-
-			assert.NilError(t, err)
-			assert.Assert(t, pr != nil)
-			assert.Equal(t, tt.wantPRNumber, pr.GetNumber())
-		})
-	}
-}
-
 func TestIsCommitPartOfPullRequest(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -577,10 +440,6 @@ func TestParsePayLoad(t *testing.T) {
 			State:  github.Ptr("open"),
 		},
 	}
-	rerunSender := &github.User{
-		Login: github.Ptr("maintainer"),
-		Type:  github.Ptr("User"),
-	}
 
 	tests := []struct {
 		name                       string
@@ -595,10 +454,6 @@ func TestParsePayLoad(t *testing.T) {
 		targetPipelinerun          string
 		targetCancelPipelinerun    string
 		wantedBranchName           string
-		wantedHeadBranch           string
-		wantedHeadURL              string
-		wantedSender               string
-		wantedUserType             string
 		wantedTagName              string
 		wantedPullRequestNumber    int
 		isCancelPipelineRunEnabled bool
@@ -607,7 +462,6 @@ func TestParsePayLoad(t *testing.T) {
 		objectType                 string
 		gitopscommentprefix        string
 		wantRepoCRError            bool
-		wantRequestSet             bool
 	}{
 		{
 			name:          "bad/unknown event",
@@ -645,12 +499,35 @@ func TestParsePayLoad(t *testing.T) {
 			payloadEventStruct: github.CheckRunEvent{Action: github.Ptr("created")},
 		},
 		{
+			name:               "bad/issue comment retest only with github apps",
+			wantErrString:      "no github client has been initialized",
+			eventType:          "issue_comment",
+			triggerTarget:      "pull_request",
+			payloadEventStruct: github.IssueCommentEvent{Action: github.Ptr("created"), Repo: sampleRepo},
+		},
+		{
 			name:               "bad/issue comment not coming from pull request",
 			eventType:          "issue_comment",
 			triggerTarget:      "pull_request",
 			githubClient:       true,
 			payloadEventStruct: github.IssueCommentEvent{Action: github.Ptr("created"), Issue: &github.Issue{}, Repo: sampleRepo},
 			wantErrString:      "issue comment is not coming from a pull_request",
+		},
+		{
+			name:          "bad/issue comment invalid pullrequest",
+			eventType:     "issue_comment",
+			triggerTarget: "pull_request",
+			githubClient:  true,
+			payloadEventStruct: github.IssueCommentEvent{
+				Action: github.Ptr("created"),
+				Issue: &github.Issue{
+					PullRequestLinks: &github.PullRequestLinks{
+						HTMLURL: github.Ptr("/bad"),
+					},
+				},
+				Repo: sampleRepo,
+			},
+			wantErrString: "bad pull request number",
 		},
 		{
 			name:          "bad/rerequest error fetching PR",
@@ -706,17 +583,14 @@ func TestParsePayLoad(t *testing.T) {
 			payloadEventStruct: github.CheckRunEvent{
 				Action: github.Ptr("rerequested"),
 				Repo:   sampleRepo,
-				Sender: rerunSender,
 				CheckRun: &github.CheckRun{
 					CheckSuite: &github.CheckSuite{
 						PullRequests: []*github.PullRequest{&samplePR},
 					},
 				},
 			},
-			muxReplies:     map[string]any{"/repos/owner/reponame/pulls/54321": samplePR},
-			shaRet:         "samplePRsha",
-			wantedSender:   "maintainer",
-			wantedUserType: "User",
+			muxReplies: map[string]any{"/repos/owner/reponame/pulls/54321": samplePR},
+			shaRet:     "samplePRsha",
 		},
 		// all checks in a check_suite
 		{
@@ -727,15 +601,12 @@ func TestParsePayLoad(t *testing.T) {
 			payloadEventStruct: github.CheckSuiteEvent{
 				Action: github.Ptr("rerequested"),
 				Repo:   sampleRepo,
-				Sender: rerunSender,
 				CheckSuite: &github.CheckSuite{
 					PullRequests: []*github.PullRequest{&samplePR},
 				},
 			},
-			muxReplies:     map[string]any{"/repos/owner/reponame/pulls/54321": samplePR},
-			shaRet:         "samplePRsha",
-			wantedSender:   "maintainer",
-			wantedUserType: "User",
+			muxReplies: map[string]any{"/repos/owner/reponame/pulls/54321": samplePR},
+			shaRet:     "samplePRsha",
 		},
 		{
 			name:         "good/rerequest on push",
@@ -744,7 +615,6 @@ func TestParsePayLoad(t *testing.T) {
 			payloadEventStruct: github.CheckRunEvent{
 				Action: github.Ptr("rerequested"),
 				Repo:   sampleRepo,
-				Sender: rerunSender,
 				CheckRun: &github.CheckRun{
 					CheckSuite: &github.CheckSuite{
 						HeadBranch: github.Ptr("main"),
@@ -752,9 +622,7 @@ func TestParsePayLoad(t *testing.T) {
 					},
 				},
 			},
-			shaRet:         "headSHACheckSuite",
-			wantedSender:   "maintainer",
-			wantedUserType: "User",
+			shaRet: "headSHACheckSuite",
 		},
 		{
 			name:          "good/rerequest check_run null head_branch resolves PR from SHA",
@@ -764,7 +632,6 @@ func TestParsePayLoad(t *testing.T) {
 			payloadEventStruct: github.CheckRunEvent{
 				Action: github.Ptr("rerequested"),
 				Repo:   sampleRepo,
-				Sender: rerunSender,
 				CheckRun: &github.CheckRun{
 					CheckSuite: &github.CheckSuite{
 						HeadSHA: github.Ptr("samplePRsha"),
@@ -776,236 +643,6 @@ func TestParsePayLoad(t *testing.T) {
 			},
 			shaRet:                  "samplePRsha",
 			wantedPullRequestNumber: 54321,
-			wantedSender:            "maintainer",
-			wantedUserType:          "User",
-		},
-		{
-			name:          "good/rerequest check_run resolves PR from check_run pull requests",
-			eventType:     "check_run",
-			githubClient:  true,
-			triggerTarget: string(triggertype.PullRequest),
-			payloadEventStruct: github.CheckRunEvent{
-				Action: github.Ptr("rerequested"),
-				Repo:   sampleRepo,
-				Sender: rerunSender,
-				CheckRun: &github.CheckRun{
-					PullRequests: []*github.PullRequest{&samplePR},
-					CheckSuite: &github.CheckSuite{
-						HeadSHA: github.Ptr("samplePRsha"),
-					},
-				},
-			},
-			muxReplies: map[string]any{
-				"/repos/owner/reponame/pulls/54321": samplePR,
-			},
-			shaRet:                  "samplePRsha",
-			wantedPullRequestNumber: 54321,
-			wantedSender:            "maintainer",
-			wantedUserType:          "User",
-		},
-		{
-			name:          "bad/rerequest check_run with multiple pull requests in payload",
-			eventType:     "check_run",
-			githubClient:  true,
-			wantErrString: "cannot determine pull request for check_run rerequest: found 2 associated pull requests in webhook payload",
-			payloadEventStruct: github.CheckRunEvent{
-				Action: github.Ptr("rerequested"),
-				Repo:   sampleRepo,
-				CheckRun: &github.CheckRun{
-					PullRequests: []*github.PullRequest{
-						&samplePR,
-						&samplePRAnother,
-					},
-					CheckSuite: &github.CheckSuite{
-						HeadSHA: github.Ptr("samplePRsha"),
-					},
-				},
-			},
-			shaRet: "samplePRsha",
-		},
-		{
-			name:          "bad/rerequest check_run with multiple check suite pull requests in payload",
-			eventType:     "check_run",
-			githubClient:  true,
-			wantErrString: "cannot determine pull request for check_run rerequest: found 2 associated pull requests in webhook payload",
-			payloadEventStruct: github.CheckRunEvent{
-				Action: github.Ptr("rerequested"),
-				Repo:   sampleRepo,
-				CheckRun: &github.CheckRun{
-					CheckSuite: &github.CheckSuite{
-						PullRequests: []*github.PullRequest{
-							&samplePR,
-							&samplePRAnother,
-						},
-						HeadSHA: github.Ptr("samplePRsha"),
-					},
-				},
-			},
-			shaRet: "samplePRsha",
-		},
-		{
-			name:          "bad/rerequest check_suite with multiple pull requests in payload",
-			eventType:     "check_suite",
-			githubClient:  true,
-			wantErrString: "cannot determine pull request for check_suite rerequest: found 2 associated pull requests in webhook payload",
-			payloadEventStruct: github.CheckSuiteEvent{
-				Action: github.Ptr("rerequested"),
-				Repo:   sampleRepo,
-				CheckSuite: &github.CheckSuite{
-					PullRequests: []*github.PullRequest{
-						&samplePR,
-						&samplePRAnother,
-					},
-					HeadSHA: github.Ptr("samplePRsha"),
-				},
-			},
-			shaRet: "samplePRsha",
-		},
-		{
-			name:          "good/rerequest check_run null head_branch resolves fork PR from open PR list",
-			eventType:     "check_run",
-			githubClient:  true,
-			triggerTarget: string(triggertype.PullRequest),
-			payloadEventStruct: github.CheckRunEvent{
-				Action: github.Ptr("rerequested"),
-				Repo:   sampleRepo,
-				Sender: rerunSender,
-				CheckRun: &github.CheckRun{
-					CheckSuite: &github.CheckSuite{
-						HeadSHA: github.Ptr("forkPRsha"),
-					},
-				},
-			},
-			muxReplies: map[string]any{
-				"/repos/owner/reponame/commits/forkPRsha/pulls": []*github.PullRequest{},
-				"/repos/owner/reponame/pulls": []*github.PullRequest{
-					{
-						Number:  github.Ptr(987),
-						State:   github.Ptr("open"),
-						HTMLURL: github.Ptr("https://github.com/owner/reponame/pull/987"),
-						Head: &github.PullRequestBranch{
-							SHA: github.Ptr("forkPRsha"),
-							Ref: github.Ptr("fork-feature"),
-							Repo: &github.Repository{
-								Owner: &github.User{
-									Login: github.Ptr("fork-owner"),
-								},
-								Name:    github.Ptr("reponame"),
-								HTMLURL: github.Ptr("https://github.com/fork-owner/reponame"),
-							},
-						},
-						Base: &github.PullRequestBranch{
-							Ref:  github.Ptr("main"),
-							SHA:  github.Ptr("basesha"),
-							Repo: sampleRepo,
-						},
-						User: &github.User{
-							Login: github.Ptr("fork-contributor"),
-						},
-						Title: github.Ptr("fork PR"),
-					},
-				},
-			},
-			shaRet:                  "forkPRsha",
-			wantedPullRequestNumber: 987,
-			wantedHeadBranch:        "fork-feature",
-			wantedHeadURL:           "https://github.com/fork-owner/reponame",
-			wantedSender:            "maintainer",
-			wantedUserType:          "User",
-		},
-		{
-			name:          "good/rerequest check_run ignores commit API PR when SHA is not PR head",
-			eventType:     "check_run",
-			githubClient:  true,
-			triggerTarget: string(triggertype.PullRequest),
-			payloadEventStruct: github.CheckRunEvent{
-				Action: github.Ptr("rerequested"),
-				Repo:   sampleRepo,
-				Sender: rerunSender,
-				CheckRun: &github.CheckRun{
-					CheckSuite: &github.CheckSuite{
-						HeadSHA: github.Ptr("forkPRsha"),
-					},
-				},
-			},
-			muxReplies: map[string]any{
-				"/repos/owner/reponame/commits/forkPRsha/pulls": []*github.PullRequest{
-					{
-						Number: github.Ptr(654),
-						State:  github.Ptr("open"),
-						Head: &github.PullRequestBranch{
-							SHA: github.Ptr("newerSHA"),
-						},
-					},
-				},
-				"/repos/owner/reponame/pulls": []*github.PullRequest{
-					{
-						Number:  github.Ptr(987),
-						State:   github.Ptr("open"),
-						HTMLURL: github.Ptr("https://github.com/owner/reponame/pull/987"),
-						Head: &github.PullRequestBranch{
-							SHA: github.Ptr("forkPRsha"),
-							Ref: github.Ptr("fork-feature"),
-							Repo: &github.Repository{
-								Owner: &github.User{
-									Login: github.Ptr("fork-owner"),
-								},
-								Name:    github.Ptr("reponame"),
-								HTMLURL: github.Ptr("https://github.com/fork-owner/reponame"),
-							},
-						},
-						Base: &github.PullRequestBranch{
-							Ref:  github.Ptr("main"),
-							SHA:  github.Ptr("basesha"),
-							Repo: sampleRepo,
-						},
-						User: &github.User{
-							Login: github.Ptr("fork-contributor"),
-						},
-						Title: github.Ptr("fork PR"),
-					},
-				},
-			},
-			shaRet:                  "forkPRsha",
-			wantedPullRequestNumber: 987,
-			wantedHeadBranch:        "fork-feature",
-			wantedHeadURL:           "https://github.com/fork-owner/reponame",
-			wantedSender:            "maintainer",
-			wantedUserType:          "User",
-		},
-		{
-			name:          "bad/rerequest check_run null head_branch ambiguous fallback PRs found",
-			eventType:     "check_run",
-			githubClient:  true,
-			wantErrString: "found 2 open pull requests associated with the commit",
-			payloadEventStruct: github.CheckRunEvent{
-				Action: github.Ptr("rerequested"),
-				Repo:   sampleRepo,
-				CheckRun: &github.CheckRun{
-					CheckSuite: &github.CheckSuite{
-						HeadSHA: github.Ptr("ambiguousFallbackSHA"),
-					},
-				},
-			},
-			muxReplies: map[string]any{
-				"/repos/owner/reponame/commits/ambiguousFallbackSHA/pulls": []*github.PullRequest{},
-				"/repos/owner/reponame/pulls": []*github.PullRequest{
-					{
-						Number: github.Ptr(301),
-						State:  github.Ptr("open"),
-						Head: &github.PullRequestBranch{
-							SHA: github.Ptr("ambiguousFallbackSHA"),
-						},
-					},
-					{
-						Number: github.Ptr(302),
-						State:  github.Ptr("open"),
-						Head: &github.PullRequestBranch{
-							SHA: github.Ptr("ambiguousFallbackSHA"),
-						},
-					},
-				},
-			},
 		},
 		{
 			name:          "good/rerequest check_suite null head_branch resolves PR from SHA",
@@ -1015,7 +652,6 @@ func TestParsePayLoad(t *testing.T) {
 			payloadEventStruct: github.CheckSuiteEvent{
 				Action: github.Ptr("rerequested"),
 				Repo:   sampleRepo,
-				Sender: rerunSender,
 				CheckSuite: &github.CheckSuite{
 					HeadSHA: github.Ptr("samplePRsha"),
 				},
@@ -1025,8 +661,6 @@ func TestParsePayLoad(t *testing.T) {
 			},
 			shaRet:                  "samplePRsha",
 			wantedPullRequestNumber: 54321,
-			wantedSender:            "maintainer",
-			wantedUserType:          "User",
 		},
 		{
 			name:          "bad/rerequest check_run null head_branch no PR found",
@@ -1044,7 +678,6 @@ func TestParsePayLoad(t *testing.T) {
 			},
 			muxReplies: map[string]any{
 				"/repos/owner/reponame/commits/orphanSHA/pulls": []*github.PullRequest{},
-				"/repos/owner/reponame/pulls":                   []*github.PullRequest{},
 			},
 		},
 		{
@@ -1061,7 +694,6 @@ func TestParsePayLoad(t *testing.T) {
 			},
 			muxReplies: map[string]any{
 				"/repos/owner/reponame/commits/orphanSHA/pulls": []*github.PullRequest{},
-				"/repos/owner/reponame/pulls":                   []*github.PullRequest{},
 			},
 		},
 		{
@@ -1085,7 +717,6 @@ func TestParsePayLoad(t *testing.T) {
 						State:  github.Ptr("closed"),
 					},
 				},
-				"/repos/owner/reponame/pulls": []*github.PullRequest{},
 			},
 		},
 		{
@@ -1105,19 +736,21 @@ func TestParsePayLoad(t *testing.T) {
 					{
 						Number: github.Ptr(101),
 						State:  github.Ptr("open"),
-						Head: &github.PullRequestBranch{
-							SHA: github.Ptr("ambiguousSHA"),
-						},
 					},
 					{
 						Number: github.Ptr(202),
 						State:  github.Ptr("open"),
-						Head: &github.PullRequestBranch{
-							SHA: github.Ptr("ambiguousSHA"),
-						},
 					},
 				},
 			},
+		},
+		{
+			name:               "bad/issue_comment_not_from_created",
+			wantErrString:      "only newly created comment is supported, received: deleted",
+			payloadEventStruct: github.IssueCommentEvent{Action: github.Ptr("deleted")},
+			eventType:          "issue_comment",
+			triggerTarget:      "pull_request",
+			githubClient:       true,
 		},
 		{
 			name:          "good/issue comment",
@@ -1130,13 +763,11 @@ func TestParsePayLoad(t *testing.T) {
 					PullRequestLinks: &github.PullRequestLinks{
 						HTMLURL: github.Ptr("/666"),
 					},
-					Number: github.Ptr(666),
 				},
 				Repo: sampleRepo,
 			},
-			muxReplies:     map[string]any{"/repos/owner/reponame/pulls/666": samplePR},
-			shaRet:         "samplePRsha",
-			wantRequestSet: true,
+			muxReplies: map[string]any{"/repos/owner/reponame/pulls/666": samplePR},
+			shaRet:     "samplePRsha",
 		},
 		{
 			name:               "good/pull request",
@@ -1176,7 +807,6 @@ func TestParsePayLoad(t *testing.T) {
 					PullRequestLinks: &github.PullRequestLinks{
 						HTMLURL: github.Ptr("/777"),
 					},
-					Number: github.Ptr(777),
 				},
 				Repo: sampleRepo,
 				Comment: &github.IssueComment{
@@ -1198,7 +828,6 @@ func TestParsePayLoad(t *testing.T) {
 					PullRequestLinks: &github.PullRequestLinks{
 						HTMLURL: github.Ptr("/777"),
 					},
-					Number: github.Ptr(777),
 				},
 				Repo: sampleRepo,
 				Comment: &github.IssueComment{
@@ -1221,7 +850,6 @@ func TestParsePayLoad(t *testing.T) {
 					PullRequestLinks: &github.PullRequestLinks{
 						HTMLURL: github.Ptr("/777"),
 					},
-					Number: github.Ptr(777),
 				},
 				Repo: sampleRepo,
 				Comment: &github.IssueComment{
@@ -1244,7 +872,6 @@ func TestParsePayLoad(t *testing.T) {
 					PullRequestLinks: &github.PullRequestLinks{
 						HTMLURL: github.Ptr("/777"),
 					},
-					Number: github.Ptr(777),
 				},
 				Repo: sampleRepo,
 				Comment: &github.IssueComment{
@@ -1267,7 +894,6 @@ func TestParsePayLoad(t *testing.T) {
 					PullRequestLinks: &github.PullRequestLinks{
 						HTMLURL: github.Ptr("/999"),
 					},
-					Number: github.Ptr(999),
 				},
 				Repo: sampleRepo,
 				Comment: &github.IssueComment{
@@ -1288,7 +914,6 @@ func TestParsePayLoad(t *testing.T) {
 					PullRequestLinks: &github.PullRequestLinks{
 						HTMLURL: github.Ptr("/888"),
 					},
-					Number: github.Ptr(888),
 				},
 				Repo: sampleRepo,
 				Comment: &github.IssueComment{
@@ -1743,41 +1368,6 @@ func TestParsePayLoad(t *testing.T) {
 			skipPushEventForPRCommits: true,
 			muxReplies:                map[string]any{"/repos/owner/pushRepo/commits/SHAPush/pulls": sampleGhPRs},
 		},
-		{
-			name:          "good/issue comment without ghClient initializes webhook client",
-			eventType:     "issue_comment",
-			triggerTarget: "pull_request",
-			githubClient:  false,
-			payloadEventStruct: github.IssueCommentEvent{
-				Action: github.Ptr("created"),
-				Issue: &github.Issue{
-					PullRequestLinks: &github.PullRequestLinks{
-						HTMLURL: github.Ptr("/666"),
-					},
-					Number: github.Ptr(666),
-				},
-				Repo: sampleRepo,
-			},
-			wantErrString: "cannot initialize GitHub webhook client",
-		},
-		{
-			name:          "bad/issue comment no matching repo",
-			eventType:     "issue_comment",
-			triggerTarget: "pull_request",
-			githubClient:  true,
-			payloadEventStruct: github.IssueCommentEvent{
-				Action: github.Ptr("created"),
-				Issue: &github.Issue{
-					PullRequestLinks: &github.PullRequestLinks{
-						HTMLURL: github.Ptr("/666"),
-					},
-					Number: github.Ptr(666),
-				},
-				Repo: sampleRepo,
-			},
-			wantRepoCRError: true,
-			wantErrString:   "no repository found matching URL",
-		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1814,15 +1404,6 @@ func TestParsePayLoad(t *testing.T) {
 					PipelineAsCode: stdata.PipelineAsCode,
 					Log:            logger,
 					Kube:           stdata.Kube,
-				},
-				Info: info.Info{
-					Controller: &info.ControllerInfo{
-						Secret:           "pipelines-as-code-secret",
-						GlobalRepository: "global-repo",
-					},
-					Kube: &info.KubeOpts{
-						Namespace: "default",
-					},
 				},
 			}
 
@@ -1939,18 +1520,6 @@ func TestParsePayLoad(t *testing.T) {
 				assert.Equal(t, tt.wantedBranchName, ret.BaseBranch)
 				assert.Equal(t, tt.isCancelPipelineRunEnabled, ret.CancelPipelineRuns)
 			}
-			if tt.wantedHeadBranch != "" {
-				assert.Equal(t, tt.wantedHeadBranch, ret.HeadBranch)
-			}
-			if tt.wantedHeadURL != "" {
-				assert.Equal(t, tt.wantedHeadURL, ret.HeadURL)
-			}
-			if tt.wantedSender != "" {
-				assert.Equal(t, tt.wantedSender, ret.Sender)
-			}
-			if tt.wantedUserType != "" {
-				assert.Equal(t, tt.wantedUserType, gprovider.userType)
-			}
 			if tt.wantedPullRequestNumber != 0 {
 				assert.Equal(t, tt.wantedPullRequestNumber, ret.PullRequestNumber)
 			}
@@ -1959,11 +1528,6 @@ func TestParsePayLoad(t *testing.T) {
 			}
 			if tt.targetCancelPipelinerun != "" {
 				assert.Equal(t, tt.targetCancelPipelinerun, ret.TargetCancelPipelineRun)
-			}
-			if tt.wantRequestSet {
-				assert.Assert(t, ret.Request != nil, "Request should be set on returned event")
-				assert.Equal(t, ret.Request.Header.Get("X-GitHub-Event"), tt.eventType)
-				assert.Assert(t, len(ret.Request.Payload) > 0, "Payload should be set on returned event")
 			}
 			assert.Equal(t, tt.triggerTarget, string(ret.TriggerTarget))
 		})
@@ -1978,7 +1542,6 @@ func TestAppTokenGeneration(t *testing.T) {
 	secretName := "pipelines-as-code-secret"
 
 	ctx, _ := rtesting.SetupFakeContext(t)
-	webhookSecret := "webhook-secret"
 	vaildSecret, _ := testclient.SeedTestData(t, ctx, testclient.Data{
 		Secret: []*corev1.Secret{
 			{
@@ -1989,7 +1552,6 @@ func TestAppTokenGeneration(t *testing.T) {
 				Data: map[string][]byte{
 					"github-application-id": []byte("12345"),
 					"github-private-key":    []byte(fakePrivateKey),
-					"webhook.secret":        []byte(webhookSecret),
 				},
 			},
 		},
@@ -2006,7 +1568,6 @@ func TestAppTokenGeneration(t *testing.T) {
 				Data: map[string][]byte{
 					"github-application-id": []byte("abcd"),
 					"github-private-key":    []byte(fakePrivateKey),
-					"webhook.secret":        []byte(webhookSecret),
 				},
 			},
 		},
@@ -2023,59 +1584,26 @@ func TestAppTokenGeneration(t *testing.T) {
 				Data: map[string][]byte{
 					"github-application-id": []byte("12345"),
 					"github-private-key":    []byte("invalid-key"),
-					"webhook.secret":        []byte(webhookSecret),
 				},
 			},
 		},
 	})
 
 	tests := []struct {
-		ctx            context.Context
-		ctxNS          string
-		name           string
-		wantErrSubst   string
-		nilClient      bool
-		seedData       testclient.Clients
-		omitSignature  bool
-		enterpriseHost string
-		payload        string
-		wantLogMessage string
+		ctx          context.Context
+		ctxNS        string
+		name         string
+		wantErrSubst string
+		nilClient    bool
+		seedData     testclient.Clients
+		envs         map[string]string
 	}{
 		{
-			name:           "secret not found",
-			ctx:            ctxNoSecret,
-			ctxNS:          "foo",
-			seedData:       noSecret,
-			wantErrSubst:   `secrets "pipelines-as-code-secret" not found`,
-			wantLogMessage: githubAppTokenMintBlockedLog,
-		},
-		{
-			ctx:            ctx,
-			name:           "missing webhook signature",
-			ctxNS:          testNamespace,
-			seedData:       vaildSecret,
-			omitSignature:  true,
-			wantErrSubst:   "no signature has been detected",
-			wantLogMessage: githubAppTokenMintBlockedLog,
-		},
-		{
-			ctx:            ctx,
-			name:           "enterprise host does not match signed repository payload",
-			ctxNS:          testNamespace,
-			seedData:       vaildSecret,
-			enterpriseHost: "127.0.0.1:1",
-			wantErrSubst:   `github enterprise host "127.0.0.1:1" does not match repository host "github.com"`,
-			wantLogMessage: githubAppTokenExfiltrationBlockedLog,
-		},
-		{
-			ctx:            ctx,
-			name:           "enterprise host with missing repository HTML URL",
-			ctxNS:          testNamespace,
-			seedData:       vaildSecret,
-			enterpriseHost: "127.0.0.1:1",
-			payload:        fmt.Sprintf(`{"installation":{"id":%d},"repository":{}}`, testInstallationID),
-			wantErrSubst:   "repository HTML URL is missing in payload, cannot validate enterprise host",
-			wantLogMessage: githubAppTokenExfiltrationBlockedLog,
+			name:         "secret not found",
+			ctx:          ctxNoSecret,
+			ctxNS:        "foo",
+			seedData:     noSecret,
+			wantErrSubst: `secrets "pipelines-as-code-secret" not found`,
 		},
 		{
 			ctx:       ctx,
@@ -2106,6 +1634,8 @@ func TestAppTokenGeneration(t *testing.T) {
 			mux.HandleFunc(fmt.Sprintf("/app/installations/%d/access_tokens", testInstallationID), func(w http.ResponseWriter, _ *http.Request) {
 				_, _ = fmt.Fprint(w, "{}")
 			})
+			envRemove := env.PatchAll(t, tt.envs)
+			defer envRemove()
 
 			// adding installation id to event to enforce client creation
 			samplePRevent.Installation = &github.Installation{
@@ -2113,21 +1643,24 @@ func TestAppTokenGeneration(t *testing.T) {
 			}
 
 			jeez, _ := json.Marshal(samplePRevent)
-			if tt.payload != "" {
-				jeez = []byte(tt.payload)
-			}
-			testLogger, observedLogs := logger.GetLogger()
+			logger, _ := logger.GetLogger()
 			gprovider := Provider{
-				Logger:   testLogger,
+				Logger:   logger,
 				ghClient: fakeghclient,
 				pacInfo: &info.PacOpts{
 					Settings: settings.Settings{},
 				},
 			}
+			request := &http.Request{Header: map[string][]string{}}
+			request.Header.Set("X-GitHub-Event", "pull_request")
+			// a bit of a pain but works
+			request.Header.Set("X-GitHub-Enterprise-Host", serverURL)
+			tt.envs = make(map[string]string)
+			tt.envs["PAC_GIT_PROVIDER_TOKEN_APIURL"] = serverURL + "/api/v3"
 
 			run := &params.Run{
 				Clients: clients.Clients{
-					Log:  testLogger,
+					Log:  logger,
 					Kube: tt.seedData.Kube,
 				},
 
@@ -2136,16 +1669,6 @@ func TestAppTokenGeneration(t *testing.T) {
 				},
 			}
 
-			request := &http.Request{Header: map[string][]string{}}
-			request.Header.Set("X-GitHub-Event", "pull_request")
-			if !tt.omitSignature {
-				request.Header.Set(github.SHA256SignatureHeader, githubSHA256Signature(webhookSecret, jeez))
-			}
-			if tt.enterpriseHost != "" {
-				request.Header.Set("X-GitHub-Enterprise-Host", tt.enterpriseHost)
-			}
-			t.Setenv("PAC_GIT_PROVIDER_TOKEN_APIURL", serverURL+"/api/v3")
-
 			tt.ctx = info.StoreCurrentControllerName(tt.ctx, "default")
 			tt.ctx = info.StoreNS(tt.ctx, tt.ctxNS)
 
@@ -2153,16 +1676,6 @@ func TestAppTokenGeneration(t *testing.T) {
 			if tt.wantErrSubst != "" {
 				assert.Assert(t, err != nil)
 				assert.ErrorContains(t, err, tt.wantErrSubst)
-				if tt.wantLogMessage != "" {
-					found := false
-					for _, entry := range observedLogs.All() {
-						if entry.Message == tt.wantLogMessage {
-							found = true
-							break
-						}
-					}
-					assert.Assert(t, found, "expected log message %q for blocked GitHub App token mint", tt.wantLogMessage)
-				}
 				return
 			}
 			assert.NilError(t, err)
@@ -2173,119 +1686,6 @@ func TestAppTokenGeneration(t *testing.T) {
 
 			// Verify client was created successfully for GitHub App
 			assert.Assert(t, gprovider.Client() != nil)
-		})
-	}
-}
-
-func TestGetAppTokenScopesRepositoryNames(t *testing.T) {
-	testNamespace := "pipelinesascode"
-	secretName := "pipelines-as-code-secret"
-
-	ctx, _ := rtesting.SetupFakeContext(t)
-	seedData, _ := testclient.SeedTestData(t, ctx, testclient.Data{
-		Secret: []*corev1.Secret{
-			{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      secretName,
-					Namespace: testNamespace,
-				},
-				Data: map[string][]byte{
-					"github-application-id": []byte("12345"),
-					"github-private-key":    []byte(fakePrivateKey),
-				},
-			},
-		},
-	})
-
-	tests := []struct {
-		name            string
-		repositoryIDs   []int64
-		repositoryNames []string
-		wantIDs         []int64
-		wantNames       []string
-	}{
-		{
-			name:            "only RepositoryNames",
-			repositoryNames: []string{"my-repo"},
-			wantNames:       []string{"my-repo"},
-		},
-		{
-			name:          "only RepositoryIDs",
-			repositoryIDs: []int64{42},
-			wantIDs:       []int64{42},
-		},
-		{
-			name:            "RepositoryIDs takes precedence over RepositoryNames",
-			repositoryIDs:   []int64{42},
-			repositoryNames: []string{"my-repo"},
-			wantIDs:         []int64{42},
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			_, mux, serverURL, teardown := ghtesthelper.SetupGH()
-			defer teardown()
-
-			var capturedBody map[string]any
-			mux.HandleFunc(fmt.Sprintf("/app/installations/%d/access_tokens", testInstallationID), func(w http.ResponseWriter, r *http.Request) {
-				body, _ := io.ReadAll(r.Body)
-				_ = json.Unmarshal(body, &capturedBody)
-				_, _ = fmt.Fprint(w, `{"token":"fake-token","expires_at":"2099-01-01T00:00:00Z"}`)
-			})
-
-			logger, _ := logger.GetLogger()
-			gprovider := Provider{
-				Logger:          logger,
-				RepositoryIDs:   tt.repositoryIDs,
-				RepositoryNames: tt.repositoryNames,
-				Run: &params.Run{
-					Info: info.Info{
-						Controller: &info.ControllerInfo{Secret: secretName},
-					},
-				},
-			}
-
-			ctx = info.StoreCurrentControllerName(ctx, "default")
-			ctx = info.StoreNS(ctx, testNamespace)
-
-			envRemove := env.PatchAll(t, map[string]string{
-				"PAC_GIT_PROVIDER_TOKEN_APIURL": serverURL + "/api/v3",
-			})
-			defer envRemove()
-
-			token, err := gprovider.GetAppToken(ctx, seedData.Kube, "", testInstallationID, testNamespace)
-			assert.NilError(t, err)
-			assert.Assert(t, token != "")
-
-			if tt.wantNames != nil {
-				raw, ok := capturedBody["repositories"]
-				assert.Assert(t, ok, "expected repositories field in token request body")
-				rawSlice, ok := raw.([]any)
-				assert.Assert(t, ok, "repositories is not an array")
-				names := make([]string, 0, len(rawSlice))
-				for _, v := range rawSlice {
-					s, ok := v.(string)
-					assert.Assert(t, ok, "repository name is not a string")
-					names = append(names, s)
-				}
-				assert.DeepEqual(t, tt.wantNames, names)
-			} else {
-				_, ok := capturedBody["repositories"]
-				assert.Assert(t, !ok, "repositories field should not be present when IDs are used")
-			}
-			if tt.wantIDs != nil {
-				raw, ok := capturedBody["repository_ids"]
-				assert.Assert(t, ok, "expected repository_ids field in token request body")
-				rawSlice, ok := raw.([]any)
-				assert.Assert(t, ok, "repository_ids is not an array")
-				ids := make([]int64, 0, len(rawSlice))
-				for _, v := range rawSlice {
-					f, ok := v.(float64)
-					assert.Assert(t, ok, "repository_id is not a number")
-					ids = append(ids, int64(f))
-				}
-				assert.DeepEqual(t, tt.wantIDs, ids)
-			}
 		})
 	}
 }

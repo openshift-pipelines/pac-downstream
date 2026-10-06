@@ -23,10 +23,7 @@ import (
 	"knative.dev/pkg/kmeta"
 )
 
-const StepActionKind = "StepAction"
-
 // +genclient
-// +kubebuilder:object:root=true
 // +genclient:noStatus
 // +genreconciler:krshapedlogic=false
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
@@ -65,7 +62,7 @@ func (s *StepAction) Copy() StepActionObject {
 
 // GetGroupVersionKind implements kmeta.OwnerRefable.
 func (*StepAction) GetGroupVersionKind() schema.GroupVersionKind {
-	return SchemeGroupVersion.WithKind(StepActionKind)
+	return SchemeGroupVersion.WithKind("StepAction")
 }
 
 // Checksum computes the sha256 checksum of the stepaction object.

@@ -17,7 +17,7 @@ limitations under the License.
 package v1
 
 import (
-	discoveryv1 "k8s.io/api/discovery/v1"
+	corev1 "k8s.io/api/core/v1"
 
 	"knative.dev/eventing/pkg/apis/duck"
 	duckv1 "knative.dev/eventing/pkg/apis/duck/v1"
@@ -27,11 +27,11 @@ func (bs *BrokerStatus) MarkIngressFailed(reason, format string, args ...interfa
 	bs.GetConditionSet().Manage(bs).MarkFalse(BrokerConditionIngress, reason, format, args...)
 }
 
-func (bs *BrokerStatus) PropagateIngressAvailability(epSlices []*discoveryv1.EndpointSlice) {
-	if duck.EndpointSlicesAreAvailable(epSlices) {
+func (bs *BrokerStatus) PropagateIngressAvailability(ep *corev1.Endpoints) {
+	if duck.EndpointsAreAvailable(ep) {
 		bs.GetConditionSet().Manage(bs).MarkTrue(BrokerConditionIngress)
 	} else {
-		bs.MarkIngressFailed("EndpointSlicesUnavailable", "EndpointSlices are unavailable.")
+		bs.MarkIngressFailed("EndpointsUnavailable", "Endpoints %q are unavailable.", ep.Name)
 	}
 }
 
@@ -57,10 +57,10 @@ func (bs *BrokerStatus) MarkFilterFailed(reason, format string, args ...interfac
 	bs.GetConditionSet().Manage(bs).MarkFalse(BrokerConditionFilter, reason, format, args...)
 }
 
-func (bs *BrokerStatus) PropagateFilterAvailability(epSlices []*discoveryv1.EndpointSlice) {
-	if duck.EndpointSlicesAreAvailable(epSlices) {
+func (bs *BrokerStatus) PropagateFilterAvailability(ep *corev1.Endpoints) {
+	if duck.EndpointsAreAvailable(ep) {
 		bs.GetConditionSet().Manage(bs).MarkTrue(BrokerConditionFilter)
 	} else {
-		bs.MarkFilterFailed("EndpointSlicesUnavailable", "EndpointSlices are unavailable.")
+		bs.MarkFilterFailed("EndpointsUnavailable", "Endpoints %q are unavailable.", ep.Name)
 	}
 }
