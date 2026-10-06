@@ -1,17 +1,4 @@
 approvers:
-  - chmouel
-  - zakisk
-  - theakshaypant
-
-reviewers:
-  - vdemeester
-  - chmouel
-  - zakisk
-  - theakshaypant
-  - waveywaves
-  - gbenhaim
-  - mathur07
-  - sm43
-  - infernus01
+    - sm43
 
 # vim: ft=yaml

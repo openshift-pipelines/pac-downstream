@@ -2,7 +2,6 @@ package adapter
 
 import (
 	"context"
-	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -24,11 +23,6 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/gitea"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/gitlab"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/tlsconfig"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/tracing"
-	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/propagation"
-	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"knative.dev/eventing/pkg/adapter/v2"
@@ -79,15 +73,6 @@ func New(run *params.Run, k *kubeinteraction.Interaction) adapter.AdapterConstru
 }
 
 func (l *listener) Start(ctx context.Context) error {
-	tp := tracing.New(l.logger)
-	defer func() {
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if err := tp.Shutdown(shutdownCtx); err != nil {
-			l.logger.Errorw("failed to shut down tracer provider", "error", err)
-		}
-	}()
-
 	adapterPort := globalAdapterPort
 	envAdapterPort := os.Getenv("PAC_CONTROLLER_PORT")
 	if envAdapterPort != "" {
@@ -108,8 +93,6 @@ func (l *listener) Start(ctx context.Context) error {
 
 	mux.HandleFunc("/", l.handleEvent(ctx))
 
-	enabled, tlsCertFile, tlsKeyFile := l.isTLSEnabled()
-
 	srv := &http.Server{
 		Addr: ":" + adapterPort,
 		Handler: http.TimeoutHandler(mux,
@@ -119,56 +102,17 @@ func (l *listener) Start(ctx context.Context) error {
 		IdleTimeout:       30 * time.Second,
 	}
 
+	enabled, tlsCertFile, tlsKeyFile := l.isTLSEnabled()
 	if enabled {
-		tlsConf := tlsconfig.LoadFromEnv(os.Getenv)
-		serverTLSConfig, err := tlsConf.ToTLSConfig()
-		if err != nil {
-			l.logger.Warnf("Error parsing TLS configuration: %v, using defaults", err)
-			serverTLSConfig = &tls.Config{
-				NextProtos: []string{"h2", "http/1.1"},
-				MinVersion: tls.VersionTLS12,
-			}
-		} else {
-			l.logger.Infof("TLS Configuration: MinVersion=%s, CipherSuites=[%s], CurvePreferences=[%s]",
-				tlsconfig.GetTLSVersionName(serverTLSConfig.MinVersion),
-				tlsconfig.FormatCipherSuites(serverTLSConfig.CipherSuites),
-				tlsconfig.FormatCurvePreferences(serverTLSConfig.CurvePreferences))
-		}
-
-		cert, err := tls.LoadX509KeyPair(tlsCertFile, tlsKeyFile)
-		if err != nil {
-			return fmt.Errorf("failed to load TLS certificate: %w", err)
-		}
-		serverTLSConfig.Certificates = []tls.Certificate{cert}
-		srv.TLSConfig = serverTLSConfig
-	}
-
-	// Shut the server down gracefully when the context is cancelled
-	// (SIGTERM/SIGINT via knative signals), so the process exits cleanly
-	// instead of being killed at the end of the pod grace period.
-	errCh := make(chan error, 1)
-	go func() {
-		var err error
-		if enabled {
-			err = srv.ListenAndServeTLS("", "")
-		} else {
-			err = srv.ListenAndServe()
-		}
-		errCh <- err
-	}()
-
-	select {
-	case err := <-errCh:
-		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+		if err := srv.ListenAndServeTLS(tlsCertFile, tlsKeyFile); err != nil {
 			return err
 		}
-		return nil
-	case <-ctx.Done():
-		l.logger.Info("shutting down listener")
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		return srv.Shutdown(shutdownCtx)
+	} else {
+		if err := srv.ListenAndServe(); err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
 func (l listener) handleEvent(ctx context.Context) http.HandlerFunc {
@@ -247,14 +191,6 @@ func (l listener) handleEvent(ctx context.Context) http.HandlerFunc {
 		}
 		gitProvider.SetPacInfo(&pacInfo)
 
-		tracedCtx := otel.GetTextMapPropagator().Extract(ctx, propagation.HeaderCarrier(request.Header))
-
-		tracer := otel.Tracer(tracing.TracerName)
-		tracedCtx, span := tracer.Start(
-			tracedCtx, "PipelinesAsCode:ProcessEvent",
-			trace.WithSpanKind(trace.SpanKindServer),
-		)
-
 		s := sinker{
 			run:        l.run,
 			vcx:        gitProvider,
@@ -270,10 +206,9 @@ func (l listener) handleEvent(ctx context.Context) http.HandlerFunc {
 		localRequest := request.Clone(request.Context())
 
 		go func() {
-			defer span.End()
-			err := s.handleEvent(tracedCtx, localRequest)
+			err := s.processEvent(ctx, localRequest)
 			if err != nil {
-				span.RecordError(err)
+				logger.Errorf("an error occurred: %v", err)
 			}
 		}()
 
@@ -283,9 +218,6 @@ func (l listener) handleEvent(ctx context.Context) http.HandlerFunc {
 
 func (l listener) processRes(processEvent bool, provider provider.Interface, logger *zap.SugaredLogger, skipReason string, err error) (provider.Interface, *zap.SugaredLogger, error) {
 	if processEvent {
-		if provider == nil {
-			return nil, logger, fmt.Errorf("internal error: no provider detected while processEvent is true")
-		}
 		provider.SetLogger(logger)
 		return provider, logger, nil
 	}

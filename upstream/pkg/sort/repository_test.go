@@ -15,19 +15,22 @@ func TestSortRepositories(t *testing.T) {
 			ObjectMeta: metav1.ObjectMeta{
 				CreationTimestamp: metav1.NewTime(metav1.Now().Add(-2 * time.Minute)),
 			},
-			Spec: v1alpha1.RepositorySpec{URL: "https://middle/one"},
+			Spec:   v1alpha1.RepositorySpec{URL: "https://middle/one"},
+			Status: []v1alpha1.RepositoryRunStatus{},
 		},
 		{
 			ObjectMeta: metav1.ObjectMeta{
 				CreationTimestamp: metav1.NewTime(metav1.Now().Add(-3 * time.Minute)),
 			},
-			Spec: v1alpha1.RepositorySpec{URL: "https://first/one"},
+			Spec:   v1alpha1.RepositorySpec{URL: "https://first/one"},
+			Status: []v1alpha1.RepositoryRunStatus{},
 		},
 		{
 			ObjectMeta: metav1.ObjectMeta{
 				CreationTimestamp: metav1.NewTime(metav1.Now().Add(-1 * time.Minute)),
 			},
-			Spec: v1alpha1.RepositorySpec{URL: "https://last/one"},
+			Spec:   v1alpha1.RepositorySpec{URL: "https://last/one"},
+			Status: []v1alpha1.RepositoryRunStatus{},
 		},
 	}
 

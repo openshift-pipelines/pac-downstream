@@ -1,8 +1,6 @@
 package provider
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"net/url"
 	"regexp"
@@ -108,18 +106,8 @@ func getNameFromComment(typeOfComment, comment string) string {
 	splitTest := strings.Split(comment, typeOfComment)
 	// now get the first line
 	getFirstLine := strings.Split(splitTest[1], "\n")
-
-	// and the first argument
-	firstArg := strings.Split(getFirstLine[0], " ")
-	if len(firstArg) < 2 {
-		return ""
-	}
-
-	name := strings.TrimSpace(firstArg[1])
-	if strings.Contains(name, "=") {
-		return ""
-	}
-	return name
+	// trim spaces
+	return strings.TrimSpace(getFirstLine[0])
 }
 
 func GetPipelineRunAndBranchOrTagNameFromTestComment(comment, prefix string) (string, string, string, error) {
@@ -169,9 +157,6 @@ func getPipelineRunAndBranchOrTagNameFromComment(typeOfComment, comment string) 
 		prData := strings.Split(strings.TrimSpace(branchData[0]), " ")
 		if len(prData) > 1 {
 			prName = strings.TrimSpace(prData[0])
-			if strings.Contains(prName, "=") {
-				prName = ""
-			}
 		}
 	} else {
 		// get the second part of the typeOfComment (/test, /retest or /cancel)
@@ -181,9 +166,6 @@ func getPipelineRunAndBranchOrTagNameFromComment(typeOfComment, comment string) 
 		// trim spaces
 		// adapt for the comment contains the key=value pair
 		prName = strings.Split(strings.TrimSpace(getFirstLine[0]), " ")[0]
-		if strings.Contains(prName, "=") {
-			prName = ""
-		}
 	}
 	return prName, branchName, tagName, nil
 }
@@ -237,42 +219,6 @@ func GetCheckName(status providerstatus.StatusOpts, pacopts *info.PacOpts) strin
 		return fmt.Sprintf("%s / %s", pacopts.ApplicationName, status.OriginalPipelineRunName)
 	}
 	return status.OriginalPipelineRunName
-}
-
-// GetBBCloudStatusKey returns a unique key for Bitbucket Cloud build commit status.
-// Bitbucket Cloud limits the key to 40 characters. When both ApplicationName and
-// OriginalPipelineRunName are set and their combined form ("{appName} / {prName}")
-// fits within 40 chars, that combined form is used. Otherwise, the
-// OriginalPipelineRunName alone is used. If the name exceeds 40 chars, it is
-// truncated to 33 chars with a 6-char hash suffix for uniqueness. If only
-// ApplicationName is set, it is returned truncated to 40 chars.
-func GetBBCloudStatusKey(status providerstatus.StatusOpts, pacopts *info.PacOpts) string {
-	if pacopts.ApplicationName != "" {
-		if status.OriginalPipelineRunName == "" {
-			if len(pacopts.ApplicationName) > 40 {
-				return pacopts.ApplicationName[:40]
-			}
-			return pacopts.ApplicationName
-		}
-		key := fmt.Sprintf("%s / %s", pacopts.ApplicationName, status.OriginalPipelineRunName)
-		// if application name and pipeline run name combined are less than 40 characters, return the key
-		// otherwise, skip it here and let the only pipeline run being returned.
-		if len(key) <= 40 {
-			return key
-		}
-	}
-
-	if len(status.OriginalPipelineRunName) > 40 {
-		hash := getNameHash(status.OriginalPipelineRunName)
-		return fmt.Sprintf("%s-%s", status.OriginalPipelineRunName[:33], hash)
-	}
-
-	return status.OriginalPipelineRunName
-}
-
-func getNameHash(input string) string {
-	hash := sha256.Sum256([]byte(input))
-	return hex.EncodeToString(hash[:])[:6]
 }
 
 func IsZeroSHA(sha string) bool {

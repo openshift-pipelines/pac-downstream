@@ -10,6 +10,11 @@ import (
 	"time"
 )
 
+func init() { //nolint:gochecknoinits // registers date format in the default registry
+	d := Date{}
+	Default.Add("date", &d, IsDate)
+}
+
 // IsDate returns true when the string is a valid date.
 func IsDate(str string) bool {
 	_, err := time.Parse(RFC3339FullDate, str)

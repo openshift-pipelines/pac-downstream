@@ -3,7 +3,6 @@ package resolve
 import (
 	"context"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"os"
@@ -105,7 +104,7 @@ func Command(run *params.Run, streams *cli.IOStreams) *cobra.Command {
 				return fmt.Errorf("you need to at least specify a file with -f")
 			}
 
-			if err := settings.SyncConfig(run.Clients.Log, &run.Info.Pac.Settings, map[string]string{}, settings.DefaultValidators()); err != nil {
+			if err := settings.SyncConfig(run.Clients.Log, &run.Info.Pac.Settings, map[string]string{}, settings.DefaultValidators(), &run.Clients.HTTP); err != nil {
 				return err
 			}
 
@@ -130,7 +129,7 @@ func Command(run *params.Run, streams *cli.IOStreams) *cobra.Command {
 				mapped["repo_name"] = strings.Split(repoOwner, "/")[1]
 			}
 
-			s, err := resolveFilenames(ctx, run, streams.ErrOut, filenames, mapped, asv1beta1)
+			s, err := resolveFilenames(ctx, run, filenames, mapped, asv1beta1)
 			if err != nil {
 				return err
 			}
@@ -182,7 +181,7 @@ func splitArgsInMap(args []string) map[string]string {
 	return m
 }
 
-func resolveFilenames(ctx context.Context, cs *params.Run, errOut io.Writer, filenames []string, params map[string]string, asv1beta1 bool) (string, error) {
+func resolveFilenames(ctx context.Context, cs *params.Run, filenames []string, params map[string]string, asv1beta1 bool) (string, error) {
 	var ret string
 
 	ropt := &resolve.Opts{
@@ -193,7 +192,7 @@ func resolveFilenames(ctx context.Context, cs *params.Run, errOut io.Writer, fil
 	}
 	allTheYamls := expandYamlsAsSingleTemplate(filenames)
 	if !noSecret {
-		outSecret, secretName, err := makeGitAuthSecret(ctx, cs, errOut, filenames, ropt.ProviderToken, params)
+		outSecret, secretName, err := makeGitAuthSecret(ctx, cs, filenames, ropt.ProviderToken, params)
 		if err != nil {
 			return "", err
 		}
@@ -207,7 +206,6 @@ func resolveFilenames(ctx context.Context, cs *params.Run, errOut io.Writer, fil
 	allTheYamls = templates.ReplacePlaceHoldersVariables(allTheYamls, params, nil, http.Header{}, map[string]any{})
 	// We use github here but since we don't do remotetask we would not care
 	providerintf := github.New()
-	providerintf.SetLogger(cs.Clients.Log)
 	event := info.NewEvent()
 	types, err := resolve.ReadTektonTypes(ctx, cs.Clients.Log, allTheYamls)
 	if err != nil {

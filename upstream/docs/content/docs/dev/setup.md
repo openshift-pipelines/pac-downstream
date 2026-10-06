@@ -267,9 +267,6 @@ Run linters
 make lint
 ```
 
-This runs all configured linters for the project. Any pinned linter versions
-are downloaded automatically, so they do not need to be installed separately.
-
 3
 
 Or run both together

@@ -110,40 +110,6 @@ func TestCheckPolicyAllowing(t *testing.T) {
 	}
 }
 
-func TestCheckPolicyAllowingCaching(t *testing.T) {
-	fakeclient, mux, teardown := tgitea.Setup(t)
-	defer teardown()
-
-	apiCallCount := 0
-	event := &info.Event{
-		Organization: "myorg",
-		Sender:       "allowedUser",
-	}
-
-	mux.HandleFunc("/orgs/myorg/teams", func(rw http.ResponseWriter, _ *http.Request) {
-		apiCallCount++
-		fmt.Fprint(rw, `[{"name": "team1", "id": 1}]`)
-	})
-	mux.HandleFunc("/teams/1/members/allowedUser", func(rw http.ResponseWriter, _ *http.Request) {
-		fmt.Fprint(rw, `{"id": 2}`)
-	})
-
-	ctx, _ := rtesting.SetupFakeContext(t)
-	observer, _ := zapobserver.New(zap.InfoLevel)
-	logger := zap.New(observer).Sugar()
-	gprovider := Provider{giteaClient: fakeclient, Logger: logger}
-
-	allowed1, reason1 := gprovider.CheckPolicyAllowing(ctx, event, []string{"team1"})
-	assert.Assert(t, allowed1)
-	assert.Equal(t, "allowing user: allowedUser as a member of the team: team1", reason1)
-
-	allowed2, reason2 := gprovider.CheckPolicyAllowing(ctx, event, []string{"team1"})
-	assert.Assert(t, allowed2)
-	assert.Equal(t, "allowing user: allowedUser as a member of the team: team1", reason2)
-
-	assert.Equal(t, 1, apiCallCount)
-}
-
 func TestOkToTestComment(t *testing.T) {
 	issueCommentPayload := &forgejostructs.IssueCommentPayload{
 		Comment: &forgejostructs.Comment{
@@ -228,7 +194,7 @@ func TestOkToTestComment(t *testing.T) {
 			runevent: info.Event{
 				Organization: "owner",
 				Repository:   "repo",
-				Sender:       "notowner",
+				Sender:       "nonowner",
 				EventType:    "issue_comment",
 				Event:        issueCommentPayload,
 			},
@@ -298,7 +264,7 @@ func TestOkToTestComment(t *testing.T) {
 			runevent: info.Event{
 				Organization: "owner",
 				Repository:   "repo",
-				Sender:       "notowner",
+				Sender:       "nonowner",
 				EventType:    "issue_comment",
 				Event:        issueCommentPayload,
 			},
@@ -326,9 +292,8 @@ func TestOkToTestComment(t *testing.T) {
 				func(rw http.ResponseWriter, _ *http.Request) {
 					fmt.Fprint(rw, tt.commentsReply)
 				})
-			mux.HandleFunc(fmt.Sprintf("/repos/%s/%s/collaborators/%s/permission", tt.runevent.Organization,
-				tt.runevent.Repository, tt.runevent.Sender), func(rw http.ResponseWriter, _ *http.Request) {
-				fmt.Fprint(rw, `{"permission": "none"}`)
+			mux.HandleFunc("/repos/owner/collaborators", func(rw http.ResponseWriter, _ *http.Request) {
+				fmt.Fprint(rw, "[]")
 			})
 			ctx, _ := rtesting.SetupFakeContext(t)
 			gprovider := Provider{
@@ -355,9 +320,7 @@ func TestOkToTestComment(t *testing.T) {
 func TestAclCheckAll(t *testing.T) {
 	type allowedRules struct {
 		ownerFile bool
-		read      bool
 		collabo   bool
-		admin     bool
 	}
 	tests := []struct {
 		name         string
@@ -367,7 +330,7 @@ func TestAclCheckAll(t *testing.T) {
 		allowed      bool
 	}{
 		{
-			name: "allowed when sender has repository write collaborator permission",
+			name: "allowed_from_org/sender allowed_from_org in collabo",
 			runevent: info.Event{
 				Organization: "collabo",
 				Repository:   "repo",
@@ -378,18 +341,7 @@ func TestAclCheckAll(t *testing.T) {
 			wantErr:      false,
 		},
 		{
-			name: "allowed when sender has repository admin permission",
-			runevent: info.Event{
-				Organization: "collabo",
-				Repository:   "repo",
-				Sender:       "login_allowed",
-			},
-			allowedRules: allowedRules{admin: true},
-			allowed:      true,
-			wantErr:      false,
-		},
-		{
-			name: "allowed when sender is approver in OWNERS file",
+			name: "allowed_from_org/sender allowed_from_org from owner file",
 			runevent: info.Event{
 				Organization:  "collabo",
 				Repository:    "repo",
@@ -402,7 +354,7 @@ func TestAclCheckAll(t *testing.T) {
 			wantErr:      false,
 		},
 		{
-			name: "disallowed when sender has no collaborator or OWNERS approval",
+			name: "disallowed/sender not allowed_from_org in collabo",
 			runevent: info.Event{
 				Organization: "denied",
 				Repository:   "denied",
@@ -410,17 +362,6 @@ func TestAclCheckAll(t *testing.T) {
 			},
 			allowed: false,
 			wantErr: false,
-		},
-		{
-			name: "allowed when sender has repository read permission",
-			runevent: info.Event{
-				Organization: "denied",
-				Repository:   "denied",
-				Sender:       "notallowed",
-			},
-			allowedRules: allowedRules{read: true},
-			allowed:      false,
-			wantErr:      false,
 		},
 	}
 	for _, tt := range tests {
@@ -436,20 +377,12 @@ func TestAclCheckAll(t *testing.T) {
 				Logger:      logger,
 			}
 
-			mux.HandleFunc(fmt.Sprintf("/repos/%s/%s/collaborators/%s/permission", tt.runevent.Organization,
-				tt.runevent.Repository, tt.runevent.Sender), func(rw http.ResponseWriter, _ *http.Request) {
-				rw.WriteHeader(http.StatusOK)
-				permission := "none"
-				switch {
-				case tt.allowedRules.admin:
-					permission = "admin"
-				case tt.allowedRules.collabo:
-					permission = "write"
-				case tt.allowedRules.read:
-					permission = "read"
-				}
-				fmt.Fprintf(rw, `{"permission": "%s"}`, permission)
-			})
+			if tt.allowedRules.collabo {
+				mux.HandleFunc(fmt.Sprintf("/repos/%s/%s/collaborators/%s", tt.runevent.Organization,
+					tt.runevent.Repository, tt.runevent.Sender), func(rw http.ResponseWriter, _ *http.Request) {
+					rw.WriteHeader(http.StatusNoContent)
+				})
+			}
 			if tt.allowedRules.ownerFile {
 				url := fmt.Sprintf("/repos/%s/%s/contents/OWNERS", tt.runevent.Organization, tt.runevent.Repository)
 				mux.HandleFunc(url, func(rw http.ResponseWriter, r *http.Request) {
@@ -458,8 +391,7 @@ func TestAclCheckAll(t *testing.T) {
 						return
 					}
 					encoded := base64.StdEncoding.EncodeToString([]byte(
-						fmt.Sprintf("approvers:\n  - %s\n", tt.runevent.Sender),
-					))
+						fmt.Sprintf("approvers:\n  - %s\n", tt.runevent.Sender)))
 					// encode to json
 					b, err := json.Marshal(forgejo.ContentsResponse{
 						Content: &encoded,

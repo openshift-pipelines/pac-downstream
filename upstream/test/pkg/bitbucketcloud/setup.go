@@ -22,14 +22,12 @@ func Setup(ctx context.Context) (*params.Run, options.E2E, bitbucketcloud.Provid
 	bitbucketCloudToken := os.Getenv("TEST_BITBUCKET_CLOUD_TOKEN")
 	bitbucketWSOwner := os.Getenv("TEST_BITBUCKET_CLOUD_E2E_REPOSITORY")
 	bitbucketCloudAPIURL := os.Getenv("TEST_BITBUCKET_CLOUD_API_URL")
-	bitbucketCloudWebhookSecret := os.Getenv("TEST_BITBUCKET_CLOUD_WEBHOOK_SECRET")
 
 	if err := setup.RequireEnvs(
 		"TEST_BITBUCKET_CLOUD_USER",
 		"TEST_BITBUCKET_CLOUD_TOKEN",
 		"TEST_BITBUCKET_CLOUD_E2E_REPOSITORY",
 		"TEST_BITBUCKET_CLOUD_API_URL",
-		"TEST_BITBUCKET_CLOUD_WEBHOOK_SECRET",
 	); err != nil {
 		return nil, options.E2E{}, bitbucketcloud.Provider{}, err
 	}
@@ -45,13 +43,11 @@ func Setup(ctx context.Context) (*params.Run, options.E2E, bitbucketcloud.Provid
 		Repo:         split[1],
 	}
 	bbc := bitbucketcloud.Provider{}
-	bbc.SetLogger(run.Clients.Log)
 	event := info.NewEvent()
 	event.Provider = &info.Provider{
-		Token:         bitbucketCloudToken,
-		URL:           bitbucketCloudAPIURL,
-		User:          bitbucketCloudUser,
-		WebhookSecret: bitbucketCloudWebhookSecret,
+		Token: bitbucketCloudToken,
+		URL:   bitbucketCloudAPIURL,
+		User:  bitbucketCloudUser,
 	}
 	if err := bbc.SetClient(ctx, run, event, nil, nil); err != nil {
 		return nil, options.E2E{}, bitbucketcloud.Provider{}, err
@@ -64,23 +60,19 @@ func TearDown(ctx context.Context, t *testing.T, runcnx *params.Run, bprovider b
 		runcnx.Clients.Log.Infof("Not cleaning up and closing PR since TEST_NOCLEANUP is set")
 		return
 	}
-
-	if prNumber != -1 {
-		runcnx.Clients.Log.Infof("Closing PR #%d", prNumber)
-		_, err := bprovider.Client().Repositories.PullRequests.Decline(&bitbucket.PullRequestsOptions{
-			ID:       fmt.Sprintf("%d", prNumber),
-			Owner:    opts.Organization,
-			RepoSlug: opts.Repo,
-		})
-		if noerror {
-			runcnx.Clients.Log.Infof("Error closing PR #%d: %v", prNumber, err)
-		} else {
-			assert.NilError(t, err)
-		}
+	runcnx.Clients.Log.Infof("Closing PR #%d", prNumber)
+	_, err := bprovider.Client().Repositories.PullRequests.Decline(&bitbucket.PullRequestsOptions{
+		ID:       fmt.Sprintf("%d", prNumber),
+		Owner:    opts.Organization,
+		RepoSlug: opts.Repo,
+	})
+	if noerror {
+		runcnx.Clients.Log.Infof("Error closing PR #%d: %v", prNumber, err)
+	} else {
+		assert.NilError(t, err)
 	}
-
 	runcnx.Clients.Log.Infof("Deleting ref %s", ref)
-	err := bprovider.Client().Repositories.Repository.DeleteBranch(
+	err = bprovider.Client().Repositories.Repository.DeleteBranch(
 		&bitbucket.RepositoryBranchDeleteOptions{
 			Owner:    opts.Organization,
 			RepoSlug: opts.Repo,

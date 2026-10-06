@@ -8,8 +8,6 @@ import (
 
 func TestMergeSpecs(t *testing.T) {
 	two := 2
-	tokenAutoRotationFalse := false
-	tokenAutoRotationTrue := true
 	incomings := &[]Incoming{{
 		Type: "type",
 		Secret: Secret{
@@ -45,28 +43,6 @@ func TestMergeSpecs(t *testing.T) {
 			expected: &RepositorySpec{
 				Params:           params,
 				ConcurrencyLimit: &two,
-			},
-		},
-		{
-			name: "global settings merge when local settings are nil",
-			local: &RepositorySpec{
-				GitProvider: &GitProvider{},
-			},
-			global: RepositorySpec{
-				Settings: &Settings{
-					Gitlab: &GitlabSettings{
-						TokenAutoRotation: &tokenAutoRotationTrue,
-					},
-				},
-				GitProvider: gp,
-			},
-			expected: &RepositorySpec{
-				Settings: &Settings{
-					Gitlab: &GitlabSettings{
-						TokenAutoRotation: &tokenAutoRotationTrue,
-					},
-				},
-				GitProvider: gp,
 			},
 		},
 		{
@@ -163,90 +139,6 @@ func TestMergeSpecs(t *testing.T) {
 				Settings: &Settings{
 					Forgejo: &ForgejoSettings{
 						UserAgent: "my-custom-agent",
-					},
-				},
-				GitProvider: &GitProvider{},
-			},
-		},
-		{
-			name: "gitlab settings from global",
-			local: &RepositorySpec{
-				Settings:    &Settings{},
-				GitProvider: &GitProvider{},
-			},
-			global: RepositorySpec{
-				Settings: &Settings{
-					Gitlab: &GitlabSettings{
-						CommentStrategy:   "disable_all",
-						TokenAutoRotation: &tokenAutoRotationFalse,
-					},
-				},
-				GitProvider: &GitProvider{},
-			},
-			expected: &RepositorySpec{
-				Settings: &Settings{
-					Gitlab: &GitlabSettings{
-						CommentStrategy:   "disable_all",
-						TokenAutoRotation: &tokenAutoRotationFalse,
-					},
-				},
-				GitProvider: &GitProvider{},
-			},
-		},
-		{
-			name: "local gitlab settings take precedence",
-			local: &RepositorySpec{
-				Settings: &Settings{
-					Gitlab: &GitlabSettings{
-						CommentStrategy:   "update",
-						TokenAutoRotation: &tokenAutoRotationTrue,
-					},
-				},
-				GitProvider: &GitProvider{},
-			},
-			global: RepositorySpec{
-				Settings: &Settings{
-					Gitlab: &GitlabSettings{
-						CommentStrategy:   "disable_all",
-						TokenAutoRotation: &tokenAutoRotationFalse,
-					},
-				},
-				GitProvider: &GitProvider{},
-			},
-			expected: &RepositorySpec{
-				Settings: &Settings{
-					Gitlab: &GitlabSettings{
-						CommentStrategy:   "update",
-						TokenAutoRotation: &tokenAutoRotationTrue,
-					},
-				},
-				GitProvider: &GitProvider{},
-			},
-		},
-		{
-			name: "local gitlab settings merge missing fields from global",
-			local: &RepositorySpec{
-				Settings: &Settings{
-					Gitlab: &GitlabSettings{
-						CommentStrategy: "update",
-					},
-				},
-				GitProvider: &GitProvider{},
-			},
-			global: RepositorySpec{
-				Settings: &Settings{
-					Gitlab: &GitlabSettings{
-						CommentStrategy:   "disable_all",
-						TokenAutoRotation: &tokenAutoRotationFalse,
-					},
-				},
-				GitProvider: &GitProvider{},
-			},
-			expected: &RepositorySpec{
-				Settings: &Settings{
-					Gitlab: &GitlabSettings{
-						CommentStrategy:   "update",
-						TokenAutoRotation: &tokenAutoRotationFalse,
 					},
 				},
 				GitProvider: &GitProvider{},

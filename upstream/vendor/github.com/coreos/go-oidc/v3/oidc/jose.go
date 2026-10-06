@@ -30,11 +30,3 @@ var allAlgs = []jose.SignatureAlgorithm{
 	jose.PS512,
 	jose.EdDSA,
 }
-
-var supportedJOSEAlgs = map[string]bool{}
-
-func init() {
-	for _, alg := range allAlgs {
-		supportedJOSEAlgs[string(alg)] = true
-	}
-}

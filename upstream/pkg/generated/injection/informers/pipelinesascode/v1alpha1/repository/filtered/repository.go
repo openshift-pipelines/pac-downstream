@@ -41,8 +41,7 @@ func withInformer(ctx context.Context) (context.Context, []controller.Informer) 
 	untyped := ctx.Value(filtered.LabelKey{})
 	if untyped == nil {
 		logging.FromContext(ctx).Panic(
-			"Unable to fetch labelkey from context.",
-		)
+			"Unable to fetch labelkey from context.")
 	}
 	labelSelectors := untyped.([]string)
 	infs := []controller.Informer{}
@@ -60,8 +59,7 @@ func Get(ctx context.Context, selector string) v1alpha1.RepositoryInformer {
 	untyped := ctx.Value(Key{Selector: selector})
 	if untyped == nil {
 		logging.FromContext(ctx).Panicf(
-			"Unable to fetch github.com/openshift-pipelines/pipelines-as-code/pkg/generated/informers/externalversions/pipelinesascode/v1alpha1.RepositoryInformer with selector %s from context.", selector,
-		)
+			"Unable to fetch github.com/openshift-pipelines/pipelines-as-code/pkg/generated/informers/externalversions/pipelinesascode/v1alpha1.RepositoryInformer with selector %s from context.", selector)
 	}
 	return untyped.(v1alpha1.RepositoryInformer)
 }

@@ -15,7 +15,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/google/go-github/v85/github"
+	"github.com/google/go-github/v84/github"
 	apipac "github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
@@ -104,15 +104,13 @@ func TestRun(t *testing.T) {
 			Index: "default",
 			URL:   testHubURL,
 			Name:  testCatalogHubName,
-		},
-	)
+		})
 	hubCatalogs.Store(
 		"anotherHub", settings.HubCatalog{
 			Index: "1",
 			URL:   testHubURL,
 			Name:  testCatalogHubName,
-		},
-	)
+		})
 	observer, log := zapobserver.New(zap.InfoLevel)
 	logger := zap.New(observer).Sugar()
 	tests := []struct {
@@ -612,11 +610,7 @@ func TestRun(t *testing.T) {
 						},
 					},
 					Controller: &info.ControllerInfo{
-						Secret:           info.DefaultPipelinesAscodeSecretName,
-						GlobalRepository: "global-repo",
-					},
-					Kube: &info.KubeOpts{
-						Namespace: repo.InstallNamespace,
+						Secret: info.DefaultPipelinesAscodeSecretName,
 					},
 				},
 			}

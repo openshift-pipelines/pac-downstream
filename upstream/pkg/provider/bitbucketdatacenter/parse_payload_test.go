@@ -599,8 +599,7 @@ func TestParsePayload(t *testing.T) {
 					Repository:   "repo",
 					URL:          "\x03💢\x16",
 					SHA:          "abcd",
-				}, "",
-			),
+				}, ""),
 			wantErrSubstr: "invalid control character",
 		},
 		{
@@ -664,14 +663,13 @@ func TestParsePayload(t *testing.T) {
 		{
 			name:      "branch/deleted with zero hash",
 			eventType: "repo:refs_changed",
-			payloadEvent: bbv1test.MakePushEvent(
-				ev1, []types.PushRequestEventChange{
-					{
-						ToHash: "0000000000000000000000000000000000000000",
-						RefID:  "refs/heads/feature-branch",
-						Type:   "DELETE",
-					},
-				}, []types.Commit{},
+			payloadEvent: bbv1test.MakePushEvent(ev1, []types.PushRequestEventChange{
+				{
+					ToHash: "0000000000000000000000000000000000000000",
+					RefID:  "refs/heads/feature-branch",
+					Type:   "DELETE",
+				},
+			}, []types.Commit{},
 			),
 			expEvent:      ev1,
 			wantErrSubstr: "branch delete event is not supported; cannot proceed",

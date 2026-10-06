@@ -233,31 +233,6 @@ func (ro *RepositoryBlobWriteOptions) WithContext(ctx context.Context) *Reposito
 	return ro
 }
 
-// RepositoryContentWriteOptions describes a commit that writes one or more
-// files to a repository using the URL-encoded form variant of the source
-// endpoint. Unlike RepositoryBlobWriteOptions, contents are passed inline so
-// no temporary file on disk is required.
-//
-// See: https://developer.atlassian.com/cloud/bitbucket/rest/api-group-source/#api-repositories-workspace-repo-slug-src-post
-type RepositoryContentWriteOptions struct {
-	Owner    string `json:"owner"`
-	RepoSlug string `json:"repo_slug"`
-	// Files maps the destination path inside the repository to the raw file
-	// content to upload.
-	Files map[string]string `json:"files"`
-	// FilesToDelete lists repo paths to remove in the same commit.
-	FilesToDelete []string `json:"files_to_delete"`
-	Author        string   `json:"author"`
-	Message       string   `json:"message"`
-	Branch        string   `json:"branch"`
-	ctx           context.Context
-}
-
-func (ro *RepositoryContentWriteOptions) WithContext(ctx context.Context) *RepositoryContentWriteOptions {
-	ro.ctx = ctx
-	return ro
-}
-
 // RepositoryRefOptions represents the options for describing a repository's refs (i.e.
 // tags and branches). The field BranchFlg is a boolean that is indicates whether a specific
 // RepositoryRefOptions instance is meant for Branch specific set of api methods.
@@ -294,17 +269,9 @@ type RepositoryBranchCreationOptions struct {
 type RepositoryBranchDeleteOptions struct {
 	Owner    string `json:"owner"`
 	RepoSlug string `json:"repo_slug"`
-	RepoUUID string `json:"repo_uuid"`
+	RepoUUID string `json:"uuid"`
 	RefName  string `json:"name"`
-	RefUUID  string `json:"ref_uuid"`
-}
-
-type RepositoryTagDeleteOptions struct {
-	Owner    string `json:"owner"`
-	RepoSlug string `json:"repo_slug"`
-	RepoUUID string `json:"repo_uuid"`
-	TagName  string `json:"name"`
-	TagUUID  string `json:"tag_uuid"`
+	RefUUID  string `json:"uuid"`
 }
 
 type RepositoryBranchTarget struct {
@@ -332,37 +299,25 @@ type RepositoryTagTarget struct {
 	Hash string `json:"hash"`
 }
 
-type PullRequestsMergeStrategy string
-
-const (
-	MergeCommit       PullRequestsMergeStrategy = "merge_commit"
-	Squash            PullRequestsMergeStrategy = "squash"
-	FastForward       PullRequestsMergeStrategy = "fast_forward"
-	SquashFastForward PullRequestsMergeStrategy = "squash_fast_forward"
-	RebaseFastForward PullRequestsMergeStrategy = "rebase_fast_forward"
-	RebaseMerge       PullRequestsMergeStrategy = "rebase_merge"
-)
-
 type PullRequestsOptions struct {
-	ID                string                    `json:"id"`
-	CommentID         string                    `json:"comment_id"`
-	Owner             string                    `json:"owner"`
-	RepoSlug          string                    `json:"repo_slug"`
-	Title             string                    `json:"title"`
-	Description       string                    `json:"description"`
-	CloseSourceBranch bool                      `json:"close_source_branch"`
-	SourceBranch      string                    `json:"source_branch"`
-	SourceRepository  string                    `json:"source_repository"`
-	DestinationBranch string                    `json:"destination_branch"`
-	DestinationCommit string                    `json:"destination_repository"`
-	MergeStrategy     PullRequestsMergeStrategy `json:"merge_strategy"`
-	Message           string                    `json:"message"`
-	Reviewers         []string                  `json:"reviewers"`
-	States            []string                  `json:"states"`
-	Query             string                    `json:"query"`
-	Sort              string                    `json:"sort"`
-	Draft             bool                      `json:"draft"`
-	Commit            string                    `json:"commit"`
+	ID                string   `json:"id"`
+	CommentID         string   `json:"comment_id"`
+	Owner             string   `json:"owner"`
+	RepoSlug          string   `json:"repo_slug"`
+	Title             string   `json:"title"`
+	Description       string   `json:"description"`
+	CloseSourceBranch bool     `json:"close_source_branch"`
+	SourceBranch      string   `json:"source_branch"`
+	SourceRepository  string   `json:"source_repository"`
+	DestinationBranch string   `json:"destination_branch"`
+	DestinationCommit string   `json:"destination_repository"`
+	Message           string   `json:"message"`
+	Reviewers         []string `json:"reviewers"`
+	States            []string `json:"states"`
+	Query             string   `json:"query"`
+	Sort              string   `json:"sort"`
+	Draft             bool     `json:"draft"`
+	Commit            string   `json:"commit"`
 	ctx               context.Context
 }
 
@@ -463,15 +418,10 @@ type BranchRestrictionsOptions struct {
 	Pattern  string            `json:"pattern"`
 	Users    []string          `json:"users"`
 	Kind     string            `json:"kind"`
-	// BranchMatchKind controls how Pattern is matched against branches.
-	// Allowed values are "glob" (default when empty) and "branching_model".
-	BranchMatchKind string `json:"branch_match_kind"`
-	// BranchType is required when BranchMatchKind is "branching_model".
-	BranchType string      `json:"branch_type"`
-	FullSlug   string      `json:"full_slug"`
-	Name       string      `json:"name"`
-	Value      interface{} `json:"value"`
-	ctx        context.Context
+	FullSlug string            `json:"full_slug"`
+	Name     string            `json:"name"`
+	Value    interface{}       `json:"value"`
+	ctx      context.Context
 }
 
 func (b *BranchRestrictionsOptions) WithContext(ctx context.Context) *BranchRestrictionsOptions {

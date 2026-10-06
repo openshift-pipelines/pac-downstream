@@ -36,7 +36,7 @@ const (
 	RequestReplyBrokerCACertsStatusAnnotationKey = "knative.dev/brokerCACerts"
 
 	// RequestReplyBrokerAudienceStatusAnnotationKey is the RequestReply status
-	// annotation key used to specify the broker's OIDC audience
+	// anotation key used to specify the broker's OIDC audience
 	RequestReplyBrokerAudienceStatusAnnotationKey = "knative.dev/brokerAudience"
 )
 

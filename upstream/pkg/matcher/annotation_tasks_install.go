@@ -26,15 +26,14 @@ const (
 )
 
 type RemoteTasks struct {
-	Run                *params.Run
-	ProviderInterface  provider.Interface
-	Event              *info.Event
-	Logger             *zap.SugaredLogger
-	RepositoryRevision string
+	Run               *params.Run
+	ProviderInterface provider.Interface
+	Event             *info.Event
+	Logger            *zap.SugaredLogger
 }
 
 // nolint: dupl
-func (rt *RemoteTasks) convertToPipeline(ctx context.Context, uri, data string) (*tektonv1.Pipeline, error) {
+func (rt RemoteTasks) convertToPipeline(ctx context.Context, uri, data string) (*tektonv1.Pipeline, error) {
 	decoder := k8scheme.Codecs.UniversalDeserializer()
 	obj, _, err := decoder.Decode([]byte(data), nil, nil)
 	if err != nil {
@@ -69,7 +68,7 @@ func (rt *RemoteTasks) convertToPipeline(ctx context.Context, uri, data string) 
 // nolint: dupl
 // golint has decided that this is a duplication with convertToPipeline but I swear it isn't - these two are different functions
 // and not even sure this is possible to do with generic complexity.
-func (rt *RemoteTasks) convertTotask(ctx context.Context, uri, data string) (*tektonv1.Task, error) {
+func (rt RemoteTasks) convertTotask(ctx context.Context, uri, data string) (*tektonv1.Task, error) {
 	decoder := k8scheme.Codecs.UniversalDeserializer()
 	obj, _, err := decoder.Decode([]byte(data), nil, nil)
 	if err != nil {
@@ -98,7 +97,7 @@ func (rt *RemoteTasks) convertTotask(ctx context.Context, uri, data string) (*te
 	return task, nil
 }
 
-func (rt *RemoteTasks) getRemote(ctx context.Context, uri string, fromHub bool, kind string) (string, error) {
+func (rt RemoteTasks) getRemote(ctx context.Context, uri string, fromHub bool, kind string) (string, error) {
 	rt.Logger.Debugf("getRemote: uri=%s kind=%s fromHub=%t", uri, kind, fromHub)
 	if fetchedFromURIFromProvider, task, err := rt.ProviderInterface.GetTaskURI(ctx, rt.Event, uri); fetchedFromURIFromProvider {
 		rt.Logger.Debugf("getRemote: fetched %s via provider hook for uri=%s", kind, uri)
@@ -118,8 +117,8 @@ func (rt *RemoteTasks) getRemote(ctx context.Context, uri string, fromHub bool, 
 		split := strings.Split(uri, "://")
 		catalogID := split[0]
 		rt.Logger.Debugf("getRemote: fetching %s from custom hub catalog=%s", kind, catalogID)
-		value, ok := rt.Run.Info.Pac.HubCatalogs.Load(catalogID)
-		if !ok {
+		value, _ := rt.Run.Info.Pac.HubCatalogs.Load(catalogID)
+		if _, ok := rt.Run.Info.Pac.HubCatalogs.Load(catalogID); !ok {
 			rt.Logger.Infof("custom catalog %s is not found, skipping", catalogID)
 			return "", nil
 		}
@@ -139,7 +138,7 @@ func (rt *RemoteTasks) getRemote(ctx context.Context, uri string, fromHub bool, 
 		var data string
 		var err error
 		if rt.Event.SHA != "" {
-			data, err = rt.ProviderInterface.GetFileInsideRepo(ctx, rt.Event, uri, rt.RepositoryRevision)
+			data, err = rt.ProviderInterface.GetFileInsideRepo(ctx, rt.Event, uri, "")
 			if err != nil {
 				return "", err
 			}
@@ -206,7 +205,7 @@ func GrabPipelineFromAnnotations(annotations map[string]string) (string, error) 
 	return pipelinesAnnotation[0], nil
 }
 
-func (rt *RemoteTasks) GetTaskFromAnnotationName(ctx context.Context, name string) (*tektonv1.Task, error) {
+func (rt RemoteTasks) GetTaskFromAnnotationName(ctx context.Context, name string) (*tektonv1.Task, error) {
 	rt.Logger.Debugf("GetTaskFromAnnotationName: name=%s", name)
 	data, err := rt.getRemote(ctx, name, true, "task")
 	if err != nil {
@@ -223,7 +222,7 @@ func (rt *RemoteTasks) GetTaskFromAnnotationName(ctx context.Context, name strin
 	return task, nil
 }
 
-func (rt *RemoteTasks) GetPipelineFromAnnotationName(ctx context.Context, name string) (*tektonv1.Pipeline, error) {
+func (rt RemoteTasks) GetPipelineFromAnnotationName(ctx context.Context, name string) (*tektonv1.Pipeline, error) {
 	rt.Logger.Debugf("GetPipelineFromAnnotationName: name=%s", name)
 	data, err := rt.getRemote(ctx, name, true, "pipeline")
 	if err != nil {

@@ -19,7 +19,6 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/test/pkg/options"
 	trepo "github.com/openshift-pipelines/pipelines-as-code/test/pkg/repository"
 	twait "github.com/openshift-pipelines/pipelines-as-code/test/pkg/wait"
-	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 	"github.com/tektoncd/pipeline/pkg/names"
 	"gotest.tools/v3/assert"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -105,17 +104,18 @@ spec:
 	}
 	defer g.TearDown(ctx, t)
 
-	runcnx.Clients.Log.Infof("Waiting for PipelineRun to succeed")
+	runcnx.Clients.Log.Infof("Waiting for Repository to be updated")
 	waitOpts := twait.Opts{
+		RepoName:        targetNS,
 		Namespace:       targetNS,
 		MinNumberStatus: 1,
 		PollTimeout:     twait.DefaultTimeout,
-		TargetSHA:       []string{sha},
+		TargetSHA:       sha,
 	}
-	_, err = twait.UntilPipelineRunHasReason(ctx, runcnx.Clients, tektonv1.PipelineRunReasonSuccessful, waitOpts)
+	_, err = twait.UntilRepositoryUpdated(ctx, runcnx.Clients, waitOpts)
 	assert.NilError(t, err)
 
-	runcnx.Clients.Log.Infof("Check if PipelineRun succeeded")
+	runcnx.Clients.Log.Infof("Check if we have the repository set as succeeded")
 
 	counter := 0
 	maxVal := 5
