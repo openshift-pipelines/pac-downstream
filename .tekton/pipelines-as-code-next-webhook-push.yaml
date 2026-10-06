@@ -39,6 +39,11 @@ spec:
   - name: prefetch-input
     value: |
       {"type": "rpm", "path": ".konflux/rpms"}
+  - name: repo-name
+    value: "pipelines-as-code"
+  - name: slack-group-ids
+    value:
+      - "S04FWV1N021"
   pipelineRef:
     name: docker-build-ta
   taskRunTemplate:
