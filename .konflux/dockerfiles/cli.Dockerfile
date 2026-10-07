@@ -29,7 +29,7 @@ LABEL \
     maintainer="pipelines-extcomm@redhat.com" \
     name="openshift-pipelines/pipelines-pipelines-as-code-cli-rhel8" \
     summary="Red Hat OpenShift Pipelines pipelines-as-code cli" \
-    version="v1.15.5"
+    version="v1.15.6"
 
 RUN microdnf install -y shadow-utils
 RUN groupadd -r -g 65532 nonroot && useradd --no-log-init -r -u 65532 -g nonroot nonroot
