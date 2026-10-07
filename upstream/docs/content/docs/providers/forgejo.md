@@ -21,7 +21,13 @@ name):
 
 <https://your.forgejo.domain/user/settings/applications>
 
-When creating the token, select these scopes:
+{{< callout type="info" >}}
+If using the CLI, the token needs access to **All (public, private, and
+limited)** repositories so it can create the repository webhook. The same token
+is stored for the runtime operations described by the scopes below.
+{{< /callout >}}
+
+You should also select these scopes:
 
 ### Required Scopes
 
@@ -35,16 +41,42 @@ These scopes are necessary for basic Pipelines-as-Code functionality:
 - **Organization** (Read) - Only required if using [team-based policies]({{< relref "/docs/advanced/policy-authorization" >}}) to restrict pipeline triggers based on Forgejo organization team membership
 
 {{< callout type="info" >}}
-For most users, only the **Required Scopes** are needed. Skip Organization (Read) unless you plan to use `policy.team_ids` in your Repository CR configuration.
+For most users, only the **Required Scopes** are needed. Skip Organization (Read)
+unless you plan to use `settings.policy.ok_to_test` or
+`settings.policy.pull_request` in your Repository CR configuration.
 {{< /callout >}}
 
 Store the generated token in a safe place, or you will have to recreate it.
 
-## Webhook Configuration (Manual)
+## Webhook Configuration using the CLI
 
 {{< callout type="info" >}}
-The `tkn pac create repo` and `tkn pac webhook` commands do not currently support Forgejo. You must configure the webhook manually.
+The CLI uses your Forgejo token to create the webhook and also stores it for runtime
+use. To use a token with tighter repository access, follow the manual
+configuration steps instead.
 {{< /callout >}}
+
+Use [`tkn pac create repo`]({{< relref "/docs/cli" >}}) to create the
+Repository CR, create the Kubernetes secret, and configure the Forgejo webhook:
+
+```shell
+tkn pac create repo
+```
+
+The command prompts for the Forgejo repository URL, controller URL, webhook
+secret, Forgejo token, and Forgejo instance URL.
+
+For an existing Repository CR, use `tkn pac webhook add` to create the Forgejo
+webhook and update the webhook secret:
+
+```shell
+tkn pac webhook add -n target-namespace my-repo
+```
+
+If the Repository CR does not have a `git_provider` configuration yet, the
+command creates a secret and updates the Repository CR.
+
+## Webhook Configuration (Manual)
 
 1. From your Forgejo repository, go to **Settings** -> **Webhooks** and click **Add Webhook** -> **Forgejo**.
 
@@ -91,13 +123,10 @@ kubectl -n target-namespace create secret generic forgejo-webhook-config \
   --from-literal webhook.secret="SECRET_AS_SET_IN_WEBHOOK_CONFIGURATION"
 ```
 
-If you configured an empty webhook secret, use an empty string:
-
-```shell
-kubectl -n target-namespace create secret generic forgejo-webhook-config \
-  --from-literal provider.token="TOKEN_AS_GENERATED_PREVIOUSLY" \
-  --from-literal webhook.secret=""
-```
+{{< callout type="warning" >}}
+Forgejo and Gitea webhook validation requires a non-empty shared secret.
+Do not set `webhook.secret` to an empty string.
+{{< /callout >}}
 
 ### Create the Repository CR
 
@@ -132,7 +161,7 @@ spec:
 
 - **Forgejo Instance URL**: Specify `git_provider.url` pointing to your Forgejo instance URL.
 
-- **Webhook Secret**: Pipelines-as-Code does not currently validate webhook signatures for Forgejo/Gitea. Secrets can be stored, but requests are accepted without signature verification.
+- **Webhook Secret**: Pipelines-as-Code validates webhook signatures for Forgejo/Gitea using HMAC-SHA256. A webhook secret must be configured both in the Forgejo webhook settings and in the Kubernetes secret referenced by the Repository CR. Requests without a valid signature will be rejected.
 
 - The `git_provider.secret` key cannot reference a secret in another namespace. Pipelines-as-Code always assumes it is in the same namespace where the Repository CR has been created.
 

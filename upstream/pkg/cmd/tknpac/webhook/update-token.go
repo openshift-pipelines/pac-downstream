@@ -3,6 +3,7 @@ package webhook
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/AlecAivazis/survey/v2"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
@@ -10,7 +11,7 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/cli/prompt"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/cmd/tknpac/completion"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/pipelineascode"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/secrets"
 	"github.com/spf13/cobra"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -51,9 +52,11 @@ func webhookUpdateToken(run *params.Run, ioStreams *cli.IOStreams) *cobra.Comman
 	}
 
 	cmd.Flags().StringP(
-		namespaceFlag, "n", "", "If present, the namespace scope for this CLI request")
+		namespaceFlag, "n", "", "If present, the namespace scope for this CLI request",
+	)
 
-	_ = cmd.RegisterFlagCompletionFunc(namespaceFlag,
+	_ = cmd.RegisterFlagCompletionFunc(
+		namespaceFlag,
 		func(_ *cobra.Command, args []string, _ string) ([]string, cobra.ShellCompDirective) {
 			return completion.BaseCompletion(namespaceFlag, args)
 		},
@@ -66,6 +69,7 @@ func update(ctx context.Context, opts *cli.PacCliOpts, run *params.Run, ioStream
 		err                 error
 		repo                *v1alpha1.Repository
 		personalAccessToken string
+		accountEmail        string
 	)
 	if opts.Namespace != "" {
 		run.Info.Kube.Namespace = opts.Namespace
@@ -102,15 +106,37 @@ func update(ctx context.Context, opts *cli.PacCliOpts, run *params.Run, ioStream
 	if err != nil {
 		return err
 	}
+	isBitbucketCloud := repo.Spec.GitProvider.Type == "bitbucket-cloud" || strings.Contains(repo.Spec.URL, "bitbucket.org")
+	tokenName := "personal access token"
+	if isBitbucketCloud {
+		tokenName = "Bitbucket Cloud API token"
+	}
 	if err := prompt.SurveyAskOne(&survey.Password{
-		Message: "Please enter your personal access token: ",
+		Message: fmt.Sprintf("Please enter your %s: ", tokenName),
 	}, &personalAccessToken, survey.WithValidator(survey.Required)); err != nil {
 		return err
 	}
 
+	if isBitbucketCloud {
+		if err := prompt.SurveyAskOne(&survey.Input{
+			Message: "Please enter your Bitbucket Cloud Atlassian account email: ",
+			Default: repo.Spec.GitProvider.User,
+		}, &accountEmail, survey.WithValidator(survey.Required)); err != nil {
+			return err
+		}
+	}
+
 	gitProviderSecretKey := repo.Spec.GitProvider.Secret.Key
 	if gitProviderSecretKey == "" {
-		gitProviderSecretKey = pipelineascode.DefaultGitProviderSecretKey
+		gitProviderSecretKey = secrets.DefaultGitProviderSecretKey
+	}
+
+	if isBitbucketCloud {
+		repo.Spec.GitProvider.User = accountEmail
+		_, err = run.Clients.PipelineAsCode.PipelinesascodeV1alpha1().Repositories(repo.Namespace).Update(ctx, repo, metav1.UpdateOptions{})
+		if err != nil {
+			return err
+		}
 	}
 
 	secretData.Data[gitProviderSecretKey] = []byte(personalAccessToken)
@@ -119,7 +145,11 @@ func update(ctx context.Context, opts *cli.PacCliOpts, run *params.Run, ioStream
 		return err
 	}
 
-	fmt.Fprintf(ioStreams.Out, "🔑 Secret %s has been updated with new personal access token in the %s namespace.\n", secretName, repo.Namespace)
+	if isBitbucketCloud {
+		fmt.Fprintf(ioStreams.Out, "🔑 Secret %s has been updated with new %s and account email in the %s namespace.\n", secretName, tokenName, repo.Namespace)
+	} else {
+		fmt.Fprintf(ioStreams.Out, "🔑 Secret %s has been updated with new %s in the %s namespace.\n", secretName, tokenName, repo.Namespace)
+	}
 
 	return nil
 }

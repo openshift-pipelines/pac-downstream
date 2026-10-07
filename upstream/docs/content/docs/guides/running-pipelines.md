@@ -123,7 +123,7 @@ the pull request describing the error. Pipelines-as-Code also logs the error in 
 Despite validation errors, Pipelines-as-Code continues to run other correctly parsed and matched PipelineRuns.
 However, a YAML syntax error in any PipelineRun halts the execution of all PipelineRuns, even those that are syntactically correct.
 
-{{< support_matrix github_app="true" github_webhook="true" forgejo="true" gitlab="true" bitbucket_cloud="false" bitbucket_server="false" >}}
+{{< support_matrix github_app="true" github_webhook="true" forgejo="true" gitlab="true" bitbucket_cloud="false" bitbucket_datacenter="false" >}}
 
 When an event triggers from a pull request, Pipelines-as-Code creates a new comment on
 the pull request detailing the error.
@@ -182,5 +182,11 @@ tab and click the "Re-Run" button in the upper right corner. Pipelines-as-Code
 re-executes the PipelineRun.
 
 You can rerun a specific pipeline or the entire suite of checks.
+
+Re-runs also work for pull requests coming from forks.
+
+The re-run is attributed to the user who clicked the "Re-Run" button, and that
+user must be authorized to run CI on the repository according to the
+[policy]({{< relref "/docs/advanced/policy-authorization" >}}) or ACL rules.
 
 ![github apps rerun check](/images/github-apps-rerun-checks.png)

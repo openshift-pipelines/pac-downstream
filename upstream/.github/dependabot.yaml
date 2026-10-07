@@ -1,6 +1,28 @@
 version: 2
 updates:
-  - package-ecosystem: "github-actions"
+  - package-ecosystem: gomod
     directory: "/"
     schedule:
-      interval: "weekly"
+      interval: weekly
+    commit-message:
+      prefix: "ci"
+    ignore:
+      # go-github and ghinstallation updates frequently break the build
+      # (major go-github API changes), update them manually instead
+      - dependency-name: "github.com/google/go-github/*"
+      - dependency-name: "github.com/bradleyfalzon/ghinstallation/v2"
+    groups:
+      go-dependencies:
+        patterns:
+          - "*"
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "ci"
+    groups:
+      github-actions:
+        patterns:
+          - "*"

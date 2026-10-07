@@ -3,6 +3,7 @@ package reconciler
 import (
 	"context"
 	"encoding/json"
+	stderrors "errors"
 	"fmt"
 	"strings"
 
@@ -25,10 +26,11 @@ import (
 	pacapi "github.com/openshift-pipelines/pipelines-as-code/pkg/generated/listers/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/kubeinteraction"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/llm"
+	_ "github.com/openshift-pipelines/pipelines-as-code/pkg/llm/providers/gemini" // register Gemini provider via init
+	_ "github.com/openshift-pipelines/pipelines-as-code/pkg/llm/providers/openai" // register OpenAI provider via init
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/settings"
-	pac "github.com/openshift-pipelines/pipelines-as-code/pkg/pipelineascode"
 	prmetrics "github.com/openshift-pipelines/pipelines-as-code/pkg/pipelinerunmetrics"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
 	providerstatus "github.com/openshift-pipelines/pipelines-as-code/pkg/provider/status"
@@ -45,14 +47,72 @@ type Reconciler struct {
 	qm                queuepkg.ManagerInterface
 	metrics           *prmetrics.Recorder
 	eventEmitter      *events.EventEmitter
-	globalRepo        *v1alpha1.Repository
-	secretNS          string
 }
 
 var (
 	_ pipelinerunreconciler.Interface = (*Reconciler)(nil)
 	_ pipelinerunreconciler.Finalizer = (*Reconciler)(nil)
 )
+
+// ErrPipelineRunNotStarted reports that a PipelineRun could not be moved out of
+// its pending state, so it is definitely not running in the cluster. Callers
+// holding a concurrency slot on its behalf must release it, otherwise the slot
+// is never freed: only a completed PipelineRun releases one, and this one never
+// started.
+var ErrPipelineRunNotStarted = stderrors.New("pipelineRun has not been started")
+
+func copyRepositoryForMerge(repo *v1alpha1.Repository) *v1alpha1.Repository {
+	if repo == nil {
+		return nil
+	}
+	// DeepCopy never returns nil for a non-nil receiver (see the generated
+	// implementation's nil-guard), so this can't actually happen.
+	copied := repo.DeepCopy()
+	if copied == nil {
+		return nil
+	}
+	repo = copied
+	if repo.Spec.Settings != nil {
+		settings := *repo.Spec.Settings
+		if settings.Policy != nil {
+			policy := *settings.Policy
+			policy.OkToTest = append([]string(nil), settings.Policy.OkToTest...)
+			policy.PullRequest = append([]string(nil), settings.Policy.PullRequest...)
+			settings.Policy = &policy
+		}
+		if settings.Gitlab != nil {
+			gitlab := *settings.Gitlab
+			settings.Gitlab = &gitlab
+		}
+		if settings.Github != nil {
+			github := *settings.Github
+			settings.Github = &github
+		}
+		if settings.Forgejo != nil {
+			forgejo := *settings.Forgejo
+			settings.Forgejo = &forgejo
+		}
+		if settings.AIAnalysis != nil {
+			aiAnalysis := *settings.AIAnalysis
+			settings.AIAnalysis = &aiAnalysis
+		}
+		settings.GithubAppTokenScopeRepos = append([]string(nil), settings.GithubAppTokenScopeRepos...)
+		repo.Spec.Settings = &settings
+	}
+	if repo.Spec.GitProvider != nil {
+		gitProvider := *repo.Spec.GitProvider
+		if gitProvider.Secret != nil {
+			secret := *gitProvider.Secret
+			gitProvider.Secret = &secret
+		}
+		if gitProvider.WebhookSecret != nil {
+			webhookSecret := *gitProvider.WebhookSecret
+			gitProvider.WebhookSecret = &webhookSecret
+		}
+		repo.Spec.GitProvider = &gitProvider
+	}
+	return repo
+}
 
 // ReconcileKind is the main entry point for reconciling PipelineRun resources.
 func (r *Reconciler) ReconcileKind(ctx context.Context, pr *tektonv1.PipelineRun) pkgreconciler.Event {
@@ -267,12 +327,17 @@ func (r *Reconciler) reportFinalStatus(ctx context.Context, logger *zap.SugaredL
 		return nil, fmt.Errorf("reportFinalStatus: %w", err)
 	}
 
-	r.secretNS = repo.GetNamespace()
-	if r.globalRepo, err = r.repoLister.Repositories(r.run.Info.Kube.Namespace).Get(r.run.Info.Controller.GlobalRepository); err == nil && r.globalRepo != nil {
-		if repo.Spec.GitProvider != nil && repo.Spec.GitProvider.Secret == nil && r.globalRepo.Spec.GitProvider != nil && r.globalRepo.Spec.GitProvider.Secret != nil {
-			r.secretNS = r.globalRepo.GetNamespace()
+	secretNS := repo.GetNamespace()
+	inheritedGlobalSecret := false
+	if globalRepo, err := r.repoLister.Repositories(r.run.Info.Kube.Namespace).Get(r.run.Info.Controller.GlobalRepository); err == nil && globalRepo != nil {
+		if repo.Spec.GitProvider != nil && repo.Spec.GitProvider.Secret == nil && globalRepo.Spec.GitProvider != nil && globalRepo.Spec.GitProvider.Secret != nil {
+			secretNS = globalRepo.GetNamespace()
+			inheritedGlobalSecret = true
 		}
-		repo.Spec.Merge(r.globalRepo.Spec)
+		if merged := copyRepositoryForMerge(repo); merged != nil {
+			repo = merged
+			repo.Spec.Merge(globalRepo.Spec)
+		}
 	}
 
 	cp := customparams.NewCustomParams(event, repo, r.run, r.kinteract, r.eventEmitter, nil)
@@ -284,16 +349,17 @@ func (r *Reconciler) reportFinalStatus(ctx context.Context, logger *zap.SugaredL
 	r.run.Clients.ConsoleUI().SetParams(maptemplate)
 
 	if event.InstallationID > 0 {
-		event.Provider.WebhookSecret, _ = pac.GetCurrentNSWebhookSecret(ctx, r.kinteract, r.run)
+		event.Provider.WebhookSecret, _ = secrets.GetCurrentNSWebhookSecret(ctx, r.kinteract, r.run)
 	} else {
-		secretFromRepo := pac.SecretFromRepository{
-			K8int:       r.kinteract,
-			Config:      provider.GetConfig(),
-			Event:       event,
-			Repo:        repo,
-			WebhookType: pacInfo.WebhookType,
-			Logger:      logger,
-			Namespace:   r.secretNS,
+		secretFromRepo := secrets.SecretFromRepository{
+			K8int:                 r.kinteract,
+			Config:                provider.GetConfig(),
+			Event:                 event,
+			Repo:                  repo,
+			WebhookType:           pacInfo.WebhookType,
+			Logger:                logger,
+			Namespace:             secretNS,
+			InheritedGlobalSecret: inheritedGlobalSecret,
 		}
 		if err := secretFromRepo.Get(ctx); err != nil {
 			return repo, fmt.Errorf("cannot get secret from repository: %w", err)
@@ -309,7 +375,7 @@ func (r *Reconciler) reportFinalStatus(ctx context.Context, logger *zap.SugaredL
 	}
 
 	finalState := kubeinteraction.StateCompleted
-	newPr, err := r.postFinalStatus(ctx, logger, pacInfo, provider, event, pr)
+	newPr, trStatus, err := r.postFinalStatus(ctx, logger, pacInfo, provider, event, pr)
 	if err != nil {
 		logger.Errorf("failed to post final status, moving on: %v", err)
 		finalState = kubeinteraction.StateFailed
@@ -318,14 +384,12 @@ func (r *Reconciler) reportFinalStatus(ctx context.Context, logger *zap.SugaredL
 	// LLM Analysis orchestrator checks if it is enabled and if the CEL condition
 	// is matched for the defined roles, defaults to failed PipelineRuns only if
 	// no CEL expression is defined.
-	if err := r.performLLMAnalysis(ctx, logger, repo, newPr, event, provider); err != nil {
+	if newPr == nil {
+		logger.Warn("skipping LLM analysis: no final pipelinerun status available")
+	} else if err := r.performLLMAnalysis(ctx, logger, repo, newPr, event, provider); err != nil {
 		logger.Warnf("LLM analysis failed (non-blocking): %v", err)
 		r.eventEmitter.EmitMessage(repo, zap.WarnLevel, "LLMAnalysisFailed",
 			fmt.Sprintf("AI/LLM analysis failed for repository %s/%s and pipeline run %s: %v", repo.Namespace, repo.Name, newPr.Name, err))
-	}
-
-	if err := r.updateRepoRunStatus(ctx, logger, newPr, repo, event); err != nil {
-		return repo, fmt.Errorf("cannot update run status: %w", err)
 	}
 
 	if _, err := r.updatePipelineRunState(ctx, logger, pr, finalState); err != nil {
@@ -336,26 +400,10 @@ func (r *Reconciler) reportFinalStatus(ctx context.Context, logger *zap.SugaredL
 		logger.Error("failed to emit metrics: ", err)
 	}
 
-	// remove pipelineRun from Queue and start the next one
-	for {
-		next := r.qm.RemoveAndTakeItemFromQueue(repo, pr)
-		if next == "" {
-			break
-		}
-		key := strings.Split(next, "/")
-		pr, err := r.run.Clients.Tekton.TektonV1().PipelineRuns(key[0]).Get(ctx, key[1], metav1.GetOptions{})
-		if err != nil {
-			logger.Errorf("cannot get pipeline for next in queue: %w", err)
-			continue
-		}
+	emitTimingSpans(logger, pr, &pacInfo.Settings, trStatus)
 
-		if err := r.updatePipelineRunToInProgress(ctx, logger, repo, pr); err != nil {
-			logger.Errorf("failed to update status: %w", err)
-			_ = r.qm.RemoveFromQueue(queuepkg.RepoKey(repo), queuepkg.PrKey(pr))
-			continue
-		}
-		break
-	}
+	// remove pipelineRun from Queue and start the next one
+	r.startNextPipelineRunInQueue(ctx, logger, repo, pr)
 
 	if err := r.cleanupPipelineRuns(ctx, logger, pacInfo, repo, pr); err != nil {
 		return repo, fmt.Errorf("error cleaning pipelineruns: %w", err)
@@ -364,10 +412,92 @@ func (r *Reconciler) reportFinalStatus(ctx context.Context, logger *zap.SugaredL
 	return repo, nil
 }
 
+// startNextPipelineRunInQueue frees the slot held by a finished PipelineRun and
+// starts the next one waiting in the repository's queue. Each candidate that
+// turns out not to be startable is definitely not running — either it is gone
+// from the cluster or its state patch never landed — so its freshly-taken slot
+// is handed back and the next candidate is tried. A candidate whose start
+// failed *after* the state patch is already running and keeps its slot.
+//
+// Handing a slot back and asking for another candidate is what makes this a
+// loop, and it only terminates because every candidate is removed from the
+// queue as it is tried, so the queue drains. A queue implementation that keeps
+// returning a key it was asked to remove would spin here forever and take the
+// process down with it, so a key seen twice is treated as a broken queue and
+// ends the loop. The loop is deliberately not capped at some fixed number of
+// candidates: a repository may legitimately have any number of stale entries
+// ahead of a startable one, and stopping early would leave that one queued with
+// no running PipelineRun left to trigger another promotion.
+func (r *Reconciler) startNextPipelineRunInQueue(ctx context.Context, logger *zap.SugaredLogger, repo *v1alpha1.Repository, pr *tektonv1.PipelineRun) {
+	repoKey := queuepkg.RepoKey(repo)
+	seen := map[string]bool{}
+	for {
+		// This both releases the slot of the finished PipelineRun and takes one
+		// for the next candidate, so it has to run at least once, before any
+		// cancellation check, or the finished PipelineRun's slot is never freed.
+		next := r.qm.RemoveAndTakeItemFromQueue(repo, pr)
+		if next == "" {
+			return
+		}
+		if seen[next] {
+			logger.Errorf("queue for repository %s returned %s twice, it is out of sync with the cluster, giving up on starting the next pipelineRun", repo.GetName(), next)
+			_ = r.qm.RemoveFromQueue(repoKey, next)
+			return
+		}
+		seen[next] = true
+
+		// Starting a PipelineRun means talking to the cluster and to the git
+		// provider, which is pointless once the context is done. Hand the slot
+		// we just took back rather than strand it. The queue is rebuilt from
+		// the cluster by InitQueues on the next start, so nothing is lost.
+		if err := ctx.Err(); err != nil {
+			logger.Warnf("not starting the next pipelineRun %s for repository %s, releasing its queue slot: %v", next, repo.GetName(), err)
+			_ = r.qm.RemoveFromQueue(repoKey, next)
+			return
+		}
+
+		key := strings.Split(next, "/")
+		if len(key) != 2 {
+			logger.Errorf("invalid pipelineRun key %q queued for repository %s, releasing its queue slot", next, repo.GetName())
+			_ = r.qm.RemoveFromQueue(repoKey, next)
+			continue
+		}
+		nextPR, err := r.run.Clients.Tekton.TektonV1().PipelineRuns(key[0]).Get(ctx, key[1], metav1.GetOptions{})
+		if err != nil {
+			// The next PipelineRun already holds the slot we just freed, but
+			// nothing has been written to the cluster for it yet, so it is
+			// still pending. Hand the slot back before moving on: a slot kept
+			// for a run that never starts is never released, since only a
+			// completed run releases one.
+			logger.Errorf("cannot get pipeline for next in queue: %w", err)
+			_ = r.qm.RemoveFromQueue(repoKey, next)
+			continue
+		}
+
+		if err := r.updatePipelineRunToInProgress(ctx, logger, repo, nextPR); err != nil {
+			logger.Errorf("failed to update status: %w", err)
+			if stderrors.Is(err, ErrPipelineRunNotStarted) {
+				// The state patch never landed, so the PipelineRun is still
+				// pending. Release the slot and try the next one in the queue.
+				_ = r.qm.RemoveFromQueue(repoKey, queuepkg.PrKey(nextPR))
+				continue
+			}
+			// The state patch landed before this failed, so the PipelineRun is
+			// already running in the cluster and rightfully owns the slot.
+			// Releasing it here would admit another run past the limit.
+			return
+		}
+		return
+	}
+}
+
 func (r *Reconciler) updatePipelineRunToInProgress(ctx context.Context, logger *zap.SugaredLogger, repo *v1alpha1.Repository, pr *tektonv1.PipelineRun) error {
 	pr, err := r.updatePipelineRunState(ctx, logger, pr, kubeinteraction.StateStarted)
 	if err != nil {
-		return fmt.Errorf("cannot update state: %w", err)
+		// the patch is what clears spec.status, so until it lands the PipelineRun
+		// is still Pending and cannot be running. Callers holding a concurrency
+		// slot for it need to know that so they can hand the slot back.
+		return fmt.Errorf("%w: cannot update state: %w", ErrPipelineRunNotStarted, err)
 	}
 
 	detectedProvider, event, err := r.initGitProviderClient(ctx, logger, repo, pr)
@@ -420,25 +550,31 @@ func (r *Reconciler) initGitProviderClient(ctx context.Context, logger *zap.Suga
 
 	// installation ID indicates Github App installation
 	if event.InstallationID > 0 {
-		event.Provider.WebhookSecret, _ = pac.GetCurrentNSWebhookSecret(ctx, r.kinteract, r.run)
+		event.Provider.WebhookSecret, _ = secrets.GetCurrentNSWebhookSecret(ctx, r.kinteract, r.run)
 	} else {
 		// secretNS is needed when git provider is other than Github App.
 		secretNS := repo.GetNamespace()
-		if r.globalRepo, err = r.repoLister.Repositories(r.run.Info.Kube.Namespace).Get(r.run.Info.Controller.GlobalRepository); err == nil && r.globalRepo != nil {
-			if repo.Spec.GitProvider != nil && repo.Spec.GitProvider.Secret == nil && r.globalRepo.Spec.GitProvider != nil && r.globalRepo.Spec.GitProvider.Secret != nil {
-				r.secretNS = r.globalRepo.GetNamespace()
+		inheritedGlobalSecret := false
+		if globalRepo, err := r.repoLister.Repositories(r.run.Info.Kube.Namespace).Get(r.run.Info.Controller.GlobalRepository); err == nil && globalRepo != nil {
+			if repo.Spec.GitProvider != nil && repo.Spec.GitProvider.Secret == nil && globalRepo.Spec.GitProvider != nil && globalRepo.Spec.GitProvider.Secret != nil {
+				secretNS = globalRepo.GetNamespace()
+				inheritedGlobalSecret = true
 			}
-			repo.Spec.Merge(r.globalRepo.Spec)
+			if merged := copyRepositoryForMerge(repo); merged != nil {
+				repo = merged
+				repo.Spec.Merge(globalRepo.Spec)
+			}
 		}
 
-		secretFromRepo := pac.SecretFromRepository{
-			K8int:       r.kinteract,
-			Config:      detectedProvider.GetConfig(),
-			Event:       event,
-			Repo:        repo,
-			WebhookType: pacInfo.WebhookType,
-			Logger:      logger,
-			Namespace:   secretNS,
+		secretFromRepo := secrets.SecretFromRepository{
+			K8int:                 r.kinteract,
+			Config:                detectedProvider.GetConfig(),
+			Event:                 event,
+			Repo:                  repo,
+			WebhookType:           pacInfo.WebhookType,
+			Logger:                logger,
+			Namespace:             secretNS,
+			InheritedGlobalSecret: inheritedGlobalSecret,
 		}
 		if err := secretFromRepo.Get(ctx); err != nil {
 			return nil, nil, fmt.Errorf("cannot get secret from repository: %w", err)
@@ -495,6 +631,5 @@ func (r *Reconciler) performLLMAnalysis(
 	event *info.Event,
 	provider provider.Interface,
 ) error {
-	orchestrator := llm.NewOrchestrator(r.run, r.kinteract, logger)
-	return orchestrator.ExecuteAnalysis(ctx, repo, pr, event, provider)
+	return llm.ExecuteAnalysis(ctx, r.run, r.kinteract, logger, repo, pr, event, provider)
 }

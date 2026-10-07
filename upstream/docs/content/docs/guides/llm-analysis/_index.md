@@ -5,7 +5,7 @@ weight: 8
 
 {{< tech_preview >}}
 
-Pipelines-as-Code can analyze your CI/CD pipeline runs using Large Language Models (LLMs). An LLM is an AI service (such as OpenAI or Google Gemini) that reads pipeline logs and failure data, then posts human-readable analysis directly on your pull requests.
+Pipelines-as-Code can analyze your CI/CD PipelineRuns using Large Language Models (LLMs). An LLM is an AI service (such as OpenAI or Google Gemini) that reads pipeline logs and failure data, then posts human-readable analysis directly on your pull requests.
 
 Use this feature when you want automated root-cause analysis of pipeline failures without manually reading through logs.
 
@@ -26,8 +26,8 @@ Additional output destinations (`check-run` and `annotation`) and structured JSO
 
 Pipelines-as-Code supports two LLM providers:
 
-- **OpenAI** -- Default model: `gpt-5-mini`
-- **Google Gemini** -- Default model: `gemini-2.5-flash-lite`
+- **OpenAI** -- Default model: `gpt-5.4-mini`
+- **Google Gemini** -- Default model: `gemini-3.1-flash-lite-preview`
 
 You can specify any model your chosen provider supports. See [Model Selection]({{< relref "/docs/guides/llm-analysis/model-and-triggers#model-selection" >}}) for guidance on choosing the right model.
 
@@ -53,7 +53,7 @@ spec:
         key: "token"
       roles:
         - name: "failure-analysis"
-          model: "gpt-5-mini"  # Optional: specify model (uses provider default if omitted)
+          model: "gpt-5.4-mini"  # Optional: specify model (uses provider default if omitted)
           prompt: |
             You are a DevOps expert. Analyze this failed pipeline and:
             1. Identify the root cause
@@ -93,7 +93,7 @@ Each role defines a specific analysis scenario. You can configure multiple roles
 | `name` | string | Yes | Unique identifier for this role |
 | `prompt` | string | Yes | Prompt template for the LLM |
 | `model` | string | No | Model name (consult provider documentation for available models). Uses provider default if not specified. |
-| `on_cel` | string | No | CEL expression for conditional triggering. If not specified, the role will always run. |
+| `on_cel` | string | No | CEL expression for conditional triggering. If not specified, the role runs for completed PipelineRuns (both successful and failed). |
 | `output` | string | Yes | Output destination (currently only `pr-comment` is supported) |
 | `context_items` | object | No | Configuration for context inclusion |
 

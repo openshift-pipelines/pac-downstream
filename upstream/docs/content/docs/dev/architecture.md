@@ -119,7 +119,7 @@ The resolver:
 
 - Fetches `.tekton/` directory from the repository
 - Matches pipelines to the event using annotations
-- Resolves remote tasks from Tekton Hub or Artifact Hub
+- Resolves remote tasks from Artifact Hub
 - Substitutes template variables (`{{repo_url}}`, `{{revision}}`, etc.)
 
 7
@@ -225,12 +225,32 @@ The resolver processes pipeline definitions:
 1. Fetch `.tekton/` directory from the repository at the event revision
 2. Parse YAML files for PipelineRun resources
 3. Match pipelines to the event
-4. Resolve remote tasks using `resolver` field:
+4. Resolve remote tasks from Pipelines-as-Code annotations and inline them into the PipelineRun:
+
+   ```yaml
+   metadata:
+     annotations:
+       pipelinesascode.tekton.dev/task: "git-clone"
+   spec:
+     pipelineSpec:
+       tasks:
+       - name: fetch-repository
+         taskRef:
+           name: git-clone
+   ```
+
+   Task references that set `taskRef.resolver` are left for Tekton to resolve in the cluster:
 
    ```yaml
    taskRef:
-     name: git-clone
-     resolver: hub  # or bundles
+     resolver: hub
+     params:
+       - name: catalog
+         value: git-clone
+       - name: kind
+         value: task
+       - name: name
+         value: git-clone
    ```
 
 5. Substitute template variables:
@@ -361,7 +381,7 @@ type Interface interface {
 
 **Authentication**:
 
-- App Password (Cloud)
+- Scoped API token (Cloud)
 - Personal Access Token (Server)
 
 ## Package Structure
@@ -377,7 +397,7 @@ pkg/
 ├── changedfiles/     # File change detection
 ├── cli/              # tkn-pac CLI implementation
 ├── formatting/       # Status and output formatting
-├── hub/              # Tekton Hub and Artifact Hub integration
+├── hub/              # Artifact Hub integration
 ├── kubeinteraction/  # Kubernetes API client
 ├── matcher/          # Event and pipeline matching
 ├── opscomments/      # GitOps command parsing (/test, /retest)
@@ -408,8 +428,8 @@ data:
   # Application settings
   application-name: "Pipelines as Code"
 
-  # Tekton Hub URL
-  hub-url: "https://api.hub.tekton.dev/v1"
+  # Artifact Hub API URL
+  hub-url: "https://artifacthub.io"
 
   # Remote tasks support
   remote-tasks: "true"
@@ -543,6 +563,9 @@ data:
 - Configure PipelineRun retention (`max-keep-runs`)
 - Enable remote task caching
 - Use volume workspaces instead of PVCs for better performance
+- Informer cache transforms automatically strip unused fields from cached
+  objects, reducing watcher memory usage by up to 94% per object — see
+  [Informer Cache Optimization]({{< relref "/docs/operations/informer-cache.md" >}})
 
 ## Security Architecture
 

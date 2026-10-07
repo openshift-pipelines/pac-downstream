@@ -103,13 +103,6 @@ Repository CR.
 
 ## Repository CR
 
-Pipelines-as-Code stores the most recent five statuses of PipelineRuns associated with a repository
-in the corresponding Repository CR.
-
-{{< callout type="error" >}}
-The `pipelinerun_status` field in the `Repository` CR is scheduled for deprecation and will be removed in a future release. Please avoid relying on it.
-{{< /callout >}}
-
 ```console
 % kubectl get repo -n pipelines-as-code-ci
 NAME                  URL                                                        NAMESPACE             SUCCEEDED   REASON      STARTTIME   COMPLETIONTIME
@@ -128,11 +121,11 @@ Pipelines](https://github.com/tektoncd/pipeline/blob/main/docs/pipelines.md#addi
 This feature executes a set of tasks at the end of a
 PipelineRun, regardless of whether it succeeds or fails.
 
-For an example, see the [coverage generation PipelineRun](https://github.com/tektoncd/pipelines-as-code/blob/16596b478f4bce202f9f69de9a4b5a7ca92962c1/.tekton/generate-coverage-release.yaml#L127) in the
+For an example, see the [release generation PipelineRun](https://github.com/tektoncd/pipelines-as-code/blob/6dfcd60091c46844449e91a38bf38b76bea56c47/.tekton/generate-release.yaml#L165) in the
 `.tekton/` directory of the Pipelines-as-Code repository. It uses the [finally
 task with the guard
 feature](https://tekton.dev/docs/pipelines/pipelines/#guard-finally-task-execution-using-when-expressions)
 to send a notification to Slack when any failure occurs in the PipelineRun. See
 it in action here:
 
-<https://github.com/tektoncd/pipelines-as-code/blob/16596b478f4bce202f9f69de9a4b5a7ca92962c1/.tekton/generate-coverage-release.yaml#L126>
+<https://github.com/tektoncd/pipelines-as-code/blob/6dfcd60091c46844449e91a38bf38b76bea56c47/.tekton/generate-release.yaml#L174>

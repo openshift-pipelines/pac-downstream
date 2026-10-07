@@ -9,7 +9,6 @@ import (
 
 	"github.com/jonboulle/clockwork"
 	"github.com/juju/ansiterm"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/cli"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/cli/status"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/cmd/tknpac/completion"
@@ -81,16 +80,19 @@ func Root(run *params.Run, ioStreams *cli.IOStreams) *cobra.Command {
 		"display the time as RFC3339 instead of a relative time")
 
 	cmd.Flags().StringP(
-		namespaceFlag, "n", "", "If present, the namespace scope for this CLI request")
+		namespaceFlag, "n", "", "If present, the namespace scope for this CLI request",
+	)
 
-	_ = cmd.RegisterFlagCompletionFunc(namespaceFlag,
+	_ = cmd.RegisterFlagCompletionFunc(
+		namespaceFlag,
 		func(_ *cobra.Command, args []string, _ string) ([]string, cobra.ShellCompDirective) {
 			return completion.BaseCompletion(namespaceFlag, args)
 		},
 	)
 
 	cmd.Flags().BoolVar(
-		&noheaders, noHeadersFlag, false, "don't print headers.")
+		&noheaders, noHeadersFlag, false, "don't print headers.",
+	)
 
 	cmd.Flags().StringVarP(&selectors, "selectors", "l",
 		"", "Selector (label query) to filter on, "+
@@ -100,33 +102,31 @@ func Root(run *params.Run, ioStreams *cli.IOStreams) *cobra.Command {
 	return cmd
 }
 
-func formatStatus(status *v1alpha1.RepositoryRunStatus, cs *cli.ColorScheme, c clockwork.Clock, ns string, opts *cli.PacCliOpts) string {
-	// TODO: we could make a hyperlink to the console namespace list of repo if
-	// we wanted to go the extra step
-	if status == nil {
+func formatStatus(rs *status.RunStatus, cs *cli.ColorScheme, c clockwork.Clock, ns string, opts *cli.PacCliOpts) string {
+	if rs == nil {
 		s := fmt.Sprintf("%s\t%s\t%s\t", cs.Dimmed("---"), cs.Dimmed("---"), cs.Dimmed("---"))
 		if opts.AllNameSpaces {
 			s += fmt.Sprintf("%s\t", ns)
 		}
 		return fmt.Sprintf("%s%s", s, cs.Dimmed("NoRun"))
 	}
-	starttime := formatting.Age(status.StartTime, c)
+	starttime := formatting.Age(rs.StartTime, c)
 	if opts.UseRealTime {
-		starttime = status.StartTime.Format("2006-01-02T15:04:05Z07:00") // RFC3339
+		starttime = rs.StartTime.Format("2006-01-02T15:04:05Z07:00") // RFC3339
 	}
 	s := fmt.Sprintf("%s\t%s\t%s",
-		cs.HyperLink(formatting.ShortSHA(*status.SHA), *status.SHAURL),
+		cs.HyperLink(formatting.ShortSHA(rs.SHA), rs.SHAURL),
 		starttime,
-		formatting.PRDuration(*status))
+		formatting.PRDuration(rs.StartTime, rs.CompletionTime))
 	if opts.AllNameSpaces {
 		s = fmt.Sprintf("%s\t%s", s, ns)
 	}
 
-	reason := "UNKNOWN"
-	if len(status.Conditions) > 0 {
-		reason = status.Conditions[0].Reason
+	reason := rs.Reason
+	if reason == "" {
+		reason = "UNKNOWN"
 	}
-	return fmt.Sprintf("%s\t%s", s, cs.HyperLink(cs.ColorStatus(reason), *status.LogURL))
+	return fmt.Sprintf("%s\t%s", s, cs.HyperLink(cs.ColorStatus(reason), rs.LogURL))
 }
 
 func list(ctx context.Context, cs *params.Run, opts *cli.PacCliOpts, ioStreams *cli.IOStreams, clock clockwork.Clock, selectors string) error {
@@ -140,13 +140,14 @@ func list(ctx context.Context, cs *params.Run, opts *cli.PacCliOpts, ioStreams *
 	lopt := metav1.ListOptions{LabelSelector: selectors}
 
 	repositories, err := cs.Clients.PipelineAsCode.PipelinesascodeV1alpha1().Repositories(cs.Info.Kube.Namespace).List(
-		ctx, lopt)
+		ctx, lopt,
+	)
 	if err != nil {
 		return err
 	}
 
 	type repoStatusInfo struct {
-		Status               *v1alpha1.RepositoryRunStatus
+		Status               *status.RunStatus
 		Name, Namespace, URL string
 	}
 	repoStatuses := []repoStatusInfo{}
@@ -156,7 +157,7 @@ func list(ctx context.Context, cs *params.Run, opts *cli.PacCliOpts, ioStreams *
 			URL:       repo.Spec.URL,
 			Namespace: repo.GetNamespace(),
 		}
-		statuses := status.MixLivePRandRepoStatus(ctx, cs, repo)
+		statuses := status.GetRunStatus(ctx, cs, repo)
 		if len(statuses) > 0 {
 			rs.Status = &statuses[0]
 		}
