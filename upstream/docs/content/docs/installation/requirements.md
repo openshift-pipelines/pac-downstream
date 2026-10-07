@@ -55,21 +55,25 @@ You need the following tools to interact with your cluster and manage Pipelines-
 
 ### Required Tools
 
-1
+1. `kubectl`
 
-kubectl
+The Kubernetes command-line tool for cluster access.
 
-The Kubernetes command-line tool for cluster access.**Installation**: [kubectl installation guide](https://kubernetes.io/docs/tasks/tools/)**Verify**:
+**Installation**: [kubectl installation guide](https://kubernetes.io/docs/tasks/tools/)
+
+**Verify**:
 
 ```bash
 kubectl version --client
 ```
 
-2
+1. `oc` (OpenShift only)
 
-oc (OpenShift only)
+The OpenShift command-line tool.
 
-The OpenShift command-line tool.**Installation**: [OpenShift CLI tools](https://docs.openshift.com/container-platform/latest/cli_reference/openshift_cli/getting-started-cli.html)**Verify**:
+**Installation**: [OpenShift CLI tools](https://docs.openshift.com/container-platform/latest/cli_reference/openshift_cli/getting-started-cli.html)
+
+**Verify**:
 
 ```bash
 oc version
@@ -79,11 +83,13 @@ oc version
 
 These tools enhance the Pipelines-as-Code experience:
 
-1
+1. `tkn`
 
-tkn
+The Tekton CLI for managing Tekton resources.
 
-The Tekton CLI for managing Tekton resources.**Installation**: [Tekton CLI installation](https://tekton.dev/docs/cli/)**Install via Homebrew**:
+**Installation**: [Tekton CLI installation](https://tekton.dev/docs/cli/)
+
+**Install via Homebrew**:
 
 ```bash
 brew install tektoncd-cli
@@ -95,14 +101,14 @@ brew install tektoncd-cli
 tkn version
 ```
 
-2
+1. `tkn-pac`
 
-tkn-pac
+The Pipelines-as-Code CLI plugin for `tkn`.
 
-The Pipelines-as-Code CLI plugin for tkn.**Install via Homebrew**:
+**Install via Homebrew**:
 
 ```bash
-brew install openshift-pipelines/pipelines-as-code/tkn-pac
+brew install --cask openshift-pipelines/pipelines-as-code/tektoncd-pac
 ```
 
 **Install via Direct Download** (Linux):
@@ -167,7 +173,7 @@ A Git provider is a hosting service for Git repositories (such as GitHub, GitLab
 **Requirements**:
 
 - Repository admin access
-- Ability to create App Passwords (Bitbucket Cloud) or Personal Access Tokens (Bitbucket Data Center)
+- Ability to create scoped API tokens (Bitbucket Cloud) or Personal Access Tokens (Bitbucket Data Center)
 
 #### Forgejo
 
@@ -211,7 +217,7 @@ Ensure the following network connectivity:
   - Source: Git provider IP ranges
 - **Outbound**: Controller must reach:
   - Git provider API endpoints (for status updates)
-  - Artifact Hub or Tekton Hub (for remote task resolution)
+  - Artifact Hub (for remote task resolution)
   - Container registries (if using remote tasks)
 
 ### Git Provider IP Ranges

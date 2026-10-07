@@ -11,7 +11,7 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/cmd/tknpac/completion"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/settings"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/pipelineascode"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/secrets"
 	"github.com/spf13/cobra"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -53,9 +53,11 @@ func webhookAdd(run *params.Run, ioStreams *cli.IOStreams) *cobra.Command {
 		"", "", "The namespace where pac is installed")
 
 	cmd.Flags().StringP(
-		namespaceFlag, "n", "", "If present, the namespace scope for this CLI request")
+		namespaceFlag, "n", "", "If present, the namespace scope for this CLI request",
+	)
 
-	_ = cmd.RegisterFlagCompletionFunc(namespaceFlag,
+	_ = cmd.RegisterFlagCompletionFunc(
+		namespaceFlag,
 		func(_ *cobra.Command, args []string, _ string) ([]string, cobra.ShellCompDirective) {
 			return completion.BaseCompletion(namespaceFlag, args)
 		},
@@ -117,7 +119,7 @@ func add(ctx context.Context, opts *cli.PacCliOpts, run *params.Run, ioStreams *
 
 	gitProviderSecretKey := repo.Spec.GitProvider.Secret.Key
 	if gitProviderSecretKey == "" {
-		gitProviderSecretKey = pipelineascode.DefaultGitProviderSecretKey
+		gitProviderSecretKey = secrets.DefaultGitProviderSecretKey
 	}
 
 	tokenData, ok := secretData.Data[gitProviderSecretKey]

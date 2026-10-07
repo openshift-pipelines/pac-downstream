@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/google/go-github/v84/github"
+	"github.com/google/go-github/v85/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/clients"
@@ -14,6 +14,7 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/settings"
 	testclient "github.com/openshift-pipelines/pipelines-as-code/pkg/test/clients"
 	ghtesthelper "github.com/openshift-pipelines/pipelines-as-code/pkg/test/github"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/test/logger"
 	"go.uber.org/zap"
 	zapobserver "go.uber.org/zap/zaptest/observer"
 	"gotest.tools/v3/assert"
@@ -125,6 +126,7 @@ func TestOkToTestComment(t *testing.T) {
 						PullRequestLinks: &github.PullRequestLinks{
 							HTMLURL: github.Ptr("http://url.com/owner/repo/1"),
 						},
+						Number: github.Ptr(1),
 					},
 				},
 			},
@@ -142,6 +144,7 @@ func TestOkToTestComment(t *testing.T) {
 				Event: &github.PullRequestEvent{
 					PullRequest: &github.PullRequest{
 						HTMLURL: github.Ptr("http://url.com/owner/repo/1"),
+						Number:  github.Ptr(1),
 					},
 				},
 			},
@@ -178,6 +181,7 @@ func TestOkToTestComment(t *testing.T) {
 						PullRequestLinks: &github.PullRequestLinks{
 							HTMLURL: github.Ptr("http://url.com/owner/repo/1"),
 						},
+						Number: github.Ptr(1),
 					},
 				},
 			},
@@ -197,6 +201,7 @@ func TestOkToTestComment(t *testing.T) {
 						PullRequestLinks: &github.PullRequestLinks{
 							HTMLURL: github.Ptr("http://url.com/owner/repo/1"),
 						},
+						Number: github.Ptr(1),
 					},
 				},
 			},
@@ -308,6 +313,7 @@ func TestOkToTestComment(t *testing.T) {
 						PullRequestLinks: &github.PullRequestLinks{
 							HTMLURL: github.Ptr("http://url.com/owner/repo/1"),
 						},
+						Number: github.Ptr(1),
 					},
 				},
 			},
@@ -539,7 +545,7 @@ func TestOkToTestCommentSHA(t *testing.T) {
 				pacInfo:       pacopts,
 			}
 
-			payload := fmt.Sprintf(`{"action": "created", "repository": {"name": "repo", "owner": {"login": "owner"}}, "sender": {"login": %q}, "issue": {"pull_request": {"html_url": "https://github.com/owner/repo/pull/1"}}, "comment": {"body": %q}}`,
+			payload := fmt.Sprintf(`{"action": "created", "repository": {"name": "repo", "owner": {"login": "owner"}, "html_url": "http://url.com/owner/repo/1"}, "sender": {"login": %q}, "issue": {"number": 1, "pull_request": {"html_url": "https://github.com/owner/repo/pull/1"}}, "comment": {"body": %q}}`,
 				tt.runevent.Sender, tt.commentBody)
 			_, err := gprovider.ParsePayload(ctx, gprovider.Run, &http.Request{Header: http.Header{"X-Github-Event": []string{"issue_comment"}}}, payload)
 			if (err != nil) != tt.wantErr {
@@ -708,6 +714,7 @@ func TestIfPullRequestIsForSameRepoWithoutFork(t *testing.T) {
 				BaseURL:           "http://org.com/owner/repo",
 				HeadBranch:        "main",
 				BaseBranch:        "dependabot",
+				Event:             &github.PullRequestEvent{},
 			},
 			pullRequestNumber: 1,
 			allowed:           true,
@@ -719,6 +726,7 @@ func TestIfPullRequestIsForSameRepoWithoutFork(t *testing.T) {
 				Sender:            "nonowner",
 				Repository:        "repo",
 				PullRequestNumber: 1,
+				Event:             &github.PullRequestEvent{},
 			},
 			pullRequestNumber: 1,
 			allowed:           false,
@@ -734,9 +742,58 @@ func TestIfPullRequestIsForSameRepoWithoutFork(t *testing.T) {
 				BaseURL:           "http://org.com/owner/repo1",
 				HeadBranch:        "main",
 				BaseBranch:        "dependabot",
+				Event:             &github.PullRequestEvent{},
 			},
 			pullRequestNumber: 1,
 			allowed:           false,
+			wantError:         false,
+		}, {
+			name: "when issue comment sender is not trusted, same repo shortcut is not applied",
+			event: &info.Event{
+				Organization:      "owner",
+				Sender:            "nonowner",
+				Repository:        "repo",
+				PullRequestNumber: 1,
+				HeadURL:           "http://org.com/owner/repo",
+				BaseURL:           "http://org.com/owner/repo",
+				HeadBranch:        "main",
+				BaseBranch:        "dependabot",
+				Event:             &github.IssueCommentEvent{},
+			},
+			pullRequestNumber: 1,
+			allowed:           false,
+			wantError:         false,
+		}, {
+			name: "when check run rerequest resolves to same repo pull request the shortcut is applied",
+			event: &info.Event{
+				Organization:      "owner",
+				Sender:            "dependabot[bot]",
+				Repository:        "repo",
+				PullRequestNumber: 1,
+				HeadURL:           "http://org.com/owner/repo",
+				BaseURL:           "http://org.com/owner/repo",
+				HeadBranch:        "dependabot/npm-foo",
+				BaseBranch:        "main",
+				Event:             &github.CheckRunEvent{},
+			},
+			pullRequestNumber: 1,
+			allowed:           true,
+			wantError:         false,
+		}, {
+			name: "when check suite rerequest resolves to same repo pull request the shortcut is applied",
+			event: &info.Event{
+				Organization:      "owner",
+				Sender:            "dependabot[bot]",
+				Repository:        "repo",
+				PullRequestNumber: 1,
+				HeadURL:           "http://org.com/owner/repo",
+				BaseURL:           "http://org.com/owner/repo",
+				HeadBranch:        "dependabot/npm-foo",
+				BaseBranch:        "main",
+				Event:             &github.CheckSuiteEvent{},
+			},
+			pullRequestNumber: 1,
+			allowed:           true,
 			wantError:         false,
 		},
 	}
@@ -749,9 +806,11 @@ func TestIfPullRequestIsForSameRepoWithoutFork(t *testing.T) {
 			repo := &v1alpha1.Repository{Spec: v1alpha1.RepositorySpec{
 				Settings: &v1alpha1.Settings{},
 			}}
+			l, _ := logger.GetLogger()
 			gprovider := Provider{
 				ghClient: fakeclient,
 				repo:     repo,
+				Logger:   l,
 			}
 
 			got, err := gprovider.aclCheckAll(ctx, tt.event)
@@ -764,4 +823,36 @@ func TestIfPullRequestIsForSameRepoWithoutFork(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestACLCheckAllIssueCommentLogsShortcutSkip(t *testing.T) {
+	fakeclient, _, _, teardown := ghtesthelper.SetupGH()
+	defer teardown()
+
+	ctx, _ := rtesting.SetupFakeContext(t)
+	repo := &v1alpha1.Repository{Spec: v1alpha1.RepositorySpec{
+		Settings: &v1alpha1.Settings{},
+	}}
+	observer, logs := zapobserver.New(zap.DebugLevel)
+
+	gprovider := Provider{
+		ghClient: fakeclient,
+		repo:     repo,
+		Logger:   zap.New(observer).Sugar(),
+	}
+
+	allowed, err := gprovider.aclCheckAll(ctx, &info.Event{
+		Organization:      "owner",
+		Sender:            "nonowner",
+		Repository:        "repo",
+		PullRequestNumber: 1,
+		HeadURL:           "http://org.com/owner/repo",
+		BaseURL:           "http://org.com/owner/repo",
+		HeadBranch:        "main",
+		BaseBranch:        "dependabot",
+		Event:             &github.IssueCommentEvent{},
+	})
+	assert.NilError(t, err)
+	assert.Equal(t, false, allowed)
+	assert.Assert(t, logs.FilterMessageSnippet("Skipping same-repo pull request shortcut for untrusted event").Len() == 1)
 }

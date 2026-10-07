@@ -1,6 +1,7 @@
 package status
 
 import (
+	"sort"
 	"testing"
 	"unicode/utf8"
 
@@ -10,11 +11,10 @@ import (
 	testclient "github.com/openshift-pipelines/pipelines-as-code/pkg/test/clients"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/test/kubernetestint"
 	tektontest "github.com/openshift-pipelines/pipelines-as-code/pkg/test/tekton"
-	"github.com/stretchr/testify/assert"
 	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 	"go.uber.org/zap"
 	zapobserver "go.uber.org/zap/zaptest/observer"
-	assertv3 "gotest.tools/v3/assert"
+	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -113,6 +113,154 @@ func TestCollectFailedTasksLogSnippet(t *testing.T) {
 			if tt.displayName != "" {
 				assert.Equal(t, tt.displayName, got["task1"].DisplayName)
 			}
+		})
+	}
+}
+
+func TestCollectFailedTasksLogSnippetWaitingReasons(t *testing.T) {
+	clock := clockwork.NewFakeClock()
+
+	tests := []struct {
+		name        string
+		reason      string
+		condMessage string
+		steps       []tektonv1.StepState
+		wantSnippet string
+	}{
+		{
+			name:        "CreateContainerConfigError surfaces step waiting message",
+			reason:      tektonv1.TaskRunReasonCreateContainerConfigError.String(),
+			condMessage: "Failed to create pod due to config error",
+			steps: []tektonv1.StepState{{
+				Name: "step",
+				ContainerState: corev1.ContainerState{
+					Waiting: &corev1.ContainerStateWaiting{
+						Reason:  tektonv1.TaskRunReasonCreateContainerConfigError.String(),
+						Message: `secret "pac-gitauth-test" not found`,
+					},
+				},
+			}},
+			wantSnippet: `CreateContainerConfigError: secret "pac-gitauth-test" not found`,
+		},
+		{
+			// TaskRunValidationFailed/PodCreationFailed happen before any
+			// step/pod is created, so waitingMessage() has nothing to
+			// inspect and we must fall back to the condition message.
+			name:        "no steps falls back to condition message",
+			reason:      "TaskRunValidationFailed",
+			condMessage: "task validation failed: unknown field foo",
+			steps:       nil,
+			wantSnippet: "task validation failed: unknown field foo",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, _ := rtesting.SetupFakeContext(t)
+			pr := tektontest.MakePRCompletion(clock, "pipeline", "ns", tektonv1.PipelineRunReasonFailed.String(), nil, map[string]string{}, 10)
+			pr.Status.ChildReferences = []tektonv1.ChildStatusReference{{
+				TypeMeta:         runtime.TypeMeta{Kind: "TaskRun"},
+				Name:             "task",
+				PipelineTaskName: "task",
+			}}
+			taskStatus := tektonv1.TaskRunStatusFields{
+				PodName: "task-pod",
+				Steps:   tt.steps,
+			}
+			stdata, _ := testclient.SeedTestData(t, ctx, testclient.Data{
+				TaskRuns: []*tektonv1.TaskRun{
+					tektontest.MakeTaskRunCompletion(clock, "task", "ns", "pipeline", map[string]string{}, taskStatus, knativeduckv1.Conditions{{
+						Type:    knativeapi.ConditionSucceeded,
+						Status:  corev1.ConditionFalse,
+						Reason:  tt.reason,
+						Message: tt.condMessage,
+					}}, 10),
+				},
+			})
+			cs := &params.Run{Clients: paramclients.Clients{Tekton: stdata.Pipeline}}
+
+			got := CollectFailedTasksLogSnippet(ctx, cs, nil, pr, 1)
+
+			assert.Equal(t, 1, len(got))
+			assert.Equal(t, tt.wantSnippet, got["task"].LogSnippet)
+		})
+	}
+}
+
+func TestWaitingMessage(t *testing.T) {
+	tests := []struct {
+		name  string
+		steps []tektonv1.StepState
+		want  string
+	}{
+		{
+			name:  "no steps",
+			steps: nil,
+			want:  "",
+		},
+		{
+			name: "step not waiting",
+			steps: []tektonv1.StepState{{
+				Name: "step",
+			}},
+			want: "",
+		},
+		{
+			name: "waiting with empty message",
+			steps: []tektonv1.StepState{{
+				Name: "step",
+				ContainerState: corev1.ContainerState{
+					Waiting: &corev1.ContainerStateWaiting{
+						Reason: "ImagePullBackOff",
+					},
+				},
+			}},
+			want: "",
+		},
+		{
+			name: "waiting with message and no reason",
+			steps: []tektonv1.StepState{{
+				Name: "step",
+				ContainerState: corev1.ContainerState{
+					Waiting: &corev1.ContainerStateWaiting{
+						Message: "something went wrong",
+					},
+				},
+			}},
+			want: "something went wrong",
+		},
+		{
+			name: "waiting with reason and message",
+			steps: []tektonv1.StepState{{
+				Name: "step",
+				ContainerState: corev1.ContainerState{
+					Waiting: &corev1.ContainerStateWaiting{
+						Reason:  "CreateContainerConfigError",
+						Message: `secret "pac-gitauth-test" not found`,
+					},
+				},
+			}},
+			want: `CreateContainerConfigError: secret "pac-gitauth-test" not found`,
+		},
+		{
+			name: "skips non waiting steps until waiting one",
+			steps: []tektonv1.StepState{
+				{Name: "first"},
+				{
+					Name: "second",
+					ContainerState: corev1.ContainerState{
+						Waiting: &corev1.ContainerStateWaiting{
+							Reason:  "ErrImagePull",
+							Message: "image not found",
+						},
+					},
+				},
+			},
+			want: "ErrImagePull: image not found",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, waitingMessage(tt.steps))
 		})
 	}
 }
@@ -223,30 +371,19 @@ func TestCollectFailedTasksLogSnippetUTF8SafeTruncation(t *testing.T) {
 			runeCount := len([]rune(snippet))
 
 			if tt.expectedTruncation {
-				// Should be truncated to at most maxErrorSnippetCharacterLimit bytes
-				if byteCount > maxErrorSnippetCharacterLimit {
-					t.Errorf("Expected truncated string to be at most %d bytes, got %d",
-						maxErrorSnippetCharacterLimit, byteCount)
-				}
-
-				// Verify the string is valid UTF-8 after truncation
-				assert.True(t, utf8.ValidString(snippet), "Truncated string should be valid UTF-8")
-
-				// Should be shorter than original (in bytes)
-				assert.Less(t, byteCount, len(tt.podOutput),
-					"Truncated string should be shorter than original")
+				assert.Assert(t, byteCount <= maxErrorSnippetCharacterLimit,
+					"expected truncated string to be at most %d bytes, got %d",
+					maxErrorSnippetCharacterLimit, byteCount)
+				assert.Assert(t, utf8.ValidString(snippet), "truncated string should be valid UTF-8")
+				assert.Assert(t, byteCount < len(tt.podOutput),
+					"truncated string should be shorter than original")
 			} else {
-				// Should match expected length exactly (in runes for non-truncated)
-				assert.Equal(t, tt.expectedLengthRunes, runeCount,
-					"Expected string length %d runes, got %d", tt.expectedLengthRunes, runeCount)
-
-				// Should match original (no truncation)
-				assert.Equal(t, tt.podOutput, snippet, "String should not be truncated")
+				assert.Equal(t, tt.expectedLengthRunes, runeCount)
+				assert.Equal(t, tt.podOutput, snippet)
 			}
 
-			// Always verify valid UTF-8
 			if tt.expectValidUTF8 {
-				assert.True(t, utf8.ValidString(snippet), "String should be valid UTF-8")
+				assert.Assert(t, utf8.ValidString(snippet), "string should be valid UTF-8")
 			}
 		})
 	}
@@ -424,17 +561,21 @@ func TestGetStatusFromTaskStatusOrFromAsking(t *testing.T) {
 				Log:    logger,
 			}
 			statuses := GetStatusFromTaskStatusOrFromAsking(ctx, tt.pr, run)
-			assert.Equal(t, len(statuses), tt.numStatus)
-			displayNames := []string{}
+			assert.Equal(t, tt.numStatus, len(statuses))
 			if tt.displayNames != nil {
+				displayNames := []string{}
 				for _, prtrs := range statuses {
 					displayNames = append(displayNames, prtrs.Status.TaskSpec.DisplayName)
 				}
-				assert.ElementsMatch(t, tt.displayNames, displayNames)
+				sort.Strings(displayNames)
+				expected := make([]string, len(tt.displayNames))
+				copy(expected, tt.displayNames)
+				sort.Strings(expected)
+				assert.DeepEqual(t, displayNames, expected)
 			}
 			if tt.expectedLogSnippet != "" {
 				logmsg := obslog.FilterMessageSnippet(tt.expectedLogSnippet).TakeAll()
-				assertv3.Assert(t, len(logmsg) > 0, "log messages", logmsg, tt.expectedLogSnippet)
+				assert.Assert(t, len(logmsg) > 0, "log messages", logmsg, tt.expectedLogSnippet)
 			}
 		})
 	}

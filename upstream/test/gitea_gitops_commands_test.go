@@ -8,9 +8,9 @@ import (
 	"regexp"
 	"strings"
 	"testing"
-	"time"
 
 	forgejo "codeberg.org/mvdkleijn/forgejo-sdk/forgejo/v3"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/opscomments"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
@@ -20,6 +20,7 @@ import (
 	pacrepo "github.com/openshift-pipelines/pipelines-as-code/test/pkg/repository"
 	"github.com/openshift-pipelines/pipelines-as-code/test/pkg/secret"
 	twait "github.com/openshift-pipelines/pipelines-as-code/test/pkg/wait"
+	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 	"github.com/tektoncd/pipeline/pkg/names"
 	"gotest.tools/v3/assert"
 )
@@ -35,19 +36,23 @@ func TestGiteaCancelRun(t *testing.T) {
 	}
 	_, f := tgitea.TestPR(t, topts)
 	defer f()
-	// let pipelineRun start and then cancel it
-	time.Sleep(time.Second * 2)
-	tgitea.PostCommentOnPullRequest(t, topts, "/cancel")
 
+	// wait for the pipelinerun to be created before cancelling it: the
+	// webhook relay can deliver the pull_request event several seconds after
+	// the PR creation, so a fixed sleep would race with the /cancel comment.
 	waitOpts := twait.Opts{
-		RepoName:        topts.TargetNS,
 		Namespace:       topts.TargetNS,
 		MinNumberStatus: 1,
 		PollTimeout:     twait.DefaultTimeout,
-		TargetSHA:       topts.PullRequest.Head.Sha,
+		TargetSHA:       []string{topts.PullRequest.Head.Sha},
 	}
-	_, err := twait.UntilRepositoryUpdated(context.Background(), topts.ParamsRun.Clients, waitOpts)
-	assert.Error(t, err, "pipelinerun has failed")
+	_, err := twait.UntilPipelineRunCreated(context.Background(), topts.ParamsRun.Clients, waitOpts)
+	assert.NilError(t, err)
+
+	tgitea.PostCommentOnPullRequest(t, topts, "/cancel")
+
+	_, err = twait.UntilPipelineRunHasReason(context.Background(), topts.ParamsRun.Clients, tektonv1.PipelineRunReasonCancelled, waitOpts)
+	assert.NilError(t, err)
 
 	tgitea.CheckIfPipelineRunsCancelled(t, topts)
 }
@@ -95,38 +100,87 @@ func TestGiteaOnCommentAnnotation(t *testing.T) {
 	tgitea.PostCommentOnPullRequest(t, topts, triggerComment)
 	// we have two status one for the pull request match and one on comment match from the comment sent
 	waitOpts := twait.Opts{
-		RepoName:        topts.TargetNS,
 		Namespace:       topts.TargetNS,
 		MinNumberStatus: 2,
 		PollTimeout:     twait.DefaultTimeout,
 	}
-	_, err = twait.UntilRepositoryUpdated(context.Background(), topts.ParamsRun.Clients, waitOpts)
+	_, err = twait.UntilPipelineRunCreated(context.Background(), topts.ParamsRun.Clients, waitOpts)
 	assert.NilError(t, err)
 
 	tgitea.PostCommentOnPullRequest(t, topts, triggerComment)
 	waitOpts.MinNumberStatus = 3
-	// now we should have only 3 status, the last one is the on comment match from the comment sent
+	// now we should have only 3 pipelineruns, the last one is the on comment match from the comment sent
 	// but should not have matched the pull request ones
-	repo, err := twait.UntilRepositoryUpdated(context.Background(), topts.ParamsRun.Clients, waitOpts)
+	prs, err := twait.UntilPipelineRunCreated(context.Background(), topts.ParamsRun.Clients, waitOpts)
 	assert.NilError(t, err)
-	assert.Equal(t, len(repo.Status), waitOpts.MinNumberStatus, fmt.Sprintf("should have only %d status", waitOpts.MinNumberStatus))
-	assert.Equal(t, *repo.Status[len(repo.Status)-1].EventType, opscomments.OnCommentEventType.String(), "should have a on comment event type")
+	assert.Equal(t, len(prs), waitOpts.MinNumberStatus, fmt.Sprintf("should have only %d pipelineruns", waitOpts.MinNumberStatus))
+	assert.Equal(t, prs[len(prs)-1].Annotations[keys.EventType], opscomments.OnCommentEventType.String(), "should have a on comment event type")
 
-	last := repo.Status[len(repo.Status)-1]
+	last := prs[len(prs)-1]
 	twait.GoldenPodLog(context.Background(), t, topts.ParamsRun, topts.TargetNS,
-		fmt.Sprintf("tekton.dev/pipelineRun=%s", last.PipelineRunName),
+		fmt.Sprintf("tekton.dev/pipelineRun=%s", last.Name),
 		"step-task", strings.ReplaceAll(fmt.Sprintf("%s-pipelinerun-on-comment-annotation.golden", t.Name()), "/", "-"), 2, nil)
 
 	tgitea.PostCommentOnPullRequest(t, topts, fmt.Sprintf(`%s revision=main custom1=thisone custom2="another one" custom_no_initial_value="a \"quote\""`, triggerComment))
 	waitOpts.MinNumberStatus = 4
-	repo, err = twait.UntilRepositoryUpdated(context.Background(), topts.ParamsRun.Clients, waitOpts)
+	prs, err = twait.UntilPipelineRunsFinished(context.Background(), topts.ParamsRun.Clients, waitOpts)
 	assert.NilError(t, err)
-	assert.Equal(t, len(repo.Status), waitOpts.MinNumberStatus, fmt.Sprintf("should have only %d status", waitOpts.MinNumberStatus))
-	assert.Equal(t, *repo.Status[len(repo.Status)-1].EventType, opscomments.OnCommentEventType.String(), "should have a on comment event type")
-	// now we should have only 3 status, the last one is the on comment match with an argument redefining the revision which is a standard parameter
+	assert.Equal(t, len(prs), waitOpts.MinNumberStatus, fmt.Sprintf("should have only %d pipelineruns", waitOpts.MinNumberStatus))
+	assert.Equal(t, prs[len(prs)-1].Annotations[keys.EventType], opscomments.OnCommentEventType.String(), "should have a on comment event type")
+	// now we should have only 4 pipelineruns, the last one is the on comment match with an argument redefining the revision which is a standard parameter
 
-	last = repo.Status[len(repo.Status)-1]
-	err = twait.RegexpMatchingInPodLog(context.Background(), topts.ParamsRun, topts.TargetNS, fmt.Sprintf("tekton.dev/pipelineRun=%s", last.PipelineRunName), "step-task", regexp.Regexp{}, t.Name(), 2, nil)
+	last = prs[len(prs)-1]
+	err = twait.RegexpMatchingInPodLog(context.Background(), topts.ParamsRun, topts.TargetNS, fmt.Sprintf("tekton.dev/pipelineRun=%s", last.Name), "step-task", regexp.Regexp{}, t.Name(), 2, nil)
+	assert.NilError(t, err)
+}
+
+// TestGiteaOnCommentTestOverride tests that a PipelineRun with
+// on-comment: "^/test.*" is triggered when posting "/test custom1=value".
+// This verifies that key=value arguments are not mistaken for a PipelineRun
+// name, which would bypass the on-comment annotation matching entirely.
+func TestGiteaOnCommentTestOverride(t *testing.T) {
+	var err error
+	ctx := context.Background()
+	topts := &tgitea.TestOpts{
+		TargetRefName: names.SimpleNameGenerator.RestrictLengthWithRandomSuffix("pac-e2e-test"),
+		RepoCRParams: &[]v1alpha1.Params{
+			{
+				Name:  "custom1",
+				Value: "default",
+			},
+		},
+	}
+	topts.TargetNS = topts.TargetRefName
+	topts.ParamsRun, topts.Opts, topts.GiteaCNX, err = tgitea.Setup(ctx)
+	assert.NilError(t, err, fmt.Errorf("cannot do gitea setup: %w", err))
+	ctx, err = cctx.GetControllerCtxInfo(ctx, topts.ParamsRun)
+	assert.NilError(t, err)
+	assert.NilError(t, pacrepo.CreateNS(ctx, topts.TargetNS, topts.ParamsRun))
+	assert.NilError(t, secret.Create(ctx, topts.ParamsRun, map[string]string{"secret": "SHHHHHHH"}, topts.TargetNS, "pac-secret"))
+	topts.TargetEvent = triggertype.PullRequest.String()
+	topts.YAMLFiles = map[string]string{
+		".tekton/on-comment-test-override.yaml": "testdata/pipelinerun-on-comment-test-override.yaml",
+	}
+	topts.ExpectEvents = false
+	_, f := tgitea.TestPR(t, topts)
+	defer f()
+
+	tgitea.PostCommentOnPullRequest(t, topts, "/test custom1=overridden")
+	waitOpts := twait.Opts{
+		Namespace:       topts.TargetNS,
+		MinNumberStatus: 1,
+		PollTimeout:     twait.DefaultTimeout,
+	}
+	prs, err := twait.UntilPipelineRunsFinished(context.Background(), topts.ParamsRun.Clients, waitOpts)
+	assert.NilError(t, err)
+	assert.Equal(t, len(prs), 1, "should have exactly 1 pipelinerun")
+	assert.Equal(t, prs[0].Annotations[keys.EventType], opscomments.OnCommentEventType.String(),
+		"should have matched via on-comment annotation, not built-in /test handler")
+
+	last := prs[0]
+	err = twait.RegexpMatchingInPodLog(context.Background(), topts.ParamsRun, topts.TargetNS,
+		fmt.Sprintf("tekton.dev/pipelineRun=%s", last.Name), "step-task",
+		*regexp.MustCompile("custom1 is overridden"), "", 2, nil)
 	assert.NilError(t, err)
 }
 
@@ -162,21 +216,20 @@ func TestGiteaTestPipelineRunExplicitlyWithTestComment(t *testing.T) {
 	tgitea.PostCommentOnPullRequest(t, topts, fmt.Sprintf("/test %s custom=awesome", targetPrName))
 	tgitea.WaitForStatus(t, topts, "heads/"+topts.TargetRefName, "", false)
 	waitOpts := twait.Opts{
-		RepoName:        topts.TargetNS,
 		Namespace:       topts.TargetNS,
 		MinNumberStatus: 1,
 		PollTimeout:     twait.DefaultTimeout,
 	}
 
-	repo, err := twait.UntilRepositoryUpdated(context.Background(), topts.ParamsRun.Clients, waitOpts)
+	prs, err := twait.UntilPipelineRunCreated(context.Background(), topts.ParamsRun.Clients, waitOpts)
 	assert.NilError(t, err)
-	assert.Equal(t, len(repo.Status), 1, "should have only 1 status")
-	assert.Equal(t, *repo.Status[0].EventType, opscomments.TestSingleCommentEventType.String(), "should have a test comment event in status")
-	assert.Assert(t, strings.HasPrefix(repo.Status[0].PipelineRunName, targetPrName+"-"),
-		"we didn't target the proper pipelinerun, we tested: %s", repo.Status[0].PipelineRunName)
+	assert.Equal(t, len(prs), 1, "should have only 1 pipelinerun")
+	assert.Equal(t, prs[0].Annotations[keys.EventType], opscomments.TestSingleCommentEventType.String(), "should have a test comment event type")
+	assert.Assert(t, strings.HasPrefix(prs[0].Name, targetPrName+"-"),
+		"we didn't target the proper pipelinerun, we tested: %s", prs[0].Name)
 
-	last := repo.Status[len(repo.Status)-1]
-	err = twait.RegexpMatchingInPodLog(context.Background(), topts.ParamsRun, topts.TargetNS, fmt.Sprintf("tekton.dev/pipelineRun=%s", last.PipelineRunName), "step-task", *regexp.MustCompile("custom is awesome"), "", 2, nil)
+	last := prs[len(prs)-1]
+	err = twait.RegexpMatchingInPodLog(context.Background(), topts.ParamsRun, topts.TargetNS, fmt.Sprintf("tekton.dev/pipelineRun=%s", last.Name), "step-task", *regexp.MustCompile("custom is awesome"), "", 2, nil)
 	assert.NilError(t, err)
 }
 
@@ -209,27 +262,26 @@ func TestGiteaTestAll(t *testing.T) {
 	defer f()
 	tgitea.PostCommentOnPullRequest(t, topts, "/test")
 	waitOpts := twait.Opts{
-		RepoName:        topts.TargetNS,
 		Namespace:       topts.TargetNS,
 		MinNumberStatus: 2,
 		PollTimeout:     twait.DefaultTimeout,
 	}
 
-	repo, err := twait.UntilRepositoryUpdated(context.Background(), topts.ParamsRun.Clients, waitOpts)
+	prs, err := twait.UntilPipelineRunCreated(context.Background(), topts.ParamsRun.Clients, waitOpts)
 	assert.NilError(t, err)
 	var hasPullRequest bool
 	var hasTestAll bool
-	for _, status := range repo.Status {
-		if *status.EventType == triggertype.PullRequest.String() {
+	for _, pr := range prs {
+		if pr.Annotations[keys.EventType] == triggertype.PullRequest.String() {
 			hasPullRequest = true
 		}
-		if *status.EventType == opscomments.TestAllCommentEventType.String() {
+		if pr.Annotations[keys.EventType] == opscomments.TestAllCommentEventType.String() {
 			hasTestAll = true
 		}
 	}
-	assert.Assert(t, hasPullRequest, "should have the initial pull request event in status")
-	assert.Assert(t, hasTestAll, "should have a test all comment event in status")
-	assert.Equal(t, len(repo.Status), 2, "should have only 2 status")
+	assert.Assert(t, hasPullRequest, "should have the initial pull request event type")
+	assert.Assert(t, hasTestAll, "should have a test all comment event type")
+	assert.Equal(t, len(prs), 2, "should have only 2 pipelineruns")
 }
 
 func TestGiteaRetestCommentUpdate(t *testing.T) {
@@ -277,28 +329,28 @@ func TestGiteaRetestCommentUpdate(t *testing.T) {
 			defer f()
 			tgitea.PostCommentOnPullRequest(t, topts, "/retest")
 			waitOpts := twait.Opts{
-				RepoName:        topts.TargetNS,
 				Namespace:       topts.TargetNS,
 				MinNumberStatus: 2,
 				PollTimeout:     twait.DefaultTimeout,
 			}
 
-			repo, err := twait.UntilRepositoryUpdated(context.Background(), topts.ParamsRun.Clients, waitOpts)
+			prs, err := twait.UntilPipelineRunCreated(context.Background(), topts.ParamsRun.Clients, waitOpts)
 			assert.NilError(t, err)
 			var rt bool
-			for _, status := range repo.Status {
-				if *status.EventType == triggertype.PullRequest.String() {
+			for _, pr := range prs {
+				if pr.Annotations[keys.EventType] == triggertype.PullRequest.String() {
 					rt = true
 				}
 			}
-			assert.Assert(t, rt, "should have a retest all comment event in status")
-			assert.Equal(t, len(repo.Status), 2, "should have only 2 status")
+			assert.Assert(t, rt, "should have a retest all comment event type")
+			assert.Equal(t, len(prs), 2, "should have only 2 pipelineruns")
 
 			// Verify comment strategy: count pac-status comments.
 			comments, _, err := topts.GiteaCNX.Client().ListRepoIssueComments(
 				topts.PullRequest.Base.Repository.Owner.UserName,
 				topts.PullRequest.Base.Repository.Name,
-				forgejo.ListIssueCommentOptions{})
+				forgejo.ListIssueCommentOptions{},
+			)
 			assert.NilError(t, err)
 
 			markerPattern := regexp.MustCompile(`<!-- pac-status-`)

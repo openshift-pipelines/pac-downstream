@@ -5,6 +5,7 @@ GOLANGCI_LINT=golangci-lint
 GOFUMPT=gofumpt
 TKN_BINARY_NAME := tkn
 TKN_BINARY_URL := https://tekton.dev/docs/cli/\#installation
+DEFAULT_GOTESTSUM_FORMAT ?= testdox
 LDFLAGS=
 OUTPUT_DIR=bin
 GO           = go
@@ -68,7 +69,7 @@ test-unit: ## Run unit tests
 	@mkdir -p tmp/
 	@echo "Running unit tests..."
 	@if command -v gotestsum >/dev/null 2>&1; then \
-		gotestsum --format testdox -- $(DEFAULT_GO_TEST_FLAGS) $(GO_TEST_FLAGS) -timeout $(TIMEOUT_UNIT) ./pkg/...; \
+		gotestsum --format ${DEFAULT_GOTESTSUM_FORMAT} -- $(DEFAULT_GO_TEST_FLAGS) $(GO_TEST_FLAGS) -timeout $(TIMEOUT_UNIT) ./pkg/...; \
 	else \
 		$(GO) test $(DEFAULT_GO_TEST_FLAGS) $(GO_TEST_FLAGS) -timeout $(TIMEOUT_UNIT) ./pkg/...; \
 	fi
@@ -89,7 +90,7 @@ html-coverage: ## generate html coverage
 
 ##@ Linting
 .PHONY: lint
-lint: lint-go lint-yaml lint-md lint-python lint-shell lint-e2e-naming ## run all linters
+lint: lint-go lint-nilaway lint-fmt lint-yaml lint-md lint-python lint-shell lint-e2e-naming ## run all linters
 
 .PHONY: lint-e2e-naming
 lint-e2e-naming: ## check e2e test naming conventions
@@ -103,6 +104,21 @@ lint-go: ## runs go linter on all go files
 							--max-issues-per-linter=0 \
 							--max-same-issues=0 \
 							--timeout $(TIMEOUT_UNIT)
+
+NILAWAY_VERSION = v0.0.0-20260720194628-9fd1b8d7bac8
+
+.PHONY: lint-nilaway
+lint-nilaway: ## runs nilaway nil-flow analysis on production code
+	@echo "Linting go files with nilaway..."
+	@GOFLAGS=-mod=readonly $(GO) run go.uber.org/nilaway/cmd/nilaway@$(NILAWAY_VERSION) \
+							-include-pkgs=github.com/openshift-pipelines/pipelines-as-code \
+							-exclude-test-files \
+							./pkg/... ./cmd/...
+
+.PHONY: lint-fmt
+lint-fmt: ## check go files are formatted with gofumpt
+	@echo "Checking Go formatting with gofumpt..."
+	@$(GOLANGCI_LINT) fmt --diff ./pkg/... ./test/... ./cmd/... || { echo "Go files are not formatted, run 'make fumpt' to fix"; exit 1; }
 
 .PHONY: lint-yaml
 lint-yaml: ## runs yamllint on all yaml files

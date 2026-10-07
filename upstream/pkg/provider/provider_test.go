@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
@@ -215,6 +216,11 @@ func TestGetPipelineRunFromComment(t *testing.T) {
 			want:    "abc-01-pr",
 		},
 		{
+			name:    "test with key value is not a pipeline name",
+			comment: "/test custom1=value",
+			want:    "",
+		},
+		{
 			name:    "retest a pipeline",
 			comment: "/retest abc-01-pr",
 			want:    "abc-01-pr",
@@ -259,6 +265,11 @@ func TestGetPipelineRunFromCancelComment(t *testing.T) {
 			name:    "cancel a pipeline",
 			comment: "/cancel abc-01-pr",
 			want:    "abc-01-pr",
+		},
+		{
+			name:    "cancel with key value is not a pipeline name",
+			comment: "/cancel custom1=value",
+			want:    "",
 		},
 		{
 			name:    "string before cancel command",
@@ -363,6 +374,19 @@ func TestGetPipelineRunAndBranchNameFromTestComment(t *testing.T) {
 			comment:    "/test abc-01-pr key=value",
 			prName:     "abc-01-pr",
 			branchName: "",
+			wantError:  false,
+		},
+		{
+			name:      "test with only key value is not a pipeline name",
+			comment:   "/test custom1=value",
+			prName:    "",
+			wantError: false,
+		},
+		{
+			name:       "test with key value and branch is not a pipeline name",
+			comment:    "/test custom1=value branch:nightly",
+			prName:     "",
+			branchName: "nightly",
 			wantError:  false,
 		},
 		{
@@ -864,6 +888,95 @@ func TestGetGitOpsCommentPrefix(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got := GetGitOpsCommentPrefix(tt.repo)
 			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestGetBBCloudStatusKey(t *testing.T) {
+	tests := []struct {
+		name     string
+		status   status.StatusOpts
+		pacopts  *info.PacOpts
+		expected string
+	}{
+		{
+			name:   "application name only no pipeline run name",
+			status: status.StatusOpts{OriginalPipelineRunName: ""},
+			pacopts: &info.PacOpts{
+				Settings: settings.Settings{ApplicationName: "MyApp"},
+			},
+			expected: "MyApp",
+		},
+		{
+			name:   "application name longer than 40 truncated",
+			status: status.StatusOpts{OriginalPipelineRunName: ""},
+			pacopts: &info.PacOpts{
+				Settings: settings.Settings{ApplicationName: strings.Repeat("x", 50)},
+			},
+			expected: strings.Repeat("x", 40),
+		},
+		{
+			name:   "app and pr name combined fit in 40 chars",
+			status: status.StatusOpts{OriginalPipelineRunName: "my-pr"},
+			pacopts: &info.PacOpts{
+				Settings: settings.Settings{ApplicationName: "MyApp"},
+			},
+			expected: "MyApp / my-pr",
+		},
+		{
+			name:   "app and pr name combined exceed 40 chars falls back to pr name only",
+			status: status.StatusOpts{OriginalPipelineRunName: "this-is-a-very-long-pipeline-run-name"},
+			pacopts: &info.PacOpts{
+				Settings: settings.Settings{ApplicationName: "MyApplication"},
+			},
+			expected: "this-is-a-very-long-pipeline-run-name",
+		},
+		{
+			name:   "no application name short pipeline run name",
+			status: status.StatusOpts{OriginalPipelineRunName: "my-pr"},
+			pacopts: &info.PacOpts{
+				Settings: settings.Settings{ApplicationName: ""},
+			},
+			expected: "my-pr",
+		},
+		{
+			name:   "no application name pipeline run name exactly 40",
+			status: status.StatusOpts{OriginalPipelineRunName: strings.Repeat("a", 40)},
+			pacopts: &info.PacOpts{
+				Settings: settings.Settings{ApplicationName: ""},
+			},
+			expected: strings.Repeat("a", 40),
+		},
+		{
+			name:   "no application name pipeline run name longer than 40 truncated with hash",
+			status: status.StatusOpts{OriginalPipelineRunName: strings.Repeat("c", 50)},
+			pacopts: &info.PacOpts{
+				Settings: settings.Settings{ApplicationName: ""},
+			},
+			expected: strings.Repeat("c", 33) + "-5de6bf",
+		},
+		{
+			name:   "no application name no pipeline run name",
+			status: status.StatusOpts{OriginalPipelineRunName: ""},
+			pacopts: &info.PacOpts{
+				Settings: settings.Settings{ApplicationName: ""},
+			},
+			expected: "",
+		},
+		{
+			name:   "long pr name with app produces stable hash",
+			status: status.StatusOpts{OriginalPipelineRunName: strings.Repeat("b", 50)},
+			pacopts: &info.PacOpts{
+				Settings: settings.Settings{ApplicationName: "App"},
+			},
+			expected: strings.Repeat("b", 33) + "-c01a9b",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := GetBBCloudStatusKey(tt.status, tt.pacopts)
+			assert.Equal(t, tt.expected, got)
+			assert.Assert(t, len(got) <= 40, "key length %d exceeds 40 char limit: %s", len(got), got)
 		})
 	}
 }

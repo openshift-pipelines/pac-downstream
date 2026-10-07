@@ -4,7 +4,7 @@ import (
 	"context"
 	"os"
 
-	"github.com/google/go-github/v84/github"
+	"github.com/google/go-github/v85/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
@@ -45,7 +45,8 @@ func CleanUpGlobalRepo(runcnx *params.Run, globalNS string) error {
 	if os.Getenv("TEST_NOCLEANUP") != "true" {
 		runcnx.Clients.Log.Infof("Cleaning up global repo %s in %s", info.DefaultGlobalRepoName, globalNS)
 		return runcnx.Clients.PipelineAsCode.PipelinesascodeV1alpha1().Repositories(globalNS).Delete(
-			context.Background(), info.DefaultGlobalRepoName, metav1.DeleteOptions{})
+			context.Background(), info.DefaultGlobalRepoName, metav1.DeleteOptions{},
+		)
 	}
 	return nil
 }

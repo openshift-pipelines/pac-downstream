@@ -13,7 +13,9 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/test/logger"
 	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 	"gotest.tools/v3/assert"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"knative.dev/pkg/apis"
 	rtesting "knative.dev/pkg/reconciler/testing"
 )
 
@@ -471,5 +473,176 @@ func TestBuildCommitContent(t *testing.T) {
 	t.Run("nil event", func(t *testing.T) {
 		_, err := assembler.buildCommitContent(ctx, nil, nil)
 		assert.ErrorContains(t, err, "event is nil")
+	})
+}
+
+func TestBuildBasicPipelineContext(t *testing.T) {
+	logger, _ := logger.GetLogger()
+	assembler := NewAssembler(&params.Run{}, &kubeinteraction.Interaction{}, logger)
+
+	t.Run("no conditions or timestamps", func(t *testing.T) {
+		pr := &tektonv1.PipelineRun{
+			ObjectMeta: metav1.ObjectMeta{Name: "test-pr", Namespace: "test-ns"},
+		}
+		event := &info.Event{EventType: "push", SHA: "abc", BaseBranch: "main", HeadBranch: "feature"}
+
+		data := assembler.buildBasicPipelineContext(pr, event)
+		assert.Equal(t, data["name"], "test-pr")
+		assert.Equal(t, data["namespace"], "test-ns")
+		assert.Equal(t, data["status"], "unknown")
+		assert.Equal(t, data["event_type"], "push")
+		assert.Equal(t, data["sha"], "abc")
+		assert.Equal(t, data["base_branch"], "main")
+		assert.Equal(t, data["head_branch"], "feature")
+	})
+
+	t.Run("with condition and timestamps", func(t *testing.T) {
+		startTime := metav1.NewTime(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
+		completionTime := metav1.NewTime(time.Date(2024, 1, 1, 1, 0, 0, 0, time.UTC))
+		pr := &tektonv1.PipelineRun{
+			ObjectMeta: metav1.ObjectMeta{Name: "test-pr", Namespace: "test-ns"},
+		}
+		pr.Status.Conditions = append(pr.Status.Conditions, apis.Condition{
+			Status: corev1.ConditionTrue, Reason: "Succeeded", Message: "all good",
+		})
+		pr.Status.StartTime = &startTime
+		pr.Status.CompletionTime = &completionTime
+
+		data := assembler.buildBasicPipelineContext(pr, nil)
+		assert.Equal(t, data["status"], corev1.ConditionTrue)
+		assert.Equal(t, data["reason"], "Succeeded")
+		assert.Equal(t, data["message"], "all good")
+		assert.Equal(t, data["start_time"], startTime.Time)
+		assert.Equal(t, data["completion_time"], completionTime.Time)
+		_, hasEventType := data["event_type"]
+		assert.Assert(t, !hasEventType, "event_type should not be set with nil event")
+	})
+}
+
+func TestBuildPRContent(t *testing.T) {
+	logger, _ := logger.GetLogger()
+	assembler := NewAssembler(&params.Run{}, &kubeinteraction.Interaction{}, logger)
+	ctx, _ := rtesting.SetupFakeContext(t)
+
+	t.Run("no pull request", func(t *testing.T) {
+		_, err := assembler.buildPRContent(ctx, &info.Event{}, nil)
+		assert.ErrorContains(t, err, "no pull request information available")
+	})
+
+	t.Run("nil event", func(t *testing.T) {
+		_, err := assembler.buildPRContent(ctx, nil, nil)
+		assert.ErrorContains(t, err, "no pull request information available")
+	})
+
+	t.Run("with pull request", func(t *testing.T) {
+		event := &info.Event{
+			PullRequestNumber: 42,
+			PullRequestTitle:  "my great PR",
+			HeadBranch:        "feature",
+			BaseBranch:        "main",
+		}
+		data, err := assembler.buildPRContent(ctx, event, nil)
+		assert.NilError(t, err)
+		assert.Equal(t, data["number"], 42)
+		assert.Equal(t, data["title"], "my great PR")
+		assert.Equal(t, data["head_branch"], "feature")
+		assert.Equal(t, data["base_branch"], "main")
+	})
+}
+
+func TestBuildErrorContent(t *testing.T) {
+	logger, _ := logger.GetLogger()
+	run := &params.Run{}
+	assembler := NewAssembler(run, &kubeinteraction.Interaction{}, logger)
+	ctx, _ := rtesting.SetupFakeContext(t)
+
+	t.Run("no conditions", func(t *testing.T) {
+		pr := &tektonv1.PipelineRun{}
+		data := assembler.buildErrorContent(ctx, pr)
+		assert.Assert(t, data == nil)
+	})
+
+	t.Run("condition not failed", func(t *testing.T) {
+		pr := &tektonv1.PipelineRun{}
+		pr.Status.Conditions = append(pr.Status.Conditions, apis.Condition{Status: corev1.ConditionTrue})
+		data := assembler.buildErrorContent(ctx, pr)
+		assert.Assert(t, data == nil)
+	})
+
+	t.Run("condition failed without task failures", func(t *testing.T) {
+		pr := &tektonv1.PipelineRun{}
+		pr.Status.Conditions = append(pr.Status.Conditions, apis.Condition{
+			Status: corev1.ConditionFalse, Reason: "Failed", Message: "pipeline failed",
+		})
+		data := assembler.buildErrorContent(ctx, pr)
+		assert.Assert(t, data != nil)
+		assert.Equal(t, data["condition_reason"], "Failed")
+		assert.Equal(t, data["condition_message"], "pipeline failed")
+		_, hasFailedTasks := data["failed_tasks"]
+		assert.Assert(t, !hasFailedTasks, "no failed_tasks expected without child references")
+	})
+}
+
+func TestBuildContainerLogs(t *testing.T) {
+	logger, _ := logger.GetLogger()
+	run := &params.Run{}
+	assembler := NewAssembler(run, &kubeinteraction.Interaction{}, logger)
+	ctx, _ := rtesting.SetupFakeContext(t)
+
+	t.Run("no failed tasks returns nil", func(t *testing.T) {
+		pr := &tektonv1.PipelineRun{}
+		data := assembler.buildContainerLogs(ctx, pr, 50)
+		assert.Assert(t, data == nil)
+	})
+}
+
+func TestBuildContext(t *testing.T) {
+	logger, _ := logger.GetLogger()
+	run := &params.Run{}
+	assembler := NewAssembler(run, &kubeinteraction.Interaction{}, logger)
+	ctx, _ := rtesting.SetupFakeContext(t)
+
+	pr := &tektonv1.PipelineRun{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-pr", Namespace: "test-ns"},
+	}
+	event := &info.Event{EventType: "push", SHA: "abc"}
+
+	t.Run("nil config returns basic pipeline context only", func(t *testing.T) {
+		data, err := assembler.BuildContext(ctx, pr, event, nil, nil)
+		assert.NilError(t, err)
+		assert.Equal(t, data["name"], "test-pr")
+	})
+
+	t.Run("full config", func(t *testing.T) {
+		config := &v1alpha1.ContextConfig{
+			CommitContent: true,
+			PRContent:     true,
+			ErrorContent:  true,
+			ContainerLogs: &v1alpha1.ContainerLogsConfig{Enabled: true, MaxLines: 10},
+		}
+		data, err := assembler.BuildContext(ctx, pr, event, config, nil)
+		assert.NilError(t, err)
+
+		commitData, ok := data["commit"].(map[string]any)
+		assert.Assert(t, ok, "commit data should be present")
+		assert.Equal(t, commitData["sha"], "abc")
+
+		_, hasPR := data["pull_request"]
+		assert.Assert(t, !hasPR, "no PR data since event has no pull request number")
+
+		pipelineData, ok := data["pipeline"].(map[string]any)
+		assert.Assert(t, ok, "pipeline data should always be present")
+		assert.Equal(t, pipelineData["name"], "test-pr")
+	})
+
+	t.Run("with PR content", func(t *testing.T) {
+		prEvent := &info.Event{PullRequestNumber: 7, PullRequestTitle: "title"}
+		config := &v1alpha1.ContextConfig{PRContent: true}
+		data, err := assembler.BuildContext(ctx, pr, prEvent, config, nil)
+		assert.NilError(t, err)
+
+		prData, ok := data["pull_request"].(map[string]any)
+		assert.Assert(t, ok, "pull_request data should be present")
+		assert.Equal(t, prData["number"], 7)
 	})
 }

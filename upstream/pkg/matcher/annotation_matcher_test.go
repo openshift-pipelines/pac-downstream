@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/go-github/v84/github"
+	"github.com/google/go-github/v85/github"
 	"github.com/jonboulle/clockwork"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
@@ -1699,7 +1699,8 @@ func runTest(ctx context.Context, t *testing.T, tt annotationTest, vcx provider.
 		repo = tt.args.data.Repositories[0]
 	}
 
-	matches, err := MatchPipelinerunByAnnotation(ctx, logger,
+	matches, err := MatchPipelinerunByAnnotation(
+		ctx, logger,
 		tt.args.pruns,
 		client, &tt.args.runevent, vcx, eventEmitter, repo, true,
 	)

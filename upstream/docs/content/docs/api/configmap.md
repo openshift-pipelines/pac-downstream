@@ -58,19 +58,10 @@ secret-github-app-scope-extra-repos: "owner/private-repo1, org/repo2"
 ### Hub Configuration
 
 {{< param name="hub-url" type="string" default="<https://artifacthub.io>" id="param-hub-url" >}}
-Specifies the default hub URL that Pipelines-as-Code uses to fetch remote tasks.
+Specifies the default hub API URL that Pipelines-as-Code uses to fetch remote tasks.
 
 ```yaml
 hub-url: "https://artifacthub.io"
-```
-
-{{< /param >}}
-
-{{< param name="hub-catalog-type" type="string" default="artifacthub" id="param-hub-catalog-type" >}}
-Sets the default hub catalog type. Supported values: `artifacthub`, `tektonhub`.
-
-```yaml
-hub-catalog-type: "artifacthub"
 ```
 
 {{< /param >}}
@@ -89,11 +80,7 @@ Name of the catalog.
 {{< /param >}}
 
 {{< param name="catalog-{N}-url" type="string" id="param-catalog-n-url" >}}
-URL of the catalog API.
-{{< /param >}}
-
-{{< param name="catalog-{N}-type" type="string" id="param-catalog-n-type" >}}
-Type of catalog (`tektonhub` or `artifacthub`).
+URL of the catalog API endpoint.
 {{< /param >}}
 
 {{< /param-group >}}
@@ -101,8 +88,7 @@ Type of catalog (`tektonhub` or `artifacthub`).
 ```yaml
 catalog-1-id: "custom"
 catalog-1-name: "tekton"
-catalog-1-url: "https://api.custom.hub/v1"
-catalog-1-type: "tektonhub"
+catalog-1-url: "https://api.custom.hub"
 ```
 
 {{< /param >}}
@@ -117,6 +103,14 @@ remote-tasks: "true"
 {{< /param >}}
 
 ### Dashboard Integration
+
+Pipelines-as-Code generates links to PipelineRun details in status reports. The console used for those links is chosen in this order:
+
+1. **Custom console**: if `custom-console-url` is set, it is used.
+2. **Tekton Dashboard**: if `tekton-dashboard-url` is set (or the `PAC_TEKTON_DASHBOARD_URL` environment variable), it is used.
+3. **OpenShift Console**: on OpenShift, the console URL is auto-detected from the `console` route in the `openshift-console` namespace. No configuration is needed.
+
+When `custom-console-url` is set, `custom-console-url-pr-details`, `custom-console-url-namespace`, and `custom-console-url-pr-tasklog` should also be configured. Any missing field produces a broken placeholder link in status reports.
 
 {{< param name="tekton-dashboard-url" type="string" id="param-tekton-dashboard-url" >}}
 Sets the Tekton dashboard URL. Pipelines-as-Code uses this base URL to generate links to PipelineRun details in status reports.
@@ -159,6 +153,16 @@ Defines the template URL for task logs. Supports variables: `{{ namespace }}`, `
 
 ```yaml
 custom-console-url-pr-tasklog: "https://url/ns/{{ namespace }}/{{ pr }}/logs/{{ task }}"
+```
+
+{{< /param >}}
+
+{{< param name="custom-console-url-namespace" type="string" id="param-custom-console-url-namespace" >}}
+Defines the template URL for namespace-level views in your custom console.
+Supports the `{{ namespace }}` variable.
+
+```yaml
+custom-console-url-namespace: "https://url/ns/{{ namespace }}"
 ```
 
 {{< /param >}}
@@ -352,7 +356,6 @@ data:
   secret-github-app-scope-extra-repos: "org/shared-repo"
 
   hub-url: "https://artifacthub.io"
-  hub-catalog-type: "artifacthub"
   remote-tasks: "true"
 
   tekton-dashboard-url: "https://tekton.example.com"

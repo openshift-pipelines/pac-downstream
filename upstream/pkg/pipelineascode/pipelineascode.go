@@ -53,7 +53,8 @@ func NewPacs(event *info.Event, vcx provider.Interface, run *params.Run, pacInfo
 }
 
 func (p *PacRun) Run(ctx context.Context) error {
-	p.debugf("run start: trigger_target=%s event_type=%s repo_url=%s sha=%s pr=%d has_skip=%t cancel_pipeline_runs=%t",
+	p.debugf(
+		"run start: trigger_target=%s event_type=%s repo_url=%s sha=%s pr=%d has_skip=%t cancel_pipeline_runs=%t",
 		p.event.TriggerTarget,
 		p.event.EventType,
 		p.event.URL,
@@ -103,6 +104,9 @@ func (p *PacRun) Run(ctx context.Context) error {
 	if len(matchedPRs) == 0 {
 		p.debugf("no pipelineruns matched; returning without starting any runs")
 		return nil
+	}
+	if repo == nil {
+		return fmt.Errorf("internal error: %d pipelineruns matched but no repository was resolved", len(matchedPRs))
 	}
 	if repo.Spec.ConcurrencyLimit != nil && *repo.Spec.ConcurrencyLimit != 0 {
 		p.debugf("enabling concurrency manager with limit=%d", *repo.Spec.ConcurrencyLimit)
@@ -208,7 +212,8 @@ func (p *PacRun) startPR(ctx context.Context, match matcher.Match) (*tektonv1.Pi
 	if prName == "" {
 		prName = match.PipelineRun.GetGenerateName()
 	}
-	p.debugf("startPR: pipelinerun=%s namespace=%s event_sha=%s target_branch=%s",
+	p.debugf(
+		"startPR: pipelinerun=%s namespace=%s event_sha=%s target_branch=%s",
 		prName,
 		match.Repo.GetNamespace(),
 		p.event.SHA,
@@ -216,7 +221,7 @@ func (p *PacRun) startPR(ctx context.Context, match matcher.Match) (*tektonv1.Pi
 	)
 
 	// Add labels and annotations to pipelinerun
-	err := kubeinteraction.AddLabelsAndAnnotations(p.event, match.PipelineRun, match.Repo, p.vcx.GetConfig(), p.run)
+	err := kubeinteraction.AddLabelsAndAnnotations(ctx, p.event, match.PipelineRun, match.Repo, p.vcx.GetConfig(), p.run)
 	if err != nil {
 		p.logger.Errorf("Error adding labels/annotations to PipelineRun '%s' in namespace '%s': %v", match.PipelineRun.GetName(), match.Repo.GetNamespace(), err)
 	} else {
@@ -310,7 +315,7 @@ func (p *PacRun) startPR(ctx context.Context, match matcher.Match) (*tektonv1.Pi
 
 	if len(patchAnnotations) > 0 || len(patchLabels) > 0 {
 		p.debugf("startPR: patching pipelinerun=%s patches=%s annotations=%d labels=%d", pr.GetName(), whatPatching, len(patchAnnotations), len(patchLabels))
-		pr, err = action.PatchPipelineRun(ctx, p.logger, whatPatching, p.run.Clients.Tekton, pr, getMergePatch(patchAnnotations, patchLabels))
+		patchedPR, err := action.PatchPipelineRun(ctx, p.logger, whatPatching, p.run.Clients.Tekton, pr, getMergePatch(patchAnnotations, patchLabels))
 		if err != nil {
 			// if PipelineRun patch is failed then do not return error, just log the error
 			// because its a false negative and on startPR return a failed check is being created
@@ -318,6 +323,12 @@ func (p *PacRun) startPR(ctx context.Context, match matcher.Match) (*tektonv1.Pi
 			p.logger.Errorf("cannot patch pipelinerun %s: %w", pr.GetGenerateName(), err)
 			return pr, nil
 		}
+		// PatchPipelineRun only returns a nil PipelineRun when given a nil input,
+		// which cannot happen here since pr is always non-nil at this point.
+		if patchedPR == nil {
+			return pr, nil
+		}
+		pr = patchedPR
 		currentReason := ""
 		if len(pr.Status.GetConditions()) > 0 {
 			currentReason = pr.Status.GetConditions()[0].GetReason()
