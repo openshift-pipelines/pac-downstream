@@ -530,6 +530,199 @@ func TestOwnersAliasesResponseError(t *testing.T) {
 	}
 }
 
+func TestCheckOkToTestCommentFromApprovedMember(t *testing.T) {
+	tests := []struct {
+		name             string
+		event            *info.Event
+		rememberOKToTest bool
+		setup            func(t *testing.T, mux *http.ServeMux)
+		wantAllowed      bool
+		wantErr          string
+	}{
+		{
+			name: "merge event skips discussions when remembering ok to test is disabled",
+			event: &info.Event{
+				Event:             &gitlab.MergeEvent{},
+				PullRequestNumber: 7,
+			},
+		},
+		{
+			name: "merge event allows ok to test from project member",
+			event: &info.Event{
+				Event:             &gitlab.MergeEvent{},
+				PullRequestNumber: 7,
+			},
+			rememberOKToTest: true,
+			setup: func(t *testing.T, mux *http.ServeMux) {
+				t.Helper()
+				thelp.MuxDiscussionsNote(mux, 999, 7, "maintainer", 101, "/ok-to-test")
+				thelp.MuxAllowUserID(mux, 999, 101)
+			},
+			wantAllowed: true,
+		},
+		{
+			name: "merge event rejects ok to test from non member",
+			event: &info.Event{
+				Event:             &gitlab.MergeEvent{},
+				PullRequestNumber: 7,
+			},
+			rememberOKToTest: true,
+			setup: func(t *testing.T, mux *http.ServeMux) {
+				t.Helper()
+				thelp.MuxDiscussionsNote(mux, 999, 7, "contributor", 102, "/ok-to-test")
+				thelp.MuxDisallowUserID(mux, 999, 102)
+			},
+		},
+		{
+			name: "merge event rejects when there are no discussions",
+			event: &info.Event{
+				Event:             &gitlab.MergeEvent{},
+				PullRequestNumber: 7,
+			},
+			rememberOKToTest: true,
+			setup: func(t *testing.T, mux *http.ServeMux) {
+				t.Helper()
+				thelp.MuxDiscussionsNoteEmpty(mux, 999, 7)
+			},
+		},
+		{
+			name: "merge event returns discussions api error",
+			event: &info.Event{
+				Event:             &gitlab.MergeEvent{},
+				PullRequestNumber: 7,
+			},
+			rememberOKToTest: true,
+			setup: func(t *testing.T, mux *http.ServeMux) {
+				t.Helper()
+				mux.HandleFunc("/projects/999/merge_requests/7/discussions", func(rw http.ResponseWriter, _ *http.Request) {
+					rw.WriteHeader(http.StatusInternalServerError)
+					fmt.Fprint(rw, `{"message":"boom"}`)
+				})
+			},
+			wantErr: "500",
+		},
+		{
+			name: "merge event follows discussion pagination",
+			event: &info.Event{
+				Event:             &gitlab.MergeEvent{},
+				PullRequestNumber: 7,
+			},
+			rememberOKToTest: true,
+			setup: func(t *testing.T, mux *http.ServeMux) {
+				t.Helper()
+				mux.HandleFunc("/projects/999/merge_requests/7/discussions", func(rw http.ResponseWriter, r *http.Request) {
+					if r.URL.Query().Get("page") == "1" {
+						rw.Header().Set("X-Next-Page", "2")
+						fmt.Fprint(rw, `[{"notes":[{"body":"not yet","author":{"username":"someone","id":201}}]}]`)
+						return
+					}
+					fmt.Fprint(rw, `[{"notes":[{"body":"/ok-to-test","author":{"username":"maintainer","id":103}}]}]`)
+				})
+				thelp.MuxAllowUserID(mux, 999, 103)
+			},
+			wantAllowed: true,
+		},
+		{
+			name: "merge comment checks current comment when remembering ok to test is disabled",
+			event: &info.Event{
+				Event: &gitlab.MergeCommentEvent{
+					ObjectAttributes: gitlab.MergeCommentEventObjectAttributes{ID: 44},
+				},
+				PullRequestNumber: 7,
+			},
+			setup: func(t *testing.T, mux *http.ServeMux) {
+				t.Helper()
+				thelp.MuxMergeRequestNote(mux, 999, 7, 44, 104, "/ok-to-test", "maintainer")
+				thelp.MuxAllowUserID(mux, 999, 104)
+			},
+			wantAllowed: true,
+		},
+		{
+			name: "merge comment rejects current comment without ok to test",
+			event: &info.Event{
+				Event: &gitlab.MergeCommentEvent{
+					ObjectAttributes: gitlab.MergeCommentEventObjectAttributes{ID: 44},
+				},
+				PullRequestNumber: 7,
+			},
+			setup: func(t *testing.T, mux *http.ServeMux) {
+				t.Helper()
+				thelp.MuxMergeRequestNote(mux, 999, 7, 44, 104, "hello", "maintainer")
+			},
+		},
+		{
+			name: "merge comment returns current comment api error",
+			event: &info.Event{
+				Event: &gitlab.MergeCommentEvent{
+					ObjectAttributes: gitlab.MergeCommentEventObjectAttributes{ID: 44},
+				},
+				PullRequestNumber: 7,
+			},
+			setup: func(t *testing.T, mux *http.ServeMux) {
+				t.Helper()
+				mux.HandleFunc("/projects/999/merge_requests/7/notes/44", func(rw http.ResponseWriter, _ *http.Request) {
+					rw.WriteHeader(http.StatusInternalServerError)
+					fmt.Fprint(rw, `{"message":"boom"}`)
+				})
+			},
+			wantErr: "500",
+		},
+		{
+			name: "merge comment uses discussions when remembering ok to test is enabled",
+			event: &info.Event{
+				Event: &gitlab.MergeCommentEvent{
+					ObjectAttributes: gitlab.MergeCommentEventObjectAttributes{ID: 44},
+				},
+				PullRequestNumber: 7,
+			},
+			rememberOKToTest: true,
+			setup: func(t *testing.T, mux *http.ServeMux) {
+				t.Helper()
+				thelp.MuxDiscussionsNote(mux, 999, 7, "maintainer", 105, "/ok-to-test")
+				thelp.MuxAllowUserID(mux, 999, 105)
+			},
+			wantAllowed: true,
+		},
+		{
+			name: "push event skips ok to test lookup",
+			event: &info.Event{
+				Event:             &gitlab.PushEvent{},
+				PullRequestNumber: 7,
+			},
+			rememberOKToTest: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, _ := rtesting.SetupFakeContext(t)
+			log, _ := logger.GetLogger()
+			client, mux, tearDown := thelp.Setup(t)
+			defer tearDown()
+
+			if tt.setup != nil {
+				tt.setup(t, mux)
+			}
+
+			v := &Provider{
+				targetProjectID: 999,
+				Logger:          log,
+				pacInfo: &info.PacOpts{
+					Settings: settings.Settings{RememberOKToTest: tt.rememberOKToTest},
+				},
+			}
+			v.SetGitLabClient(client)
+
+			got, err := v.checkOkToTestCommentFromApprovedMember(ctx, tt.event, 1)
+			if tt.wantErr != "" {
+				assert.ErrorContains(t, err, tt.wantErr)
+				return
+			}
+			assert.NilError(t, err)
+			assert.Equal(t, tt.wantAllowed, got)
+		})
+	}
+}
+
 func TestCheckMembership(t *testing.T) {
 	tests := []struct {
 		name              string
