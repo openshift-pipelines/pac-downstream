@@ -1,6 +1,7 @@
 package matcher
 
 import (
+	"errors"
 	"testing"
 	"time"
 
@@ -464,6 +465,74 @@ func TestIncomingWebhookRule(t *testing.T) {
 			} else if got != nil {
 				t.Errorf("IncomingWebhookRule() = %+v, want nil for branch %s", got, tt.branch)
 			}
+		})
+	}
+}
+
+func TestGetRepoByName(t *testing.T) {
+	tests := []struct {
+		name           string
+		repositories   []*v1alpha1.Repository
+		repoName       string
+		namespace      string
+		wantRepo       string
+		wantErrIs      error
+		wantErrContain string
+	}{
+		{
+			name:     "no repository found",
+			repoName: "missing",
+		},
+		{
+			name: "single repository found",
+			repositories: []*v1alpha1.Repository{
+				testnewrepo.NewRepo(testnewrepo.RepoTestcreationOpts{Name: "target", InstallNamespace: "ns"}),
+			},
+			repoName: "target",
+			wantRepo: "target",
+		},
+		{
+			name: "namespace narrows repository name",
+			repositories: []*v1alpha1.Repository{
+				testnewrepo.NewRepo(testnewrepo.RepoTestcreationOpts{Name: "target", InstallNamespace: "ns-a"}),
+				testnewrepo.NewRepo(testnewrepo.RepoTestcreationOpts{Name: "target", InstallNamespace: "ns-b"}),
+			},
+			repoName:  "target",
+			namespace: "ns-b",
+			wantRepo:  "target",
+		},
+		{
+			name: "name conflict across namespaces",
+			repositories: []*v1alpha1.Repository{
+				testnewrepo.NewRepo(testnewrepo.RepoTestcreationOpts{Name: "target", InstallNamespace: "ns-a"}),
+				testnewrepo.NewRepo(testnewrepo.RepoTestcreationOpts{Name: "target", InstallNamespace: "ns-b"}),
+			},
+			repoName:  "target",
+			wantErrIs: ErrRepositoryNameConflict,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, _ := rtesting.SetupFakeContext(t)
+			cs, _ := testclient.SeedTestData(t, ctx, testclient.Data{Repositories: tt.repositories})
+			client := &params.Run{Clients: clients.Clients{PipelineAsCode: cs.PipelineAsCode}}
+			got, err := GetRepoByName(ctx, client, tt.repoName, tt.namespace)
+			if tt.wantErrIs != nil {
+				assert.Assert(t, errors.Is(err, tt.wantErrIs))
+				return
+			}
+			if tt.wantErrContain != "" {
+				assert.ErrorContains(t, err, tt.wantErrContain)
+				return
+			}
+			assert.NilError(t, err)
+			if tt.wantRepo == "" {
+				assert.Assert(t, got == nil)
+				return
+			}
+			assert.Assert(t, got != nil)
+			assert.Equal(t, tt.wantRepo, got.GetName())
 		})
 	}
 }

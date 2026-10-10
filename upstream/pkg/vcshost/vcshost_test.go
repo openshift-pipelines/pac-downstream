@@ -85,6 +85,64 @@ func TestParse(t *testing.T) {
 	}
 }
 
+func TestSplitURL(t *testing.T) {
+	tests := []struct {
+		name       string
+		rawURL     string
+		wantScheme string
+		wantHost   string
+		wantPath   string
+		wantErrSub string
+	}{
+		{
+			name:       "empty url",
+			wantErrSub: "provider URL is empty",
+		},
+		{
+			name:       "bare host defaults to https",
+			rawURL:     "ghe.example.com",
+			wantScheme: "https",
+			wantHost:   "ghe.example.com",
+		},
+		{
+			name:       "path is preserved for callers that allow it",
+			rawURL:     "https://ghe.example.com/gitlab",
+			wantScheme: "https",
+			wantHost:   "ghe.example.com",
+			wantPath:   "/gitlab",
+		},
+		{
+			name:       "credentials are rejected",
+			rawURL:     "https://token@ghe.example.com",
+			wantErrSub: ErrURLUnsafeComponents.Error(),
+		},
+		{
+			name:       "query is rejected",
+			rawURL:     "https://ghe.example.com?token=secret",
+			wantErrSub: ErrURLUnsafeComponents.Error(),
+		},
+		{
+			name:       "fragment is rejected",
+			rawURL:     "https://ghe.example.com#secret",
+			wantErrSub: ErrURLUnsafeComponents.Error(),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := SplitURL(tt.rawURL)
+			if tt.wantErrSub != "" {
+				assert.ErrorContains(t, err, tt.wantErrSub)
+				return
+			}
+			assert.NilError(t, err)
+			assert.Equal(t, tt.wantScheme, got.Scheme)
+			assert.Equal(t, tt.wantHost, got.Host)
+			assert.Equal(t, tt.wantPath, got.Path)
+		})
+	}
+}
+
 func TestIsPublic(t *testing.T) {
 	tests := []struct {
 		name string
@@ -250,6 +308,8 @@ func TestParseNormalisation(t *testing.T) {
 		{name: "uppercase host is lowercased", rawHost: "GHE.EXAMPLE.COM", want: "ghe.example.com"},
 		{name: "root label trailing dot is dropped", rawHost: "ghe.example.com.", want: "ghe.example.com"},
 		{name: "port is kept", rawHost: "ghe.example.com:8443", want: "ghe.example.com:8443"},
+		{name: "ipv6 literal is bracketed", rawHost: "https://[2001:db8::1]", want: "[2001:db8::1]"},
+		{name: "ipv6 literal with port keeps port", rawHost: "https://[2001:db8::1]:8443", want: "[2001:db8::1]:8443"},
 		{name: "unicode is mapped to punycode", rawHost: "ghé.example.com", want: "xn--gh-cja.example.com"},
 		{
 			// strings.ToLower would fold this onto plain "github.com" while
@@ -277,6 +337,101 @@ func TestParseNormalisation(t *testing.T) {
 			}
 			assert.NilError(t, err)
 			assert.Equal(t, got, tt.want)
+		})
+	}
+}
+
+func TestValidDNSHostname(t *testing.T) {
+	tests := []struct {
+		name     string
+		hostname string
+		want     bool
+	}{
+		{
+			name:     "valid hostname",
+			hostname: "ghe.example.com",
+			want:     true,
+		},
+		{
+			name:     "too long hostname",
+			hostname: strings.Repeat("a", 254),
+			want:     false,
+		},
+		{
+			name:     "empty label",
+			hostname: "ghe..example.com",
+			want:     false,
+		},
+		{
+			name:     "too long label",
+			hostname: strings.Repeat("a", 64) + ".example.com",
+			want:     false,
+		},
+		{
+			name:     "leading hyphen",
+			hostname: "-ghe.example.com",
+			want:     false,
+		},
+		{
+			name:     "trailing hyphen",
+			hostname: "ghe-.example.com",
+			want:     false,
+		},
+		{
+			name:     "invalid character",
+			hostname: "ghe_example.com",
+			want:     false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, validDNSHostname(tt.hostname))
+		})
+	}
+}
+
+func TestIsNumericAddress(t *testing.T) {
+	tests := []struct {
+		name     string
+		hostname string
+		want     bool
+	}{
+		{
+			name:     "decimal dotted",
+			hostname: "127.1",
+			want:     true,
+		},
+		{
+			name:     "hex dotted",
+			hostname: "0x7f.1",
+			want:     true,
+		},
+		{
+			name:     "empty label",
+			hostname: "127..1",
+			want:     false,
+		},
+		{
+			name:     "empty hex digits",
+			hostname: "0x.1",
+			want:     false,
+		},
+		{
+			name:     "invalid hex digit",
+			hostname: "0x7g.1",
+			want:     false,
+		},
+		{
+			name:     "hostname label",
+			hostname: "github.com",
+			want:     false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, isNumericAddress(tt.hostname))
 		})
 	}
 }

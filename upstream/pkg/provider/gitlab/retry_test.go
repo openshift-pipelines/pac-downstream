@@ -125,6 +125,72 @@ func TestGitLabRetryWaitCap(t *testing.T) {
 	assert.Assert(t, wait <= maxWait)
 }
 
+func TestGitLabRateLimitWait(t *testing.T) {
+	header := func(values map[string]string) http.Header {
+		h := http.Header{}
+		for key, value := range values {
+			h.Set(key, value)
+		}
+		return h
+	}
+	tests := []struct {
+		name     string
+		resp     *http.Response
+		wantOK   bool
+		wantWait time.Duration
+	}{
+		{
+			name: "nil response",
+		},
+		{
+			name: "retry after seconds",
+			resp: &http.Response{
+				Header: header(map[string]string{"Retry-After": "2"}),
+			},
+			wantOK:   true,
+			wantWait: 2 * time.Second,
+		},
+		{
+			name: "retry after date in past",
+			resp: &http.Response{
+				Header: header(map[string]string{
+					"Retry-After": time.Now().Add(-time.Minute).UTC().Format(http.TimeFormat),
+				}),
+			},
+			wantOK: true,
+		},
+		{
+			name: "invalid retry after falls back to rate limit reset",
+			resp: &http.Response{
+				Header: header(map[string]string{
+					"Retry-After":     "not-a-date",
+					"RateLimit-Reset": strconv.FormatInt(time.Now().Add(-time.Minute).Unix(), 10),
+				}),
+			},
+			wantOK: true,
+		},
+		{
+			name: "invalid headers",
+			resp: &http.Response{
+				Header: header(map[string]string{
+					"Retry-After":     "not-a-date",
+					"RateLimit-Reset": "not-an-epoch",
+				}),
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotWait, gotOK := gitlabRateLimitWait(tt.resp)
+			assert.Equal(t, tt.wantOK, gotOK)
+			if tt.wantWait != 0 {
+				assert.Equal(t, tt.wantWait, gotWait)
+			}
+			assert.Assert(t, gotWait >= 0)
+		})
+	}
+}
+
 func TestGitLabRetryBackoffTransient(t *testing.T) {
 	maxWait := 120 * time.Second
 	minWait := time.Second

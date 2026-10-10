@@ -35,7 +35,7 @@ func TestGiteaErrorSnippet(t *testing.T) {
 	_, f := tgitea.TestPR(t, topts)
 	defer f()
 
-	topts.Regexp = regexp.MustCompile(`Hey man i just wanna to say i am not such a failure, i am useful in my failure`)
+	topts.Regexp = regexp.MustCompile(`(?s)<h4>Failure snippet:</h4>.*Hey man i just wanna to say i am not such a failure, i am useful in my failure`)
 	tgitea.WaitForPullRequestCommentMatch(t, topts)
 }
 
@@ -80,7 +80,40 @@ func TestGiteaErrorSnippetCustomLines(t *testing.T) {
 	if idx := strings.Index(body, marker); idx != -1 {
 		body = body[idx:]
 	}
+	// The taskrun failure reason depends on the tekton version (Failed,
+	// StepFailed, ...), normalize it so the golden file stays stable.
+	body = taskStatusReasonRe.ReplaceAllString(body, `has the status <b>"FAILURE_REASON"</b>`)
 	golden.Assert(t, body, strings.ReplaceAll(fmt.Sprintf("%s.golden", t.Name()), "/", "-"))
+}
+
+var taskStatusReasonRe = regexp.MustCompile(`has the status <b>"[^"]*"</b>`)
+
+// TestGiteaErrorSnippetStripsANSI checks that terminal color codes printed by
+// a failing step are removed from the failure snippet posted on the PR.
+func TestGiteaErrorSnippetStripsANSI(t *testing.T) {
+	topts := &tgitea.TestOpts{
+		TargetEvent: triggertype.PullRequest.String(),
+		YAMLFiles: map[string]string{
+			".tekton/pr.yaml": "testdata/pipelinerun-error-snippet-ansi.yaml",
+		},
+		CheckForStatus: "failure",
+		ExpectEvents:   false,
+	}
+	_, f := tgitea.TestPR(t, topts)
+	defer f()
+
+	topts.Regexp = regexp.MustCompile(`(?s)<h4>Failure snippet:</h4>.*error: colored failure for ansi stripping`)
+	tgitea.WaitForPullRequestCommentMatch(t, topts)
+
+	comments, _, err := topts.GiteaCNX.Client().ListRepoIssueComments(topts.PullRequest.Base.Repository.Owner.UserName, topts.PullRequest.Base.Repository.Name, forgejo.ListIssueCommentOptions{})
+	assert.NilError(t, err)
+	for _, comment := range comments {
+		if topts.Regexp.MatchString(comment.Body) {
+			assert.Assert(t, !strings.Contains(comment.Body, "\x1b"), "failure snippet contains terminal escape codes: %q", comment.Body)
+			return
+		}
+	}
+	t.Fatal("could not find the failure snippet comment")
 }
 
 func TestGiteaErrorSnippetWithSecret(t *testing.T) {

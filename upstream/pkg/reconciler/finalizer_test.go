@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
@@ -17,6 +18,7 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/settings"
 	queuepkg "github.com/openshift-pipelines/pipelines-as-code/pkg/queue"
 	testclient "github.com/openshift-pipelines/pipelines-as-code/pkg/test/clients"
+	testconcurrency "github.com/openshift-pipelines/pipelines-as-code/pkg/test/concurrency"
 	ghtesthelper "github.com/openshift-pipelines/pipelines-as-code/pkg/test/github"
 	testkubernetestint "github.com/openshift-pipelines/pipelines-as-code/pkg/test/kubernetestint"
 	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
@@ -25,6 +27,8 @@ import (
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	k8stesting "k8s.io/client-go/testing"
 	"knative.dev/pkg/logging"
 	rtesting "knative.dev/pkg/reconciler/testing"
 	"knative.dev/pkg/system"
@@ -207,6 +211,208 @@ func TestFinalizeKindControllerInfoHandling(t *testing.T) {
 	}
 }
 
+func TestFinalizeKindErrorBranches(t *testing.T) {
+	tests := []struct {
+		name         string
+		repoLister   *errorRepositoryLister
+		repositories []*v1alpha1.Repository
+		nextInQueue  []string
+		// admissionRepoKey is the key the fake queue manager reports removals
+		// under. It is only meaningful for cases that have a repository.
+		admissionRepoKey string
+		// tektonGetErr, when set, makes every "get pipelineruns" call against
+		// the fake Tekton client fail with it.
+		tektonGetErr error
+		// wantRemoved is the expected content of the fake's removal log, in
+		// "repoKey|prKey" form.
+		wantRemoved []string
+		wantErrSub  string
+		wantLogSub  string
+	}{
+		{
+			name: "repository lister error is returned",
+			repoLister: &errorRepositoryLister{
+				err: fmt.Errorf("cache failed"),
+			},
+			wantErrSub: "cache failed",
+		},
+		{
+			name: "cancel reporting error is logged and ignored",
+			repositories: []*v1alpha1.Repository{{
+				ObjectMeta: metav1.ObjectMeta{Name: "test-repo", Namespace: "test-ns"},
+			}},
+			wantLogSub: "failed to report deleted pipeline run as cancelled",
+		},
+		{
+			// A successor that no longer exists is not a finalizer failure.
+			// Taking it off the queue already reserved its slot, so returning
+			// an error here would leave that slot held by a PipelineRun that
+			// will never complete to release it, and the finalizer would be
+			// retried forever. It is dropped and the promotion loop moves on.
+			// Do not turn this back into an error expectation.
+			name: "next queued pipelinerun that no longer exists is dropped",
+			repositories: []*v1alpha1.Repository{{
+				ObjectMeta: metav1.ObjectMeta{Name: "test-repo", Namespace: "test-ns"},
+			}},
+			nextInQueue:      []string{"test-ns/missing"},
+			admissionRepoKey: "test-ns/test-repo",
+			// The fake only records the removal request, it does not model a
+			// real queue, so this asserts the release was asked for. Actual
+			// slot release and successor promotion are covered against the
+			// real manager in
+			// TestReconcilerFinalizeKindPromotesSuccessorPastMalformedKey.
+			wantRemoved: []string{"test-ns/test-repo|test-ns/missing"},
+		},
+		{
+			// A read failure that is not "gone" says nothing about the
+			// successor, so it must surface and let the finalizer be retried
+			// rather than being mistaken for a vanished PipelineRun.
+			name: "next queued pipelinerun get error is returned",
+			repositories: []*v1alpha1.Repository{{
+				ObjectMeta: metav1.ObjectMeta{Name: "test-repo", Namespace: "test-ns"},
+			}},
+			nextInQueue:  []string{"test-ns/successor"},
+			tektonGetErr: fmt.Errorf("tekton api is unavailable"),
+			wantErrSub:   "tekton api is unavailable",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, _ := rtesting.SetupFakeContext(t)
+			observer, log := zapobserver.New(zap.ErrorLevel)
+			logger := zap.New(observer).Sugar()
+			ctx = logging.WithLogger(ctx, logger)
+
+			pr := &tektonv1.PipelineRun{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-pr",
+					Namespace: "test-ns",
+					Annotations: map[string]string{
+						keys.State:      kubeinteraction.StateQueued,
+						keys.Repository: "test-repo",
+					},
+				},
+			}
+			stdata, informers := testclient.SeedTestData(t, ctx, testclient.Data{
+				Repositories: tt.repositories,
+			})
+			if tt.tektonGetErr != nil {
+				stdata.Pipeline.PrependReactor("get", "pipelineruns", func(k8stesting.Action) (bool, runtime.Object, error) {
+					return true, nil, tt.tektonGetErr
+				})
+			}
+			repoLister := informers.Repository.Lister()
+			if tt.repoLister != nil {
+				repoLister = tt.repoLister
+			}
+			nextInQueue := append([]string{}, tt.nextInQueue...)
+			removed := []string{}
+			r := Reconciler{
+				repoLister: repoLister,
+				qm: testconcurrency.TestQMI{
+					NextInQueue:      &nextInQueue,
+					Removed:          &removed,
+					AdmissionRepoKey: tt.admissionRepoKey,
+				},
+				run: &params.Run{
+					Clients: clients.Clients{
+						Tekton: stdata.Pipeline,
+						Kube:   stdata.Kube,
+						Log:    logger,
+					},
+					Info: info.Info{
+						Kube:       &info.KubeOpts{Namespace: "global"},
+						Controller: &info.ControllerInfo{GlobalRepository: "global-repo"},
+						Pac:        info.NewPacOpts(),
+					},
+				},
+			}
+
+			err := r.FinalizeKind(ctx, pr)
+			if tt.wantErrSub != "" {
+				assert.ErrorContains(t, err, tt.wantErrSub)
+			} else {
+				assert.NilError(t, err)
+			}
+			if tt.wantLogSub != "" {
+				assert.Assert(t, log.FilterMessageSnippet(tt.wantLogSub).Len() > 0, "expected log %q", tt.wantLogSub)
+			}
+			if tt.wantRemoved != nil {
+				assert.DeepEqual(t, removed, tt.wantRemoved)
+			}
+		})
+	}
+}
+
+func TestReportPipelineRunAsCancelledStatusError(t *testing.T) {
+	tests := []struct {
+		name string
+	}{
+		{name: "provider status error is returned"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, _ := rtesting.SetupFakeContext(t)
+			ctx = info.StoreNS(ctx, system.Namespace())
+			observer, _ := zapobserver.New(zap.InfoLevel)
+			logger := zap.New(observer).Sugar()
+			ctx = logging.WithLogger(ctx, logger)
+
+			_, mux, mockServerURL, teardown := ghtesthelper.SetupGH()
+			defer teardown()
+			mux.HandleFunc("/repos/org/repo/statuses/123afc", func(rw http.ResponseWriter, _ *http.Request) {
+				http.Error(rw, "provider failed", http.StatusInternalServerError)
+			})
+
+			oldBackoffSchedule := backoffSchedule
+			backoffSchedule = []time.Duration{time.Millisecond}
+			defer func() { backoffSchedule = oldBackoffSchedule }()
+
+			repo := finalizeTestRepo.DeepCopy()
+			repo.Spec.GitProvider.URL = mockServerURL
+			testData := testclient.Data{
+				Repositories: []*v1alpha1.Repository{repo},
+				ConfigMap: []*corev1.ConfigMap{{
+					ObjectMeta: metav1.ObjectMeta{Name: "pipelines-as-code", Namespace: system.Namespace()},
+					Data: map[string]string{
+						settings.TrustedProviderHostnamesKey: strings.TrimPrefix(mockServerURL, "http://"),
+					},
+				}},
+			}
+			stdata, informers := testclient.SeedTestData(t, ctx, testData)
+
+			run := &params.Run{
+				Clients: clients.Clients{
+					PipelineAsCode: stdata.PipelineAsCode,
+					Kube:           stdata.Kube,
+					Log:            logger,
+				},
+				Info: info.Info{
+					Kube:       &info.KubeOpts{Namespace: "pac"},
+					Controller: &info.ControllerInfo{GlobalRepository: "global-repo"},
+					Pac:        info.NewPacOpts(),
+				},
+			}
+			run.Clients.SetConsoleUI(consoleui.FallBackConsole{})
+			r := Reconciler{
+				repoLister: informers.Repository.Lister(),
+				qm:         queuepkg.NewManager(logger),
+				run:        run,
+				kinteract: &testkubernetestint.KinterfaceTest{
+					GetSecretResult: map[string]string{
+						"pac-git-basic-auth-owner-repo": "test-token",
+					},
+				},
+			}
+
+			err := r.reportPipelineRunAsCancelled(ctx, repo, getTestPR("test-pr", kubeinteraction.StateStarted))
+			assert.ErrorContains(t, err, "failed to report cancelled status to provider")
+		})
+	}
+}
+
 func TestReconcilerFinalizeKind(t *testing.T) {
 	observer, _ := zapobserver.New(zap.InfoLevel)
 	fakelogger := zap.New(observer).Sugar()
@@ -370,4 +576,150 @@ func TestReconcilerFinalizeKind(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestReconcilerFinalizeKindSkipsMalformedQueueKey is a regression test for a
+// panic on a malformed key taken off the queue: FinalizeKind splits and
+// indexes the "next" key returned by RemoveAndTakeItemFromQueue the same way
+// queue_pipelineruns.go and queue_manager.go do for execution-order entries,
+// so it needs the same guard against an entry that doesn't split into exactly
+// namespace/name. A malformed queue entry is not reachable through normal
+// annotation parsing today (see TestFilterPipelineRunByStateSkipsMalformedKeys),
+// but the guard here is deliberately defensive rather than relying on that
+// invariant holding everywhere a string is added to the queue.
+func TestReconcilerFinalizeKindSkipsMalformedQueueKey(t *testing.T) {
+	observer, logs := zapobserver.New(zap.InfoLevel)
+	fakelogger := zap.New(observer).Sugar()
+
+	ctx, _ := rtesting.SetupFakeContext(t)
+	ctx = logging.WithLogger(ctx, fakelogger)
+
+	stdata, informers := testclient.SeedTestData(t, ctx, testclient.Data{
+		Repositories: []*v1alpha1.Repository{finalizeTestRepo},
+	})
+
+	cs := &params.Run{
+		Clients: clients.Clients{
+			PipelineAsCode: stdata.PipelineAsCode,
+			Kube:           stdata.Kube,
+			Log:            fakelogger,
+		},
+		Info: info.Info{
+			Kube:       &info.KubeOpts{Namespace: "pac"},
+			Controller: &info.ControllerInfo{GlobalRepository: "pac"},
+			Pac:        info.NewPacOpts(),
+		},
+	}
+	cs.Clients.SetConsoleUI(consoleui.FallBackConsole{})
+	r := Reconciler{
+		repoLister: informers.Repository.Lister(),
+		qm:         queuepkg.NewManager(fakelogger),
+		run:        cs,
+		kinteract:  &testkubernetestint.KinterfaceTest{},
+	}
+
+	running := getTestPR("running", kubeinteraction.StateStarted)
+	_, err := r.qm.AddListToRunningQueue(finalizeTestRepo, []string{queuepkg.PrKey(running)})
+	assert.NilError(t, err)
+	// A malformed entry, as if something other than PrKey had added it to the
+	// queue: an extra "/" separator in the namespace/name key.
+	assert.NilError(t, r.qm.AddToPendingQueue(finalizeTestRepo, []string{"malformed/entry/with/extra-slash"}))
+
+	err = r.FinalizeKind(ctx, running)
+	assert.NilError(t, err, "a malformed queue entry must not panic or fail the finalizer")
+
+	found := false
+	for _, entry := range logs.All() {
+		if strings.Contains(entry.Message, "invalid pipelineRun key") {
+			found = true
+		}
+	}
+	assert.Assert(t, found, "expected a warning about the malformed queue entry, got: %v", logs.All())
+}
+
+// TestReconcilerFinalizeKindPromotesSuccessorPastMalformedKey is a regression
+// test for a slot leak: RemoveAndTakeItemFromQueue already moves the "next"
+// key into the running set before FinalizeKind gets a chance to validate it,
+// so simply discarding a malformed key without releasing that reservation
+// would strand it forever, since nothing ever completes to release a slot
+// that was never a real running PipelineRun. FinalizeKind must keep retrying
+// past the malformed entry and promote the next valid candidate instead of
+// leaving the running queue with a phantom occupant.
+func TestReconcilerFinalizeKindPromotesSuccessorPastMalformedKey(t *testing.T) {
+	observer, logs := zapobserver.New(zap.InfoLevel)
+	fakelogger := zap.New(observer).Sugar()
+
+	ctx, _ := rtesting.SetupFakeContext(t)
+	ctx = logging.WithLogger(ctx, fakelogger)
+
+	_, mux, mockServerURL, teardown := ghtesthelper.SetupGH()
+	defer teardown()
+	mux.HandleFunc("/repos/org/repo/statuses/123afc", func(rw http.ResponseWriter, _ *http.Request) {
+		fmt.Fprint(rw, `{"state":"pending"}`)
+	})
+
+	repo := finalizeTestRepo.DeepCopy()
+	repo.Spec.GitProvider.URL = mockServerURL
+
+	successor := getTestPR("successor", kubeinteraction.StateQueued)
+
+	stdata, informers := testclient.SeedTestData(t, ctx, testclient.Data{
+		Repositories: []*v1alpha1.Repository{repo},
+		PipelineRuns: []*tektonv1.PipelineRun{successor},
+		ConfigMap: []*corev1.ConfigMap{{
+			ObjectMeta: metav1.ObjectMeta{Name: "pipelines-as-code", Namespace: system.Namespace()},
+			Data: map[string]string{
+				settings.TrustedProviderHostnamesKey: strings.TrimPrefix(mockServerURL, "http://"),
+			},
+		}},
+	})
+
+	cs := &params.Run{
+		Clients: clients.Clients{
+			PipelineAsCode: stdata.PipelineAsCode,
+			Kube:           stdata.Kube,
+			Tekton:         stdata.Pipeline,
+			Log:            fakelogger,
+		},
+		Info: info.Info{
+			Kube:       &info.KubeOpts{Namespace: "pac"},
+			Controller: &info.ControllerInfo{GlobalRepository: "pac"},
+			Pac:        info.NewPacOpts(),
+		},
+	}
+	cs.Clients.SetConsoleUI(consoleui.FallBackConsole{})
+	r := Reconciler{
+		repoLister: informers.Repository.Lister(),
+		qm:         queuepkg.NewManager(fakelogger),
+		run:        cs,
+		kinteract: &testkubernetestint.KinterfaceTest{
+			GetSecretResult: map[string]string{
+				"pac-git-basic-auth-owner-repo": "https://whateveryousayboss",
+			},
+		},
+	}
+
+	running := getTestPR("running", kubeinteraction.StateStarted)
+	_, err := r.qm.AddListToRunningQueue(repo, []string{queuepkg.PrKey(running)})
+	assert.NilError(t, err)
+	// The malformed entry is queued ahead of the valid successor so
+	// RemoveAndTakeItemFromQueue picks it first and FinalizeKind has to skip
+	// past it rather than stopping there.
+	assert.NilError(t, r.qm.AddToPendingQueue(repo, []string{"malformed-entry-with-no-slash"}))
+	assert.NilError(t, r.qm.AddToPendingQueue(repo, []string{queuepkg.PrKey(successor)}))
+
+	err = r.FinalizeKind(ctx, running)
+	assert.NilError(t, err, "a malformed queue entry must not panic or fail the finalizer")
+
+	found := false
+	for _, entry := range logs.All() {
+		if strings.Contains(entry.Message, "invalid pipelineRun key") {
+			found = true
+		}
+	}
+	assert.Assert(t, found, "expected a warning about the malformed queue entry, got: %v", logs.All())
+
+	runningKeys := r.qm.RunningPipelineRuns(repo)
+	assert.DeepEqual(t, runningKeys, []string{queuepkg.PrKey(successor)})
+	assert.Equal(t, len(r.qm.QueuedPipelineRuns(repo)), 0, "the successor must have been promoted, not left pending")
 }
