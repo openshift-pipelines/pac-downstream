@@ -17,6 +17,7 @@ jobs:
       - name: Get branches matching pattern
         id: set-matrix
         run: |
+<<<<<<< Updated upstream
           # List all branches and filter
           branches=$(gh api repos/${{ github.repository }}/branches --paginate -q '.[] | .name' | grep -E '^(release-v.*\.x$|nightly|next$)')
           echo "Found branches:"
@@ -27,6 +28,100 @@ jobs:
           echo "Matrix JSON: $json"
           
           echo "matrix=$json" >> $GITHUB_OUTPUT
+=======
+          rm -fR upstream
+          git clone https://github.com/tektoncd/pipelines-as-code upstream
+          pushd upstream
+          git checkout -B release-v0.27.x origin/release-v0.27.x
+          popd
+      - name: Generate patches
+        run: |
+          pushd upstream
+            sed -i "s/go 1.26.6/go 1.26.5/g" go.mod
+
+          popd
+      - name: update-rpms
+        continue-on-error: true
+        run: |
+          set -x
+          export BASE_IMAGE=$(grep -h "RUNTIME=" .konflux/dockerfiles/* | sed -E 's/.*RUNTIME=["'\'']?([^"'\'' ]+).*/\1/' | head -n 1)
+          docker run --rm\
+            -e BASE_IMAGE=$BASE_IMAGE \
+            -v ./.konflux/rpms/:/rpms -w /rpms $BASE_IMAGE  sh -c "
+              cp -f /etc/yum.repos.d/*.repo ./
+              sed -i 's/^\[ubi-8-/\[ubi-8-for-\$basearch-/' *.repo
+              sed -i 's/^\[ubi-9-/\[ubi-9-for-\$basearch-/' *.repo
+          "
+          docker run  --rm\
+            -e BASE_IMAGE=$BASE_IMAGE \
+            -v ./.konflux/rpms/:/rpms -w /rpms registry.access.redhat.com/ubi9/ubi-minimal:latest sh -c "
+          	  microdnf update -y	 &&   microdnf install -y python3-dnf skopeo pip
+              python3 -m pip install https://github.com/konflux-ci/rpm-lockfile-prototype/archive/refs/tags/v0.21.0.tar.gz
+              rpm-lockfile-prototype --image $BASE_IMAGE rpms.in.yaml
+            "
+      - name: Commit new changes
+        run: |
+
+          set -x
+
+          git config user.name openshift-pipelines-bot
+          git config user.email pipelines-extcomm@redhat.com
+          git checkout -b actions/update/sources-release-v1.15.x
+          touch head
+          pushd upstream
+          OLD_COMMIT=$(cat ../head || echo "")
+          NEW_COMMIT=$(git rev-parse HEAD)
+          echo "New commit: ${NEW_COMMIT}"
+          git show --stat ${NEW_COMMIT}
+
+          VALID_OLD_COMMIT=false
+          if [ -n "${OLD_COMMIT}" ] && git rev-parse --verify "${OLD_COMMIT}" >/dev/null 2>&1; then
+            echo "Previous commit: ${OLD_COMMIT}"
+            git show --stat ${OLD_COMMIT}
+            git diff --stat ${NEW_COMMIT}..${OLD_COMMIT} > /tmp/diff.txt
+            VALID_OLD_COMMIT=true
+          else
+            echo "No previous commit or commit not found, treating as initial sync"
+            echo "Initial sync to ${NEW_COMMIT}" > /tmp/diff.txt
+          fi
+
+          git rev-parse HEAD > ../head
+          popd
+          rm -rf upstream/.git
+          git add -f upstream head .konflux
+
+          if [[ -z $(git status --porcelain --untracked-files=no) ]]; then
+            echo "No change, exiting"
+            exit 0
+          fi
+
+          if [ "${VALID_OLD_COMMIT}" = "true" ]; then
+            COMPARE_URL="https://github.com/tektoncd/pipelines-as-code/compare/${NEW_COMMIT}..${OLD_COMMIT}"
+            DIFF_HEADER="$ git diff --stat ${NEW_COMMIT}..${OLD_COMMIT}"
+          else
+            COMPARE_URL="https://github.com/tektoncd/pipelines-as-code/tree/${NEW_COMMIT}"
+            DIFF_HEADER="Initial sync"
+          fi
+
+          git commit -F- <<EOF
+          [bot] Update release-v1.15.x from tektoncd/pipelines-as-code:release-v0.27.x to ${NEW_COMMIT}
+
+              ${DIFF_HEADER}
+          $(cat /tmp/diff.txt | sed 's/^/    /' | head -c 55555)
+
+          ${COMPARE_URL}
+          EOF
+          
+          git push -f origin actions/update/sources-release-v1.15.x
+          
+          if [ "$(gh pr list --base release-v1.15.x --head actions/update/sources-release-v1.15.x --json url --jq 'length')" = "0" ]; then
+            echo "creating PR..."
+            gh pr create -B release-v1.15.x -H actions/update/sources-release-v1.15.x --label=automated --label=upstream --fill
+          else
+            echo "a PR already exists, editing..."
+          gh pr edit --title "[bot] Update release-v1.15.x from tektoncd/pipelines-as-code:release-v0.27.x to ${NEW_COMMIT}" --body "$(cat /tmp/diff.txt | sed 's/^/    /' | head -c 55555)"
+          fi
+>>>>>>> Stashed changes
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   build:
