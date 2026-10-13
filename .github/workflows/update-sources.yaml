@@ -54,39 +54,56 @@ jobs:
               rpm-lockfile-prototype --image $BASE_IMAGE rpms.in.yaml
             "
       - name: Commit new changes
-        run: |          
-        
-          set -x          
-        
+        run: |
+
+          set -x
+
           git config user.name openshift-pipelines-bot
           git config user.email pipelines-extcomm@redhat.com
           git checkout -b actions/update/sources-release-v1.15.x
           touch head
           pushd upstream
-          OLD_COMMIT=$(cat ../head)
+          OLD_COMMIT=$(cat ../head || echo "")
           NEW_COMMIT=$(git rev-parse HEAD)
-          echo Previous commit: ${OLD_COMMIT}
-          git show --stat ${OLD_COMMIT}
-          echo New commit: ${NEW_COMMIT}
+          echo "New commit: ${NEW_COMMIT}"
           git show --stat ${NEW_COMMIT}
-          git diff --stat ${NEW_COMMIT}..${OLD_COMMIT} > /tmp/diff.txt
+
+          VALID_OLD_COMMIT=false
+          if [ -n "${OLD_COMMIT}" ] && git rev-parse --verify "${OLD_COMMIT}" >/dev/null 2>&1; then
+            echo "Previous commit: ${OLD_COMMIT}"
+            git show --stat ${OLD_COMMIT}
+            git diff --stat ${NEW_COMMIT}..${OLD_COMMIT} > /tmp/diff.txt
+            VALID_OLD_COMMIT=true
+          else
+            echo "No previous commit or commit not found, treating as initial sync"
+            echo "Initial sync to ${NEW_COMMIT}" > /tmp/diff.txt
+          fi
+
           git rev-parse HEAD > ../head
           popd
           rm -rf upstream/.git
           git add -f upstream head .konflux
-          
+
           if [[ -z $(git status --porcelain --untracked-files=no) ]]; then
             echo "No change, exiting"
             exit 0
           fi
-          
+
+          if [ "${VALID_OLD_COMMIT}" = "true" ]; then
+            COMPARE_URL="https://github.com/tektoncd/pipelines-as-code/compare/${NEW_COMMIT}..${OLD_COMMIT}"
+            DIFF_HEADER="$ git diff --stat ${NEW_COMMIT}..${OLD_COMMIT}"
+          else
+            COMPARE_URL="https://github.com/tektoncd/pipelines-as-code/tree/${NEW_COMMIT}"
+            DIFF_HEADER="Initial sync"
+          fi
+
           git commit -F- <<EOF
           [bot] Update release-v1.15.x from tektoncd/pipelines-as-code:release-v0.27.x to ${NEW_COMMIT}
-          
-              $ git diff --stat ${NEW_COMMIT}..${OLD_COMMIT}
+
+              ${DIFF_HEADER}
           $(cat /tmp/diff.txt | sed 's/^/    /' | head -c 55555)
-          
-          https://github.com/tektoncd/pipelines-as-code/compare/${NEW_COMMIT}..${OLD_COMMIT}
+
+          ${COMPARE_URL}
           EOF
           
           git push -f origin actions/update/sources-release-v1.15.x
