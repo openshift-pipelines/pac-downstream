@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/google/go-github/v90/github"
+	"github.com/google/go-github/v91/github"
 	"github.com/jenkins-x/go-scm/scm"
 	"github.com/jenkins-x/go-scm/scm/driver/stash"
 	"github.com/jenkins-x/go-scm/scm/transport/oauth2"
@@ -25,6 +25,9 @@ import (
 )
 
 const taskStatusTemplate = `{{range $taskrun := .TaskRunList }}| **{{ formatCondition $taskrun.PipelineRunTaskRunStatus.Status.Conditions }}** | {{ $taskrun.ConsoleLogURL }} | *{{ formatDuration $taskrun.Status.StartTime $taskrun.Status.CompletionTime }}* |
+{{- range $step := $taskrun.Steps }}
+| {{ $step.Status }} | ↳ {{ $step.ConsoleLogURL }} | *{{ $step.Duration }}* |
+{{- end }}
 {{ end }}`
 const apiResponseLimit = 100
 
@@ -97,8 +100,8 @@ func (v *Provider) CreateStatus(ctx context.Context, event *info.Event, statusOp
 
 	switch statusOpts.Conclusion {
 	case status.ConclusionSkipped:
-		state = scm.StateFailure
-		statusOpts.Title = "➖ Skipping this commit"
+		state = scm.StateUnknown
+		statusOpts.Title = "➖ Skipping this PipelineRun"
 	case status.ConclusionNeutral:
 		state = scm.StateFailure
 		statusOpts.Title = "➖ CI has stopped"

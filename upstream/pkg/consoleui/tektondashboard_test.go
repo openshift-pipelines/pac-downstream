@@ -38,8 +38,11 @@ func TestTektonDashboard(t *testing.T) {
 	assert.NilError(t, tr.UI(ctx, dynClient))
 	assert.Assert(t, strings.Contains(tr.DetailURL(pr), "namespaces/ns"))
 	assert.Assert(t, strings.Contains(tr.TaskLogURL(pr, trStatus), "pipelineTask=task"))
+	assert.Equal(t, tr.StepLogURL(pr, trStatus, "unit-tests"),
+		"https://test/#/namespaces/ns/pipelineruns/pr?pipelineTask=task&step=unit-tests")
+	assert.Equal(t, tr.StepLogURL(pr, trStatus, ""), tr.TaskLogURL(pr, trStatus))
 	assert.Assert(t, strings.Contains(tr.URL(), "test"))
 	assert.Assert(t, strings.Contains(tr.NamespaceURL(pr), "namespaces/ns"))
 	assert.Assert(t, strings.Contains(tr.GetName(), tektonDashboardName))
-	tr.SetParams(map[string]string{})
+	assert.Equal(t, tr.WithParams(map[string]string{}), Interface(tr))
 }
