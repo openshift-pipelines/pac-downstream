@@ -68,7 +68,8 @@ func TestProviderDetect(t *testing.T) {
 		{
 			name: "retest comment",
 			event: types.PullRequestEvent{
-				Comment: types.ActivityComment{Text: "/retest"},
+				PullRequest: types.PullRequest{Open: true},
+				Comment:     types.ActivityComment{Text: "/retest"},
 			},
 			eventType:  "pr:comment:added",
 			isBS:       true,
@@ -77,16 +78,18 @@ func TestProviderDetect(t *testing.T) {
 		{
 			name: "random comment",
 			event: types.PullRequestEvent{
-				Comment: types.ActivityComment{Text: "random string, ignore me :)"},
+				PullRequest: types.PullRequest{Open: true},
+				Comment:     types.ActivityComment{Text: "random string, ignore me :)"},
 			},
 			eventType:  "pr:comment:added",
 			isBS:       true,
-			processReq: false,
+			processReq: true,
 		},
 		{
 			name: "ok-to-test comment",
 			event: types.PullRequestEvent{
-				Comment: types.ActivityComment{Text: "/ok-to-test"},
+				PullRequest: types.PullRequest{Open: true},
+				Comment:     types.ActivityComment{Text: "/ok-to-test"},
 			},
 			eventType:  "pr:comment:added",
 			isBS:       true,
@@ -95,7 +98,8 @@ func TestProviderDetect(t *testing.T) {
 		{
 			name: "cancel comment",
 			event: types.PullRequestEvent{
-				Comment: types.ActivityComment{Text: "/cancel"},
+				PullRequest: types.PullRequest{Open: true},
+				Comment:     types.ActivityComment{Text: "/cancel"},
 			},
 			eventType:  "pr:comment:added",
 			isBS:       true,
@@ -104,18 +108,30 @@ func TestProviderDetect(t *testing.T) {
 		{
 			name: "cancel a pipelinerun comment",
 			event: types.PullRequestEvent{
-				Comment: types.ActivityComment{Text: "/cancel dummy"},
+				PullRequest: types.PullRequest{Open: true},
+				Comment:     types.ActivityComment{Text: "/cancel dummy"},
 			},
 			eventType:  "pr:comment:added",
 			isBS:       true,
 			processReq: true,
+		},
+		{
+			name: "comment on closed pull request",
+			event: types.PullRequestEvent{
+				PullRequest: types.PullRequest{Open: false},
+				Comment:     types.ActivityComment{Text: "/retest"},
+			},
+			eventType:  "pr:comment:added",
+			isBS:       true,
+			processReq: false,
+			wantReason: "comments on closed pull requests are not supported",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			bprovider := Provider{}
-			logger, _ := logger.GetLogger()
+			logger, logCatcher := logger.GetLogger()
 
 			jeez, err := json.Marshal(tt.event)
 			if err != nil {
@@ -124,8 +140,9 @@ func TestProviderDetect(t *testing.T) {
 
 			header := http.Header{}
 			header.Set("X-Event-Key", tt.eventType)
+			header.Set("X-Request-ID", "1234567890")
 			req := &http.Request{Header: header}
-			isBS, processReq, _, reason, err := bprovider.Detect(req, string(jeez), logger)
+			isBS, processReq, logger, reason, err := bprovider.Detect(req, string(jeez), logger)
 			if tt.wantErrString != "" {
 				assert.ErrorContains(t, err, tt.wantErrString)
 				return
@@ -137,6 +154,17 @@ func TestProviderDetect(t *testing.T) {
 			assert.NilError(t, err)
 			assert.Equal(t, tt.isBS, isBS)
 			assert.Equal(t, tt.processReq, processReq)
+
+			logger.Info("generate a log message to check if event-id is added to the logger")
+
+			logs := logCatcher.All()
+			for _, entry := range logs {
+				for _, field := range entry.Context {
+					if field.Key == "event-id" {
+						assert.Equal(t, field.String, "1234567890")
+					}
+				}
+			}
 		})
 	}
 }
