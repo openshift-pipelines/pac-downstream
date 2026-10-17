@@ -7,7 +7,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/google/go-github/v90/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/gitea"
@@ -24,7 +23,7 @@ func CreateProvider(ctx context.Context, giteaURL, user, password string) (gitea
 	}
 	gprovider := gitea.Provider{
 		Password: password,
-		Token:    github.Ptr(password),
+		Token:    new(password),
 	}
 	gprovider.SetLogger(run.Clients.Log)
 	event := info.NewEvent()
@@ -66,7 +65,7 @@ func Setup(ctx context.Context) (*params.Run, options.E2E, gitea.Provider, error
 		return nil, options.E2E{}, gitea.Provider{}, fmt.Errorf("cannot create new client: %w", err)
 	}
 	// Repo is actually not used
-	e2eoptions := options.E2E{Organization: split[0], Repo: split[1]}
+	e2eoptions := options.E2E{Organization: split[0], Repo: split[1], ControllerURL: os.Getenv("TEST_EL_URL")}
 	gprovider, err := CreateProvider(ctx, giteaURL, split[0], giteaPassword)
 	if err != nil {
 		return nil, options.E2E{}, gitea.Provider{}, fmt.Errorf("cannot set client: %w", err)
