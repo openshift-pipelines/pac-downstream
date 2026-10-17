@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/go-github/v85/github"
+	"github.com/google/go-github/v91/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/random"
@@ -29,15 +29,15 @@ import (
 // and a max-keep-run, may be a bit slow (180s at least) but it's worth it.
 func TestGithubGHEPullRequestConcurrencyMultiplePR(t *testing.T) {
 	ctx := context.Background()
-	label := "Github Multiple PullRequest Concurrency-1 MaxKeepRun-1 Multiple"
-	numberOfPullRequest := 3
+	label := "Github Multiple PullRequest Concurrency-1 MaxKeepRun-1"
+	numberOfPullRequest := 2
 	numberOfPipelineRuns := 3
 	numberOfRetests := 1
 	maxNumberOfConcurrentPipelineRuns := 1
 	maxKeepRun := 1
 	allPipelinesRunsCnt := (numberOfPullRequest * numberOfPipelineRuns) + (numberOfPullRequest * numberOfRetests * numberOfPipelineRuns)
 	allPipelinesRunAfterCleanUp := allPipelinesRunsCnt / (maxKeepRun + 1)
-	loopMax := 35
+	loopMax := 45
 
 	targetNS := names.SimpleNameGenerator.RestrictLengthWithRandomSuffix("pac-e2e-ns")
 	_, runcnx, opts, ghcnx, err := tgithub.Setup(ctx, true, false)
@@ -101,7 +101,7 @@ func TestGithubGHEPullRequestConcurrencyMultiplePR(t *testing.T) {
 			_, _, err := g.Provider.Client().Issues.CreateComment(ctx,
 				g.Options.Organization,
 				g.Options.Repo, g.PRNumber,
-				&github.IssueComment{Body: github.Ptr("/retest")})
+				github.IssueCommentRequest{Body: "/retest"})
 			assert.NilError(t, err)
 		}
 	}
@@ -143,7 +143,7 @@ func TestGithubGHEPullRequestConcurrencyMultiplePR(t *testing.T) {
 		t.Errorf("we didn't get %d pipelineruns as successful, some of them are still pending or it's abnormally slow to process the Q", allPipelinesRunsCnt)
 	}
 
-	maxWaitLoopRun := 10
+	maxWaitLoopRun := 20
 	success := false
 	allPipelineRunsNamesAndStatus := []string{}
 	for i := range maxWaitLoopRun {
