@@ -1,0 +1,20 @@
+---
+apiVersion: tekton.dev/v1beta1
+kind: PipelineRun
+metadata:
+  name: "\\ .PipelineName //"
+  annotations:
+    pipelinesascode.tekton.dev/target-namespace: "\\ .TargetNamespace //"
+    pipelinesascode.tekton.dev/on-target-branch: "[\\ .TargetBranch //]"
+    pipelinesascode.tekton.dev/on-event: "[\\ .TargetEvent //]"
+spec:
+  pipelineSpec:
+    tasks:
+      - name: task
+        taskSpec:
+          steps:
+            - name: task-fail-colored
+              image: registry.access.redhat.com/ubi10/ubi-micro
+              script: |
+                printf '.tekton/pipelinerun-error-snippet-ansi.yaml:1:1: \033[31merror:\033[0m colored \033[1;95mfailure\033[0m for ansi stripping\n'
+                exit 1

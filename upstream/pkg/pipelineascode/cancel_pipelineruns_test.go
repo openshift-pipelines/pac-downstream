@@ -1,6 +1,7 @@
 package pipelineascode
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 	"testing"
@@ -14,17 +15,19 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/settings"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
 	testclient "github.com/openshift-pipelines/pipelines-as-code/pkg/test/clients"
 	testprovider "github.com/openshift-pipelines/pipelines-as-code/pkg/test/provider"
 
-	"github.com/google/go-github/v90/github"
 	pipelinev1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 	"go.uber.org/zap"
 	zapobserver "go.uber.org/zap/zaptest/observer"
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/selection"
+	k8stesting "k8s.io/client-go/testing"
 	"knative.dev/pkg/apis"
 	knativeduckv1 "knative.dev/pkg/apis/duck/v1"
 	rtesting "knative.dev/pkg/reconciler/testing"
@@ -1348,7 +1351,7 @@ func TestCancelInProgressMatchingPipelineRun(t *testing.T) {
 				},
 				Spec: v1alpha1.RepositorySpec{
 					URL:              "https://github.com/fooorg/foo",
-					ConcurrencyLimit: github.Ptr(1),
+					ConcurrencyLimit: new(1),
 				},
 			},
 			cancelledPipelineRuns: map[string]bool{},
@@ -1758,6 +1761,220 @@ func TestCancelAllInProgressBelongingToClosedPullRequest(t *testing.T) {
 					fmt.Sprintf("could not find log message: got %+v", catcher.TakeAll()),
 				)
 			}
+		})
+	}
+}
+
+func TestCancelPipelineRunListErrors(t *testing.T) {
+	tests := []struct {
+		name    string
+		runFunc func(context.Context, *PacRun, *v1alpha1.Repository, *pipelinev1.PipelineRun) error
+		event   *info.Event
+		matchPR *pipelinev1.PipelineRun
+		wantErr string
+	}{
+		{
+			name: "closed pull request cancellation list error",
+			runFunc: func(ctx context.Context, pac *PacRun, repo *v1alpha1.Repository, _ *pipelinev1.PipelineRun) error {
+				return pac.cancelAllInProgressBelongingToClosedPullRequest(ctx, repo)
+			},
+			event: &info.Event{
+				Repository:        "foo",
+				TriggerTarget:     triggertype.PullRequest,
+				PullRequestNumber: pullReqNumber,
+			},
+			wantErr: "failed to list pipelineRuns : list failed",
+		},
+		{
+			name: "cancel in progress list error",
+			runFunc: func(ctx context.Context, pac *PacRun, repo *v1alpha1.Repository, matchPR *pipelinev1.PipelineRun) error {
+				return pac.cancelInProgressMatchingPipelineRun(ctx, matchPR, repo)
+			},
+			event: &info.Event{
+				Repository:        "foo",
+				HeadBranch:        "head",
+				TriggerTarget:     triggertype.PullRequest,
+				PullRequestNumber: pullReqNumber,
+			},
+			matchPR: &pipelinev1.PipelineRun{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "pr-foo",
+					Namespace: "foo",
+					Labels:    fooRepoLabels,
+					Annotations: map[string]string{
+						keys.CancelInProgress: "true",
+						keys.SourceBranch:     "head",
+					},
+				},
+			},
+			wantErr: "failed to list pipelineRuns : list failed",
+		},
+		{
+			name: "cancel ops comment list error",
+			runFunc: func(ctx context.Context, pac *PacRun, repo *v1alpha1.Repository, _ *pipelinev1.PipelineRun) error {
+				return pac.cancelPipelineRunsOpsComment(ctx, repo)
+			},
+			event: &info.Event{
+				Repository:        "foo",
+				SHA:               "foosha",
+				TriggerTarget:     triggertype.PullRequest,
+				PullRequestNumber: pullReqNumber,
+				State:             info.State{CancelPipelineRuns: true},
+			},
+			wantErr: "failed to list pipelineRuns : list failed",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			observer, _ := zapobserver.New(zap.InfoLevel)
+			logger := zap.New(observer).Sugar()
+			ctx, _ := rtesting.SetupFakeContext(t)
+			stdata, _ := testclient.SeedTestData(t, ctx, testclient.Data{})
+			stdata.Pipeline.PrependReactor("list", "pipelineruns", func(_ k8stesting.Action) (bool, k8sruntime.Object, error) {
+				return true, nil, fmt.Errorf("list failed")
+			})
+			run := &params.Run{
+				Clients: clients.Clients{
+					Log:    logger,
+					Tekton: stdata.Pipeline,
+					Kube:   stdata.Kube,
+				},
+			}
+			pac := NewPacs(tt.event, nil, run, &info.PacOpts{}, nil, logger, nil)
+
+			err := tt.runFunc(ctx, &pac, fooRepo, tt.matchPR)
+			assert.ErrorContains(t, err, tt.wantErr)
+		})
+	}
+}
+
+type cancelTektonDirProvider struct {
+	testprovider.TestProviderImp
+	err error
+}
+
+func (p *cancelTektonDirProvider) GetTektonDir(context.Context, *info.Event, string, string) (string, error) {
+	return p.TektonDirTemplate, p.err
+}
+
+func TestResolveRepoForTargetCancelPipelineRunBranches(t *testing.T) {
+	tests := []struct {
+		name          string
+		repositories  []*v1alpha1.Repository
+		repo          *v1alpha1.Repository
+		event         *info.Event
+		provider      provider.Interface
+		wantNamespace string
+	}{
+		{
+			name:          "nil repo returns nil",
+			event:         &info.Event{State: info.State{TargetCancelPipelineRun: "target"}},
+			provider:      &testprovider.TestProviderImp{},
+			wantNamespace: "",
+		},
+		{
+			name: "no target cancel pipelinerun returns original repo",
+			repo: fooRepo,
+			event: &info.Event{
+				Repository: "foo",
+			},
+			provider:      &testprovider.TestProviderImp{},
+			wantNamespace: "foo",
+		},
+		{
+			name: "nil provider returns original repo",
+			repo: fooRepo,
+			event: &info.Event{
+				Repository: "foo",
+				State:      info.State{TargetCancelPipelineRun: "target"},
+			},
+			wantNamespace: "foo",
+		},
+		{
+			name: "template fetch error returns original repo",
+			repo: fooRepo,
+			event: &info.Event{
+				Repository: "foo",
+				State:      info.State{TargetCancelPipelineRun: "target"},
+			},
+			provider:      &cancelTektonDirProvider{err: fmt.Errorf("template error")},
+			wantNamespace: "foo",
+		},
+		{
+			name: "invalid template returns original repo",
+			repo: fooRepo,
+			event: &info.Event{
+				Repository: "foo",
+				State:      info.State{TargetCancelPipelineRun: "target"},
+			},
+			provider:      &testprovider.TestProviderImp{TektonDirTemplate: "not yaml: ["},
+			wantNamespace: "foo",
+		},
+		{
+			name: "generate name fallback resolves target namespace repo",
+			repo: &v1alpha1.Repository{
+				ObjectMeta: metav1.ObjectMeta{Name: "foo", Namespace: "foo"},
+				Spec:       v1alpha1.RepositorySpec{URL: "https://example.com/owner/repo"},
+			},
+			event: &info.Event{
+				Repository: "repo",
+				URL:        "https://example.com/owner/repo",
+				State:      info.State{TargetCancelPipelineRun: "target"},
+			},
+			repositories: []*v1alpha1.Repository{
+				{
+					ObjectMeta: metav1.ObjectMeta{Name: "foo", Namespace: "foo"},
+					Spec:       v1alpha1.RepositorySpec{URL: "https://example.com/owner/repo"},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{Name: "bar", Namespace: "bar"},
+					Spec:       v1alpha1.RepositorySpec{URL: "https://example.com/owner/repo"},
+				},
+			},
+			provider: &testprovider.TestProviderImp{TektonDirTemplate: `apiVersion: tekton.dev/v1beta1
+kind: PipelineRun
+metadata:
+  generateName: target-
+  annotations:
+    pipelinesascode.tekton.dev/target-namespace: "bar"
+spec:
+  pipelineSpec:
+    tasks:
+    - name: task
+      taskSpec:
+        steps:
+        - name: task
+          image: quay.io/prometheus/busybox
+          script: |
+            exit 0
+`},
+			wantNamespace: "bar",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			observer, _ := zapobserver.New(zap.InfoLevel)
+			logger := zap.New(observer).Sugar()
+			ctx, _ := rtesting.SetupFakeContext(t)
+			stdata, _ := testclient.SeedTestData(t, ctx, testclient.Data{Repositories: tt.repositories})
+			run := &params.Run{
+				Clients: clients.Clients{
+					Log:            logger,
+					Kube:           stdata.Kube,
+					PipelineAsCode: stdata.PipelineAsCode,
+				},
+			}
+			pac := NewPacs(tt.event, tt.provider, run, &info.PacOpts{}, nil, logger, nil)
+
+			got := pac.resolveRepoForTargetCancelPipelineRun(ctx, tt.repo)
+			if tt.wantNamespace == "" {
+				assert.Assert(t, got == nil)
+				return
+			}
+			assert.Assert(t, got != nil)
+			assert.Equal(t, tt.wantNamespace, got.GetNamespace())
 		})
 	}
 }

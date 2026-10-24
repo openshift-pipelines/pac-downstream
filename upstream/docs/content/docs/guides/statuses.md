@@ -17,6 +17,33 @@ name.
 If any step fails, Pipelines-as-Code includes a small portion of the log from that step
 in the output.
 
+## Step breakdown
+
+Under every task of the breakdown, Pipelines-as-Code lists the steps that ran,
+with their status, their duration and a link to their own logs on the console.
+This is useful when a task is assembled out of several
+[StepActions](https://tekton.dev/docs/pipelines/stepactions/), since the task
+name alone does not say much about what ran.
+
+A step shows its
+[displayName](https://tekton.dev/docs/pipelines/tasks/#specifying-a-display-name)
+when it has one, otherwise its name without any leading `step-`. Steps that
+never ran because an earlier step of the same task failed are left out, so a
+failing task shows the step that broke. A task that only has one step keeps
+showing a single line.
+
+On GitHub, GitLab and Gitea the task name becomes a collapsible block holding
+the steps, so the table keeps one line per task until you unfold it. The
+Bitbucket providers list the steps as extra lines because their comments cannot
+fold content.
+
+The step links point to the logs of that step on the OpenShift Console or the
+Tekton Dashboard. For a custom console, set `custom-console-url-pr-steplog` with
+a `{{ step }}` variable, otherwise the links fall back to the task logs.
+
+Set `status-show-steps` to `false` in the Pipelines-as-Code ConfigMap to report
+only the tasks.
+
 If an error occurs while creating the PipelineRun on the cluster,
 Pipelines-as-Code surfaces the error message from the Pipeline Controller in the
 GitHub user interface. This helps you identify and
@@ -112,6 +139,10 @@ pipelines-as-code-ci   https://github.com/tektoncd/pipelines-as-code   pipelines
 You can use the `tkn pac describe` command from the [CLI]({{< relref "/docs/cli/" >}}) to view
 all statuses of PipelineRuns associated with your repository and
 their metadata.
+
+## Status checks for unmatched PipelineRuns
+
+By default, Pipelines-as-Code only reports status for PipelineRuns that matched and ran. If you want to see which PipelineRuns were skipped because their annotations did not match the incoming event, enable the `status_checks` setting in your Repository CR. See the [Status Checks guide]({{< relref "/docs/guides/repository-crd/status-checks" >}}) for configuration and provider behavior.
 
 ## Notifications
 

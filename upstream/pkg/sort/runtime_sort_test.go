@@ -17,13 +17,19 @@ limitations under the License.
 package sort
 
 import (
+	"reflect"
+	gsort "sort"
 	"testing"
+	"time"
 
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/util/jsonpath"
 )
 
 func createPodSpecResource(t *testing.T, memReq, memLimit, cpuReq, cpuLimit string) corev1.PodSpec {
@@ -178,6 +184,356 @@ func TestRuntimeSortLess(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			result := test.runtimeSort.Less(test.i, test.j)
 			assert.Equal(t, test.expectResult, result)
+		})
+	}
+}
+
+func TestIsLess(t *testing.T) {
+	interfaceValues := func(left, right any) (reflect.Value, reflect.Value) {
+		values := []any{left, right}
+		return reflect.ValueOf(values).Index(0), reflect.ValueOf(values).Index(1)
+	}
+
+	type fallbackStruct struct {
+		Number int
+	}
+
+	tests := []struct {
+		name    string
+		values  func(t *testing.T) (reflect.Value, reflect.Value)
+		want    bool
+		wantErr string
+	}{
+		{
+			name: "int kind",
+			values: func(t *testing.T) (reflect.Value, reflect.Value) {
+				t.Helper()
+				return reflect.ValueOf(-1), reflect.ValueOf(1)
+			},
+			want: true,
+		},
+		{
+			name: "uint kind",
+			values: func(t *testing.T) (reflect.Value, reflect.Value) {
+				t.Helper()
+				return reflect.ValueOf(uint(1)), reflect.ValueOf(uint(2))
+			},
+			want: true,
+		},
+		{
+			name: "float kind",
+			values: func(t *testing.T) (reflect.Value, reflect.Value) {
+				t.Helper()
+				return reflect.ValueOf(1.5), reflect.ValueOf(2.5)
+			},
+			want: true,
+		},
+		{
+			name: "string natural sort",
+			values: func(t *testing.T) (reflect.Value, reflect.Value) {
+				t.Helper()
+				return reflect.ValueOf("item2"), reflect.ValueOf("item10")
+			},
+			want: true,
+		},
+		{
+			name: "pointer",
+			values: func(t *testing.T) (reflect.Value, reflect.Value) {
+				t.Helper()
+				left := 1
+				right := 2
+				return reflect.ValueOf(&left), reflect.ValueOf(&right)
+			},
+			want: true,
+		},
+		{
+			name: "metav1 time struct",
+			values: func(t *testing.T) (reflect.Value, reflect.Value) {
+				t.Helper()
+				return reflect.ValueOf(metav1.NewTime(time.Unix(1, 0))), reflect.ValueOf(metav1.NewTime(time.Unix(2, 0)))
+			},
+			want: true,
+		},
+		{
+			name: "resource quantity struct",
+			values: func(t *testing.T) (reflect.Value, reflect.Value) {
+				t.Helper()
+				return reflect.ValueOf(resource.MustParse("1Gi")), reflect.ValueOf(resource.MustParse("2Gi"))
+			},
+			want: true,
+		},
+		{
+			name: "generic empty struct equal returns true",
+			values: func(t *testing.T) (reflect.Value, reflect.Value) {
+				t.Helper()
+				return reflect.ValueOf(struct{}{}), reflect.ValueOf(struct{}{})
+			},
+			want: true,
+		},
+		{
+			name: "generic struct first field less",
+			values: func(t *testing.T) (reflect.Value, reflect.Value) {
+				t.Helper()
+				return reflect.ValueOf(fallbackStruct{Number: 1}), reflect.ValueOf(fallbackStruct{Number: 2})
+			},
+			want: true,
+		},
+		{
+			name: "generic struct error inside field",
+			values: func(t *testing.T) (reflect.Value, reflect.Value) {
+				t.Helper()
+				return reflect.ValueOf(struct{ Unsupported bool }{Unsupported: false}), reflect.ValueOf(struct{ Unsupported bool }{Unsupported: true})
+			},
+			wantErr: "unsortable type",
+		},
+		{
+			name: "array different lengths",
+			values: func(t *testing.T) (reflect.Value, reflect.Value) {
+				t.Helper()
+				return reflect.ValueOf([0]int{}), reflect.ValueOf([1]int{1})
+			},
+			want: true,
+		},
+		{
+			name: "slice elem not less",
+			values: func(t *testing.T) (reflect.Value, reflect.Value) {
+				t.Helper()
+				return reflect.ValueOf([]int{2}), reflect.ValueOf([]int{1})
+			},
+			want: false,
+		},
+		{
+			name: "interface both nil",
+			values: func(t *testing.T) (reflect.Value, reflect.Value) {
+				t.Helper()
+				return interfaceValues(nil, nil)
+			},
+			want: false,
+		},
+		{
+			name: "interface nil non nil",
+			values: func(t *testing.T) (reflect.Value, reflect.Value) {
+				t.Helper()
+				return interfaceValues(nil, 1)
+			},
+			want: true,
+		},
+		{
+			name: "interface value nil",
+			values: func(t *testing.T) (reflect.Value, reflect.Value) {
+				t.Helper()
+				return interfaceValues(1, nil)
+			},
+			want: false,
+		},
+		{
+			name: "interface uint8",
+			values: func(t *testing.T) (reflect.Value, reflect.Value) {
+				t.Helper()
+				return interfaceValues(uint8(1), uint8(2))
+			},
+			want: true,
+		},
+		{
+			name: "interface uint16",
+			values: func(t *testing.T) (reflect.Value, reflect.Value) {
+				t.Helper()
+				return interfaceValues(uint16(1), uint16(2))
+			},
+			want: true,
+		},
+		{
+			name: "interface uint32",
+			values: func(t *testing.T) (reflect.Value, reflect.Value) {
+				t.Helper()
+				return interfaceValues(uint32(1), uint32(2))
+			},
+			want: true,
+		},
+		{
+			name: "interface uint64",
+			values: func(t *testing.T) (reflect.Value, reflect.Value) {
+				t.Helper()
+				return interfaceValues(uint64(1), uint64(2))
+			},
+			want: true,
+		},
+		{
+			name: "interface int8",
+			values: func(t *testing.T) (reflect.Value, reflect.Value) {
+				t.Helper()
+				return interfaceValues(int8(1), int8(2))
+			},
+			want: true,
+		},
+		{
+			name: "interface int16",
+			values: func(t *testing.T) (reflect.Value, reflect.Value) {
+				t.Helper()
+				return interfaceValues(int16(1), int16(2))
+			},
+			want: true,
+		},
+		{
+			name: "interface int32",
+			values: func(t *testing.T) (reflect.Value, reflect.Value) {
+				t.Helper()
+				return interfaceValues(int32(1), int32(2))
+			},
+			want: true,
+		},
+		{
+			name: "interface int64",
+			values: func(t *testing.T) (reflect.Value, reflect.Value) {
+				t.Helper()
+				return interfaceValues(int64(1), int64(2))
+			},
+			want: true,
+		},
+		{
+			name: "interface uint",
+			values: func(t *testing.T) (reflect.Value, reflect.Value) {
+				t.Helper()
+				return interfaceValues(uint(1), uint(2))
+			},
+			want: true,
+		},
+		{
+			name: "interface int",
+			values: func(t *testing.T) (reflect.Value, reflect.Value) {
+				t.Helper()
+				return interfaceValues(1, 2)
+			},
+			want: true,
+		},
+		{
+			name: "interface float32",
+			values: func(t *testing.T) (reflect.Value, reflect.Value) {
+				t.Helper()
+				return interfaceValues(float32(1.5), float32(2.5))
+			},
+			want: true,
+		},
+		{
+			name: "interface float64",
+			values: func(t *testing.T) (reflect.Value, reflect.Value) {
+				t.Helper()
+				return interfaceValues(1.5, 2.5)
+			},
+			want: true,
+		},
+		{
+			name: "interface string quantities",
+			values: func(t *testing.T) (reflect.Value, reflect.Value) {
+				t.Helper()
+				return interfaceValues("1Gi", "2Gi")
+			},
+			want: true,
+		},
+		{
+			name: "interface string one not quantity",
+			values: func(t *testing.T) (reflect.Value, reflect.Value) {
+				t.Helper()
+				return interfaceValues("item2", "item10")
+			},
+			want: true,
+		},
+		{
+			name: "interface mismatched types",
+			values: func(t *testing.T) (reflect.Value, reflect.Value) {
+				t.Helper()
+				return interfaceValues(uint8(1), uint16(2))
+			},
+			wantErr: "unsortable interface",
+		},
+		{
+			name: "interface unsupported type",
+			values: func(t *testing.T) (reflect.Value, reflect.Value) {
+				t.Helper()
+				return interfaceValues(struct{}{}, struct{}{})
+			},
+			wantErr: "unsortable type",
+		},
+		{
+			name: "default unsupported bool",
+			values: func(t *testing.T) (reflect.Value, reflect.Value) {
+				t.Helper()
+				return reflect.ValueOf(true), reflect.ValueOf(false)
+			},
+			wantErr: "unsortable type",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			left, right := tt.values(t)
+			got, err := isLess(left, right)
+			if tt.wantErr != "" {
+				assert.ErrorContains(t, err, tt.wantErr)
+				return
+			}
+			assert.NilError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestOriginalPosition(t *testing.T) {
+	tests := []struct {
+		name     string
+		field    string
+		objects  []runtime.Object
+		expected []int
+	}{
+		{
+			name:  "tracks original positions after sorting",
+			field: "{.metadata.name}",
+			objects: []runtime.Object{
+				&unstructured.Unstructured{Object: map[string]any{"metadata": map[string]any{"name": "c"}}},
+				&unstructured.Unstructured{Object: map[string]any{"metadata": map[string]any{"name": "a"}}},
+				&unstructured.Unstructured{Object: map[string]any{"metadata": map[string]any{"name": "b"}}},
+			},
+			expected: []int{1, 2, 0},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sorter := NewRuntimeSort(tt.field, tt.objects)
+			gsort.Sort(sorter)
+
+			for idx, want := range tt.expected {
+				assert.Equal(t, want, sorter.OriginalPosition(idx))
+			}
+			assert.Equal(t, -1, sorter.OriginalPosition(-1))
+			assert.Equal(t, -1, sorter.OriginalPosition(len(tt.objects)))
+		})
+	}
+}
+
+func TestFindJSONPathResultsError(t *testing.T) {
+	tests := []struct {
+		name    string
+		field   string
+		object  runtime.Object
+		wantErr string
+	}{
+		{
+			name:    "array index against scalar",
+			field:   "{.metadata.name[1]}",
+			object:  &unstructured.Unstructured{Object: map[string]any{"metadata": map[string]any{"name": "pod"}}},
+			wantErr: "not array or slice",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			parser := jsonpath.New("sorting").AllowMissingKeys(true)
+			err := parser.Parse(tt.field)
+			assert.NilError(t, err)
+
+			_, err = findJSONPathResults(parser, tt.object)
+			assert.ErrorContains(t, err, tt.wantErr)
 		})
 	}
 }
