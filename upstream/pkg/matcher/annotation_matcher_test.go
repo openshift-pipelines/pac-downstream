@@ -7,11 +7,12 @@ import (
 	"fmt"
 	"net/http"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/google/go-github/v85/github"
+	"github.com/google/go-github/v91/github"
 	"github.com/jonboulle/clockwork"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
@@ -1624,7 +1625,7 @@ func TestMatchPipelinerunAnnotationAndRepositories(t *testing.T) {
 			fakeclient, mux, ghTestServerURL, teardown := ghtesthelper.SetupGH()
 			defer teardown()
 			vcx := &ghprovider.Provider{
-				Token: github.Ptr("None"),
+				Token: new("None"),
 			}
 			vcx.SetGithubClient(fakeclient)
 			if tt.args.runevent.Request == nil {
@@ -1634,8 +1635,8 @@ func TestMatchPipelinerunAnnotationAndRepositories(t *testing.T) {
 				commitFiles := make([]*github.CommitFile, len(tt.args.fileChanged))
 				for i, v := range tt.args.fileChanged {
 					commitFiles[i] = &github.CommitFile{
-						Filename: github.Ptr(v.FileName),
-						Status:   github.Ptr(v.Status),
+						Filename: new(v.FileName),
+						Status:   new(v.Status),
 					}
 				}
 				if tt.args.runevent.TriggerTarget == "push" {
@@ -1699,7 +1700,7 @@ func runTest(ctx context.Context, t *testing.T, tt annotationTest, vcx provider.
 		repo = tt.args.data.Repositories[0]
 	}
 
-	matches, err := MatchPipelinerunByAnnotation(
+	matches, _, err := MatchPipelinerunByAnnotation(
 		ctx, logger,
 		tt.args.pruns,
 		client, &tt.args.runevent, vcx, eventEmitter, repo, true,
@@ -1747,6 +1748,15 @@ func TestMatchPipelinerunByAnnotation(t *testing.T) {
 		},
 	}
 
+	pipelinePushCel := &tektonv1.PipelineRun{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "pipeline-push-cel",
+			Annotations: map[string]string{
+				keys.OnCelExpression: `event == "push"`,
+			},
+		},
+	}
+
 	pipelinePush := &tektonv1.PipelineRun{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "pipeline-push",
@@ -1762,6 +1772,17 @@ func TestMatchPipelinerunByAnnotation(t *testing.T) {
 			Name: "pipeline-on-comment",
 			Annotations: map[string]string{
 				keys.OnComment: "^/hello-world$",
+			},
+		},
+	}
+
+	pipelineOnLabel := &tektonv1.PipelineRun{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "pipeline-on-label",
+			Annotations: map[string]string{
+				keys.OnLabel:        "[bug]",
+				keys.OnEvent:        "[pull_request]",
+				keys.OnTargetBranch: "[main]",
 			},
 		},
 	}
@@ -1806,7 +1827,7 @@ func TestMatchPipelinerunByAnnotation(t *testing.T) {
 		},
 	}
 
-	observer, log := zapobserver.New(zap.InfoLevel)
+	observer, log := zapobserver.New(zap.DebugLevel)
 	logger := zap.New(observer).Sugar()
 
 	pipelinePullRequestForRetest := &tektonv1.PipelineRun{
@@ -1828,8 +1849,8 @@ func TestMatchPipelinerunByAnnotation(t *testing.T) {
 		args                            args
 		wantErr                         bool
 		wantPrName                      string
+		wantUnmatchedPRs                []string
 		wantLog                         []string
-		logLevel                        int
 		repo                            *v1alpha1.Repository
 		seedData                        *testclient.Data
 		wantErrNoFailedPipelineToRetest bool
@@ -2201,6 +2222,26 @@ func TestMatchPipelinerunByAnnotation(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name: "on-comment-annotation-with-invalid-regexp-match",
+			args: args{
+				runevent: info.Event{TriggerTarget: "push", EventType: "push", BaseBranch: "refs/heads/main"},
+				pruns: []*tektonv1.PipelineRun{
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: "on-comment-annotation-with-invalid-regexp-match",
+							Annotations: map[string]string{
+								keys.OnComment: "^/(help|rebase",
+							},
+						},
+					},
+				},
+			},
+			wantErr: true,
+			wantLog: []string{
+				"could not compile regexp ^/(help|rebase from on-comment annotation in pipelineRun on-comment-annotation-with-invalid-regexp-match",
+			},
+		},
+		{
 			name: "ref-heads-*--allow-any-branch",
 			args: args{
 				pruns:    []*tektonv1.PipelineRun{pipelineRefAll},
@@ -2322,6 +2363,68 @@ func TestMatchPipelinerunByAnnotation(t *testing.T) {
 				}},
 			},
 		},
+		{
+			name: "good-match-with-only-one-unmatched-pipeline-run",
+			args: args{
+				pruns: []*tektonv1.PipelineRun{pipelineGood, pipelinePushCel},
+				runevent: info.Event{
+					URL:               "https://hello/moto",
+					TriggerTarget:     "pull_request",
+					EventType:         "pull_request",
+					HeadBranch:        "source",
+					BaseBranch:        "main",
+					PullRequestNumber: 10,
+					Request: &info.Request{
+						Header: http.Header{},
+					},
+				},
+			},
+			wantErr:          false,
+			wantUnmatchedPRs: []string{"pipeline-push-cel"},
+			wantLog:          []string{"CEL expression for PipelineRun pipeline-push-cel is not matching, skipping"},
+		},
+		{
+			name: "good-match-with-only-one-unmatched-pipeline-run-on-comment",
+			args: args{
+				pruns: []*tektonv1.PipelineRun{pipelineOnComment},
+				runevent: info.Event{
+					URL:               "https://hello/moto",
+					TriggerTarget:     "pull_request",
+					EventType:         "no-ops-comment",
+					HeadBranch:        "source",
+					BaseBranch:        "main",
+					PullRequestNumber: 10,
+					TriggerComment:    "/bye-world",
+					Request: &info.Request{
+						Header: http.Header{},
+					},
+				},
+			},
+			wantErr:          true,
+			wantUnmatchedPRs: []string{"pipeline-on-comment"},
+			wantLog:          []string{"PipelineRun pipeline-on-comment: on-comment annotation did not match, skipping"},
+		},
+		{
+			name: "good-match-with-only-one-unmatched-pipeline-run-on-label",
+			args: args{
+				pruns: []*tektonv1.PipelineRun{pipelineOnLabel},
+				runevent: info.Event{
+					URL:               "https://hello/moto",
+					TriggerTarget:     "pull_request",
+					EventType:         "pull_request_labeled",
+					HeadBranch:        "source",
+					BaseBranch:        "main",
+					PullRequestNumber: 10,
+					PullRequestLabel:  []string{"feature"},
+					Request: &info.Request{
+						Header: http.Header{},
+					},
+				},
+			},
+			wantErr:          true,
+			wantUnmatchedPRs: []string{"pipeline-on-label"},
+			wantLog:          []string{"PipelineRun pipeline-on-label: label annotation did not match, skipping"},
+		},
 	}
 
 	for _, tt := range tests {
@@ -2339,7 +2442,7 @@ func TestMatchPipelinerunByAnnotation(t *testing.T) {
 
 			eventEmitter := events.NewEventEmitter(cs.Clients.Kube, logger)
 			repo := tt.repo
-			matches, err := MatchPipelinerunByAnnotation(ctx, logger, tt.args.pruns, cs, &tt.args.runevent, &ghprovider.Provider{}, eventEmitter, repo, true)
+			matches, unmatchedPRs, err := MatchPipelinerunByAnnotation(ctx, logger, tt.args.pruns, cs, &tt.args.runevent, &ghprovider.Provider{}, eventEmitter, repo, true)
 			if tt.wantErrNoFailedPipelineToRetest {
 				assert.Assert(t, err != nil, "expected ErrNoFailedPipelineToRetest")
 				assert.Assert(t, errors.Is(err, NoFailedPipelineToRetestError("/pac ")), "expected ErrNoFailedPipelineToRetest, got: %v", err)
@@ -2355,6 +2458,13 @@ func TestMatchPipelinerunByAnnotation(t *testing.T) {
 				assert.Assert(t, len(matches) > 0, "expected at least one match")
 				assert.Assert(t, matches[0].PipelineRun.GetName() == tt.wantPrName, "Pipelinerun hasn't been matched: %+v",
 					matches[0].PipelineRun.GetName(), tt.wantPrName)
+			}
+
+			if len(tt.wantUnmatchedPRs) > 0 {
+				assert.Assert(t, len(unmatchedPRs) == len(tt.wantUnmatchedPRs), "expected %d unmatched pipelineruns, got %d", len(tt.wantUnmatchedPRs), len(unmatchedPRs))
+				for _, unmatchedPR := range unmatchedPRs {
+					assert.Assert(t, slices.Contains(tt.wantUnmatchedPRs, unmatchedPR.GetName()), "unmatched pipelinerun %s not in expected list", unmatchedPR.GetName())
+				}
 			}
 			if len(tt.wantLog) > 0 {
 				assert.Assert(t, log.Len() > 0, "We didn't get any log message")
@@ -2455,6 +2565,116 @@ func TestGetAnnotationValues(t *testing.T) {
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("getAnnotationValues() got = %v, want %v", got, tt.want)
 			}
+		})
+	}
+}
+
+func TestNoFailedPipelineToRetestErrorIs(t *testing.T) {
+	tests := []struct {
+		name   string
+		err    error
+		target error
+		want   bool
+	}{
+		{
+			name:   "same error type matches",
+			err:    NoFailedPipelineToRetestError("/pac "),
+			target: NoFailedPipelineToRetestError("/"),
+			want:   true,
+		},
+		{
+			name:   "different error type does not match",
+			err:    NoFailedPipelineToRetestError("/pac "),
+			target: fmt.Errorf("other"),
+			want:   false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.want {
+				assert.Assert(t, strings.Contains(tt.err.Error(), "All PipelineRuns for this commit have already succeeded"))
+			}
+			assert.Equal(t, tt.want, errors.Is(tt.err, tt.target))
+		})
+	}
+}
+
+func TestMatchOnAnnotation(t *testing.T) {
+	tests := []struct {
+		name           string
+		annotations    string
+		eventTypes     []string
+		branchMatching bool
+		want           bool
+		wantErrContain string
+	}{
+		{
+			name:        "matches exact event",
+			annotations: "[pull_request,push]",
+			eventTypes:  []string{"push"},
+			want:        true,
+		},
+		{
+			name:           "matches branch glob",
+			annotations:    "[refs/heads/release-*]",
+			eventTypes:     []string{"release-1.0"},
+			branchMatching: true,
+			want:           true,
+		},
+		{
+			name:        "returns false when no target matches",
+			annotations: "[pull_request]",
+			eventTypes:  []string{"push"},
+			want:        false,
+		},
+		{
+			name:           "invalid annotation returns error",
+			annotations:    "[pull_request",
+			eventTypes:     []string{"pull_request"},
+			wantErrContain: "wrong format",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := matchOnAnnotation(tt.annotations, tt.eventTypes, tt.branchMatching)
+			if tt.wantErrContain != "" {
+				assert.ErrorContains(t, err, tt.wantErrContain)
+				return
+			}
+			assert.NilError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestResolveCustomParamsForCELNilRepo(t *testing.T) {
+	tests := []struct {
+		name string
+		repo *v1alpha1.Repository
+	}{
+		{
+			name: "nil repo",
+		},
+		{
+			name: "repo without params",
+			repo: &v1alpha1.Repository{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := resolveCustomParamsForCEL(
+				context.Background(),
+				tt.repo,
+				&info.Event{},
+				&params.Run{},
+				&testprovider.TestProviderImp{},
+				nil,
+				zap.NewNop().Sugar(),
+			)
+			assert.Equal(t, 0, len(got))
 		})
 	}
 }
@@ -3365,6 +3585,8 @@ func TestFilterSuccessfulTemplatesFallbackToCommitStatuses(t *testing.T) {
 
 	tests := []struct {
 		name           string
+		providerName   string
+		nilPac         bool
 		commitStatuses []provider.CommitStatusInfo
 		matchedPRs     []Match
 		expectedNames  []string
@@ -3415,6 +3637,54 @@ func TestFilterSuccessfulTemplatesFallbackToCommitStatuses(t *testing.T) {
 			},
 			expectedNames: []string{"template-a", "template-b"},
 		},
+		{
+			name:         "BB Cloud truncated key matched via GetBBCloudStatusKey",
+			providerName: "bitbucket-cloud",
+			commitStatuses: []provider.CommitStatusInfo{
+				{Name: "this-is-a-long-pipelinerun-name-t-989318", Status: "successful"},
+				{Name: "Pipelines as Code CI / pipelinerun-exit-1", Status: "failed"},
+			},
+			matchedPRs: []Match{
+				createMatchedPR("this-is-a-long-pipelinerun-name-that-exceeds-forty-characters"),
+				createMatchedPR("pipelinerun-exit-1"),
+			},
+			expectedNames: []string{"pipelinerun-exit-1"},
+		},
+		{
+			name:         "BB Cloud key without prefix matched via GetBBCloudStatusKey",
+			providerName: "bitbucket-cloud",
+			commitStatuses: []provider.CommitStatusInfo{
+				{Name: "my-long-pipeline-run-name-abcdef", Status: "successful"},
+			},
+			matchedPRs: []Match{
+				createMatchedPR("my-long-pipeline-run-name-abcdef"),
+			},
+			expectedNames: []string{},
+		},
+		{
+			name:         "Non BB Cloud provider skips GetBBCloudStatusKey fallback",
+			providerName: "github",
+			commitStatuses: []provider.CommitStatusInfo{
+				{Name: "this-is-a-long-pipelinerun-name-t-989318", Status: "successful"},
+				{Name: "Pipelines as Code CI / this-is-a-long-pipelinerun-name-that-exceeds-forty-characters", Status: "failed"},
+			},
+			matchedPRs: []Match{
+				createMatchedPR("this-is-a-long-pipelinerun-name-that-exceeds-forty-characters"),
+			},
+			expectedNames: []string{"this-is-a-long-pipelinerun-name-that-exceeds-forty-characters"},
+		},
+		{
+			name:   "Nil Pac uses default ApplicationName for status matching",
+			nilPac: true,
+			commitStatuses: []provider.CommitStatusInfo{
+				{Name: "Pipelines as Code CI / template-a", Status: "success"},
+			},
+			matchedPRs: []Match{
+				createMatchedPR("template-a"),
+				createMatchedPR("template-b"),
+			},
+			expectedNames: []string{"template-b"},
+		},
 	}
 
 	for _, tt := range tests {
@@ -3425,9 +3695,21 @@ func TestFilterSuccessfulTemplatesFallbackToCommitStatuses(t *testing.T) {
 			}
 			vcx := &testprovider.TestProviderImp{
 				CommitStatuses: tt.commitStatuses,
+				ProviderName:   tt.providerName,
 			}
 
-			filtered := filterSuccessfulTemplates(ctx, logger, cs, event, repo, vcx, tt.matchedPRs)
+			testCS := cs
+			if tt.nilPac {
+				testCS = &params.Run{
+					Clients: clients.Clients{
+						Log:    logger,
+						Tekton: stdata.Pipeline,
+						Kube:   stdata.Kube,
+					},
+				}
+			}
+
+			filtered := filterSuccessfulTemplates(ctx, logger, testCS, event, repo, vcx, tt.matchedPRs)
 
 			assert.Equal(t, len(tt.expectedNames), len(filtered),
 				"Expected %d templates but got %d", len(tt.expectedNames), len(filtered))

@@ -32,6 +32,7 @@ You can define the following settings in the global Repository CR:
   - The `type` must be defined in the namespace repository settings and must match the `type` of the global repository (see below for an example).
 - [Custom Parameters]({{< relref "/docs/advanced/custom-parameters" >}}).
 - [Incoming Webhooks Rules]({{< relref "/docs/advanced/incoming-webhooks" >}}).
+- [Status Checks]({{< relref "/docs/guides/repository-crd/status-checks" >}}).
 
 {{< callout type="info" >}}
 Global settings are only applied when running via a Git provider event; they are not applied when for example using the `tkn pac` cli.
@@ -79,6 +80,8 @@ spec:
 In this example, the `repo` Repository CR keeps its concurrency limit of 2 because the local setting overrides the global value of 1. The `custom` parameter with value `value` applies to every repository that does not define its own custom parameters.
 
 Because the local Repository CR sets `git_provider.type` to `gitlab`, matching the global Repository CR, Pipelines-as-Code uses the Git provider settings (secret, webhook secret) from the global repository. It fetches the referenced secrets from the namespace where the global repository lives.
+
+A namespace-level Repository that inherits `git_provider.secret` cannot set a different `git_provider.url`. Otherwise, someone who controls that Repository could redirect a credential owned by the controller namespace. To use another provider endpoint, configure `git_provider.secret` on the namespace-level Repository as well. This restriction applies to webhook-based providers; GitHub Apps use the controller's GitHub App credentials instead of inheriting this secret.
 
 ## Webhook-Based Provider Global Settings
 
