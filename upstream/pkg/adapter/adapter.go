@@ -30,7 +30,6 @@ import (
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"knative.dev/eventing/pkg/adapter/v2"
 	"knative.dev/pkg/logging"
 	"knative.dev/pkg/system"
@@ -173,6 +172,12 @@ func (l *listener) Start(ctx context.Context) error {
 
 func (l listener) handleEvent(ctx context.Context) http.HandlerFunc {
 	return func(response http.ResponseWriter, request *http.Request) {
+		start := time.Now()
+		eventID := getProviderEventIDFromHeader(request.Header)
+		eventLogger := l.logger.With("event-id", eventID)
+		defer func() {
+			eventLogger.Infof("controller responded to event %s in %dms", eventID, time.Since(start).Milliseconds())
+		}()
 		if request.Method != http.MethodPost {
 			l.writeResponse(response, http.StatusOK, "ok")
 			return
@@ -201,15 +206,6 @@ func (l listener) handleEvent(ctx context.Context) http.HandlerFunc {
 		event := info.NewEvent()
 		pacInfo := l.run.Info.GetPacOpts()
 
-		globalRepo, err := l.run.Clients.PipelineAsCode.PipelinesascodeV1alpha1().Repositories(l.run.Info.Kube.Namespace).Get(
-			ctx, l.run.Info.Controller.GlobalRepository, metav1.GetOptions{},
-		)
-		if err == nil && globalRepo != nil {
-			l.logger.Infof("detected global repository settings named %s in namespace %s", l.run.Info.Controller.GlobalRepository, l.run.Info.Kube.Namespace)
-		} else {
-			globalRepo = &v1alpha1.Repository{}
-		}
-
 		detected, configuring, err := github.ConfigureRepository(ctx, l.run, request, string(payload), &pacInfo, l.logger)
 		if detected {
 			if configuring && err == nil {
@@ -227,10 +223,10 @@ func (l listener) handleEvent(ctx context.Context) http.HandlerFunc {
 
 		isIncoming, targettedRepo, err := l.detectIncoming(ctx, event, request, payload)
 		if err != nil {
-			if errors.Is(err, errMissingFields) {
-				l.writeResponse(response, http.StatusBadRequest, err.Error())
-			}
+			// detectIncoming returns errors only for /incoming requests.
+			// Reject failed incoming requests without further event processing.
 			l.logger.Errorf("error processing incoming webhook: %v", err)
+			l.writeResponse(response, http.StatusBadRequest, "error processing incoming webhook: invalid request")
 			return
 		}
 
@@ -255,6 +251,16 @@ func (l listener) handleEvent(ctx context.Context) http.HandlerFunc {
 			trace.WithSpanKind(trace.SpanKindServer),
 		)
 
+		globalRepo, err := l.run.GetRepository(ctx, l.run.Info.Kube.Namespace, l.run.Info.Controller.GlobalRepository)
+		if err == nil && globalRepo != nil {
+			l.logger.Infof("detected global repository settings named %s in namespace %s", l.run.Info.Controller.GlobalRepository, l.run.Info.Kube.Namespace)
+		} else {
+			if err != nil {
+				l.logger.Infof("global repository lookup failed: %v, continuing with empty global config", err)
+			}
+			globalRepo = &v1alpha1.Repository{}
+		}
+
 		s := sinker{
 			run:        l.run,
 			vcx:        gitProvider,
@@ -270,7 +276,11 @@ func (l listener) handleEvent(ctx context.Context) http.HandlerFunc {
 		localRequest := request.Clone(request.Context())
 
 		go func() {
-			defer span.End()
+			eventHandlerStart := time.Now()
+			defer func() {
+				logger.Infof("event %s processed in %dms", eventID, time.Since(eventHandlerStart).Milliseconds())
+				span.End()
+			}()
 			err := s.handleEvent(tracedCtx, localRequest)
 			if err != nil {
 				span.RecordError(err)
@@ -279,6 +289,30 @@ func (l listener) handleEvent(ctx context.Context) http.HandlerFunc {
 
 		l.writeResponse(response, http.StatusAccepted, "accepted")
 	}
+}
+
+func getProviderEventIDFromHeader(header http.Header) string {
+	if header.Get("X-GitHub-Delivery") != "" {
+		return header.Get("X-GitHub-Delivery")
+	}
+	// For Gitea/Forgejo
+	if header.Get("X-Gitea-Delivery") != "" {
+		return header.Get("X-Gitea-Delivery")
+	}
+	// For GitLab
+	if header.Get("X-Gitlab-Event-UUID") != "" {
+		return header.Get("X-Gitlab-Event-UUID")
+	}
+	// For Bitbucket cloud
+	if header.Get("X-Request-UUID") != "" {
+		return header.Get("X-Request-UUID")
+	}
+	// For Bitbucket data center
+	if header.Get("X-Request-Id") != "" {
+		return header.Get("X-Request-Id")
+	}
+	// return nil UUID to indicate that git provider is unknown
+	return "00000000-0000-0000-0000-000000000000"
 }
 
 func (l listener) processRes(processEvent bool, provider provider.Interface, logger *zap.SugaredLogger, skipReason string, err error) (provider.Interface, *zap.SugaredLogger, error) {
