@@ -1,5 +1,5 @@
 ARG GO_BUILDER=registry.redhat.io/ubi9/go-toolset:latest@sha256:edb9452603fa48e9882063f001ecd7d322add20f1564a4f05f38f6683be5ea94
-ARG RUNTIME=registry.access.redhat.com/ubi9/ubi-minimal:latest
+ARG UBI_RUNTIME=registry.access.redhat.com/ubi9/ubi-minimal:latest
 
 FROM $GO_BUILDER AS builder
 
@@ -14,7 +14,7 @@ RUN go build -mod=vendor -tags disable_gcp,strictfipsruntime -v  \
     -ldflags "-X github.com/openshift-pipelines/pipelines-as-code/pkg/params/version.Version=${TKN_PAC_VERSION}" \
     -o /tmp/tkn-pac ./cmd/tkn-pac
 
-FROM $RUNTIME
+FROM $UBI_RUNTIME
 ARG VERSION=1.23
 
 COPY --from=builder /tmp/tkn-pac /usr/bin
