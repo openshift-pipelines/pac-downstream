@@ -57,6 +57,105 @@ func TestIsOkToTestComment(t *testing.T) {
 	}
 }
 
+func TestGetMarkdownTemplate(t *testing.T) {
+	tests := []struct {
+		name        string
+		commentType CommentType
+		wantEmpty   bool
+	}{
+		{
+			name:        "starting pipeline template",
+			commentType: StartingPipelineType,
+		},
+		{
+			name:        "pipeline run status template",
+			commentType: PipelineRunStatusType,
+		},
+		{
+			name:        "queueing pipeline template",
+			commentType: QueueingPipelineType,
+		},
+		{
+			name:        "unknown template",
+			commentType: CommentType(99),
+			wantEmpty:   true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := GetMarkdownTemplate(tt.commentType)
+			assert.Equal(t, tt.wantEmpty, got == "")
+		})
+	}
+}
+
+func TestGetHTMLTemplate(t *testing.T) {
+	tests := []struct {
+		name        string
+		commentType CommentType
+		wantEmpty   bool
+	}{
+		{
+			name:        "starting pipeline template",
+			commentType: StartingPipelineType,
+		},
+		{
+			name:        "pipeline run status template",
+			commentType: PipelineRunStatusType,
+		},
+		{
+			name:        "queueing pipeline template",
+			commentType: QueueingPipelineType,
+		},
+		{
+			name:        "unknown template",
+			commentType: CommentType(99),
+			wantEmpty:   true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := GetHTMLTemplate(tt.commentType)
+			assert.Equal(t, tt.wantEmpty, got == "")
+		})
+	}
+}
+
+func TestValid(t *testing.T) {
+	tests := []struct {
+		name        string
+		value       string
+		validValues []string
+		want        bool
+	}{
+		{
+			name:        "value is valid",
+			value:       "github",
+			validValues: []string{"github", "gitlab"},
+			want:        true,
+		},
+		{
+			name:        "value is not valid",
+			value:       "forgejo",
+			validValues: []string{"github", "gitlab"},
+			want:        false,
+		},
+		{
+			name:  "empty list",
+			value: "github",
+			want:  false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, Valid(tt.value, tt.validValues))
+		})
+	}
+}
+
 func TestCancelComment(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -446,6 +545,54 @@ func TestGetPipelineRunAndBranchNameFromTestComment(t *testing.T) {
 	}
 }
 
+func TestGetPipelineRunAndTagNameFromTestComment(t *testing.T) {
+	tests := []struct {
+		name      string
+		comment   string
+		prefix    string
+		wantPR    string
+		wantTag   string
+		wantError bool
+	}{
+		{
+			name:    "test all on tag",
+			comment: "/test tag:v1.0.0",
+			wantTag: "v1.0.0",
+		},
+		{
+			name:    "test one pipeline on tag",
+			comment: "/test pipeline tag:v1.0.0",
+			wantPR:  "pipeline",
+			wantTag: "v1.0.0",
+		},
+		{
+			name:    "retest one pipeline on tag with prefix",
+			comment: "/pac-retest pipeline tag:v1.0.0",
+			prefix:  "/pac-",
+			wantPR:  "pipeline",
+			wantTag: "v1.0.0",
+		},
+		{
+			name:      "unsupported marker returns error",
+			comment:   "/test pipeline ref:v1.0.0",
+			wantError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.prefix == "" {
+				tt.prefix = "/"
+			}
+			prName, branchName, tagName, err := GetPipelineRunAndBranchOrTagNameFromTestComment(tt.comment, tt.prefix)
+			assert.Equal(t, tt.wantError, err != nil)
+			assert.Equal(t, "", branchName)
+			assert.Equal(t, tt.wantPR, prName)
+			assert.Equal(t, tt.wantTag, tagName)
+		})
+	}
+}
+
 func TestGetPipelineRunAndBranchNameFromCancelComment(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -607,6 +754,60 @@ func TestCompareHostOfURLS(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got := CompareHostOfURLS(tt.url1, tt.url2)
 			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestValidateYaml(t *testing.T) {
+	tests := []struct {
+		name           string
+		content        []byte
+		wantErrContain string
+	}{
+		{
+			name:    "valid yaml",
+			content: []byte("apiVersion: v1\nkind: ConfigMap\n"),
+		},
+		{
+			name:           "invalid yaml",
+			content:        []byte("apiVersion: ["),
+			wantErrContain: "error unmarshalling yaml file test.yaml",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateYaml(tt.content, "test.yaml")
+			if tt.wantErrContain != "" {
+				assert.ErrorContains(t, err, tt.wantErrContain)
+				return
+			}
+			assert.NilError(t, err)
+		})
+	}
+}
+
+func TestIsZeroSHA(t *testing.T) {
+	tests := []struct {
+		name string
+		sha  string
+		want bool
+	}{
+		{
+			name: "zero sha",
+			sha:  "0000000000000000000000000000000000000000",
+			want: true,
+		},
+		{
+			name: "non zero sha",
+			sha:  "1111111111111111111111111111111111111111",
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, IsZeroSHA(tt.sha))
 		})
 	}
 }
@@ -977,6 +1178,58 @@ func TestGetBBCloudStatusKey(t *testing.T) {
 			got := GetBBCloudStatusKey(tt.status, tt.pacopts)
 			assert.Equal(t, tt.expected, got)
 			assert.Assert(t, len(got) <= 40, "key length %d exceeds 40 char limit: %s", len(got), got)
+		})
+	}
+}
+
+func TestIsCommentStrategyUpdate(t *testing.T) {
+	tests := []struct {
+		name string
+		repo *v1alpha1.Repository
+		want bool
+	}{
+		{
+			name: "nil repo",
+			want: false,
+		},
+		{
+			name: "nil settings",
+			repo: &v1alpha1.Repository{},
+			want: false,
+		},
+		{
+			name: "gitlab update",
+			repo: &v1alpha1.Repository{Spec: v1alpha1.RepositorySpec{Settings: &v1alpha1.Settings{
+				Gitlab: &v1alpha1.GitlabSettings{CommentStrategy: UpdateCommentStrategy},
+			}}},
+			want: true,
+		},
+		{
+			name: "github update",
+			repo: &v1alpha1.Repository{Spec: v1alpha1.RepositorySpec{Settings: &v1alpha1.Settings{
+				Github: &v1alpha1.GithubSettings{CommentStrategy: UpdateCommentStrategy},
+			}}},
+			want: true,
+		},
+		{
+			name: "forgejo update",
+			repo: &v1alpha1.Repository{Spec: v1alpha1.RepositorySpec{Settings: &v1alpha1.Settings{
+				Forgejo: &v1alpha1.ForgejoSettings{CommentStrategy: UpdateCommentStrategy},
+			}}},
+			want: true,
+		},
+		{
+			name: "disable all is not update",
+			repo: &v1alpha1.Repository{Spec: v1alpha1.RepositorySpec{Settings: &v1alpha1.Settings{
+				Gitlab: &v1alpha1.GitlabSettings{CommentStrategy: DisableAllCommentStrategy},
+			}}},
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, IsCommentStrategyUpdate(tt.repo))
 		})
 	}
 }
