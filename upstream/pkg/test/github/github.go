@@ -7,13 +7,12 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/google/go-github/v85/github"
+	"github.com/google/go-github/v91/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	"gotest.tools/v3/assert"
 )
@@ -54,10 +53,12 @@ func SetupGH() (client *github.Client, mux *http.ServeMux, serverURL string, tea
 
 	// client is the GitHub client being tested and is
 	// configured to use test server.
-	client = github.NewClient(nil)
-	url, _ := url.Parse(server.URL + githubBaseURLPath + "/")
-	client.BaseURL = url
-	client.UploadURL = url
+	testURL := server.URL + githubBaseURLPath + "/"
+	var err error
+	client, err = github.NewClient(github.WithURLs(&testURL, &testURL))
+	if err != nil {
+		panic(err)
+	}
 
 	return client, mux, server.URL, server.Close
 }
@@ -128,8 +129,8 @@ func SetupGitTree(t *testing.T, mux *http.ServeMux, dir string, event *info.Even
 					assert.NilError(t, err)
 					// encode content as base64
 					blob := &github.Blob{
-						SHA:     github.Ptr(chosenf.sha),
-						Content: github.Ptr(base64.StdEncoding.EncodeToString(s)),
+						SHA:     new(chosenf.sha),
+						Content: new(base64.StdEncoding.EncodeToString(s)),
 					}
 					b, err := json.Marshal(blob)
 					assert.NilError(t, err)
@@ -137,10 +138,10 @@ func SetupGitTree(t *testing.T, mux *http.ServeMux, dir string, event *info.Even
 				})
 		}
 		entries = append(entries, &github.TreeEntry{
-			Path: github.Ptr(strings.TrimPrefix(f.name, dir+"/")),
-			Mode: github.Ptr(mode),
-			Type: github.Ptr(etype),
-			SHA:  github.Ptr(f.sha),
+			Path: new(strings.TrimPrefix(f.name, dir+"/")),
+			Mode: new(mode),
+			Type: new(etype),
+			SHA:  new(f.sha),
 		})
 	}
 	u := fmt.Sprintf("/repos/%v/%v/git/trees/%v", event.Organization, event.Repository, event.SHA)

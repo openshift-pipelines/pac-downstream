@@ -3,7 +3,7 @@ title: PipelineRun status
 weight: 7
 ---
 
-This page describes how Pipelines-as-Code reports PipelineRun status across different Git providers, including log snippets, error annotations, and notification options.
+This page describes how Pipelines-as-Code reports PipelineRun statuses across different Git providers, including log snippets, error annotations, and notification options.
 
 ## GitHub Apps
 
@@ -112,6 +112,10 @@ pipelines-as-code-ci   https://github.com/tektoncd/pipelines-as-code   pipelines
 You can use the `tkn pac describe` command from the [CLI]({{< relref "/docs/cli/" >}}) to view
 all statuses of PipelineRuns associated with your repository and
 their metadata.
+
+## Status checks for unmatched PipelineRuns
+
+By default, Pipelines-as-Code only reports status for PipelineRuns that matched and ran. If you want to see which PipelineRuns were skipped because their annotations did not match the incoming event, enable the `status_checks` setting in your Repository CR. See the [Status Checks guide]({{< relref "/docs/guides/repository-crd/status-checks" >}}) for configuration and provider behavior.
 
 ## Notifications
 

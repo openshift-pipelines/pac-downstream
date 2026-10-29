@@ -689,3 +689,96 @@ func TestGetTaskFromLocalFS(t *testing.T) {
 	assert.NilError(t, err)
 	assert.Equal(t, content, taskContent)
 }
+
+func TestGetFileFromLocalFSErrors(t *testing.T) {
+	tests := []struct {
+		name           string
+		setup          func(t *testing.T) string
+		want           string
+		wantErrContain string
+	}{
+		{
+			name: "missing file returns empty content",
+			setup: func(t *testing.T) string {
+				t.Helper()
+				return "missing-task"
+			},
+		},
+		{
+			name: "directory returns read error",
+			setup: func(t *testing.T) string {
+				t.Helper()
+				return t.TempDir()
+			},
+			wantErrContain: "is a directory",
+		},
+	}
+
+	observer, _ := zapobserver.New(zap.InfoLevel)
+	logger := zap.New(observer).Sugar()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := getFileFromLocalFS(tt.setup(t), logger)
+			if tt.wantErrContain != "" {
+				assert.ErrorContains(t, err, tt.wantErrContain)
+				return
+			}
+			assert.NilError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestRemoteTasksConvertErrors(t *testing.T) {
+	tests := []struct {
+		name           string
+		kind           string
+		data           string
+		wantErrContain string
+	}{
+		{
+			name:           "task parse error",
+			kind:           "task",
+			data:           "not: [valid",
+			wantErrContain: "cannot be parsed as a Kubernetes resource",
+		},
+		{
+			name: "task wrong resource type",
+			kind: "task",
+			data: `apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: config`,
+			wantErrContain: "has not been recognized as a Tekton task",
+		},
+		{
+			name:           "pipeline parse error",
+			kind:           "pipeline",
+			data:           "not: [valid",
+			wantErrContain: "cannot be parsed as a Kubernetes resource",
+		},
+		{
+			name: "pipeline wrong resource type",
+			kind: "pipeline",
+			data: `apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: config`,
+			wantErrContain: "has not been recognized as a Tekton pipeline",
+		},
+	}
+
+	rt := RemoteTasks{}
+	ctx := context.Background()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var err error
+			if tt.kind == "task" {
+				_, err = rt.convertTotask(ctx, "test-uri", tt.data)
+			} else {
+				_, err = rt.convertToPipeline(ctx, "test-uri", tt.data)
+			}
+			assert.ErrorContains(t, err, tt.wantErrContain)
+		})
+	}
+}
