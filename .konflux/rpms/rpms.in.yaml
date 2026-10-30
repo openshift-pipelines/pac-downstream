@@ -1,7 +1,8 @@
 contentOrigin:
-  repofiles: 
+  repofiles:
     - ./ubi.repo
-packages: [openssl-libs-3.2.2-6.el9_5.1]
+packages:
+  - shadow-utils
 arches:
   # The list of architectures
   - aarch64
