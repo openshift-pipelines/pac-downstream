@@ -11,9 +11,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/go-github/v90/github"
+	"github.com/google/go-github/v91/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	providerMetrics "github.com/openshift-pipelines/pipelines-as-code/pkg/provider/providermetrics"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/retryhttp"
 	"go.uber.org/zap"
 )
 
@@ -185,6 +186,7 @@ func (c *graphQLClient) fetchFilesBatch(ctx context.Context, owner, repo, ref st
 	if err != nil {
 		return nil, fmt.Errorf("failed to create GraphQL request: %w", err)
 	}
+	req = req.WithContext(retryhttp.WithReadOnlyPostRetry(req.Context()))
 
 	// Record metrics for GraphQL API call
 	if c.logger != nil {

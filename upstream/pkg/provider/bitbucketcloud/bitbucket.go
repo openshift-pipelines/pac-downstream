@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/google/go-github/v90/github"
+	"github.com/google/go-github/v91/github"
 	"github.com/ktrysmt/go-bitbucket"
 	"github.com/mitchellh/mapstructure"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
@@ -23,6 +23,10 @@ import (
 )
 
 var _ provider.Interface = (*Provider)(nil)
+
+// accessTokenPrefix identifies Bitbucket Cloud repository access tokens:
+// https://community.atlassian.com/forums/discussion/3093481/can-we-confirm-bitbuckets-token-prefixes
+const accessTokenPrefix = "ATCT"
 
 type Provider struct {
 	bbClient      *bitbucket.Client
@@ -66,6 +70,9 @@ func (v *Provider) SetPacInfo(pacInfo *info.PacOpts) {
 }
 
 const taskStatusTemplate = `{{range $taskrun := .TaskRunList }} | **{{ formatCondition $taskrun.PipelineRunTaskRunStatus.Status.Conditions }}** | {{ $taskrun.ConsoleLogURL }} | *{{ formatDuration $taskrun.PipelineRunTaskRunStatus.Status.StartTime $taskrun.PipelineRunTaskRunStatus.Status.CompletionTime }}* |
+{{- range $step := $taskrun.Steps }}
+ | {{ $step.Status }} | ↳ {{ $step.ConsoleLogURL }} | *{{ $step.Duration }}* |
+{{- end }}
 {{ end }}`
 
 func (v *Provider) Validate(_ context.Context, _ *params.Run, event *info.Event) error {
@@ -107,7 +114,7 @@ func (v *Provider) CreateStatus(_ context.Context, event *info.Event, statusopts
 	switch statusopts.Conclusion {
 	case status.ConclusionSkipped:
 		state = types.StateStopped
-		statusopts.Title = "➖ Skipping this commit"
+		statusopts.Title = "➖ Skipping this PipelineRun"
 	case status.ConclusionNeutral:
 		state = types.StateStopped
 		statusopts.Title = "➖ CI has stopped"
@@ -259,7 +266,13 @@ func (v *Provider) SetClient(_ context.Context, run *params.Run, event *info.Eve
 	if event.Provider.User == "" {
 		return fmt.Errorf("no git_provider.user has been in repo crd")
 	}
-	bbClient, err := bitbucket.NewBasicAuth(event.Provider.User, event.Provider.Token)
+	var bbClient *bitbucket.Client
+	var err error
+	if strings.HasPrefix(event.Provider.Token, accessTokenPrefix) {
+		bbClient, err = bitbucket.NewOAuthbearerToken(event.Provider.Token)
+	} else {
+		bbClient, err = bitbucket.NewBasicAuth(event.Provider.User, event.Provider.Token)
+	}
 	if err != nil {
 		return fmt.Errorf("failed to create bitbucket client: %w", err)
 	}

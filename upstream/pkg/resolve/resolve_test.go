@@ -93,6 +93,138 @@ func TestGenerateName(t *testing.T) {
 	assert.Assert(t, resolved.GenerateName != "")
 }
 
+func TestValidatePipelineRunAnnotations(t *testing.T) {
+	tests := []struct {
+		name        string
+		value       string
+		wantErr     string
+		wantNoError bool
+	}{
+		{
+			name:        "annotation is absent",
+			wantNoError: true,
+		},
+		{
+			name:        "value is exactly 210 characters",
+			value:       strings.Repeat("a", 210),
+			wantNoError: true,
+		},
+		{
+			name:    "value is more than 210 characters",
+			value:   strings.Repeat("a", 211),
+			wantErr: "value must not exceed 210 characters",
+		},
+		{
+			name:        "multibyte value is counted by characters",
+			value:       strings.Repeat("é", 105),
+			wantNoError: true,
+		},
+		{
+			name:    "value is not valid UTF-8",
+			value:   string([]byte{0xff}),
+			wantErr: "value is not valid UTF-8",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pr := &tektonv1.PipelineRun{}
+			if tt.value != "" {
+				pr.Annotations = map[string]string{
+					apipac.BitbucketRequiredBuildParent: tt.value,
+				}
+			}
+
+			err := validatePipelineRunAnnotations(pr)
+			if tt.wantNoError {
+				assert.NilError(t, err)
+				return
+			}
+			assert.ErrorContains(t, err, tt.wantErr)
+		})
+	}
+}
+
+func TestMetadataResolveIncludesPipelineRunNameInAnnotationError(t *testing.T) {
+	tests := []struct {
+		name            string
+		apiVersion      string
+		pipelineRunName string
+		parent          string
+		wantErr         string
+	}{
+		{
+			name:            "invalid annotation includes pipeline run name",
+			apiVersion:      "tekton.dev/v1",
+			pipelineRunName: "invalid-parent",
+			parent:          strings.Repeat("a", 211),
+			wantErr:         "invalid pipeline run invalid-parent annotations",
+		},
+		{
+			name:            "valid annotation parses successfully",
+			apiVersion:      "tekton.dev/v1",
+			pipelineRunName: "valid-parent",
+			parent:          strings.Repeat("a", 210),
+		},
+		{
+			name:            "v1beta1 invalid annotation includes pipeline run name",
+			apiVersion:      "tekton.dev/v1beta1",
+			pipelineRunName: "invalid-parent-beta",
+			parent:          strings.Repeat("a", 211),
+			wantErr:         "invalid pipeline run invalid-parent-beta annotations",
+		},
+		{
+			name:            "v1beta1 valid annotation parses successfully",
+			apiVersion:      "tekton.dev/v1beta1",
+			pipelineRunName: "valid-parent-beta",
+			parent:          strings.Repeat("a", 210),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			data := fmt.Sprintf(`apiVersion: %s
+kind: PipelineRun
+metadata:
+  name: %s
+  annotations:
+    %s: %s
+`, tt.apiVersion, tt.pipelineRunName, apipac.BitbucketRequiredBuildParent, tt.parent)
+
+			types, err := ReadTektonTypes(context.TODO(), nil, data)
+			assert.NilError(t, err)
+			_, err = MetadataResolve(types.PipelineRuns)
+			if tt.wantErr == "" {
+				assert.NilError(t, err)
+				return
+			}
+			assert.ErrorContains(t, err, tt.wantErr)
+		})
+	}
+}
+
+func TestMetadataResolveKeepsPipelineRunsBeforeInvalidAnnotation(t *testing.T) {
+	valid := &tektonv1.PipelineRun{
+		ObjectMeta: metav1.ObjectMeta{Name: "valid"},
+	}
+	validAfterInvalid := &tektonv1.PipelineRun{
+		ObjectMeta: metav1.ObjectMeta{Name: "valid-after-invalid"},
+	}
+	invalid := &tektonv1.PipelineRun{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "invalid",
+			Annotations: map[string]string{
+				apipac.BitbucketRequiredBuildParent: strings.Repeat("a", 211),
+			},
+		},
+	}
+
+	resolved, err := MetadataResolve([]*tektonv1.PipelineRun{valid, invalid, validAfterInvalid})
+
+	assert.ErrorContains(t, err, "invalid pipeline run invalid annotations")
+	assert.Equal(t, len(resolved), 0)
+}
+
 // TestPipelineBundlesSkipped effectively test conversion from beta1 to v1.
 func TestPipelineBundlesSkipped(t *testing.T) {
 	resolved, _, err := readTDfile(t, "pipelinerun-pipeline-bundle", false, true)
@@ -284,9 +416,11 @@ func TestReportBadTektonYaml(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			observer, _ := zapobserver.New(zap.InfoLevel)
+			logger := zap.New(observer).Sugar()
 			data, err := os.ReadFile("testdata/" + tt.filename + ".yaml")
 			assert.NilError(t, err)
-			types, err := ReadTektonTypes(context.TODO(), nil, string(data))
+			types, err := ReadTektonTypes(context.TODO(), logger, string(data))
 			assert.NilError(t, err)
 
 			// Find the validation error by name
@@ -378,7 +512,9 @@ spec:
         taskSpec:
           invalid-field: "this should cause an error"`
 
-	types, err := ReadTektonTypes(context.TODO(), nil, testYaml)
+	observer, _ := zapobserver.New(zap.InfoLevel)
+	logger := zap.New(observer).Sugar()
+	types, err := ReadTektonTypes(context.TODO(), logger, testYaml)
 	assert.NilError(t, err)
 
 	// Each validation error should have the proper structure
@@ -467,7 +603,9 @@ func TestErrorMessageFormat(t *testing.T) {
   - this: should
     cause: [an error`
 
-	types, err := ReadTektonTypes(context.TODO(), nil, testYaml)
+	observer, _ := zapobserver.New(zap.InfoLevel)
+	logger := zap.New(observer).Sugar()
+	types, err := ReadTektonTypes(context.TODO(), logger, testYaml)
 	assert.NilError(t, err)
 
 	// Should have at least one validation error
@@ -504,6 +642,123 @@ func TestReferencedPipelineNotInRepo(t *testing.T) {
 func TestIgnoreDocSpace(t *testing.T) {
 	_, _, err := readTDfile(t, "empty-spaces", false, true)
 	assert.NilError(t, err)
+}
+
+func TestReadTektonTypesCommentOnlyDocuments(t *testing.T) {
+	tests := []struct {
+		name         string
+		yamlContent  string
+		pipelineRuns int
+		pipelines    int
+		tasks        int
+		validErrors  int
+	}{
+		{
+			name: "comment-only document should be skipped",
+			yamlContent: `---
+# This is just a comment
+# Another comment
+---
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+metadata:
+  name: test-pr
+spec:
+  pipelineSpec:
+    tasks: []`,
+			pipelineRuns: 1,
+			validErrors:  0,
+		},
+		{
+			name: "whitespace and comments should be skipped",
+			yamlContent: `---
+
+# Comment with empty lines above
+
+---
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: test-task
+spec:
+  steps:
+    - name: step1
+      image: alpine`,
+			tasks:       1,
+			validErrors: 0,
+		},
+		{
+			name: "comment before YAML content should process normally",
+			yamlContent: `---
+# Configuration for pipeline
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: test-pipeline
+spec:
+  tasks: []`,
+			pipelines:   1,
+			validErrors: 0,
+		},
+		{
+			name: "multiple comment-only docs with one valid doc",
+			yamlContent: `---
+# First comment block
+---
+# Second comment block
+# More comments
+---
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+metadata:
+  name: test-pr
+spec:
+  pipelineSpec:
+    tasks: []
+---
+# Trailing comment block
+---`,
+			pipelineRuns: 1,
+			validErrors:  0,
+		},
+		{
+			name: "NetworkManager comment case from bug report",
+			yamlContent: `---
+# --- NetworkManager ---
+---
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+metadata:
+  name: networkmanager-test
+spec:
+  pipelineSpec:
+    tasks: []`,
+			pipelineRuns: 1,
+			validErrors:  0,
+		},
+		{
+			name: "all comment-only documents",
+			yamlContent: `---
+# Just comments
+---
+# More comments
+# And more
+---
+# Final comments`,
+			validErrors: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			types, err := ReadTektonTypes(context.TODO(), nil, tt.yamlContent)
+			assert.NilError(t, err)
+			assert.Equal(t, len(types.PipelineRuns), tt.pipelineRuns, "unexpected number of PipelineRuns")
+			assert.Equal(t, len(types.Pipelines), tt.pipelines, "unexpected number of Pipelines")
+			assert.Equal(t, len(types.Tasks), tt.tasks, "unexpected number of Tasks")
+			assert.Equal(t, len(types.ValidationErrors), tt.validErrors, "unexpected number of ValidationErrors")
+		})
+	}
 }
 
 func TestPipelineV1StayV1(t *testing.T) {
@@ -544,7 +799,9 @@ func TestV1Beta1ConversionFixturesAreAcceptedByReadTektonTypes(t *testing.T) {
 			data, err := os.ReadFile("testdata/" + tt.filename + ".yaml")
 			assert.NilError(t, err)
 
-			types, err := ReadTektonTypes(context.TODO(), nil, string(data))
+			observer, _ := zapobserver.New(zap.InfoLevel)
+			logger := zap.New(observer).Sugar()
+			types, err := ReadTektonTypes(context.TODO(), logger, string(data))
 			assert.NilError(t, err)
 			assert.Equal(t, len(types.PipelineRuns), tt.pipelineRuns)
 			assert.Equal(t, len(types.Pipelines), tt.pipelines)

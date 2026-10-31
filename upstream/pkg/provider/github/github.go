@@ -16,7 +16,7 @@ import (
 
 	"github.com/gobwas/glob"
 	"github.com/golang-jwt/jwt/v4"
-	"github.com/google/go-github/v90/github"
+	"github.com/google/go-github/v91/github"
 	"github.com/jonboulle/clockwork"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
@@ -96,7 +96,7 @@ type checkRunsCache struct {
 
 func New() *Provider {
 	return &Provider{
-		APIURL:        github.Ptr(keys.PublicGithubAPIURL),
+		APIURL:        new(keys.PublicGithubAPIURL),
 		PaginedNumber: defaultPaginedNumber,
 		skippedRun: skippedRun{
 			mutex: &sync.Mutex{},
@@ -306,7 +306,7 @@ func MakeClient(ctx context.Context, apiURL, token string, retryOpts ...*retryht
 		apiURL = client.BaseURL()
 	}
 
-	return client, providerName, github.Ptr(apiURL), nil
+	return client, providerName, new(apiURL), nil
 }
 
 // MakeClient creates a GitHub API client using the provider retry settings.
@@ -761,8 +761,10 @@ func (v *Provider) populateRunEventFromPullRequest(runevent *info.Event, pr *git
 	// Make sure to use the Base for Default BaseBranch or there would be a potential hijack
 	runevent.DefaultBranch = pr.GetBase().GetRepo().GetDefaultBranch()
 	runevent.URL = pr.GetBase().GetRepo().GetHTMLURL()
-	runevent.SHA = pr.GetHead().GetSHA()
-	runevent.SHAURL = fmt.Sprintf("%s/commit/%s", pr.GetHTMLURL(), pr.GetHead().GetSHA())
+	if runevent.SHA == "" {
+		runevent.SHA = pr.GetHead().GetSHA()
+	}
+	runevent.SHAURL = fmt.Sprintf("%s/commit/%s", pr.GetHTMLURL(), runevent.SHA)
 	runevent.PullRequestTitle = pr.GetTitle()
 
 	// TODO: check if we really need this
@@ -1229,8 +1231,8 @@ func (v *Provider) CreateComment(ctx context.Context, event *info.Event, commit,
 				"comment_id", comment.GetID(),
 				"body_hash", bodyHash(commit))
 			if _, _, err := wrapAPI(v, "edit_comment", func() (*github.IssueComment, *github.Response, error) {
-				return v.Client().Issues.EditComment(ctx, event.Organization, event.Repository, comment.GetID(), &github.IssueComment{
-					Body: github.Ptr(commit),
+				return v.Client().Issues.UpdateComment(ctx, event.Organization, event.Repository, comment.GetID(), github.IssueCommentRequest{
+					Body: commit,
 				})
 			}); err != nil {
 				return err
@@ -1245,8 +1247,8 @@ func (v *Provider) CreateComment(ctx context.Context, event *info.Event, commit,
 	v.debugCommentPhase(event, trace, "create_comment_start",
 		"body_hash", bodyHash(commit))
 	createdComment, createResp, err := wrapAPI(v, "create_comment", func() (*github.IssueComment, *github.Response, error) {
-		return v.Client().Issues.CreateComment(ctx, event.Organization, event.Repository, event.PullRequestNumber, &github.IssueComment{
-			Body: github.Ptr(commit),
+		return v.Client().Issues.CreateComment(ctx, event.Organization, event.Repository, event.PullRequestNumber, github.IssueCommentRequest{
+			Body: commit,
 		})
 	})
 	if err != nil {
