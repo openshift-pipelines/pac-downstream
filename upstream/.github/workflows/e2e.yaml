@@ -135,6 +135,17 @@ jobs:
           github-token: ${{ secrets.GH_TOKEN }}
           team-slugs: ${{ env.TARGET_TEAM_SLUGS }}
 
+      - name: Check GitHub API rate limits
+        env:
+          TEST_PROVIDER: ${{ matrix.provider }}
+        # The script comes from the PR head; older branches lack this command.
+        run: |
+          if grep -q '^check_e2e_rate_limits)' hack/gh-workflow-ci.sh; then
+            ./hack/gh-workflow-ci.sh check_e2e_rate_limits
+          else
+            echo "Rate-limit check not available on this branch, skipping"
+          fi
+
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: "go.mod"
@@ -352,7 +363,14 @@ jobs:
       - name: Enable debug logging for e2e
         run: |
           set -euo pipefail
-          kubectl -n pipelines-as-code patch configmap pac-config-logging --type merge -p '{"data":{"loglevel.pipelinesascode":"debug","loglevel.pac-watcher":"debug","loglevel.pipelines-as-code-webhook":"debug"}}'
+          kubectl -n pipelines-as-code patch configmap pac-config-logging --type merge \
+            -p '{"data":{"loglevel.pipelinesascode":"debug","loglevel.pac-watcher":"debug","loglevel.pipelines-as-code-webhook":"debug"}}'
+          for cm in pipelines-as-code ghe-configmap; do
+            if kubectl -n pipelines-as-code get configmap "$cm" &>/dev/null; then
+              kubectl -n pipelines-as-code patch configmap "$cm" --type merge \
+                -p '{"data":{"enable-api-retry":"true"}}'
+            fi
+          done
           kubectl -n pipelines-as-code rollout restart deployment/pipelines-as-code-controller deployment/pipelines-as-code-webhook deployment/pipelines-as-code-watcher
           for name in controller webhook watcher; do
             echo "=== Waiting for $name to be ready ==="
@@ -408,10 +426,34 @@ jobs:
 
       - name: Upload artifacts
         if: ${{ always() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: logs-e2e-tests-${{ matrix.provider }}
           path: /tmp/logs
+
+  cleanup-e2e-leftovers:
+    name: Clean up E2E leftovers
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    needs: [e2e-tests]
+    if: ${{ always() && github.ref_name == 'main' && github.event_name == 'schedule' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Close old E2E PRs and delete old E2E branches and repositories
+        env:
+          TEST_GITHUB_API_URL: api.github.com
+          TEST_GITHUB_TOKEN: ${{ secrets.GH_APPS_TOKEN }}
+          TEST_GITHUB_REPO_OWNER_GITHUBAPP: openshift-pipelines/pipelines-as-code-e2e-tests
+          TEST_GITHUB_REPO_OWNER_WEBHOOK: openshift-pipelines/pipelines-as-code-e2e-tests-webhook
+          TEST_GITHUB_SECOND_API_URL: ghe.pipelinesascode.com
+          TEST_GITHUB_SECOND_TOKEN: ${{ secrets.TEST_GITHUB_SECOND_TOKEN }}
+          TEST_GITHUB_SECOND_REPO_OWNER_GITHUBAPP: pipelines-as-code/e2e
+          TEST_GITHUB_SECOND_WEBHOOK_ORG: pac-e2e-webhook-tests
+          TEST_GITHUB_SECOND_WEBHOOK_TOKEN: ${{ secrets.TEST_GITHUB_SECOND_WEBHOOK_TOKEN }}
+        run: ./hack/cleanup-github-e2e.py --force
 
   notify-slack:
     name: Notify Slack on Failures
@@ -426,7 +468,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Download all artifacts
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           path: artifacts
           pattern: logs-e2e-tests-*

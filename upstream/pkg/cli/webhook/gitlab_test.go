@@ -102,6 +102,12 @@ func TestGLCreate(t *testing.T) {
 		_, _ = fmt.Fprint(w, `{"status": "forbidden"}`)
 	})
 
+	// webhook response is successful HTTP but not the created status the CLI expects
+	mux.HandleFunc("/projects/14/hooks", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprint(w, `{"status": "ok"}`)
+	})
+
 	tests := []struct {
 		name      string
 		projectID string
@@ -117,6 +123,11 @@ func TestGLCreate(t *testing.T) {
 			projectID: "13",
 			wantErr:   true,
 		},
+		{
+			name:      "webhook returned non created status",
+			projectID: "14",
+			wantErr:   true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -129,7 +140,46 @@ func TestGLCreate(t *testing.T) {
 			err := gl.create()
 			if !tt.wantErr {
 				assert.NilError(t, err)
+			} else {
+				assert.Assert(t, err != nil)
 			}
+		})
+	}
+}
+
+func TestGLNewClient(t *testing.T) {
+	tests := []struct {
+		name           string
+		apiURL         string
+		wantErrContain string
+	}{
+		{
+			name: "default gitlab client",
+		},
+		{
+			name:   "custom api url",
+			apiURL: "https://gitlab.example.com/api/v4",
+		},
+		{
+			name:           "invalid api url",
+			apiURL:         "://bad-url",
+			wantErrContain: "missing protocol scheme",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gl := gitLabConfig{
+				personalAccessToken: "token",
+				APIURL:              tt.apiURL,
+			}
+			client, err := gl.newClient()
+			if tt.wantErrContain != "" {
+				assert.ErrorContains(t, err, tt.wantErrContain)
+				return
+			}
+			assert.NilError(t, err)
+			assert.Assert(t, client != nil)
 		})
 	}
 }

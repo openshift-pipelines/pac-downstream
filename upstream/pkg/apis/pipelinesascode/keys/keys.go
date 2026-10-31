@@ -1,5 +1,5 @@
 /*
-CoCopyright 2022 Red Hat
+Copyright 2022 Red Hat
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -62,7 +62,6 @@ const (
 	LogURL                 = pipelinesascode.GroupName + "/log-url"
 	ExecutionOrder         = pipelinesascode.GroupName + "/execution-order"
 	SCMReportingPLRStarted = pipelinesascode.GroupName + "/scm-reporting-plr-started"
-	SecretCreated          = pipelinesascode.GroupName + "/secret-created"
 	CloneURL               = pipelinesascode.GroupName + "/clone-url"
 	// AutoTrustedProviderHostnames annotates the controller ConfigMap with the
 	// hostnames the controller learnt on its own, so that it can tell them apart
@@ -74,7 +73,9 @@ const (
 	GithubPrivateKey     = "github-private-key"
 	ResultsRecordSummary = "results.tekton.dev/recordSummaryAnnotations"
 
-	SpanContextAnnotation = "tekton.dev/pipelinerunSpanContext"
+	SpanContextAnnotation        = "tekton.dev/pipelinerunSpanContext"
+	BitbucketProjectKey          = pipelinesascode.GroupName + "/bitbucket-project-key"
+	BitbucketRequiredBuildParent = pipelinesascode.GroupName + "/bitbucket-required-build-parent"
 )
 
 var ParamsRe = regexp.MustCompile(`{{([^}]{2,})}}`)

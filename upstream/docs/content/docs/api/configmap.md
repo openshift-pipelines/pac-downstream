@@ -157,12 +157,45 @@ custom-console-url-pr-tasklog: "https://url/ns/{{ namespace }}/{{ pr }}/logs/{{ 
 
 {{< /param >}}
 
+{{< param name="custom-console-url-pr-steplog" type="string" id="param-custom-console-url-pr-steplog" >}}
+Defines the template URL for the logs of a single step, used by the step
+breakdown of the status report. The template must start with `http://` or
+`https://`. Supports variables: `{{ namespace }}`,
+`{{ pr }}`, `{{ task }}`, `{{ step }}`. When it is not set the step breakdown
+links to the task logs instead.
+
+```yaml
+custom-console-url-pr-steplog: "https://url/ns/{{ namespace }}/{{ pr }}/logs/{{ task }}/{{ step }}"
+```
+
+{{< /param >}}
+
 {{< param name="custom-console-url-namespace" type="string" id="param-custom-console-url-namespace" >}}
 Defines the template URL for namespace-level views in your custom console.
 Supports the `{{ namespace }}` variable.
 
 ```yaml
 custom-console-url-namespace: "https://url/ns/{{ namespace }}"
+```
+
+{{< /param >}}
+
+### Status Reporting
+
+{{< param name="status-show-steps" type="boolean" default="true" id="param-status-show-steps" >}}
+Controls whether the status reported back to the Git provider lists the steps
+of every task under the task itself. Each step links to its own logs on the
+console, which is useful when a task is built out of several StepActions and
+the task name alone does not say what ran.
+
+Steps that were skipped because an earlier step failed are left out, so a
+failing task shows the step that broke, and tasks that only have one step keep
+showing a single line. On GitHub, GitLab and Gitea the steps are nested in a
+collapsible block; the Bitbucket providers list them as extra rows because their
+comments do not render collapsible blocks.
+
+```yaml
+status-show-steps: "true"
 ```
 
 {{< /param >}}
@@ -377,10 +410,10 @@ skip-push-event-for-pr-commits: "true"
 
 ### API Retry
 
-{{< tech_preview "Provider API Retry for GitHub and GitLab" >}}
+{{< tech_preview "Provider API Retry for GitHub, GitLab, and Gitea/Forgejo" >}}
 
 {{< param name="enable-api-retry" type="boolean" default="false" id="param-enable-api-retry" >}}
-Enables retrying GitHub and GitLab API requests when Pipelines-as-Code
+Enables retrying GitHub, GitLab, and Gitea/Forgejo API requests when Pipelines-as-Code
 encounters a temporary provider failure. This includes rate limits, temporary
 server errors, and selected network failures.
 
@@ -393,11 +426,19 @@ The setting is disabled by default. Enabling it affects API operations made
 while processing an event, including temporary clients and GitHub App setup.
 
 When disabled, the GitLab client keeps the retry behaviour built into the
-upstream GitLab Go client, and the GitHub client performs no retries.
+upstream GitLab Go client, the GitHub client performs no retries, and the
+Gitea/Forgejo client performs no retries except for a single specific transient
+error.
 
 Pipelines-as-Code only repeats an operation when it can do so safely. It does
 not repeat provider changes after an uncertain network or server failure when
 doing so could create duplicate comments, statuses, or other mutations.
+
+Independently of this setting, Pipelines-as-Code always retries a GitHub
+check-run update that returns a 404 when the check-run id comes from the
+annotation on a PipelineRun. Another reconcile may have created that check run
+moments earlier and GitHub can still report it as missing, so the update is
+retried a few times with a short backoff before the error is reported.
 
 ```yaml
 enable-api-retry: "false"
