@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/google/go-github/v91/github"
+	"github.com/google/go-github/v93/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
 	ghprovider "github.com/openshift-pipelines/pipelines-as-code/pkg/provider/github"
@@ -35,7 +35,7 @@ func PushFilesToRef(ctx context.Context, client *github.Client, commitMessage, b
 		content := base64.StdEncoding.EncodeToString([]byte(fcontent))
 		encoding := "base64"
 		blob, _, err := client.Git.CreateBlob(ctx, owner, repo, github.Blob{
-			Content:  &content,
+			Content:  content,
 			Encoding: &encoding,
 		})
 		if err != nil {
@@ -128,9 +128,21 @@ type PRTest struct {
 
 func (g *PRTest) RunPullRequest(ctx context.Context, t *testing.T) {
 	targetNS := names.SimpleNameGenerator.RestrictLengthWithRandomSuffix("pac-e2e-ns")
+	var (
+		runcnx *params.Run
+		opts   options.E2E
+		ghcnx  *ghprovider.Provider
+		err    error
+	)
 
-	ctx, runcnx, opts, ghcnx, err := Setup(ctx, g.GHE, g.Webhook)
-	assert.NilError(t, err)
+	if g.Cnx == nil || g.Provider == nil || g.Options == (options.E2E{}) {
+		ctx, runcnx, opts, ghcnx, err = Setup(ctx, g.GHE, g.Webhook)
+		assert.NilError(t, err)
+	} else {
+		runcnx = g.Cnx
+		opts = g.Options
+		ghcnx = g.Provider
+	}
 	g.Logger = runcnx.Clients.Log
 	g.Cnx = runcnx
 	settings := g.Options.Settings

@@ -16,7 +16,7 @@ import (
 	// ghinstallation.Transport.InstallationTokenOptions is typed against this
 	// specific go-github major version; keep in sync with its go.mod.
 	githubv88 "github.com/google/go-github/v88/github"
-	"github.com/google/go-github/v91/github"
+	"github.com/google/go-github/v93/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/gitclient"
@@ -714,9 +714,18 @@ func (v *Provider) processEvent(ctx context.Context, event *info.Event, eventInt
 		processedEvent.HeadBranch = gitEvent.GetPullRequest().Head.GetRef()
 		processedEvent.BaseURL = gitEvent.GetPullRequest().Base.GetRepo().GetHTMLURL()
 		processedEvent.HeadURL = gitEvent.GetPullRequest().Head.GetRepo().GetHTMLURL()
-		processedEvent.Sender = gitEvent.GetPullRequest().GetUser().GetLogin()
+		// Attribute a push to the user who pushed, so a trusted maintainer
+		// updating a fork pull request authorizes the run. Every other action
+		// keeps the pull request author.
+		sender := gitEvent.GetPullRequest().GetUser()
+		if gitEvent.GetAction() == "synchronize" {
+			if actor := gitEvent.GetSender(); actor.GetLogin() != "" {
+				sender = actor
+			}
+		}
+		v.userType = sender.GetType()
+		processedEvent.Sender = sender.GetLogin()
 		processedEvent.EventType = event.EventType
-		v.userType = gitEvent.GetPullRequest().GetUser().GetType()
 
 		if gitEvent.Action != nil && provider.Valid(*gitEvent.Action, pullRequestLabelEvent) {
 			processedEvent.EventType = string(triggertype.PullRequestLabeled)
