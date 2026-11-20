@@ -5,7 +5,9 @@ weight: 2
 
 This page covers how to configure Pipelines-as-Code with a GitHub webhook. Use this method when you cannot create a GitHub App, for example in environments where App installation is restricted.
 
-Because a webhook integration does not use the [GitHub CheckRun API](https://docs.github.com/en/rest/guides/getting-started-with-the-checks-api), Pipelines-as-Code reports task status as a comment on the pull request instead of through the **Checks** tab. GitOps comments such as `/retest` and `/ok-to-test` are also not supported. To restart CI, create a new commit:
+Because a webhook integration does not use the [GitHub CheckRun API](https://docs.github.com/en/rest/guides/getting-started-with-the-checks-api), Pipelines-as-Code reports task status as a comment on the pull request instead of through the **Checks** tab. The `/retest` and `/ok-to-test` commands work in pull-request comments with both GitHub webhooks and GitHub Apps. Commands on commit comments, used for pushed-commit runs, require the App integration. The **Re-run** button on a GitHub check run also requires the App.
+
+To trigger a new run without using a GitOps command, create a new commit:
 
 ```console
 git commit --amend -a --no-edit && git push --force-with-lease origin branchname
@@ -159,6 +161,41 @@ spec:
       name: "github-webhook-config"
       # Set this if you have a different key for your secret
       # key: "webhook.secret"
+```
+
+With the secret and the Repository CR in place, every event uses your personal access token:
+
+```mermaid
+sequenceDiagram
+%% title: How a GitHub webhook event uses the token from the Repository secret
+%% autoplay
+  participant GH as GitHub
+  participant Ctrl as Controller
+  participant Sec as github-webhook-config
+  participant Run as PipelineRun
+  participant W as Watcher
+  GH->>Ctrl: webhook
+  Ctrl->>Ctrl: find Repository CR
+  Ctrl->>Sec: read provider.token and webhook.secret
+  Ctrl->>Ctrl: verify signature
+  Ctrl->>GH: check token expiry
+  Ctrl->>Run: create
+  Ctrl->>GH: commit status pending
+  Run->>W: finished
+  W->>GH: commit status
+  W->>GH: comment on the pull request
+
+%% play: Pull request
+%% GH -> Ctrl : event | GitHub sends the event, signed with the secret you set on the webhook
+%% Ctrl -> Ctrl | The controller finds the Repository CR that matches the URL
+%% Ctrl -> Sec | and reads the token and the webhook secret from the secret it references
+%% Ctrl -> Ctrl : HMAC | A payload without a valid signature is refused
+%% Ctrl -> GH : token | An expired personal access token stops the event here
+%% Ctrl -> Run
+%% Ctrl -> GH : pending | Without the Checks API, status goes through the commit status API
+%% Run -> W
+%% W -> GH : success
+%% W -> GH : comment | and a summary is posted as a comment on the pull request
 ```
 
 ## Notes
