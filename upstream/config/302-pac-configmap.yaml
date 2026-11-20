@@ -182,6 +182,11 @@ data:
   # Default: false
   require-ok-to-test-sha: "false"
 
+  # Enable the PipelineRun follow-ups, the on-pipelinerun annotation chaining
+  # PipelineRuns after their dependencies. Tech preview.
+  # Default: false
+  enable-follow-up-runs: "false"
+
   # Enable retrying Git provider API requests when hitting rate limits (429,
   # or 403 with rate limit headers on GitHub) or transient server errors.
   # Retries use exponential backoff with jitter and honor the Retry-After and
@@ -229,6 +234,18 @@ data:
   # custom-console-url-namespace: https://url/ns/{{ namespace }}
   # custom-console-url-pr-details: https://url/ns/{{ namespace }}/{{ pr }}
   # custom-console-url-pr-tasklog: https://url/ns/{{ namespace }}/{{ pr }}/logs/{{ task }}
+  # custom-console-url-pr-steplog: https://url/ns/{{ namespace }}/{{ pr }}/logs/{{ task }}/{{ step }}
+
+  # Add the breakdown of the steps of every task to the status reported back to
+  # the Git provider. The steps are listed under their task with a link to
+  # their logs on the console, which lets you jump straight to the logs of a
+  # step of a task using StepActions. Set it to false to only report the tasks.
+  status-show-steps: "true"
+
+  # Enable or disable the feature to support edited comments events.
+  # When enabled, edited comments will be processed and PipelineRuns will be triggered on them.
+  # Default: false
+  support-edited-comments: "false"
 
 kind: ConfigMap
 metadata:

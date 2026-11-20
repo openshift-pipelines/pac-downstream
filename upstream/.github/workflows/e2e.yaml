@@ -126,7 +126,24 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-ko-
 
-      - uses: ko-build/setup-ko@61b4d1d396f5b2e7d6bb6fefdce3dc38d1a13445 # v0.10
+      # The gotestsum version must match the one hack/gh-workflow-ci.sh
+      # installs, otherwise the cached binary is ignored and downloaded again.
+      - name: Cache E2E tool binaries
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
+        with:
+          path: |
+            ~/go/bin/ko
+            ~/go/bin/minica
+            ~/go/bin/gotestsum
+          key: ${{ runner.os }}-${{ runner.arch }}-e2e-tools-ko-v0.19.1-minica-v1.1.0-gotestsum-1.13.0
+
+      # Install from the Go module proxy, GitHub release downloads get
+      # throttled for anonymous clients during GitHub incidents.
+      - name: Install ko and minica
+        run: | # zizmor: ignore[github-env]
+          [[ -x "${HOME}/go/bin/ko" ]] || go install github.com/google/ko@v0.19.1
+          [[ -x "${HOME}/go/bin/minica" ]] || go install github.com/jsha/minica@v1.1.0
+          echo "${HOME}/go/bin" >> "$GITHUB_PATH"
 
       # Start binary build in background as soon as possible so we can optimize
       # the run of e2e when it's start later on
@@ -139,16 +156,15 @@ jobs:
         uses: jaxxstorm/action-install-gh-release@b82b2052fdf822192f2119b7e289a6f63e668bc8 # v4.0.0
         with:
           repo: chmouel/gosmee
+          tag: v0.32.1
+          cache: enable
 
       - name: Install Snazy
         uses: jaxxstorm/action-install-gh-release@b82b2052fdf822192f2119b7e289a6f63e668bc8 # v4.0.0
         with:
           repo: chmouel/snazy
-
-      - name: Install minica
-        run: | # zizmor: ignore[github-env]
-          go install github.com/jsha/minica@latest
-          echo "${HOME}/go/bin" >> "$GITHUB_PATH"
+          tag: 0.59.1
+          cache: enable
 
       - name: Clone startpaac
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -291,6 +307,8 @@ jobs:
         # Remove the old label check which is no longer relevant for triggering.
         if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request_target' }}
         env:
+          # Authenticates tool downloads from GitHub releases (gotestsum).
+          GH_TOKEN: ${{ github.token }}
           TEST_PROVIDER: ${{ matrix.provider }}
           TEST_GITEA_SMEEURL: ${{ steps.gosmee-url.outputs.url }}
           TEST_GITLAB_SMEEURL: ${{ steps.gosmee-gitlab-url.outputs.url }}
@@ -326,6 +344,40 @@ jobs:
         with:
           name: logs-e2e-tests-${{ matrix.provider }}
           path: /tmp/logs
+
+  cleanup-e2e-leftovers:
+    name: Clean up E2E leftovers
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    needs: [e2e-tests]
+    if: ${{ always() && github.ref_name == 'main' && github.event_name == 'schedule' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Close old E2E PRs and delete old E2E branches and repositories
+        env:
+          E2E_CONFIG_YAML: ${{ secrets.E2E_CONFIG_YAML }}
+        run: |
+          cfg() { printf '%s\n' "$E2E_CONFIG_YAML" | yq -r "$1 // \"\""; }
+          for key in .github.token .github_enterprise.token .github_enterprise.webhook_token; do
+            echo "::add-mask::$(cfg "$key")"
+          done
+          TEST_GITHUB_API_URL=$(cfg .github.api_url)
+          TEST_GITHUB_TOKEN=$(cfg .github.token)
+          TEST_GITHUB_REPO_OWNER_GITHUBAPP=$(cfg .github.repo_owner_githubapp)
+          TEST_GITHUB_REPO_OWNER_WEBHOOK=$(cfg .github.repo_owner_webhook)
+          TEST_GITHUB_SECOND_API_URL=$(cfg .github_enterprise.api_url)
+          TEST_GITHUB_SECOND_TOKEN=$(cfg .github_enterprise.token)
+          TEST_GITHUB_SECOND_REPO_OWNER_GITHUBAPP=$(cfg .github_enterprise.repo_owner_githubapp)
+          TEST_GITHUB_SECOND_WEBHOOK_ORG=$(cfg .github_enterprise.webhook_org)
+          TEST_GITHUB_SECOND_WEBHOOK_TOKEN=$(cfg .github_enterprise.webhook_token)
+          export TEST_GITHUB_API_URL TEST_GITHUB_TOKEN TEST_GITHUB_REPO_OWNER_GITHUBAPP \
+            TEST_GITHUB_REPO_OWNER_WEBHOOK TEST_GITHUB_SECOND_API_URL TEST_GITHUB_SECOND_TOKEN \
+            TEST_GITHUB_SECOND_REPO_OWNER_GITHUBAPP TEST_GITHUB_SECOND_WEBHOOK_ORG \
+            TEST_GITHUB_SECOND_WEBHOOK_TOKEN
+          ./hack/cleanup-github-e2e.py --force
 
   notify-slack:
     name: Notify Slack on Failures

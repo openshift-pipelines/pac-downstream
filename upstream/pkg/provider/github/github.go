@@ -16,7 +16,7 @@ import (
 
 	"github.com/gobwas/glob"
 	"github.com/golang-jwt/jwt/v4"
-	"github.com/google/go-github/v91/github"
+	"github.com/google/go-github/v93/github"
 	"github.com/jonboulle/clockwork"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
@@ -761,8 +761,10 @@ func (v *Provider) populateRunEventFromPullRequest(runevent *info.Event, pr *git
 	// Make sure to use the Base for Default BaseBranch or there would be a potential hijack
 	runevent.DefaultBranch = pr.GetBase().GetRepo().GetDefaultBranch()
 	runevent.URL = pr.GetBase().GetRepo().GetHTMLURL()
-	runevent.SHA = pr.GetHead().GetSHA()
-	runevent.SHAURL = fmt.Sprintf("%s/commit/%s", pr.GetHTMLURL(), pr.GetHead().GetSHA())
+	if runevent.SHA == "" {
+		runevent.SHA = pr.GetHead().GetSHA()
+	}
+	runevent.SHAURL = fmt.Sprintf("%s/commit/%s", pr.GetHTMLURL(), runevent.SHA)
 	runevent.PullRequestTitle = pr.GetTitle()
 
 	// TODO: check if we really need this

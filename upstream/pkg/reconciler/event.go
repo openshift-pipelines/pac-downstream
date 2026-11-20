@@ -52,6 +52,15 @@ func (r *Reconciler) detectProvider(ctx context.Context, logger *zap.SugaredLogg
 				return nil, nil, err
 			}
 		}
+		// scope the GitHub App token to the triggering repository, like the
+		// event-time token: the watcher hands it to created runs (follow-ups)
+		// through the git auth secret, so it must not be installation-wide.
+		// Set after the bootstrap token, like at event time, so SetClient can
+		// look up the configured extra repositories before it scopes the
+		// final token, which replaces the bootstrap one.
+		if event.Repository != "" {
+			gh.RepositoryNames = []string{event.Repository}
+		}
 		provider = gh
 	case "gitlab":
 		provider = &gitlab.Provider{}
@@ -84,6 +93,9 @@ func buildEventFromPipelineRun(pr *tektonv1.PipelineRun) *info.Event {
 	event.SHATitle = prAnno[keys.ShaTitle]
 	event.SHAURL = prAnno[keys.ShaURL]
 
+	event.HeadBranch = prAnno[keys.SourceBranch]
+	event.Sender = prAnno[keys.Sender]
+
 	prNumber := prAnno[keys.PullRequest]
 	if prNumber != "" {
 		event.PullRequestNumber, _ = strconv.Atoi(prNumber)
@@ -115,6 +127,9 @@ func buildEventFromPipelineRun(pr *tektonv1.PipelineRun) *info.Event {
 	if projectID, ok := prAnno[keys.TargetProjectID]; ok {
 		id, _ := strconv.ParseInt(projectID, 10, 64)
 		event.TargetProjectID = id
+	}
+	if projectKey, ok := prAnno[keys.BitbucketProjectKey]; ok {
+		event.BBDCProjectKey = projectKey
 	}
 	return event
 }

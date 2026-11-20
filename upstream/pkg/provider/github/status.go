@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/go-github/v91/github"
+	"github.com/google/go-github/v93/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/action"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/kubeinteraction"
@@ -46,7 +46,22 @@ const taskStatusTemplate = `
 <td>{{ formatCondition $taskrun.PipelineRunTaskRunStatus.Status.Conditions }}</td>
 <td>{{ formatDuration $taskrun.PipelineRunTaskRunStatus.Status.StartTime $taskrun.PipelineRunTaskRunStatus.Status.CompletionTime }}</td><td>
 
+{{- if $taskrun.Steps }}
+<details><summary>{{ $taskrun.ConsoleLogHTMLLink }}</summary>
+<table>
+{{- range $step := $taskrun.Steps }}
+<tr><td>{{ $step.Status }}</td><td>{{ $step.Duration }}</td><td>
+
+{{ $step.ConsoleLogURL }}
+
+</td></tr>
+{{- end }}
+</table>
+</details>
+{{- else }}
+
 {{ $taskrun.ConsoleLogURL }}
+{{- end }}
 
 </td></tr>
 {{- end }}
