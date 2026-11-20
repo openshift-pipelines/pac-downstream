@@ -1,10 +1,12 @@
 package webhook
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"testing"
 
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/cli"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/cli/prompt"
 	ghtesthelper "github.com/openshift-pipelines/pipelines-as-code/pkg/test/github"
@@ -111,6 +113,12 @@ func TestCreate(t *testing.T) {
 		_, _ = fmt.Fprint(w, `{"status": "forbidden"}`)
 	})
 
+	// webhook response is successful HTTP but not the created status the CLI expects
+	mux.HandleFunc("/repos/pac/notcreated/hooks", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprint(w, `{"status": "ok"}`)
+	})
+
 	tests := []struct {
 		name      string
 		wantErr   bool
@@ -128,6 +136,12 @@ func TestCreate(t *testing.T) {
 			repoName:  "invalid",
 			wantErr:   true,
 		},
+		{
+			name:      "webhook returned non created status",
+			repoOwner: "pac",
+			repoName:  "notcreated",
+			wantErr:   true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -142,7 +156,60 @@ func TestCreate(t *testing.T) {
 			err := gh.create(ctx)
 			if !tt.wantErr {
 				assert.NilError(t, err)
+			} else {
+				assert.Assert(t, err != nil)
 			}
+		})
+	}
+}
+
+func TestNewGHClientByToken(t *testing.T) {
+	tests := []struct {
+		name           string
+		apiURL         string
+		wantBaseURL    string
+		wantUploadURL  string
+		wantErrContain string
+	}{
+		{
+			name:          "default api url when empty",
+			wantBaseURL:   "https://api.github.com/",
+			wantUploadURL: "https://uploads.github.com/",
+		},
+		{
+			name:          "default api url when public api configured",
+			apiURL:        keys.PublicGithubAPIURL,
+			wantBaseURL:   "https://api.github.com/",
+			wantUploadURL: "https://uploads.github.com/",
+		},
+		{
+			name:          "enterprise api url",
+			apiURL:        "https://ghe.example.com/api/v3/",
+			wantBaseURL:   "https://ghe.example.com/api/v3/",
+			wantUploadURL: "https://ghe.example.com/api/v3/api/uploads/",
+		},
+		{
+			name:           "invalid enterprise api url",
+			apiURL:         "://bad-url",
+			wantErrContain: "missing protocol scheme",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gh := gitHubConfig{
+				personalAccessToken: "token",
+				APIURL:              tt.apiURL,
+			}
+
+			client, err := gh.newGHClientByToken(context.Background())
+			if tt.wantErrContain != "" {
+				assert.ErrorContains(t, err, tt.wantErrContain)
+				return
+			}
+			assert.NilError(t, err)
+			assert.Equal(t, tt.wantBaseURL, client.BaseURL())
+			assert.Equal(t, tt.wantUploadURL, client.UploadURL())
 		})
 	}
 }

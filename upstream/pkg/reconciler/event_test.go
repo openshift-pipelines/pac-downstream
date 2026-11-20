@@ -2,11 +2,13 @@ package reconciler
 
 import (
 	"context"
+	stderrors "errors"
 	"testing"
 
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/kubeinteraction"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/github"
 	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 	"go.uber.org/zap"
 	zapobserver "go.uber.org/zap/zaptest/observer"
@@ -29,6 +31,7 @@ func TestBuildEventFromPipelineRun(t *testing.T) {
 		SourceProjectID:   1234,
 		TargetProjectID:   2345,
 		CloneURL:          "https://url/clone",
+		BBDCProjectKey:    "project-key",
 	}
 	tests := []struct {
 		name        string
@@ -67,6 +70,9 @@ func TestBuildEventFromPipelineRun(t *testing.T) {
 						keys.Branch:          "branch",
 						keys.State:           kubeinteraction.StateStarted,
 						keys.PullRequest:     "1234",
+
+						// bitbucket
+						keys.BitbucketProjectKey: "project-key",
 					},
 				},
 			},
@@ -81,6 +87,7 @@ func TestBuildEventFromPipelineRun(t *testing.T) {
 			assert.Equal(t, event.SHATitle, tt.event.SHATitle)
 			assert.Equal(t, event.SourceProjectID, tt.event.SourceProjectID)
 			assert.Equal(t, event.TargetProjectID, tt.event.TargetProjectID)
+			assert.Equal(t, event.BBDCProjectKey, tt.event.BBDCProjectKey)
 			assert.Equal(t, event.PullRequestNumber, tt.event.PullRequestNumber)
 			assert.Equal(t, event.CloneURL, tt.event.CloneURL)
 		})
@@ -91,11 +98,23 @@ func TestDetectProvider(t *testing.T) {
 	observer, _ := zapobserver.New(zap.InfoLevel)
 	fakelogger := zap.New(observer).Sugar()
 	tests := []struct {
-		name         string
-		missTheLabel bool
-		annotation   string
-		errStr       string
+		name          string
+		missTheLabel  bool
+		annotation    string
+		repository    string
+		errStr        string
+		wantRepoNames []string
 	}{
+		{
+			name:          "github token scoped to the triggering repository",
+			annotation:    "github",
+			repository:    "repo",
+			wantRepoNames: []string{"repo"},
+		},
+		{
+			name:       "github without repository annotation is not scoped by name",
+			annotation: "github",
+		},
 		{
 			name:       "known provider",
 			annotation: "gitlab",
@@ -109,12 +128,12 @@ func TestDetectProvider(t *testing.T) {
 		{
 			name:       "unknown provider",
 			annotation: "batman",
-			errStr:     "failed to detect provider for pipelinerun: test : unknown provider",
+			errStr:     `provider not configured: unknown provider "batman" for pipelinerun test`,
 		},
 		{
 			name:         "no label",
 			missTheLabel: true,
-			errStr:       "failed to detect git provider for pipleinerun test : git-provider label not found",
+			errStr:       "provider not configured: git-provider annotation not found on pipelinerun test",
 		},
 	}
 	for _, tt := range tests {
@@ -128,18 +147,24 @@ func TestDetectProvider(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "test",
 						Annotations: map[string]string{
-							keys.GitProvider: tt.annotation,
+							keys.GitProvider:   tt.annotation,
+							keys.URLRepository: tt.repository,
 						},
 					},
 				}
 			}
 			r := Reconciler{}
-			_, _, err := r.detectProvider(context.Background(), fakelogger, pr)
+			vcx, _, err := r.detectProvider(context.Background(), fakelogger, pr)
 			if tt.errStr == "" {
 				assert.NilError(t, err)
+				if gh, ok := vcx.(*github.Provider); ok {
+					assert.DeepEqual(t, tt.wantRepoNames, gh.RepositoryNames)
+				}
 				return
 			}
 			assert.Error(t, err, tt.errStr)
+			assert.Assert(t, stderrors.Is(err, ErrProviderNotConfigured),
+				"a missing or unknown provider annotation must be classified as permanent")
 		})
 	}
 }
