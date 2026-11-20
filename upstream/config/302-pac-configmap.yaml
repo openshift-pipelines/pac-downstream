@@ -20,6 +20,28 @@ data:
   # The application name, you can customize this label. If using the Github App you will need to customize the label on the github app setting as well.
   application-name: "Pipelines as Code CI"
 
+  # Comma separated list of the hosted VCS hostnames this controller is allowed
+  # to send its Git provider credentials to, for example:
+  #
+  #   trusted-provider-hostnames: "ghe.example.com,gitlab.example.com"
+  #
+  # While this key is empty, the controller manages the policy: the public SaaS
+  # instances (github.com, gitlab.com, bitbucket.org, gitea.com, codeberg.org)
+  # stay trusted and the hostname of every webhook whose signature was verified
+  # is recorded in the auto-trusted-provider-hostnames ConfigMap annotation.
+  #
+  # A non-empty list is authoritative for every hostname, the public ones
+  # included, and the controller stops learning hosts. Listing only your own
+  # instance is how you forbid this controller from talking to public SaaS.
+  #
+  # The allowlist gates the GitHub provider today; the other providers are being
+  # moved onto it.
+  #
+  # Set it explicitly when using incoming webhooks, they carry no signature and
+  # can't be used to establish that trust, and when this ConfigMap is managed by
+  # GitOps tooling that prunes controller-owned annotations.
+  trusted-provider-hostnames: ""
+
   # Whether to automatically create a secret with the token to be use by git-clone
   secret-auto-create: "true"
 
@@ -160,6 +182,32 @@ data:
   # Default: false
   require-ok-to-test-sha: "false"
 
+  # Enable the PipelineRun follow-ups, the on-pipelinerun annotation chaining
+  # PipelineRuns after their dependencies. Tech preview.
+  # Default: false
+  enable-follow-up-runs: "false"
+
+  # Enable retrying Git provider API requests when hitting rate limits (429,
+  # or 403 with rate limit headers on GitHub) or transient server errors.
+  # Retries use exponential backoff with jitter and honor the Retry-After and
+  # X-RateLimit-Reset headers, giving up when the reset is further away than
+  # api-retry-max-wait-seconds.
+  # When false, the GitLab client keeps the retry behaviour of the upstream
+  # GitLab Go client and the GitHub client does not retry.
+  # Default: false
+  enable-api-retry: "false"
+
+  # Maximum number of attempts (initial request included) when enable-api-retry
+  # is true. Values lower than 1 fall back to the default.
+  # Default: 4
+  api-retry-max-attempts: "4"
+
+  # Maximum time in seconds to wait between retries when enable-api-retry is
+  # true. If the provider rate limit reset is further away than this, the
+  # request fails instead of blocking.
+  # Default: 120
+  api-retry-max-wait-seconds: "120"
+
   # When enabled, this option prevents duplicate pipeline runs when a commit appears in
   # both a push event and a pull request. If a push event comes from a commit that is
   # part of an open pull request, the push event will be skipped as it would create
@@ -186,6 +234,18 @@ data:
   # custom-console-url-namespace: https://url/ns/{{ namespace }}
   # custom-console-url-pr-details: https://url/ns/{{ namespace }}/{{ pr }}
   # custom-console-url-pr-tasklog: https://url/ns/{{ namespace }}/{{ pr }}/logs/{{ task }}
+  # custom-console-url-pr-steplog: https://url/ns/{{ namespace }}/{{ pr }}/logs/{{ task }}/{{ step }}
+
+  # Add the breakdown of the steps of every task to the status reported back to
+  # the Git provider. The steps are listed under their task with a link to
+  # their logs on the console, which lets you jump straight to the logs of a
+  # step of a task using StepActions. Set it to false to only report the tasks.
+  status-show-steps: "true"
+
+  # Enable or disable the feature to support edited comments events.
+  # When enabled, edited comments will be processed and PipelineRuns will be triggered on them.
+  # Default: false
+  support-edited-comments: "false"
 
 kind: ConfigMap
 metadata:

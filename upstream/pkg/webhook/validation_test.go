@@ -2,6 +2,9 @@ package webhook
 
 import (
 	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
@@ -39,6 +42,7 @@ func TestReconcilerAdmit(t *testing.T) {
 		allowed bool
 		result  string
 		sars    []*authorizationv1.SubjectAccessReview
+		setup   func(*v1alpha1.Repository)
 	}{
 		{
 			name: "allow",
@@ -59,6 +63,15 @@ func TestReconcilerAdmit(t *testing.T) {
 			}),
 			allowed: false,
 			result:  "URL scheme must be http or https",
+		},
+		{
+			name: "missing url",
+			repo: testnewrepo.NewRepo(testnewrepo.RepoTestcreationOpts{
+				Name:             "test-run",
+				InstallNamespace: "namespace",
+			}),
+			allowed: false,
+			result:  "URL must be set",
 		},
 		{
 			name: "no http or https for global namespace allowed",
@@ -268,6 +281,20 @@ func TestReconcilerAdmit(t *testing.T) {
 			},
 			allowed: true,
 		},
+		{
+			name: "reject zero concurrency limit",
+			repo: testnewrepo.NewRepo(testnewrepo.RepoTestcreationOpts{
+				Name:             "test-run",
+				InstallNamespace: "namespace",
+				URL:              "https://github.com/owner/new-repo",
+			}),
+			setup: func(repo *v1alpha1.Repository) {
+				zero := 0
+				repo.Spec.ConcurrencyLimit = &zero
+			},
+			allowed: false,
+			result:  "concurrency limit must be greater than 0",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -298,6 +325,9 @@ func TestReconcilerAdmit(t *testing.T) {
 			if len(tt.sars) > 0 {
 				username = tt.sars[0].Spec.User
 			}
+			if tt.setup != nil {
+				tt.setup(tt.repo)
+			}
 
 			userRepo, err := json.Marshal(tt.repo)
 			assert.NilError(t, err)
@@ -312,6 +342,44 @@ func TestReconcilerAdmit(t *testing.T) {
 			if !res.Allowed {
 				assert.Equal(t, res.Result.Message, tt.result)
 			}
+		})
+	}
+}
+
+func TestValidateRepositoryURLGitHubEnterpriseDetection(t *testing.T) {
+	tests := []struct {
+		name           string
+		path           string
+		serverHeader   string
+		wantErrContain string
+	}{
+		{
+			name:           "github enterprise header rejects subgroup",
+			path:           "/owner/repo/subgroup",
+			serverHeader:   "GitHub.com",
+			wantErrContain: "found 3 path segments",
+		},
+		{
+			name:         "non github enterprise header allows subgroup",
+			path:         "/owner/repo/subgroup",
+			serverHeader: "nginx",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Server", tt.serverHeader)
+				w.WriteHeader(http.StatusOK)
+			}))
+			defer server.Close()
+
+			err := validateRepositoryURL(fmt.Sprintf("%s%s", server.URL, tt.path), "")
+			if tt.wantErrContain != "" {
+				assert.ErrorContains(t, err, tt.wantErrContain)
+				return
+			}
+			assert.NilError(t, err)
 		})
 	}
 }

@@ -1,5 +1,5 @@
 TARGET_NAMESPACE=pipelines-as-code
-HUGO_VERSION=0.146.0
+HUGO_VERSION=0.166.0
 HTMLTEST_VERSION=0.17.0
 GOLANGCI_LINT=golangci-lint
 GOFUMPT=gofumpt
@@ -26,7 +26,7 @@ GIT_LS_FILES = git ls-files -z -- $(1) | xargs -0 -r $(2)
 PY_PATTERNS := '*.py' ':!vendor/*'
 SH_PATTERNS := 'hack/*.sh' ':!vendor/*'
 YAML_PATTERNS := '*.yml' '*.yaml' ':!.vale/*' ':!docs/themes/*' ':!vendor/*' ':!.claude/skills/*'
-MD_PATTERNS := '*.md' ':!docs/themes/*' ':!.vale/*' ':!vendor/*' ':!.claude/skills/*'
+MD_PATTERNS := '*.md' ':!docs/themes/*' ':!docs/layouts/*' ':!.vale/*' ':!vendor/*' ':!.claude/skills/*'
 MD_YAML_PATTERNS := '*.md' '*.yml' '*.yaml' ':!docs/themes/*' ':!.vale/*' ':!vendor/*' ':!tmp/*' ':!.claude/skills/*'
 
 ifeq ($(PAC_VERSION),)
@@ -210,6 +210,11 @@ update-golden: ## run unit tests (updating golden files)
 update-schemas: ## update openapi schemas
 	@echo "Running update schemas..."
 	@./hack/update-schemas.sh
+
+.PHONY: generate-diagrams
+generate-diagrams: ## generate SVG and PNG ecosystem diagrams
+	@echo "Generating ecosystem diagrams..."
+	@python3 ./hack/generate-ecosystem-diagram.py
 
 .PHONY: generated
 generated: update-golden fumpt ## generate all files that needs to be generated

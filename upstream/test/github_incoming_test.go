@@ -7,17 +7,17 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/url"
 	"os"
 	"regexp"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/google/go-github/v85/github"
+	"github.com/google/go-github/v93/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
+	"github.com/openshift-pipelines/pipelines-as-code/test/pkg/configmap"
 	tgithub "github.com/openshift-pipelines/pipelines-as-code/test/pkg/github"
 	"github.com/openshift-pipelines/pipelines-as-code/test/pkg/payload"
 	repository "github.com/openshift-pipelines/pipelines-as-code/test/pkg/repository"
@@ -181,6 +181,10 @@ func TestGithubGHEAppIncomingNoMatchExactName(t *testing.T) {
 }
 
 func verifyIncomingWebhook(t *testing.T, randomedString, pipelinerunName string, entries map[string]string, targets []string, onWebhook bool, numberOfPR int) {
+	verifyIncomingWebhookWithCommitTitle(t, randomedString, pipelinerunName, entries, targets, onWebhook, numberOfPR, "")
+}
+
+func verifyIncomingWebhookWithCommitTitle(t *testing.T, randomedString, pipelinerunName string, entries map[string]string, targets []string, onWebhook bool, numberOfPR int, commitTitle string) {
 	ctx := context.Background()
 	onGHE := true // All incoming webhook tests use GHE
 	ctx, runcnx, opts, ghprovider, err := tgithub.Setup(ctx, onGHE, onWebhook)
@@ -191,6 +195,11 @@ func verifyIncomingWebhook(t *testing.T, randomedString, pipelinerunName string,
 	}
 	logmsg := fmt.Sprintf("Testing %s with Github APPS integration on %s with targets %v", label, randomedString, targets)
 	runcnx.Clients.Log.Info(logmsg)
+
+	// An incoming webhook carries no provider signature, so the controller can
+	// never learn this host on its own: it has to be trusted explicitly.
+	defer configmap.TrustProviderHostname(ctx, t, runcnx,
+		tgithub.ControllerConfigMapName(onGHE), *ghprovider.APIURL)()
 
 	var repoinfo *github.Repository
 	var dynamicRepoName string
@@ -240,6 +249,9 @@ func verifyIncomingWebhook(t *testing.T, randomedString, pipelinerunName string,
 	targetRefName := fmt.Sprintf("refs/heads/%s", randomedString)
 
 	title := "TestGithubAppIncoming - " + randomedString
+	if commitTitle != "" {
+		title = commitTitle
+	}
 	sha, vref, err := tgithub.PushFilesToRef(ctx, ghprovider.Client(), title,
 		repoinfo.GetDefaultBranch(),
 		targetRefName,
@@ -277,10 +289,6 @@ func verifyIncomingWebhook(t *testing.T, randomedString, pipelinerunName string,
 		req, err = http.NewRequestWithContext(ctx, http.MethodPost, incomingURL, strings.NewReader(string(jsonData)))
 		assert.NilError(t, err)
 		req.Header.Add("Content-Type", "application/json")
-	}
-	if onGHE {
-		urlParse, _ := url.Parse(*ghprovider.APIURL)
-		req.Header.Add("X-GitHub-Enterprise-Host", urlParse.Host)
 	}
 	assert.NilError(t, err)
 	httpResp, err := client.Do(req)
@@ -356,6 +364,11 @@ func TestGithubGHEAppIncomingDefaultBranchProvenance(t *testing.T) {
 	targetBranch := names.SimpleNameGenerator.RestrictLengthWithRandomSuffix("incoming-branch")
 
 	runcnx.Clients.Log.Infof("Testing incoming webhook with default_branch provenance on %s", randomedString)
+
+	// An incoming webhook carries no provider signature, so the controller can
+	// never learn this host on its own: it has to be trusted explicitly.
+	defer configmap.TrustProviderHostname(ctx, t, runcnx,
+		tgithub.ControllerConfigMapName(onGHE), *ghprovider.APIURL)()
 
 	repoinfo, resp, err := ghprovider.Client().Repositories.Get(ctx, opts.Organization, opts.Repo)
 	assert.NilError(t, err)
@@ -449,10 +462,6 @@ func TestGithubGHEAppIncomingDefaultBranchProvenance(t *testing.T) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, incomingURL, strings.NewReader(string(jsonData)))
 	assert.NilError(t, err)
 	req.Header.Add("Content-Type", "application/json")
-	if onGHE {
-		urlParse, _ := url.Parse(*ghprovider.APIURL)
-		req.Header.Add("X-GitHub-Enterprise-Host", urlParse.Host)
-	}
 
 	client := &http.Client{}
 	httpResp, err := client.Do(req)
@@ -494,6 +503,23 @@ func TestGithubGHEAppIncomingDefaultBranchProvenance(t *testing.T) {
 		"pipelinesascode.tekton.dev/event-type=incoming", "step-task",
 		*regexp.MustCompile(".*It's a Bird... It's a Plane... It's Superman"), "", 2, nil)
 	assert.NilError(t, err, "Error while checking the logs of the pods")
+}
+
+// TestGithubGHEAppIncomingSkipCI verifies that an incoming webhook creates a
+// PipelineRun even when the HEAD commit message contains a [skip ci] marker.
+// Incoming webhooks are explicit user-triggered runs and must not be suppressed
+// by the skip-CI convention.
+func TestGithubGHEAppIncomingSkipCI(t *testing.T) {
+	randomedString := names.SimpleNameGenerator.RestrictLengthWithRandomSuffix("pac-e2e-ns")
+
+	entries, err := payload.GetEntries(map[string]string{
+		".tekton/pipelinerun-incoming.yaml": "testdata/pipelinerun-incoming.yaml",
+	}, randomedString, randomedString, triggertype.Incoming.String(), map[string]string{})
+	assert.NilError(t, err)
+
+	verifyIncomingWebhookWithCommitTitle(t, randomedString, "pipelinerun-incoming", entries,
+		[]string{randomedString}, false, 1,
+		"chore: update readme [skip ci]")
 }
 
 // Local Variables:

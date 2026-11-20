@@ -19,7 +19,7 @@ fi
 
 TOPDIR=$(git rev-parse --show-toplevel)
 TMPDIR=${TOPDIR}/tmp
-HUGO_VERSION=${HUGO_VERSION:-0.146.0}
+HUGO_VERSION=${HUGO_VERSION:-0.166.0}
 HTMLTEST_VERSION=${HTMLTEST_VERSION:-0.17.0}
 HUGO_BIN=${TMPDIR}/hugo/hugo
 HTMLTEST_BIN=${TMPDIR}/htmltest/htmltest
@@ -187,6 +187,9 @@ rm -rf "${DOCS_BUILD_DIR}" "${TOPDIR}/docs/public"
 # Build Hugo site
 echo "==> Building Hugo documentation site..."
 "${HUGO_BIN}" build --gc --minify -s "${TOPDIR}/docs/" -d "${DOCS_BUILD_DIR}"
+
+# Verify Markdown output routes and canonical links.
+"${TOPDIR}/hack/check-markdown-output.sh" "${DOCS_BUILD_DIR}"
 
 # Run htmltest
 echo "==> Running htmltest link checker..."

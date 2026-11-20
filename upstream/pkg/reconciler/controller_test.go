@@ -2,6 +2,7 @@ package reconciler
 
 import (
 	"context"
+	"fmt"
 	"path"
 	"testing"
 
@@ -12,10 +13,12 @@ import (
 	testclient "github.com/openshift-pipelines/pipelines-as-code/pkg/test/clients"
 	tektontest "github.com/openshift-pipelines/pipelines-as-code/pkg/test/tekton"
 	pipelinev1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
+	tektonv1lister "github.com/tektoncd/pipeline/pkg/client/listers/pipeline/v1"
 	"go.uber.org/zap"
 	zapobserver "go.uber.org/zap/zaptest/observer"
 	"gotest.tools/v3/assert"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"knative.dev/pkg/controller"
 	rtesting "knative.dev/pkg/reconciler/testing"
 )
@@ -24,6 +27,34 @@ type fakeReconciler struct{}
 
 func (r *fakeReconciler) Reconcile(_ context.Context, _ string) error {
 	return nil
+}
+
+type errorPipelineRunLister struct {
+	err error
+}
+
+var _ tektonv1lister.PipelineRunLister = (*errorPipelineRunLister)(nil)
+
+func (l *errorPipelineRunLister) List(_ labels.Selector) ([]*pipelinev1.PipelineRun, error) {
+	return nil, l.err
+}
+
+func (l *errorPipelineRunLister) PipelineRuns(_ string) tektonv1lister.PipelineRunNamespaceLister {
+	return &errorPipelineRunNamespaceLister{err: l.err}
+}
+
+type errorPipelineRunNamespaceLister struct {
+	err error
+}
+
+var _ tektonv1lister.PipelineRunNamespaceLister = (*errorPipelineRunNamespaceLister)(nil)
+
+func (l *errorPipelineRunNamespaceLister) List(_ labels.Selector) ([]*pipelinev1.PipelineRun, error) {
+	return nil, l.err
+}
+
+func (l *errorPipelineRunNamespaceLister) Get(_ string) (*pipelinev1.PipelineRun, error) {
+	return nil, l.err
 }
 
 func TestCheckStateAndEnqueue(t *testing.T) {
@@ -52,6 +83,43 @@ func TestCheckStateAndEnqueue(t *testing.T) {
 	assert.Equal(t, impl.Name, "ValidationWebhook")
 	assert.Equal(t, impl.Concurrency, 2)
 	assert.Equal(t, catcher.FilterMessageSnippet("Adding to queue namespace/force-me").Len(), 1)
+}
+
+func TestCheckStateAndEnqueueSkipsObjects(t *testing.T) {
+	tests := []struct {
+		name string
+		obj  any
+	}{
+		{
+			name: "object without state annotation",
+			obj: &pipelinev1.PipelineRun{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        "force-me",
+					Namespace:   "namespace",
+					Annotations: map[string]string{},
+				},
+			},
+		},
+		{
+			name: "object without metadata accessor",
+			obj:  "not-a-kubernetes-object",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			observer, catcher := zapobserver.New(zap.DebugLevel)
+			logger := zap.New(observer).Sugar()
+			impl := controller.NewContext(context.TODO(), &fakeReconciler{}, controller.ControllerOptions{
+				WorkQueueName: "ValidationWebhook",
+				Logger:        logger.Named("ValidationWebhook"),
+			})
+
+			checkStateAndEnqueue(impl)(tt.obj)
+
+			assert.Equal(t, catcher.FilterMessageSnippet("Adding to queue").Len(), 0)
+		})
+	}
 }
 
 func TestCtrlOpts(t *testing.T) {
@@ -102,6 +170,7 @@ func TestEnqueueQueuedPipelineRuns(t *testing.T) {
 			},
 		}
 	}
+
 	startedPR := &pipelinev1.PipelineRun{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "already-running",
@@ -164,6 +233,53 @@ func TestEnqueueQueuedPipelineRuns(t *testing.T) {
 			for _, notWant := range tt.notLog {
 				assert.Equal(t, catcher.FilterMessageSnippet(notWant).Len(), 0, "did not expect %q to be enqueued", notWant)
 			}
+		})
+	}
+}
+
+func TestEnqueueQueuedPipelineRunsEdgeCases(t *testing.T) {
+	tests := []struct {
+		name    string
+		obj     any
+		lister  tektonv1lister.PipelineRunLister
+		wantLog string
+	}{
+		{
+			name: "non kubernetes object is ignored",
+			obj:  "not-a-repository",
+			lister: &errorPipelineRunLister{
+				err: fmt.Errorf("should not be used"),
+			},
+		},
+		{
+			name: "pipelineRun lister error is logged",
+			obj: &pacv1alpha1.Repository{
+				ObjectMeta: metav1.ObjectMeta{Name: "myrepo", Namespace: "test-ns"},
+			},
+			lister: &errorPipelineRunLister{
+				err: fmt.Errorf("cache list failed"),
+			},
+			wantLog: "failed to list queued pipelineRuns for repository test-ns/myrepo",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			observer, catcher := zapobserver.New(zap.DebugLevel)
+			logger := zap.New(observer).Sugar()
+			impl := controller.NewContext(context.TODO(), &fakeReconciler{}, controller.ControllerOptions{
+				WorkQueueName: "Test",
+				Logger:        logger.Named("Test"),
+			})
+
+			enqueueQueuedPipelineRuns(impl, tt.lister, logger)(tt.obj)
+
+			if tt.wantLog == "" {
+				assert.Equal(t, catcher.FilterMessageSnippet("failed to list queued pipelineRuns").Len(), 0)
+				assert.Equal(t, catcher.FilterMessageSnippet("Adding to queue").Len(), 0)
+				return
+			}
+			assert.Equal(t, catcher.FilterMessageSnippet(tt.wantLog).Len(), 1)
 		})
 	}
 }

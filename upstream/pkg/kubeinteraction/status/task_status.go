@@ -8,6 +8,7 @@ import (
 	"unicode/utf8"
 
 	pacv1alpha1 "github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/formatting"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/kubeinteraction"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
@@ -132,7 +133,7 @@ func CollectFailedTasksLogSnippet(ctx context.Context, cs *params.Run, kinteract
 		}
 		ti := pacv1alpha1.TaskInfos{
 			Name:           task.PipelineTaskName,
-			Message:        reasonMessageReplacementRegexp.ReplaceAllString(task.Status.Conditions[0].Message, ""),
+			Message:        formatting.StripANSI(reasonMessageReplacementRegexp.ReplaceAllString(task.Status.Conditions[0].Message, "")),
 			CompletionTime: task.Status.CompletionTime,
 			Reason:         task.Status.Conditions[0].Reason,
 		}
@@ -140,7 +141,7 @@ func CollectFailedTasksLogSnippet(ctx context.Context, cs *params.Run, kinteract
 			ti.DisplayName = task.Status.TaskSpec.DisplayName
 		}
 		if message := waitingMessage(task.Status.Steps); message != "" {
-			ti.LogSnippet = message
+			ti.LogSnippet = formatting.StripANSI(message)
 		} else if ti.Message != "" {
 			ti.LogSnippet = ti.Message
 		}
@@ -166,7 +167,7 @@ func CollectFailedTasksLogSnippet(ctx context.Context, cs *params.Run, kinteract
 						cs.Clients.Log.Errorf("cannot get pod logs: %w", err)
 						continue
 					}
-					trimmed := strings.TrimSpace(log)
+					trimmed := strings.TrimSpace(formatting.StripANSI(log))
 					if strings.HasSuffix(trimmed, " Skipping step because a previous step failed") {
 						continue
 					}

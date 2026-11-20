@@ -42,12 +42,16 @@ func TestSyncConfig(t *testing.T) {
 				EnableCancelInProgressOnPullRequests: false,
 				EnableCancelInProgressOnPush:         false,
 				SkipPushEventForPRCommits:            true,
+				SupportEditedComments:                false,
+				StatusShowSteps:                      true,
 				CustomConsoleName:                    "",
 				CustomConsoleURL:                     "",
 				CustomConsolePRdetail:                "",
 				CustomConsolePRTaskLog:               "",
 				CustomConsoleNamespaceURL:            "",
 				RememberOKToTest:                     false,
+				APIRetryMaxAttempts:                  4,
+				APIRetryMaxWaitSeconds:               120,
 			},
 		},
 		{
@@ -77,7 +81,9 @@ func TestSyncConfig(t *testing.T) {
 				"custom-console-url-namespace":            "https://custom-console-namespace",
 				"remember-ok-to-test":                     "false",
 				"skip-push-event-for-pr-commits":          "true",
+				"support-edited-comments":                 "false",
 				"require-ok-to-test-sha":                  "true",
+				"enable-follow-up-runs":                   "true",
 			},
 			expectedStruct: Settings{
 				ApplicationName:                      "pac-pac",
@@ -102,6 +108,8 @@ func TestSyncConfig(t *testing.T) {
 				EnableCancelInProgressOnPullRequests: false,
 				EnableCancelInProgressOnPush:         false,
 				SkipPushEventForPRCommits:            true,
+				SupportEditedComments:                false,
+				StatusShowSteps:                      true,
 				CustomConsoleName:                    "custom-console",
 				CustomConsoleURL:                     "https://custom-console",
 				CustomConsolePRdetail:                "https://custom-console-pr-details",
@@ -109,6 +117,9 @@ func TestSyncConfig(t *testing.T) {
 				CustomConsoleNamespaceURL:            "https://custom-console-namespace",
 				RememberOKToTest:                     false,
 				RequireOkToTestSHA:                   true,
+				EnableFollowUpRuns:                   true,
+				APIRetryMaxAttempts:                  4,
+				APIRetryMaxWaitSeconds:               120,
 			},
 		},
 		{
@@ -146,6 +157,13 @@ func TestSyncConfig(t *testing.T) {
 			},
 			expectedError: "custom validation failed for field CustomConsolePRTaskLog: invalid value, must start with http:// or https://",
 		},
+		{
+			name: "invalid value trusted provider hostnames",
+			configMap: map[string]string{
+				"trusted-provider-hostnames": "ghe.example.com, https://user@bad.example.com",
+			},
+			expectedError: "custom validation failed for field TrustedProviderHostnames: invalid value for trusted-provider-hostnames",
+		},
 	}
 
 	for _, tc := range testCases {
@@ -167,6 +185,112 @@ func TestSyncConfig(t *testing.T) {
 			if !reflect.DeepEqual(test, tc.expectedStruct) {
 				t.Errorf("failure, actual and expected struct:\nActual: %#v\nExpected: %#v", test, tc.expectedStruct)
 			}
+		})
+	}
+}
+
+func TestSyncConfigCustomConsoleStepLog(t *testing.T) {
+	tests := []struct {
+		name      string
+		config    map[string]string
+		want      string
+		wantError bool
+	}{
+		{
+			name:   "https template",
+			config: map[string]string{CustomConsolePRStepLogKey: "https://console/{{ namespace }}/{{ pr }}/{{ task }}/{{ step }}"},
+			want:   "https://console/{{ namespace }}/{{ pr }}/{{ task }}/{{ step }}",
+		},
+		{
+			name:   "http template",
+			config: map[string]string{CustomConsolePRStepLogKey: "http://console/{{ task }}/{{ step }}"},
+			want:   "http://console/{{ task }}/{{ step }}",
+		},
+		{
+			name:   "unset template",
+			config: map[string]string{},
+		},
+		{
+			name:   "empty template",
+			config: map[string]string{CustomConsolePRStepLogKey: ""},
+		},
+		{
+			name:      "missing scheme",
+			config:    map[string]string{CustomConsolePRStepLogKey: "console/logs"},
+			wantError: true,
+		},
+		{
+			name:      "misspelled scheme",
+			config:    map[string]string{CustomConsolePRStepLogKey: "htps://console/logs"},
+			wantError: true,
+		},
+		{
+			name:      "ftp scheme",
+			config:    map[string]string{CustomConsolePRStepLogKey: "ftp://console/logs"},
+			wantError: true,
+		},
+		{
+			name:      "javascript scheme",
+			config:    map[string]string{CustomConsolePRStepLogKey: "javascript:alert(1)"},
+			wantError: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			log, _ := logger.GetLogger()
+			current := DefaultSettings()
+			const previous = "https://console/previous"
+			current.CustomConsolePRStepLog = previous
+
+			err := SyncConfig(log, &current, tt.config, DefaultValidators())
+			if tt.wantError {
+				assert.ErrorContains(t, err, "custom validation failed for field CustomConsolePRStepLog: invalid value, must start with http:// or https://")
+				assert.Equal(t, current.CustomConsolePRStepLog, previous)
+				return
+			}
+			assert.NilError(t, err)
+			assert.Equal(t, current.CustomConsolePRStepLog, tt.want)
+		})
+	}
+}
+
+func TestIsValidTrustedProviderHostnames(t *testing.T) {
+	tests := []struct {
+		name    string
+		value   string
+		wantErr string
+	}{
+		{
+			name:  "empty value means not configured",
+			value: "  ",
+		},
+		{
+			name:  "valid comma separated hostnames",
+			value: "ghe.example.com, gitlab.example.com",
+		},
+		{
+			name:  "https url spelling of a hostname",
+			value: "https://ghe.example.com",
+		},
+		{
+			name:    "hostname with a path is refused",
+			value:   "ghe.example.com/api/v3",
+			wantErr: "invalid value for trusted-provider-hostnames",
+		},
+		{
+			name:    "hostname with credentials is refused",
+			value:   "https://user@ghe.example.com",
+			wantErr: "invalid value for trusted-provider-hostnames",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := isValidTrustedProviderHostnames(tt.value)
+			if tt.wantErr != "" {
+				assert.ErrorContains(t, err, tt.wantErr)
+				return
+			}
+			assert.NilError(t, err)
 		})
 	}
 }

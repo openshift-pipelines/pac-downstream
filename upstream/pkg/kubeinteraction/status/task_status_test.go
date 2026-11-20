@@ -1,23 +1,30 @@
 package status
 
 import (
+	"context"
+	"errors"
 	"sort"
 	"testing"
 	"unicode/utf8"
 
 	"github.com/jonboulle/clockwork"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/kubeinteraction"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	paramclients "github.com/openshift-pipelines/pipelines-as-code/pkg/params/clients"
 	testclient "github.com/openshift-pipelines/pipelines-as-code/pkg/test/clients"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/test/kubernetestint"
 	tektontest "github.com/openshift-pipelines/pipelines-as-code/pkg/test/tekton"
 	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
+	tektonfake "github.com/tektoncd/pipeline/pkg/client/clientset/versioned/fake"
 	"go.uber.org/zap"
 	zapobserver "go.uber.org/zap/zaptest/observer"
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	ktesting "k8s.io/client-go/testing"
 	knativeapi "knative.dev/pkg/apis"
 	knativeduckv1 "knative.dev/pkg/apis/duck/v1"
 	rtesting "knative.dev/pkg/reconciler/testing"
@@ -201,6 +208,191 @@ func TestCollectFailedTasksLogSnippet(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestGetTaskRunStatusForPipelineTaskBranches(t *testing.T) {
+	tests := []struct {
+		name     string
+		childRef tektonv1.ChildStatusReference
+		setup    func(t *testing.T) *tektonfake.Clientset
+		wantNil  bool
+		wantErr  string
+	}{
+		{
+			name: "rejects non taskrun child reference",
+			childRef: tektonv1.ChildStatusReference{
+				TypeMeta:         runtime.TypeMeta{Kind: "PipelineRun"},
+				Name:             "child",
+				PipelineTaskName: "task",
+			},
+			setup: func(t *testing.T) *tektonfake.Clientset {
+				t.Helper()
+				client := tektonfake.NewSimpleClientset()
+				client.PrependReactor("get", "taskruns", func(_ ktesting.Action) (bool, runtime.Object, error) {
+					return true, nil, apierrors.NewNotFound(schema.GroupResource{Group: "tekton.dev", Resource: "taskruns"}, "missing")
+				})
+				return client
+			},
+			wantNil: true,
+			wantErr: "should have kind TaskRun",
+		},
+		{
+			name: "ignores not found error",
+			childRef: tektonv1.ChildStatusReference{
+				TypeMeta:         runtime.TypeMeta{Kind: "TaskRun"},
+				Name:             "missing",
+				PipelineTaskName: "task",
+			},
+			setup: func(t *testing.T) *tektonfake.Clientset {
+				t.Helper()
+				return tektonfake.NewSimpleClientset()
+			},
+			wantNil: false,
+		},
+		{
+			name: "returns get error",
+			childRef: tektonv1.ChildStatusReference{
+				TypeMeta:         runtime.TypeMeta{Kind: "TaskRun"},
+				Name:             "taskrun",
+				PipelineTaskName: "task",
+			},
+			setup: func(t *testing.T) *tektonfake.Clientset {
+				t.Helper()
+				client := tektonfake.NewSimpleClientset()
+				client.PrependReactor("get", "taskruns", func(_ ktesting.Action) (bool, runtime.Object, error) {
+					return true, nil, errors.New("get failed")
+				})
+				return client
+			},
+			wantNil: true,
+			wantErr: "get failed",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := GetTaskRunStatusForPipelineTask(t.Context(), tt.setup(t), "ns", tt.childRef)
+			if tt.wantErr != "" {
+				assert.ErrorContains(t, err, tt.wantErr)
+			} else {
+				assert.NilError(t, err)
+			}
+			assert.Equal(t, tt.wantNil, got == nil)
+		})
+	}
+}
+
+func TestCollectFailedTasksLogSnippetNilPipelineRun(t *testing.T) {
+	tests := []struct {
+		name string
+	}{
+		{
+			name: "returns empty failures",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := CollectFailedTasksLogSnippet(t.Context(), &params.Run{}, nil, nil, 1)
+
+			assert.Equal(t, 0, len(got))
+		})
+	}
+}
+
+func TestCollectFailedTasksLogSnippetPodLogBranches(t *testing.T) {
+	clock := clockwork.NewFakeClock()
+
+	tests := []struct {
+		name        string
+		kinteract   kubeinteraction.Interface
+		condMessage string
+		wantSnippet string
+	}{
+		{
+			name:        "keeps condition message when pod logs error",
+			kinteract:   errorPodLogsInterface{KinterfaceTest: &kubernetestint.KinterfaceTest{}},
+			condMessage: "task failed",
+			wantSnippet: "task failed",
+		},
+		{
+			name: "skips previous step failure noise",
+			kinteract: &kubernetestint.KinterfaceTest{
+				GetPodLogsOutput: map[string]string{
+					"task1": "step failed Skipping step because a previous step failed",
+				},
+			},
+			condMessage: "task failed",
+			wantSnippet: "task failed",
+		},
+		{
+			name: "strips ansi color codes from pod logs",
+			kinteract: &kubernetestint.KinterfaceTest{
+				GetPodLogsOutput: map[string]string{
+					"task1": "pkg/params/run.go:58:16: \x1b[31merror: \x1b[0mliteral \x1b[95m`nil`\x1b[0m returned\n",
+				},
+			},
+			condMessage: "task failed",
+			wantSnippet: "pkg/params/run.go:58:16: error: literal `nil` returned",
+		},
+		{
+			name:        "strips ansi color codes from condition message",
+			kinteract:   errorPodLogsInterface{KinterfaceTest: &kubernetestint.KinterfaceTest{}},
+			condMessage: "\x1b[31mtask failed\x1b[0m",
+			wantSnippet: "task failed",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pr := tektontest.MakePRCompletion(clock, "pipeline-newest", "ns", tektonv1.PipelineRunReasonFailed.String(), nil, map[string]string{}, 10)
+			pr.Status.ChildReferences = []tektonv1.ChildStatusReference{{
+				TypeMeta:         runtime.TypeMeta{Kind: "TaskRun"},
+				Name:             "task1",
+				PipelineTaskName: "task1",
+			}}
+
+			taskStatus := tektonv1.TaskRunStatusFields{
+				PodName: "task1",
+				Steps: []tektonv1.StepState{{
+					Name: "step1",
+					ContainerState: corev1.ContainerState{
+						Terminated: &corev1.ContainerStateTerminated{
+							ExitCode: 1,
+						},
+					},
+				}},
+			}
+			ctx, _ := rtesting.SetupFakeContext(t)
+			stdata, _ := testclient.SeedTestData(t, ctx, testclient.Data{
+				TaskRuns: []*tektonv1.TaskRun{
+					tektontest.MakeTaskRunCompletion(clock, "task1", "ns", "pipeline-newest", map[string]string{}, taskStatus, knativeduckv1.Conditions{{
+						Type:    knativeapi.ConditionSucceeded,
+						Status:  corev1.ConditionFalse,
+						Reason:  tektonv1.PipelineRunReasonFailed.String(),
+						Message: tt.condMessage,
+					}}, 10),
+				},
+			})
+			cs := &params.Run{Clients: paramclients.Clients{
+				Tekton: stdata.Pipeline,
+				Log:    zap.NewNop().Sugar(),
+			}}
+
+			got := CollectFailedTasksLogSnippet(ctx, cs, tt.kinteract, pr, 1)
+
+			assert.Equal(t, 1, len(got))
+			assert.Equal(t, tt.wantSnippet, got["task1"].LogSnippet)
+		})
+	}
+}
+
+type errorPodLogsInterface struct {
+	*kubernetestint.KinterfaceTest
+}
+
+func (errorPodLogsInterface) GetPodLogs(context.Context, string, string, string, int64) (string, error) {
+	return "", errors.New("pod logs failed")
 }
 
 func TestCollectFailedTasksLogSnippetWaitingReasons(t *testing.T) {
