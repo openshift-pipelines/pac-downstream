@@ -142,6 +142,10 @@ func controllerInfoForPipelineRun(pr *tektonv1.PipelineRun, fallback *info.Contr
 func (r *Reconciler) reconcileKind(ctx context.Context, pr *tektonv1.PipelineRun) pkgreconciler.Event {
 	ctx = info.StoreNS(ctx, system.Namespace())
 	logger := logging.FromContext(ctx).With("namespace", pr.GetNamespace())
+	// ReconcileKind copies this struct, which copies the emitter pointer.
+	// Use a per-reconcile copy before anything emits, so overlapping
+	// reconciles do not log under each other's fields.
+	r.eventEmitter = r.eventEmitter.WithLogger(logger.With("pipeline-run", pr.GetName()))
 
 	logger.Debugf("reconciling pipelineRun %s/%s", pr.GetNamespace(), pr.GetName())
 
@@ -201,7 +205,11 @@ func (r *Reconciler) reconcileKind(ctx context.Context, pr *tektonv1.PipelineRun
 	}
 	if done {
 		r.qm.ForgetAdmission(queuepkg.RepoKey(repo), pr)
-		return nil
+		// The reconcile of an already done run is the recovery path for the
+		// pending follow-up entries of its group: after a watcher restart
+		// every run is re-enqueued by the informer sync, and this evaluates
+		// the entries a completion event may have been missed for.
+		return r.evaluateFollowUpsOf(ctx, logger, pr)
 	}
 
 	reason := ""
@@ -279,7 +287,7 @@ func (r *Reconciler) reconcileKind(ctx context.Context, pr *tektonv1.PipelineRun
 
 	logger = logger.With(logFields...)
 	logger.Infof("pipelineRun %v/%v is done, reconciling to report status!  ", pr.GetNamespace(), pr.GetName())
-	r.eventEmitter.SetLogger(logger)
+	r.eventEmitter = r.eventEmitter.WithLogger(logger)
 
 	detectedProvider, event, err := r.detectProvider(ctx, logger, pr)
 	if err != nil {
@@ -344,7 +352,7 @@ func (r *Reconciler) reportFinalStatus(ctx context.Context, logger *zap.SugaredL
 	inheritedGlobalSecret := false
 	if globalRepo, gerr := r.repoLister.Repositories(r.run.Info.Kube.Namespace).Get(r.run.Info.Controller.GlobalRepository); gerr == nil && globalRepo != nil {
 		if event.InstallationID <= 0 {
-			if secretNS, inheritedGlobalSecret, err = secrets.ResolveInheritedSecret(repo, globalRepo); err != nil {
+			if secretNS, inheritedGlobalSecret, err = secrets.ResolveInheritedSecret(repo, globalRepo, event); err != nil {
 				return nil, err
 			}
 		}
@@ -363,6 +371,12 @@ func (r *Reconciler) reportFinalStatus(ctx context.Context, logger *zap.SugaredL
 	// scope the custom console to this request so concurrent reconciles do not
 	// render their URLs with another repository's parameters
 	console := r.run.Clients.ConsoleUI().WithParams(maptemplate)
+	if r.run.Clients.Log == nil {
+		r.run.Clients.Log = logger
+	}
+	scopedReconciler := *r
+	scopedReconciler.run = r.run.WithConsoleParams(maptemplate)
+	r = &scopedReconciler
 
 	if event.InstallationID > 0 {
 		event.Provider.WebhookSecret, _ = secrets.GetCurrentNSWebhookSecret(ctx, r.kinteract, r.run)
@@ -382,9 +396,6 @@ func (r *Reconciler) reportFinalStatus(ctx context.Context, logger *zap.SugaredL
 		}
 	}
 
-	if r.run.Clients.Log == nil {
-		r.run.Clients.Log = logger
-	}
 	err = provider.SetClient(ctx, r.run, event, repo, r.eventEmitter)
 	if err != nil {
 		return repo, fmt.Errorf("cannot set client: %w", err)
@@ -415,6 +426,12 @@ func (r *Reconciler) reportFinalStatus(ctx context.Context, logger *zap.SugaredL
 		return repo, fmt.Errorf("cannot update state: %w", err)
 	}
 	r.qm.ForgetAdmission(queuepkg.RepoKey(repo), pr)
+
+	// a finished dependency unlocks the follow-ups waiting on it. Errors
+	// don't fail the reconcile: the waiting entries re-evaluate on their own.
+	if err := r.evaluateFollowUpsOf(ctx, logger, pr); err != nil {
+		logger.Errorf("failed to evaluate the follow-ups of pipelinerun %s: %v", pr.GetName(), err)
+	}
 
 	if err := r.emitMetrics(ctx, pr); err != nil {
 		logger.Error("failed to emit metrics: ", err)
@@ -521,24 +538,33 @@ func (r *Reconciler) initGitProviderClient(ctx context.Context, logger *zap.Suga
 	}
 	detectedProvider.SetPacInfo(&pacInfo)
 
+	// repo must not be merged with the global repository yet: whether the
+	// git provider secret is inherited is decided on the local spec
+	globalRepo, gerr := r.repoLister.Repositories(r.run.Info.Kube.Namespace).Get(r.run.Info.Controller.GlobalRepository)
+	if gerr != nil {
+		globalRepo = nil
+	}
+	secretNS := repo.GetNamespace()
+	inheritedGlobalSecret := false
+	if event.InstallationID <= 0 && globalRepo != nil {
+		secretNS, inheritedGlobalSecret, err = secrets.ResolveInheritedSecret(repo, globalRepo, event)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+	// then merged, like the event time client setup does, for every provider:
+	// a GitHub App token is scoped with the global settings too
+	if globalRepo != nil {
+		if merged := copyRepositoryForMerge(repo); merged != nil {
+			repo = merged
+			repo.Spec.Merge(globalRepo.Spec)
+		}
+	}
+
 	// installation ID indicates Github App installation
 	if event.InstallationID > 0 {
 		event.Provider.WebhookSecret, _ = secrets.GetCurrentNSWebhookSecret(ctx, r.kinteract, r.run)
 	} else {
-		// secretNS is needed when git provider is other than Github App.
-		secretNS := repo.GetNamespace()
-		inheritedGlobalSecret := false
-		if globalRepo, gerr := r.repoLister.Repositories(r.run.Info.Kube.Namespace).Get(r.run.Info.Controller.GlobalRepository); gerr == nil && globalRepo != nil {
-			secretNS, inheritedGlobalSecret, err = secrets.ResolveInheritedSecret(repo, globalRepo)
-			if err != nil {
-				return nil, nil, err
-			}
-			if merged := copyRepositoryForMerge(repo); merged != nil {
-				repo = merged
-				repo.Spec.Merge(globalRepo.Spec)
-			}
-		}
-
 		secretFromRepo := secrets.SecretFromRepository{
 			K8int:                 r.kinteract,
 			Config:                detectedProvider.GetConfig(),

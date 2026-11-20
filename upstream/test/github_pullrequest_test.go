@@ -24,7 +24,7 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/test/pkg/payload"
 	twait "github.com/openshift-pipelines/pipelines-as-code/test/pkg/wait"
 
-	"github.com/google/go-github/v91/github"
+	"github.com/google/go-github/v93/github"
 	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 	"github.com/tektoncd/pipeline/pkg/names"
 	"gotest.tools/v3/assert"
@@ -37,17 +37,6 @@ func TestGithubGHEPullRequestBasic(t *testing.T) {
 	ctx := context.Background()
 	g := &tgithub.PRTest{
 		Label:     "Github PullRequest",
-		YamlFiles: []string{"testdata/pipelinerun.yaml"},
-		GHE:       true,
-	}
-	g.RunPullRequest(ctx, t)
-	defer g.TearDown(ctx, t)
-}
-
-func TestGithubGHEPullRequest(t *testing.T) {
-	ctx := context.Background()
-	g := &tgithub.PRTest{
-		Label:     "Github Rerequest",
 		YamlFiles: []string{"testdata/pipelinerun.yaml"},
 		GHE:       true,
 	}
@@ -608,7 +597,7 @@ func TestGithubGHECancelInProgressSettingFromConfigMapOnPush(t *testing.T) {
 	_, _, err = g.Provider.Client().Repositories.CreateComment(ctx,
 		g.Options.Organization,
 		g.Options.Repo, g.SHA,
-		&github.RepositoryComment{Body: new(comment)})
+		github.CreateCommitCommentRequest{Body: comment})
 	assert.NilError(t, err)
 
 	g.Cnx.Clients.Log.Infof("Waiting for the two pipelinerun to be created")

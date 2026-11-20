@@ -30,7 +30,6 @@ import (
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"knative.dev/eventing/pkg/adapter/v2"
 	"knative.dev/pkg/logging"
 	"knative.dev/pkg/system"
@@ -207,15 +206,6 @@ func (l listener) handleEvent(ctx context.Context) http.HandlerFunc {
 		event := info.NewEvent()
 		pacInfo := l.run.Info.GetPacOpts()
 
-		globalRepo, err := l.run.Clients.PipelineAsCode.PipelinesascodeV1alpha1().Repositories(l.run.Info.Kube.Namespace).Get(
-			ctx, l.run.Info.Controller.GlobalRepository, metav1.GetOptions{},
-		)
-		if err == nil && globalRepo != nil {
-			l.logger.Infof("detected global repository settings named %s in namespace %s", l.run.Info.Controller.GlobalRepository, l.run.Info.Kube.Namespace)
-		} else {
-			globalRepo = &v1alpha1.Repository{}
-		}
-
 		detected, configuring, err := github.ConfigureRepository(ctx, l.run, request, string(payload), &pacInfo, l.logger)
 		if detected {
 			if configuring && err == nil {
@@ -233,17 +223,17 @@ func (l listener) handleEvent(ctx context.Context) http.HandlerFunc {
 
 		isIncoming, targettedRepo, err := l.detectIncoming(ctx, event, request, payload)
 		if err != nil {
-			if errors.Is(err, errMissingFields) {
-				l.writeResponse(response, http.StatusBadRequest, err.Error())
-			}
+			// detectIncoming returns errors only for /incoming requests.
+			// Reject failed incoming requests without further event processing.
 			l.logger.Errorf("error processing incoming webhook: %v", err)
+			l.writeResponse(response, http.StatusBadRequest, "error processing incoming webhook: invalid request")
 			return
 		}
 
 		if isIncoming {
 			gitProvider, logger, err = l.processIncoming(event, targettedRepo)
 		} else {
-			gitProvider, logger, err = l.detectProvider(request, string(payload))
+			gitProvider, logger, err = l.detectProvider(request, string(payload), &pacInfo)
 		}
 
 		// figure out which provider request coming from
@@ -260,6 +250,16 @@ func (l listener) handleEvent(ctx context.Context) http.HandlerFunc {
 			tracedCtx, "PipelinesAsCode:ProcessEvent",
 			trace.WithSpanKind(trace.SpanKindServer),
 		)
+
+		globalRepo, err := l.run.GetRepository(ctx, l.run.Info.Kube.Namespace, l.run.Info.Controller.GlobalRepository)
+		if err == nil && globalRepo != nil {
+			l.logger.Infof("detected global repository settings named %s in namespace %s", l.run.Info.Controller.GlobalRepository, l.run.Info.Kube.Namespace)
+		} else {
+			if err != nil {
+				l.logger.Infof("global repository lookup failed: %v, continuing with empty global config", err)
+			}
+			globalRepo = &v1alpha1.Repository{}
+		}
 
 		s := sinker{
 			run:        l.run,
@@ -335,7 +335,7 @@ func (l listener) processRes(processEvent bool, provider provider.Interface, log
 	return nil, logger, fmt.Errorf("skipping non supported event")
 }
 
-func (l listener) detectProvider(req *http.Request, reqBody string) (provider.Interface, *zap.SugaredLogger, error) {
+func (l listener) detectProvider(req *http.Request, reqBody string, pacInfo *info.PacOpts) (provider.Interface, *zap.SugaredLogger, error) {
 	log := *l.logger
 
 	// payload validation
@@ -346,6 +346,7 @@ func (l listener) detectProvider(req *http.Request, reqBody string) (provider.In
 
 	gitHub := github.New()
 	gitHub.Run = l.run
+	gitHub.SetPacInfo(pacInfo)
 	isGH, processReq, logger, reason, err := gitHub.Detect(req, reqBody, &log)
 	if isGH {
 		return l.processRes(processReq, gitHub, logger, reason, err)

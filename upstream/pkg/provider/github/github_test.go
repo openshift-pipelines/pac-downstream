@@ -17,7 +17,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/go-github/v91/github"
+	"github.com/google/go-github/v93/github"
 	"github.com/jonboulle/clockwork"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
@@ -2464,6 +2464,29 @@ func TestGetPullRequest(t *testing.T) {
 			apiReturn:         prJSON,
 			wantSHA:           "headsha123",
 			wantSHAURL:        "https://github.com/owner/repo/pull/42/commit/headsha123",
+			wantURL:           "https://github.com/owner/repo",
+			wantDefaultBranch: "main",
+			wantHeadBranch:    "feature-branch",
+			wantBaseBranch:    "main",
+			wantHeadURL:       "https://github.com/author/repo",
+			wantBaseURL:       "https://github.com/owner/repo",
+			wantTitle:         "very cool feature pr",
+			wantSender:        "author",
+			wantEventType:     triggertype.PullRequest.String(),
+			wantLabels:        []string{"bug", "enhancement"},
+			wantRepoID:        9876,
+		},
+		{
+			name: "preserves pre-set SHA from webhook payload",
+			event: &info.Event{
+				Organization:      org,
+				Repository:        repo,
+				PullRequestNumber: prNum,
+				SHA:               "webhooksha456",
+			},
+			apiReturn:         prJSON,
+			wantSHA:           "webhooksha456",
+			wantSHAURL:        "https://github.com/owner/repo/pull/42/commit/webhooksha456",
 			wantURL:           "https://github.com/owner/repo",
 			wantDefaultBranch: "main",
 			wantHeadBranch:    "feature-branch",

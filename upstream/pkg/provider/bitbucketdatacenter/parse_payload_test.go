@@ -556,13 +556,36 @@ func TestCheckValidPayload(t *testing.T) {
 
 func TestParsePayload(t *testing.T) {
 	ev1 := &info.Event{
+		AccountID:      "12345",
+		Sender:         "sender",
+		Organization:   "PROJ",
+		BBDCProjectKey: "PROJ",
+		Repository:     "repo",
+		URL:            "http://forge/PROJ/repo/browse",
+		SHA:            "abcd",
+		// Clone URL is served under a different path but the same host.
+		CloneURL: "http://forge/scm/PROJ/repo.git",
+	}
+	personalRepoPayload := &info.Event{
 		AccountID:    "12345",
 		Sender:       "sender",
-		Organization: "PROJ",
+		Organization: "~joe",
 		Repository:   "repo",
-		URL:          "http://forge/PROJ/repo/browse",
+		URL:          "http://forge/~joe/repo/browse",
 		SHA:          "abcd",
-		CloneURL:     "http://clone/PROJ/repo",
+		// Clone URL is served under a different path but the same host.
+		CloneURL: "http://forge/scm/~joe/repo.git",
+	}
+	personalRepoEvent := &info.Event{
+		AccountID:    "12345",
+		Sender:       "sender",
+		Organization: "joe",
+		Repository:   "repo",
+		URL:          "http://forge/~joe/repo/browse",
+		SHA:          "abcd",
+		// Clone URL is served under a different path but the same host.
+		CloneURL:       "http://forge/scm/~joe/repo.git",
+		BBDCProjectKey: "~joe",
 	}
 
 	tests := []struct {
@@ -615,12 +638,54 @@ func TestParsePayload(t *testing.T) {
 			expTriggerTarget: "pull_request",
 		},
 		{
+			name:      "bad/pull_request clone URL host does not match repository host",
+			eventType: "pr:opened",
+			payloadEvent: bbv1test.MakePREvent(
+				&info.Event{
+					AccountID:    "12345",
+					Sender:       "sender",
+					Organization: "PROJ",
+					Repository:   "repo",
+					URL:          "http://forge/PROJ/repo/browse",
+					SHA:          "abcd",
+					CloneURL:     "http://other.example.com/scm/PROJ/repo.git",
+				}, "",
+			),
+			wantErrSubstr: "does not match the host of repository URL",
+		},
+		{
 			name:             "good/push",
 			eventType:        "repo:refs_changed",
 			payloadEvent:     bbv1test.MakePushEvent(ev1, []types.PushRequestEventChange{{ToHash: ev1.SHA, RefID: "base"}}, []types.Commit{{ID: ev1.SHA}}),
 			expEvent:         ev1,
 			expEventType:     "push",
 			expTriggerTarget: "push",
+		},
+		{
+			name:             "good/pull_request personal repository",
+			eventType:        "pr:opened",
+			payloadEvent:     bbv1test.MakePREvent(personalRepoPayload, ""),
+			expEvent:         personalRepoEvent,
+			expEventType:     "pull_request",
+			expTriggerTarget: "pull_request",
+		},
+		{
+			name:      "bad/push clone URL host does not match repository host",
+			eventType: "repo:refs_changed",
+			payloadEvent: bbv1test.MakePushEvent(
+				&info.Event{
+					AccountID:    "12345",
+					Sender:       "sender",
+					Organization: "PROJ",
+					Repository:   "repo",
+					URL:          "http://forge/PROJ/repo/browse",
+					SHA:          "abcd",
+					CloneURL:     "http://other.example.com/scm/PROJ/repo.git",
+				},
+				[]types.PushRequestEventChange{{ToHash: "abcd", RefID: "base"}},
+				[]types.Commit{{ID: "abcd"}},
+			),
+			wantErrSubstr: "does not match the host of repository URL",
 		},
 		{
 			name:          "bad/changes are empty in push",
@@ -756,6 +821,7 @@ func TestParsePayload(t *testing.T) {
 			assert.Equal(t, got.URL+"/browse", tt.expEvent.URL)
 
 			assert.Equal(t, got.CloneURL, tt.expEvent.CloneURL)
+			assert.Equal(t, got.BBDCProjectKey, tt.expEvent.BBDCProjectKey)
 
 			if tt.targetPipelinerun != "" {
 				assert.Equal(t, got.TargetTestPipelineRun, tt.targetPipelinerun)
