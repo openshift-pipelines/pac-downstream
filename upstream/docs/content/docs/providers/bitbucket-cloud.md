@@ -217,8 +217,8 @@ You can only reference a user by the `ACCOUNT_ID` in a owner file. For reason se
 
 ### IP-based validation (defense-in-depth)
 
-Pipelines-as-Code verifies that webhooks originate from Bitbucket Cloud IP addresses by fetching the
-IP list from <https://ip-ranges.atlassian.com/>.
+By default, Pipelines-as-Code verifies that webhooks originate from Bitbucket Cloud IP addresses by fetching the
+IP list from <https://ip-ranges.atlassian.com/>. When this check is enabled, signature validation is skipped.
 
 - To add extra IP addresses or networks, set the
   `bitbucket-cloud-additional-source-ip` key in the `pipelines-as-code`
@@ -230,11 +230,8 @@ IP list from <https://ip-ranges.atlassian.com/>.
 
 ### Webhook Secret Validation
 
-In addition to IP-based validation, Pipelines-as-Code can also verify
-Bitbucket Cloud supports HMAC webhook secrets. When you configure a
-webhook secret on the Repository CR, Pipelines-as-Code validates the
-signature header on every incoming webhook to verify the payload was
-sent by Bitbucket Cloud and has not been tampered with.
+When IP-based validation is disabled, Pipelines-as-Code verifies the webhook
+signature using the secret configured on the Repository CR.
 
 Note: If IP-Based validation is disabled, Pipelines-as-Code falls back to
 webhook secret validation to protect PipelineRuns being triggered from unverified source.
@@ -245,6 +242,52 @@ is not present.
 
 Make sure the same secret value is configured in your Bitbucket Cloud webhook
 settings under **Repository settings → Workflow → Webhooks → Edit → Secret**.
+
+The `bitbucket-cloud-check-source-ip` setting picks which check runs:
+
+```mermaid
+flowchart LR
+%% title: How the controller checks a Bitbucket Cloud webhook
+%% autoplay
+  BB@{ img: "/icons/repository.svg", label: "Bitbucket Cloud", w: 48, h: 48, constraint: "on" }
+  Ctrl@{ img: "/icons/controller.svg", label: "Controller", w: 48, h: 48, constraint: "on" }
+  IPs@{ img: "/icons/network.svg", label: "Allowed IP ranges", w: 48, h: 48, constraint: "on" }
+  Sec@{ img: "/icons/secret.svg", label: "Repository secret", w: 48, h: 48, constraint: "on" }
+  Sig@{ img: "/icons/shield.svg", label: "Signature", w: 48, h: 48, constraint: "on" }
+  Ok@{ img: "/icons/success.svg", label: "Processed", w: 48, h: 48, constraint: "on" }
+  No@{ img: "/icons/refuse.svg", label: "Refused", w: 48, h: 48, constraint: "on" }
+  BB -->|webhook| Ctrl
+  Ctrl ipon@-->|check on| IPs
+  IPs inrange@-->|in range| Ok
+  IPs outrange@-->|unknown IP| No
+  Ctrl ipoff@-->|check off| Sec
+  Sec --> Sig
+  Sig sigok@-->|valid| Ok
+  Sig sigbad@-->|missing or wrong| No
+
+%% play: IP check on
+%% skip Sec Sig No
+%% BB -> Ctrl : event
+%% Ctrl -> IPs @ipon : source IP | The last address in X-Forwarded-For is compared with ip-ranges.atlassian.com and bitbucket-cloud-additional-source-ip
+%% IPs -> Ok @inrange | This is the default, and the signature is not checked at all
+%% play: Unknown IP
+%% skip Sec Sig Ok
+%% BB -> Ctrl : event
+%% Ctrl -> IPs @ipon : source IP
+%% IPs -> No @outrange | A request from outside those ranges is refused
+%% play: IP check off
+%% skip IPs No
+%% BB -> Ctrl : event
+%% Ctrl -> Sec @ipoff | With the IP check turned off, the webhook secret from the Repository secret is required
+%% Sec -> Sig : HMAC | X-Hub-Signature-256 is checked, or X-Hub-Signature when it is missing
+%% Sig -> Ok @sigok
+%% play: No signature
+%% skip IPs Ok
+%% BB -> Ctrl : event
+%% Ctrl -> Sec @ipoff
+%% Sec -> Sig
+%% Sig -> No @sigbad | No signature header or an empty webhook secret is refused
+```
 
 ## Add Webhook Secret
 

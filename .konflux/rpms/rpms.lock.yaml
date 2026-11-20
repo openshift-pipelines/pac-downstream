@@ -4,13 +4,6 @@ lockfileVendor: redhat
 arches:
 - arch: aarch64
   packages:
-  - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi10/10/aarch64/baseos/os/Packages/l/libselinux-3.11-2.el10.aarch64.rpm
-    repoid: ubi-10-baseos-rpms
-    size: 106672
-    checksum: sha256:e62a3a0ad4bef2517e51130c6e5a9ca684ac041636b52ea5d9cfec34384b44ea
-    name: libselinux
-    evr: 3.11-2.el10
-    sourcerpm: libselinux-3.11-2.el10.src.rpm
   - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi10/10/aarch64/baseos/os/Packages/l/libsemanage-3.11-1.el10.aarch64.rpm
     repoid: ubi-10-baseos-rpms
     size: 128157
@@ -18,13 +11,6 @@ arches:
     name: libsemanage
     evr: 3.11-1.el10
     sourcerpm: libsemanage-3.11-1.el10.src.rpm
-  - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi10/10/aarch64/baseos/os/Packages/l/libsepol-3.11-2.el10.aarch64.rpm
-    repoid: ubi-10-baseos-rpms
-    size: 347674
-    checksum: sha256:c62c2bbc4dee727dffc20b1ff851bbf6f46438f5e29bb44b84f5bf8389d7d736
-    name: libsepol
-    evr: 3.11-2.el10
-    sourcerpm: libsepol-3.11-2.el10.src.rpm
   - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi10/10/aarch64/baseos/os/Packages/l/libxcrypt-4.4.36-10.el10.aarch64.rpm
     repoid: ubi-10-baseos-rpms
     size: 130795
@@ -43,13 +29,6 @@ arches:
   module_metadata: []
 - arch: ppc64le
   packages:
-  - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi10/10/ppc64le/baseos/os/Packages/l/libselinux-3.11-2.el10.ppc64le.rpm
-    repoid: ubi-10-baseos-rpms
-    size: 119414
-    checksum: sha256:be29903177e848237cf9fb69ffe87777af7734d02aa962043a953a35d37faf94
-    name: libselinux
-    evr: 3.11-2.el10
-    sourcerpm: libselinux-3.11-2.el10.src.rpm
   - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi10/10/ppc64le/baseos/os/Packages/l/libsemanage-3.11-1.el10.ppc64le.rpm
     repoid: ubi-10-baseos-rpms
     size: 144016
@@ -57,13 +36,6 @@ arches:
     name: libsemanage
     evr: 3.11-1.el10
     sourcerpm: libsemanage-3.11-1.el10.src.rpm
-  - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi10/10/ppc64le/baseos/os/Packages/l/libsepol-3.11-2.el10.ppc64le.rpm
-    repoid: ubi-10-baseos-rpms
-    size: 392537
-    checksum: sha256:db5f7691596837af519b4053600456c577ebbe1b61637fd709e1a697c8c19669
-    name: libsepol
-    evr: 3.11-2.el10
-    sourcerpm: libsepol-3.11-2.el10.src.rpm
   - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi10/10/ppc64le/baseos/os/Packages/l/libxcrypt-4.4.36-10.el10.ppc64le.rpm
     repoid: ubi-10-baseos-rpms
     size: 138025
@@ -82,13 +54,6 @@ arches:
   module_metadata: []
 - arch: s390x
   packages:
-  - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi10/10/s390x/baseos/os/Packages/l/libselinux-3.11-2.el10.s390x.rpm
-    repoid: ubi-10-baseos-rpms
-    size: 112374
-    checksum: sha256:fb6d94670534ba0ad6c009b72e309ee4456045b541d6c837a5d9d8ab53bba216
-    name: libselinux
-    evr: 3.11-2.el10
-    sourcerpm: libselinux-3.11-2.el10.src.rpm
   - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi10/10/s390x/baseos/os/Packages/l/libsemanage-3.11-1.el10.s390x.rpm
     repoid: ubi-10-baseos-rpms
     size: 133648
@@ -96,13 +61,6 @@ arches:
     name: libsemanage
     evr: 3.11-1.el10
     sourcerpm: libsemanage-3.11-1.el10.src.rpm
-  - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi10/10/s390x/baseos/os/Packages/l/libsepol-3.11-2.el10.s390x.rpm
-    repoid: ubi-10-baseos-rpms
-    size: 370495
-    checksum: sha256:d3e31983a6f06642d0f3f07f753131515d01dd8de99b9422b3be4180c16032a6
-    name: libsepol
-    evr: 3.11-2.el10
-    sourcerpm: libsepol-3.11-2.el10.src.rpm
   - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi10/10/s390x/baseos/os/Packages/l/libxcrypt-4.4.36-10.el10.s390x.rpm
     repoid: ubi-10-baseos-rpms
     size: 132147
@@ -121,13 +79,6 @@ arches:
   module_metadata: []
 - arch: x86_64
   packages:
-  - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi10/10/x86_64/baseos/os/Packages/l/libselinux-3.11-2.el10.x86_64.rpm
-    repoid: ubi-10-baseos-rpms
-    size: 108045
-    checksum: sha256:8ef4008334468fa9eda143afa556de20b900cc66df6385ca3fe25b2d6911883c
-    name: libselinux
-    evr: 3.11-2.el10
-    sourcerpm: libselinux-3.11-2.el10.src.rpm
   - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi10/10/x86_64/baseos/os/Packages/l/libsemanage-3.11-1.el10.x86_64.rpm
     repoid: ubi-10-baseos-rpms
     size: 131430
@@ -135,13 +86,6 @@ arches:
     name: libsemanage
     evr: 3.11-1.el10
     sourcerpm: libsemanage-3.11-1.el10.src.rpm
-  - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi10/10/x86_64/baseos/os/Packages/l/libsepol-3.11-2.el10.x86_64.rpm
-    repoid: ubi-10-baseos-rpms
-    size: 363667
-    checksum: sha256:dfe7523ec887842b15b18f2c1b89182a802c45a06cb781c062e819378380f6ce
-    name: libsepol
-    evr: 3.11-2.el10
-    sourcerpm: libsepol-3.11-2.el10.src.rpm
   - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi10/10/x86_64/baseos/os/Packages/l/libxcrypt-4.4.36-10.el10.x86_64.rpm
     repoid: ubi-10-baseos-rpms
     size: 127002
