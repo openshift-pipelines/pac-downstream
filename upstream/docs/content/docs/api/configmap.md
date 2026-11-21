@@ -157,12 +157,45 @@ custom-console-url-pr-tasklog: "https://url/ns/{{ namespace }}/{{ pr }}/logs/{{ 
 
 {{< /param >}}
 
+{{< param name="custom-console-url-pr-steplog" type="string" id="param-custom-console-url-pr-steplog" >}}
+Defines the template URL for the logs of a single step, used by the step
+breakdown of the status report. The template must start with `http://` or
+`https://`. Supports variables: `{{ namespace }}`,
+`{{ pr }}`, `{{ task }}`, `{{ step }}`. When it is not set the step breakdown
+links to the task logs instead.
+
+```yaml
+custom-console-url-pr-steplog: "https://url/ns/{{ namespace }}/{{ pr }}/logs/{{ task }}/{{ step }}"
+```
+
+{{< /param >}}
+
 {{< param name="custom-console-url-namespace" type="string" id="param-custom-console-url-namespace" >}}
 Defines the template URL for namespace-level views in your custom console.
 Supports the `{{ namespace }}` variable.
 
 ```yaml
 custom-console-url-namespace: "https://url/ns/{{ namespace }}"
+```
+
+{{< /param >}}
+
+### Status Reporting
+
+{{< param name="status-show-steps" type="boolean" default="true" id="param-status-show-steps" >}}
+Controls whether the status reported back to the Git provider lists the steps
+of every task under the task itself. Each step links to its own logs on the
+console, which is useful when a task is built out of several StepActions and
+the task name alone does not say what ran.
+
+Steps that were skipped because an earlier step failed are left out, so a
+failing task shows the step that broke, and tasks that only have one step keep
+showing a single line. On GitHub, GitLab and Gitea the steps are nested in a
+collapsible block; the Bitbucket providers list them as extra rows because their
+comments do not render collapsible blocks.
+
+```yaml
+status-show-steps: "true"
 ```
 
 {{< /param >}}
@@ -362,6 +395,34 @@ Requires that a pull request's commit SHA be specified in an `/ok-to-test` comme
 
 ```yaml
 require-ok-to-test-sha: "false"
+```
+
+{{< /param >}}
+
+{{< tech_preview "Support for edited comments" >}}
+
+{{< param name="support-edited-comments" type="boolean" default="false" id="param-support-edited-comments" >}}
+
+Enables processing of edited comment events. When enabled, editing a comment that contains a GitOps command (such as `/test` or `/retest`) triggers the command as if it were a new comment. This is useful when you need to fix a typo in a command or change a PipelineRun name without posting a new comment.
+
+When disabled (the default), only newly created comments trigger PipelineRuns. Edited comments are ignored.
+
+Currently supported on GitHub only.
+
+```yaml
+support-edited-comments: "false"
+```
+
+{{< /param >}}
+
+{{< tech_preview "PipelineRun follow-ups" >}}
+
+{{< param name="enable-follow-up-runs" type="boolean" default="false" id="param-enable-follow-up-runs" >}}
+
+Enables the [PipelineRun follow-ups]({{< relref "/docs/guides/pipelinerun-followups" >}}), the `on-pipelinerun` annotation that chains PipelineRuns after their dependencies. When disabled (the default), the definitions carrying the annotation are left unmatched: they do not run, like definitions that do not match the event.
+
+```yaml
+enable-follow-up-runs: "false"
 ```
 
 {{< /param >}}

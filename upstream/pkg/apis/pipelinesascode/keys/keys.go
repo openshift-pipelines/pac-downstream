@@ -1,5 +1,5 @@
 /*
-CoCopyright 2022 Red Hat
+Copyright 2022 Red Hat
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -56,6 +56,9 @@ const (
 	OnLabel                = pipelinesascode.GroupName + "/on-label"
 	OnPathChangeIgnore     = pipelinesascode.GroupName + "/on-path-change-ignore"
 	OnCelExpression        = pipelinesascode.GroupName + "/on-cel-expression"
+	OnPipelineRun          = pipelinesascode.GroupName + "/on-pipelinerun"
+	GroupID                = pipelinesascode.GroupName + "/group-id"
+	FollowUps              = pipelinesascode.GroupName + "/followups"
 	TargetNamespace        = pipelinesascode.GroupName + "/target-namespace"
 	MaxKeepRuns            = pipelinesascode.GroupName + "/max-keep-runs"
 	CancelInProgress       = pipelinesascode.GroupName + "/cancel-in-progress"
@@ -73,7 +76,9 @@ const (
 	GithubPrivateKey     = "github-private-key"
 	ResultsRecordSummary = "results.tekton.dev/recordSummaryAnnotations"
 
-	SpanContextAnnotation = "tekton.dev/pipelinerunSpanContext"
+	SpanContextAnnotation        = "tekton.dev/pipelinerunSpanContext"
+	BitbucketProjectKey          = pipelinesascode.GroupName + "/bitbucket-project-key"
+	BitbucketRequiredBuildParent = pipelinesascode.GroupName + "/bitbucket-required-build-parent"
 )
 
 var ParamsRe = regexp.MustCompile(`{{([^}]{2,})}}`)
