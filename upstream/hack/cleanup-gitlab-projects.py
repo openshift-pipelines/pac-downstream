@@ -25,7 +25,7 @@ Examples:
 import argparse
 import os
 import sys
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 
 import requests
 
@@ -94,7 +94,7 @@ def main() -> None:
         sys.exit(1)
 
     base_url = args.api_url.rstrip("/")
-    now = datetime.now(tz=UTC)
+    now = datetime.now(tz=timezone.UTC)
 
     print(f"Listing projects in group '{args.group}' on {base_url} ...")
     projects = get_projects(base_url, args.token, args.group)
