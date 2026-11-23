@@ -140,6 +140,19 @@ func TestScopeTokenToListOfRepos(t *testing.T) {
 		},
 	}
 
+	// This repo is created after lister is setup in the cache test and matches the glob "owner2/*" used, so it would only be listed if API is queried instead of cache.
+	apiOnlyRepoURL := "https://org.com/owner2/repo4"
+	apiOnlyRepo := &v1alpha1.Repository{
+		TypeMeta: metav1.TypeMeta{},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "apionlyrepo",
+			Namespace: testNamespace.Name,
+		},
+		Spec: v1alpha1.RepositorySpec{
+			URL: apiOnlyRepoURL,
+		},
+	}
+
 	// Malformed repository URLs for testing validation
 	malformedRepoURL := "https://org.com/owner/repo/subgroup"
 	repoDataMalformed := &v1alpha1.Repository{
@@ -177,12 +190,14 @@ func TestScopeTokenToListOfRepos(t *testing.T) {
 		wantError                string
 		wantToken                string
 		repositoryID             []int64
+		useCache                 bool
 	}{
 		{
 			name: "repos are listed under global configuration",
 			tData: testclient.Data{
 				Namespaces: []*corev1.Namespace{testNamespace},
 				Secret:     []*corev1.Secret{validSecret},
+				ConfigMap:  emptyAllowlistConfigMap(),
 			},
 			repository: &v1alpha1.Repository{
 				TypeMeta: metav1.TypeMeta{},
@@ -204,6 +219,7 @@ func TestScopeTokenToListOfRepos(t *testing.T) {
 			tData: testclient.Data{
 				Namespaces: []*corev1.Namespace{testNamespace},
 				Secret:     []*corev1.Secret{validSecret},
+				ConfigMap:  emptyAllowlistConfigMap(),
 				Repositories: []*v1alpha1.Repository{
 					repoData, repoData1,
 				},
@@ -219,6 +235,7 @@ func TestScopeTokenToListOfRepos(t *testing.T) {
 			tData: testclient.Data{
 				Namespaces: []*corev1.Namespace{testNamespace},
 				Secret:     []*corev1.Secret{validSecret},
+				ConfigMap:  emptyAllowlistConfigMap(),
 				Repositories: []*v1alpha1.Repository{
 					repoData,
 				},
@@ -233,6 +250,7 @@ func TestScopeTokenToListOfRepos(t *testing.T) {
 			tData: testclient.Data{
 				Namespaces: []*corev1.Namespace{testNamespace},
 				Secret:     []*corev1.Secret{validSecret},
+				ConfigMap:  emptyAllowlistConfigMap(),
 				Repositories: []*v1alpha1.Repository{
 					repoData, repoData1,
 				},
@@ -244,10 +262,51 @@ func TestScopeTokenToListOfRepos(t *testing.T) {
 			repositoryID:          []int64{789, 10112, 112233},
 		},
 		{
+			name: "repos are read from the informer cache when a lister is configured",
+			tData: testclient.Data{
+				Namespaces: []*corev1.Namespace{testNamespace},
+				Secret:     []*corev1.Secret{validSecret},
+				ConfigMap:  emptyAllowlistConfigMap(),
+				Repositories: []*v1alpha1.Repository{
+					{
+						TypeMeta: metav1.TypeMeta{},
+						ObjectMeta: metav1.ObjectMeta{
+							Name:      "publicrepo-cache-test",
+							Namespace: testNamespace.Name,
+						},
+						Spec: v1alpha1.RepositorySpec{
+							URL: repoFromWhichEventComes,
+							Settings: &v1alpha1.Settings{
+								GithubAppTokenScopeRepos: []string{"owner2/*"},
+							},
+						},
+					},
+					repoData1,
+				},
+			},
+			repository: &v1alpha1.Repository{
+				TypeMeta: metav1.TypeMeta{},
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "publicrepo-cache-test",
+					Namespace: testNamespace.Name,
+				},
+				Spec: v1alpha1.RepositorySpec{
+					URL: repoFromWhichEventComes,
+					Settings: &v1alpha1.Settings{
+						GithubAppTokenScopeRepos: []string{"owner2/*"},
+					},
+				},
+			},
+			useCache:     true,
+			wantToken:    "123abcdfrf",
+			repositoryID: []int64{789, 112233},
+		},
+		{
 			name: "failed to scope GitHub token to a list of repositories provided by repo level as repo scoped key secret-github-app-token-scoped is enabled",
 			tData: testclient.Data{
 				Namespaces: []*corev1.Namespace{testNamespace},
 				Secret:     []*corev1.Secret{validSecret},
+				ConfigMap:  emptyAllowlistConfigMap(),
 				Repositories: []*v1alpha1.Repository{
 					repoData, repoData1,
 				},
@@ -263,6 +322,7 @@ func TestScopeTokenToListOfRepos(t *testing.T) {
 			tData: testclient.Data{
 				Namespaces: []*corev1.Namespace{testNamespace},
 				Secret:     []*corev1.Secret{validSecret},
+				ConfigMap:  emptyAllowlistConfigMap(),
 				Repositories: []*v1alpha1.Repository{
 					repoData, repoData1,
 				},
@@ -279,6 +339,7 @@ func TestScopeTokenToListOfRepos(t *testing.T) {
 			tData: testclient.Data{
 				Namespaces: []*corev1.Namespace{testNamespace},
 				Secret:     []*corev1.Secret{validSecret},
+				ConfigMap:  emptyAllowlistConfigMap(),
 				Repositories: []*v1alpha1.Repository{
 					repoDataGlobAndExact, repoData1, repoData2, repoData3,
 				},
@@ -294,6 +355,7 @@ func TestScopeTokenToListOfRepos(t *testing.T) {
 			tData: testclient.Data{
 				Namespaces: []*corev1.Namespace{testNamespace},
 				Secret:     []*corev1.Secret{validSecret},
+				ConfigMap:  emptyAllowlistConfigMap(),
 				Repositories: []*v1alpha1.Repository{
 					repoDataInvalidGlob, repoData1,
 				},
@@ -308,6 +370,7 @@ func TestScopeTokenToListOfRepos(t *testing.T) {
 			tData: testclient.Data{
 				Namespaces: []*corev1.Namespace{testNamespace},
 				Secret:     []*corev1.Secret{validSecret},
+				ConfigMap:  emptyAllowlistConfigMap(),
 				Repositories: []*v1alpha1.Repository{
 					repoDataGlobNoMatch, repoData1,
 				},
@@ -322,6 +385,7 @@ func TestScopeTokenToListOfRepos(t *testing.T) {
 			tData: testclient.Data{
 				Namespaces: []*corev1.Namespace{testNamespace},
 				Secret:     []*corev1.Secret{validSecret},
+				ConfigMap:  emptyAllowlistConfigMap(),
 			},
 			repository: &v1alpha1.Repository{
 				TypeMeta: metav1.TypeMeta{},
@@ -342,6 +406,7 @@ func TestScopeTokenToListOfRepos(t *testing.T) {
 			tData: testclient.Data{
 				Namespaces: []*corev1.Namespace{testNamespace},
 				Secret:     []*corev1.Secret{validSecret},
+				ConfigMap:  emptyAllowlistConfigMap(),
 				Repositories: []*v1alpha1.Repository{
 					repoData, repoDataMalformed,
 				},
@@ -368,6 +433,7 @@ func TestScopeTokenToListOfRepos(t *testing.T) {
 			tData: testclient.Data{
 				Namespaces: []*corev1.Namespace{testNamespace},
 				Secret:     []*corev1.Secret{validSecret},
+				ConfigMap:  emptyAllowlistConfigMap(),
 				Repositories: []*v1alpha1.Repository{
 					repoDataMalformedPattern, repoData1,
 				},
@@ -382,6 +448,7 @@ func TestScopeTokenToListOfRepos(t *testing.T) {
 			tData: testclient.Data{
 				Namespaces: []*corev1.Namespace{testNamespace},
 				Secret:     []*corev1.Secret{validSecret},
+				ConfigMap:  emptyAllowlistConfigMap(),
 			},
 			repository: &v1alpha1.Repository{
 				TypeMeta: metav1.TypeMeta{},
@@ -414,6 +481,13 @@ func TestScopeTokenToListOfRepos(t *testing.T) {
 						Secret: info.DefaultPipelinesAscodeSecretName,
 					},
 				},
+			}
+
+			if tt.useCache {
+				run.RepositoryLister = stdata.RepositoryLister
+				// Add a repo to the API that's not in the cache to validate cache is used.
+				_, err := stdata.PipelineAsCode.PipelinesascodeV1alpha1().Repositories(testNamespace.Name).Create(ctx, apiOnlyRepo, metav1.CreateOptions{})
+				assert.NilError(t, err)
 			}
 
 			pacInfo := &info.PacOpts{
@@ -451,7 +525,7 @@ func TestScopeTokenToListOfRepos(t *testing.T) {
 				pacInfo:  pacInfo,
 			}
 
-			extraRepoInstallIDs := map[string]string{"owner/repo": "789", "owner1/repo1": "10112", "owner2/repo2": "112233", "owner2/repo3": "445566"}
+			extraRepoInstallIDs := map[string]string{"owner/repo": "789", "owner1/repo1": "10112", "owner2/repo2": "112233", "owner2/repo3": "445566", "owner2/repo4": "999888"}
 			for v := range extraRepoInstallIDs {
 				split := strings.Split(v, "/")
 				mux.HandleFunc(fmt.Sprintf("/repos/%s/%s", split[0], split[1]), func(w http.ResponseWriter, _ *http.Request) {

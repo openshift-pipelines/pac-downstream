@@ -16,6 +16,7 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/opscomments"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
+	prgroup "github.com/openshift-pipelines/pipelines-as-code/pkg/pipelinerungroup"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
 	providerstatus "github.com/openshift-pipelines/pipelines-as-code/pkg/provider/status"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/resolve"
@@ -25,30 +26,30 @@ import (
 	"go.uber.org/zap"
 )
 
-func (p *PacRun) matchRepoPR(ctx context.Context) ([]matcher.Match, *v1alpha1.Repository, error) {
+func (p *PacRun) matchRepoPR(ctx context.Context) ([]matcher.Match, map[string]*tektonv1.PipelineRun, *v1alpha1.Repository, error) {
 	p.debugf("matchRepoPR: starting repo verification for url=%s", p.event.URL)
 	repo, err := p.verifyRepoAndUser(ctx)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, repo, err
 	}
 	if repo == nil {
 		p.debugf("matchRepoPR: no repository match for url=%s", p.event.URL)
-		return nil, nil, nil
+		return nil, nil, repo, nil
 	}
 
 	if p.event.CancelPipelineRuns {
 		p.debugf("matchRepoPR: cancel pipeline runs requested, skipping match")
-		return nil, repo, p.cancelPipelineRunsOpsComment(ctx, repo)
+		return nil, nil, repo, p.cancelPipelineRunsOpsComment(ctx, repo)
 	}
 
 	p.debugf("matchRepoPR: fetching pipelineruns from repo=%s/%s", repo.GetNamespace(), repo.GetName())
-	matchedPRs, err := p.getPipelineRunsFromRepo(ctx, repo)
+	matchedPRs, unmatchedPRs, err := p.getPipelineRunsFromRepo(ctx, repo)
 	if err != nil {
-		return nil, repo, err
+		return nil, nil, repo, err
 	}
 
 	p.debugf("matchRepoPR: matched=%d repo=%s/%s", len(matchedPRs), repo.GetNamespace(), repo.GetName())
-	return matchedPRs, repo, nil
+	return matchedPRs, unmatchedPRs, repo, nil
 }
 
 // verifyRepoAndUser verifies if the Repo CR exists for the Git Repository,
@@ -142,12 +143,18 @@ func (p *PacRun) verifyRepoAndUser(ctx context.Context) (*v1alpha1.Repository, e
 	return repo, nil
 }
 
-// getPipelineRunsFromRepo fetches pipelineruns from git repository and prepare them for creation.
-func (p *PacRun) getPipelineRunsFromRepo(ctx context.Context, repo *v1alpha1.Repository) ([]matcher.Match, error) {
-	provenance := "source"
+// pipelineRunProvenance returns where the .tekton directory is fetched from:
+// the repository setting, "source" by default.
+func pipelineRunProvenance(repo *v1alpha1.Repository) string {
 	if repo.Spec.Settings != nil && repo.Spec.Settings.PipelineRunProvenance != "" {
-		provenance = repo.Spec.Settings.PipelineRunProvenance
+		return repo.Spec.Settings.PipelineRunProvenance
 	}
+	return "source"
+}
+
+// getPipelineRunsFromRepo fetches pipelineruns from git repository and prepare them for creation.
+func (p *PacRun) getPipelineRunsFromRepo(ctx context.Context, repo *v1alpha1.Repository) ([]matcher.Match, map[string]*tektonv1.PipelineRun, error) {
+	provenance := pipelineRunProvenance(repo)
 	repositoryRevision := getRepositoryRevisionForProvenance(p.event, provenance)
 	p.debugf("getPipelineRunsFromRepo: repo=%s/%s provenance=%s", repo.GetNamespace(), repo.GetName(), provenance)
 	rawTemplates, err := p.vcx.GetTektonDir(ctx, p.event, tektonDir, provenance)
@@ -168,10 +175,10 @@ func (p *PacRun) getPipelineRunsFromRepo(ctx context.Context, repo *v1alpha1.Rep
 					},
 				},
 			)
-			return nil, nil
+			return nil, nil, nil
 		}
 
-		return nil, err
+		return nil, nil, err
 	}
 
 	if err != nil {
@@ -203,14 +210,24 @@ func (p *PacRun) getPipelineRunsFromRepo(ctx context.Context, repo *v1alpha1.Rep
 			msg = fmt.Sprintf("cannot locate templates in %s/ directory for this repository in %s", tektonDir, p.event.HeadBranch)
 		}
 		p.eventEmitter.EmitMessage(nil, logLevel, reason, msg)
-		return nil, nil
+		return nil, nil, nil
+	}
+
+	// A follow-up is resolved again by the watcher at creation, when the
+	// webhook payload is gone: template variables that only the payload can
+	// expand are rejected here rather than left unreplaced in the created run.
+	if p.pacInfo.EnableFollowUpRuns {
+		if validations := validateFollowUpTemplates(rawTemplates); len(validations) > 0 {
+			p.reportValidationErrors(ctx, repo, validations)
+			return nil, nil, nil
+		}
 	}
 
 	// check for condition if need update the pipelinerun with regexp from the
 	// "raw" pipelinerun string
 	if msg, needUpdate := p.checkNeedUpdate(rawTemplates); needUpdate {
 		p.eventEmitter.EmitMessage(repo, zap.InfoLevel, "RepositoryNeedUpdate", msg)
-		return nil, fmt.Errorf("%s", msg)
+		return nil, nil, fmt.Errorf("%s", msg)
 	}
 
 	// This is for bitbucket
@@ -232,19 +249,21 @@ func (p *PacRun) getPipelineRunsFromRepo(ctx context.Context, repo *v1alpha1.Rep
 	if p.event.TargetTestPipelineRun == "" {
 		rtypes, err := resolve.ReadTektonTypes(ctx, p.logger, rawTemplates)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		p.debugf("getPipelineRunsFromRepo: pre-parse types: pipelineruns=%d pipelines=%d tasks=%d", len(rtypes.PipelineRuns), len(rtypes.Pipelines), len(rtypes.Tasks))
 		// Don't fail or do anything if we don't have a match yet, we will do it properly later in this function
-		_, _ = matcher.MatchPipelinerunByAnnotation(ctx, p.logger, rtypes.PipelineRuns, p.run, p.event, p.vcx, p.eventEmitter, repo, false)
+		_, _, _ = matcher.MatchPipelinerunByAnnotation(ctx, p.logger, rtypes.PipelineRuns, p.run, p.event, p.vcx, p.eventEmitter, repo, false)
 	}
 	// Replace those {{var}} placeholders user has in her template to the run.Info variable
 	allTemplates := p.makeTemplate(ctx, repo, rawTemplates)
+	templatedEvent := *p.event
+	p.templatedEvent = &templatedEvent
 	p.debugf("getPipelineRunsFromRepo: templated data length=%d", len(allTemplates))
 
 	types, err := resolve.ReadTektonTypes(ctx, p.logger, allTemplates)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	p.debugf("getPipelineRunsFromRepo: parsed types: pipelineruns=%d pipelines=%d tasks=%d validation_errors=%d", len(types.PipelineRuns), len(types.Pipelines), len(types.Tasks), len(types.ValidationErrors))
 
@@ -255,7 +274,7 @@ func (p *PacRun) getPipelineRunsFromRepo(ctx context.Context, repo *v1alpha1.Rep
 	if len(pipelineRuns) == 0 {
 		msg := fmt.Sprintf("cannot locate valid templates in %s/ directory for this repository in %s", tektonDir, p.event.HeadBranch)
 		p.eventEmitter.EmitMessage(nil, zap.InfoLevel, "RepositoryCannotLocatePipelineRun", msg)
-		return nil, nil
+		return nil, nil, nil
 	}
 	p.debugf("getPipelineRunsFromRepo: pipelineRuns count=%d", len(pipelineRuns))
 	pipelineRuns, err = resolve.MetadataResolve(pipelineRuns)
@@ -264,26 +283,31 @@ func (p *PacRun) getPipelineRunsFromRepo(ctx context.Context, repo *v1alpha1.Rep
 		// reporting creates a comment, which triggers another webhook, which hits the same error.
 		if p.event.EventType == opscomments.NoOpsCommentEventType.String() {
 			p.logger.Infof("skipping MetadataResolve error for no-ops comment event: %s", err)
-			return nil, nil
+			return nil, nil, nil
 		}
 		p.eventEmitter.EmitMessage(repo, zap.ErrorLevel, "FailedToResolvePipelineRunMetadata", err.Error())
-		return nil, err
+		return nil, nil, err
 	}
 	p.debugf("getPipelineRunsFromRepo: metadata resolved for pipelineRuns count=%d", len(pipelineRuns))
+	// every definition of the .tekton directory, before the remote task
+	// resolution narrows the list down to the matched ones: the follow-up
+	// graph is validated over all of them
+	allDefinitions := pipelineRuns
 
 	// Match the PipelineRun with annotation
 	var matchedPRs []matcher.Match
+	var unmatchedPRs map[string]*tektonv1.PipelineRun
 	if p.event.TargetTestPipelineRun == "" {
-		if matchedPRs, err = matcher.MatchPipelinerunByAnnotation(ctx, p.logger, pipelineRuns, p.run, p.event, p.vcx, p.eventEmitter, repo, true); err != nil {
+		if matchedPRs, unmatchedPRs, err = matcher.MatchPipelinerunByAnnotation(ctx, p.logger, pipelineRuns, p.run, p.event, p.vcx, p.eventEmitter, repo, true); err != nil {
 			prefix := provider.GetGitOpsCommentPrefix(repo)
 			// Check if all pipelines have already succeeded - post comment so user gets feedback
 			if errors.Is(err, matcher.NoFailedPipelineToRetestError(prefix)) {
 				p.logger.Infof("RepositoryAllPipelinesSucceeded: %s", err.Error())
 				p.eventEmitter.EmitMessage(nil, zap.InfoLevel, "RepositoryAllPipelinesSucceeded", err.Error())
 				if commentErr := p.vcx.CreateComment(ctx, p.event, err.Error(), ""); commentErr != nil {
-					return nil, fmt.Errorf("error adding no pipelineruns to rerun comment: %w", commentErr)
+					return nil, nil, fmt.Errorf("error adding no pipelineruns to rerun comment: %w", commentErr)
 				}
-				return nil, nil
+				return nil, unmatchedPRs, nil
 			}
 			// Don't fail when you don't have a match between pipeline and annotations
 			p.eventEmitter.EmitMessage(nil, zap.WarnLevel, "RepositoryNoMatch", err.Error())
@@ -298,7 +322,7 @@ func (p *PacRun) getPipelineRunsFromRepo(ctx context.Context, repo *v1alpha1.Rep
 				}
 				p.eventEmitter.EmitMessage(nil, zap.InfoLevel, "RepositoryNoMatch", text)
 			}
-			return nil, nil
+			return nil, unmatchedPRs, nil
 		}
 		p.debugf("getPipelineRunsFromRepo: initial match count=%d", len(matchedPRs))
 	}
@@ -314,18 +338,37 @@ func (p *PacRun) getPipelineRunsFromRepo(ctx context.Context, repo *v1alpha1.Rep
 			AccessDenied: true,
 		}
 		if allowed, err := p.checkAccessOrError(ctx, repo, status, "by GitOps comment on push commit"); !allowed {
-			return nil, err
+			return nil, nil, err
 		}
 	}
 
 	// if event type is incoming then filter out the pipelineruns related to incoming event
+	beforeIncomingFilter := pipelineRuns
 	pipelineRuns = matcher.MatchRunningPipelineRunForIncomingWebhook(p.event.EventType, p.event.TargetPipelineRun, pipelineRuns)
 	if pipelineRuns == nil {
 		msg := fmt.Sprintf("cannot find pipelinerun %s for matching an incoming event in this repository", p.event.TargetPipelineRun)
 		p.eventEmitter.EmitMessage(repo, zap.InfoLevel, "RepositoryCannotLocatePipelineRunForIncomingEvent", msg)
-		return nil, nil
+		return nil, nil, nil
 	}
 	p.debugf("getPipelineRunsFromRepo: incoming filter result count=%d", len(pipelineRuns))
+	// An incoming webhook targeting a follow-up is rejected like a /test of
+	// it: a follow-up only runs after its dependencies of the same event.
+	if p.event.EventType == "incoming" && p.event.TargetPipelineRun != "" && len(pipelineRuns) == 1 {
+		if deps, err := prgroup.DepsOf(pipelineRuns[0]); err != nil || len(deps) > 0 {
+			msg := fmt.Sprintf("cannot run the pipelinerun %s from an incoming webhook: it is a follow-up (it has an %s annotation) and only runs after its dependencies of the same event",
+				p.event.TargetPipelineRun, apipac.OnPipelineRun)
+			p.eventEmitter.EmitMessage(repo, zap.InfoLevel, "RepositoryCannotRunFollowUpFromIncoming", msg)
+			// a broken on-pipelinerun is still a follow-up: not an event error
+			return nil, nil, nil //nolint:nilerr
+		}
+		// the follow-up definitions stay next to the target: they are never
+		// started at event time, the planning keeps the ones following it
+		for _, pr := range beforeIncomingFilter {
+			if _, followUp := pr.GetAnnotations()[apipac.OnPipelineRun]; followUp && pr != pipelineRuns[0] {
+				pipelineRuns = append(pipelineRuns, pr)
+			}
+		}
+	}
 
 	// if /test command is used then filter out the pipelinerun
 	if p.event.TargetTestPipelineRun != "" {
@@ -333,7 +376,7 @@ func (p *PacRun) getPipelineRunsFromRepo(ctx context.Context, repo *v1alpha1.Rep
 		if targetPR == nil {
 			msg := fmt.Sprintf("cannot find the targeted pipelinerun %s in this repository", p.event.TargetTestPipelineRun)
 			p.eventEmitter.EmitMessage(repo, zap.InfoLevel, "RepositoryCannotLocatePipelineRun", msg)
-			return nil, nil
+			return nil, nil, nil
 		}
 		pipelineRuns = []*tektonv1.PipelineRun{targetPR}
 		p.debugf("getPipelineRunsFromRepo: filtered to target pipelinerun=%s", p.event.TargetTestPipelineRun)
@@ -341,10 +384,18 @@ func (p *PacRun) getPipelineRunsFromRepo(ctx context.Context, repo *v1alpha1.Rep
 
 	// finally resolve with fetching the remote tasks (if enabled)
 	if p.pacInfo.RemoteTasks {
+		// the follow-ups are not resolved at event time: the watcher resolves
+		// them at creation, and a remote task only a follow-up references
+		// must not fail the event of its dependencies
+		var followUps []*tektonv1.PipelineRun
 		// only resolve on the matched pipelineruns if we don't do explicit /test of unmatched pipelineruns
 		if p.event.TargetTestPipelineRun == "" {
 			types.PipelineRuns = nil
 			for _, match := range matchedPRs {
+				if match.Config[matcher.ConfigFollowUp] == "true" {
+					followUps = append(followUps, match.PipelineRun)
+					continue
+				}
 				for pr := range pipelineRuns {
 					if match.PipelineRun.GetName() == "" && match.PipelineRun.GetGenerateName() == pipelineRuns[pr].GenerateName ||
 						match.PipelineRun.GetName() != "" && match.PipelineRun.GetName() == pipelineRuns[pr].Name {
@@ -361,13 +412,14 @@ func (p *PacRun) getPipelineRunsFromRepo(ctx context.Context, repo *v1alpha1.Rep
 		})
 		if err != nil {
 			p.eventEmitter.EmitMessage(repo, zap.ErrorLevel, "RepositoryFailedToMatch", fmt.Sprintf("failed to match pipelineRuns: %s", err.Error()))
-			return nil, err
+			return nil, nil, err
 		}
+		pipelineRuns = append(pipelineRuns, followUps...)
 	}
 
 	err = p.changePipelineRun(ctx, repo, pipelineRuns)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	p.debugf("getPipelineRunsFromRepo: updated pipelineRuns count=%d", len(pipelineRuns))
 	// if we are doing explicit /test command then we only want to run the one that has matched the /test
@@ -377,30 +429,54 @@ func (p *PacRun) getPipelineRunsFromRepo(ctx context.Context, repo *v1alpha1.Rep
 		if selectedPr == nil {
 			msg := fmt.Sprintf("cannot find the targeted pipelinerun %s in this repository", p.event.TargetTestPipelineRun)
 			p.eventEmitter.EmitMessage(repo, zap.InfoLevel, "RepositoryCannotLocatePipelineRun", msg)
-			return nil, nil
+			return nil, nil, nil
+		}
+		// A follow-up cannot be tested standalone: reject the /test.
+		if deps, err := prgroup.DepsOf(selectedPr); err != nil || len(deps) > 0 {
+			msg := fmt.Sprintf("cannot test the pipelinerun %s: it is a follow-up (it has an %s annotation) and only runs after its dependencies of the same event",
+				p.event.TargetTestPipelineRun, apipac.OnPipelineRun)
+			p.eventEmitter.EmitMessage(repo, zap.InfoLevel, "RepositoryCannotTestFollowUp", msg)
+			if err := p.vcx.CreateComment(ctx, p.event, msg, ""); err != nil {
+				p.eventEmitter.EmitMessage(repo, zap.ErrorLevel, "RepositoryCreateComment",
+					fmt.Sprintf("cannot create comment on /test of follow-up %s: %s", p.event.TargetTestPipelineRun, err.Error()))
+			}
+			return nil, nil, nil
 		}
 		selectedRepo := p.resolveTargetNamespaceRepo(ctx, repo, selectedPr)
 		if selectedRepo == nil {
 			msg := fmt.Sprintf("skipping pipelinerun %s: target-namespace repo not found", pipelineRunIdentifier(selectedPr))
 			p.eventEmitter.EmitMessage(repo, zap.InfoLevel, "RepositoryTargetNamespaceNotFound", msg)
-			return nil, nil
+			return nil, nil, nil
 		}
 		p.debugf("getPipelineRunsFromRepo: explicit /test using repo=%s/%s for pipelinerun=%s", selectedRepo.GetNamespace(), selectedRepo.GetName(), pipelineRunIdentifier(selectedPr))
 		return []matcher.Match{{
 			PipelineRun: selectedPr,
 			Repo:        selectedRepo,
-		}}, nil
+		}}, nil, nil
 	}
 
-	matchedPRs, err = matcher.MatchPipelinerunByAnnotation(ctx, p.logger, pipelineRuns, p.run, p.event, p.vcx, p.eventEmitter, repo, false)
+	// unmatchedPRs are filtered out above if RemoteTasks is enabled so we should also check if RemoteTasks is enabled then
+	// return unmatchedPRs from last call to MatchPipelinerunByAnnotation and if RemoteTasks is disabled then return unmatchedPRs from here
+	matchedPRs, unmatchedPRsNew, err := matcher.MatchPipelinerunByAnnotation(ctx, p.logger, pipelineRuns, p.run, p.event, p.vcx, p.eventEmitter, repo, false)
+	if !p.pacInfo.RemoteTasks {
+		unmatchedPRs = unmatchedPRsNew
+	}
 	if err != nil {
 		// Don't fail when you don't have a match between pipeline and annotations
 		p.eventEmitter.EmitMessage(nil, zap.WarnLevel, "RepositoryNoMatch", err.Error())
-		return nil, nil
+		return nil, unmatchedPRs, nil
 	}
 	p.debugf("getPipelineRunsFromRepo: final match count=%d", len(matchedPRs))
 
-	return matchedPRs, nil
+	// plan the follow-ups last: the plan needs the matched definitions and
+	// every other definition of the .tekton directory. A /retest drops the
+	// already-succeeded templates from both the matched and the unmatched
+	// lists, and a follow-up waiting on one must not be taken for a missing
+	// dependency.
+	matchedPRs = p.planFollowUps(ctx, repo, matchedPRs, unmatchedPRs, allDefinitions)
+	p.debugf("getPipelineRunsFromRepo: count after follow-up planning=%d", len(matchedPRs))
+
+	return matchedPRs, unmatchedPRs, nil
 }
 
 func getRepositoryRevisionForProvenance(event *info.Event, provenance string) string {
@@ -478,32 +554,41 @@ func (p *PacRun) changePipelineRun(ctx context.Context, repo *v1alpha1.Repositor
 		}
 		p.debugf("changePipelineRun: processing pipelinerun=%s", prName)
 
-		b, err := json.Marshal(pr)
+		np, err := withGitAuthSecret(pr, prName, func(s string) string { return p.makeTemplate(ctx, repo, s) })
 		if err != nil {
-			return fmt.Errorf("failed to marshal PipelineRun %s: %w", prName, err)
+			return err
 		}
-
-		name := secrets.GenerateBasicAuthSecretName()
-		processed := templates.ReplacePlaceHoldersVariables(string(b), map[string]string{
-			"git_auth_secret": name,
-		}, nil, nil, map[string]any{})
-		processed = p.makeTemplate(ctx, repo, processed)
-
-		var np *tektonv1.PipelineRun
-		err = json.Unmarshal([]byte(processed), &np)
-		if err != nil {
-			return fmt.Errorf("failed to unmarshal PipelineRun %s: %w", prName, err)
-		}
-		// don't crash when we don't have any annotations
-		if np.Annotations == nil {
-			np.Annotations = map[string]string{}
-		}
-		np.Annotations[apipac.GitAuthSecret] = name
-
 		prs[k] = np
 		p.debugf("changePipelineRun: updated pipelinerun=%s with git_auth_secret annotation", prName)
 	}
 	return nil
+}
+
+// withGitAuthSecret returns a copy of the PipelineRun with a freshly generated
+// git auth secret name: the {{ git_auth_secret }} placeholder expanded, the
+// remaining template variables expanded by template, and the annotation set.
+func withGitAuthSecret(pr *tektonv1.PipelineRun, prName string, template func(string) string) (*tektonv1.PipelineRun, error) {
+	b, err := json.Marshal(pr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal PipelineRun %s: %w", prName, err)
+	}
+
+	name := secrets.GenerateBasicAuthSecretName()
+	processed := templates.ReplacePlaceHoldersVariables(string(b), map[string]string{
+		"git_auth_secret": name,
+	}, nil, nil, map[string]any{})
+	processed = template(processed)
+
+	var np *tektonv1.PipelineRun
+	if err := json.Unmarshal([]byte(processed), &np); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal PipelineRun %s: %w", prName, err)
+	}
+	// don't crash when we don't have any annotations
+	if np.Annotations == nil {
+		np.Annotations = map[string]string{}
+	}
+	np.Annotations[apipac.GitAuthSecret] = name
+	return np, nil
 }
 
 // checkNeedUpdate checks if the template needs an update form the user, try to

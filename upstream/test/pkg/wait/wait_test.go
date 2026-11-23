@@ -72,6 +72,17 @@ func withState(pr *pipelinev1.PipelineRun, state string) *pipelinev1.PipelineRun
 	return pr
 }
 
+// withEventType sets the EventType annotation, as set on PipelineRuns
+// matched from different webhook deliveries (e.g. pull_request vs
+// pull_request_labeled) that can share the same SHA.
+func withEventType(pr *pipelinev1.PipelineRun, eventType string) *pipelinev1.PipelineRun {
+	if pr.Annotations == nil {
+		pr.Annotations = map[string]string{}
+	}
+	pr.Annotations[keys.EventType] = eventType
+	return pr
+}
+
 func seedAndMakeClients(ctx context.Context, t *testing.T, prs []*pipelinev1.PipelineRun) paramsclients.Clients {
 	t.Helper()
 	seeded, _ := testclient.SeedTestData(t, ctx, testclient.Data{
@@ -87,13 +98,14 @@ func seedAndMakeClients(ctx context.Context, t *testing.T, prs []*pipelinev1.Pip
 }
 
 type waitTestCase struct {
-	name         string
-	pipelineRuns []*pipelinev1.PipelineRun
-	targetSHA    []string
-	minStatus    int
-	wantErr      bool
-	wantCount    int
-	wantOrder    []string
+	name            string
+	pipelineRuns    []*pipelinev1.PipelineRun
+	targetSHA       []string
+	targetEventType string
+	minStatus       int
+	wantErr         bool
+	wantCount       int
+	wantOrder       []string
 }
 
 func runWaitTests(t *testing.T, tests []waitTestCase, waitFn func(context.Context, paramsclients.Clients, Opts) ([]pipelinev1.PipelineRun, error)) {
@@ -106,6 +118,7 @@ func runWaitTests(t *testing.T, tests []waitTestCase, waitFn func(context.Contex
 				Namespace:       "test-ns",
 				MinNumberStatus: tt.minStatus,
 				TargetSHA:       tt.targetSHA,
+				TargetEventType: tt.targetEventType,
 				PollTimeout:     10 * time.Millisecond,
 			}
 
@@ -265,6 +278,57 @@ func TestUntilPipelineRunsFinished(t *testing.T) {
 			wantCount: 1,
 			wantOrder: []string{"pr-1"},
 		},
+		{
+			// Two PipelineRuns can share the same SHA when different webhook
+			// deliveries both match an annotation (e.g. pull_request and
+			// pull_request_labeled both matching an on-label PipelineRun).
+			// Without TargetEventType, whichever finishes first satisfies
+			// minStatus and the labeled one is never waited for.
+			name: "target event type filters out same-sha pipelinerun with different event type",
+			pipelineRuns: []*pipelinev1.PipelineRun{
+				withEventType(withState(makePipelineRunWithStatus("pr-opened", "sha-1", "Succeeded", corev1.ConditionTrue, now, now.Add(2*time.Second)), kubeinteraction.StateCompleted), "pull_request"),
+				withEventType(withState(makePipelineRunWithStatus("pr-labeled", "sha-1", "Succeeded", corev1.ConditionTrue, now, now.Add(5*time.Second)), kubeinteraction.StateCompleted), "pull_request_labeled"),
+			},
+			targetSHA:       []string{"sha-1"},
+			targetEventType: "pull_request_labeled",
+			minStatus:       2,
+			wantCount:       1,
+			wantOrder:       []string{"pr-labeled"},
+		},
+		{
+			// MinNumberStatus counts all finished PipelineRuns cumulatively
+			// (e.g. two prior pull_request runs plus one gitops test-comment
+			// run), not just ones matching TargetEventType; only readiness
+			// additionally requires at least one target-event run to have
+			// finished, and only that subset is returned.
+			name: "target event type counts cumulative finished but returns only matching subset",
+			pipelineRuns: []*pipelinev1.PipelineRun{
+				withEventType(withState(makePipelineRunWithStatus("pr-1", "sha-1", "Succeeded", corev1.ConditionTrue, now, now.Add(1*time.Second)), kubeinteraction.StateCompleted), "pull_request"),
+				withEventType(withState(makePipelineRunWithStatus("pr-2", "sha-1", "Succeeded", corev1.ConditionTrue, now, now.Add(2*time.Second)), kubeinteraction.StateCompleted), "pull_request"),
+				withEventType(withState(makePipelineRunWithStatus("pr-3", "sha-1", "Succeeded", corev1.ConditionTrue, now, now.Add(3*time.Second)), kubeinteraction.StateCompleted), "test-comment"),
+			},
+			targetSHA:       []string{"sha-1"},
+			targetEventType: "test-comment",
+			minStatus:       3,
+			wantCount:       1,
+			wantOrder:       []string{"pr-3"},
+		},
+		{
+			// The unfinished PipelineRun already carries the target
+			// EventType annotation (as it would once the PaC controller
+			// matches and creates it, before the watcher marks it
+			// finished), so the wait must recognize it as the awaited run
+			// that hasn't finished yet, not just ignore it.
+			name: "target event type times out when only non matching event finished",
+			pipelineRuns: []*pipelinev1.PipelineRun{
+				withEventType(withState(makePipelineRunWithStatus("pr-opened", "sha-1", "Succeeded", corev1.ConditionTrue, now, now.Add(2*time.Second)), kubeinteraction.StateCompleted), "pull_request"),
+				withEventType(makePipelineRun("pr-labeled", "sha-1", ""), "pull_request_labeled"),
+			},
+			targetSHA:       []string{"sha-1"},
+			targetEventType: "pull_request_labeled",
+			minStatus:       1,
+			wantErr:         true,
+		},
 	}, UntilPipelineRunsFinished)
 }
 
@@ -275,7 +339,9 @@ func TestUntilPipelineRunHasReason(t *testing.T) {
 		targetSHA       []string
 		reason          string
 		minNumberStatus int
+		failOnOther     bool
 		wantErr         bool
+		errContains     string
 	}{
 		{
 			name: "match by target sha and reason",
@@ -333,6 +399,29 @@ func TestUntilPipelineRunHasReason(t *testing.T) {
 			minNumberStatus: 1,
 			wantErr:         true,
 		},
+		{
+			name: "fail fast when matching pipelinerun finished with another reason",
+			pipelineRuns: []*pipelinev1.PipelineRun{
+				makePipelineRunWithStatus("pr-1", "sha-2", "Succeeded", corev1.ConditionTrue, time.Now(), time.Now()),
+			},
+			targetSHA:       []string{"sha-2"},
+			reason:          "Cancelled",
+			minNumberStatus: 1,
+			failOnOther:     true,
+			wantErr:         true,
+			errContains:     `finished with reason "Succeeded" while waiting for "Cancelled"`,
+		},
+		{
+			name: "fail fast keeps waiting while pipelinerun is still running",
+			pipelineRuns: []*pipelinev1.PipelineRun{
+				makePipelineRunWithStatus("pr-1", "sha-2", "Running", corev1.ConditionUnknown, time.Now(), time.Time{}),
+			},
+			targetSHA:       []string{"sha-2"},
+			reason:          "Cancelled",
+			minNumberStatus: 1,
+			failOnOther:     true,
+			wantErr:         true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -344,12 +433,17 @@ func TestUntilPipelineRunHasReason(t *testing.T) {
 				MinNumberStatus: tt.minNumberStatus,
 				TargetSHA:       tt.targetSHA,
 				PollTimeout:     10 * time.Millisecond,
+
+				FailOnOtherTerminalReason: tt.failOnOther,
 			}
 
 			prs, err := UntilPipelineRunHasReason(ctx, clients, pipelinev1.PipelineRunReason(tt.reason), opts)
 			if tt.wantErr {
-				assert.Assert(t, err != nil)
-				assert.ErrorContains(t, err, "timed out")
+				errContains := tt.errContains
+				if errContains == "" {
+					errContains = "timed out"
+				}
+				assert.ErrorContains(t, err, errContains)
 				return
 			}
 

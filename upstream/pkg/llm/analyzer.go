@@ -18,6 +18,8 @@ import (
 	apis "knative.dev/pkg/apis"
 )
 
+var analysisRetryDelay = 2 * time.Second
+
 // AnalysisResult represents the result of an LLM analysis.
 type AnalysisResult struct {
 	Role     string
@@ -222,7 +224,6 @@ func analyze(
 		analysisStart := time.Now()
 
 		const maxRetries = 3
-		const retryDelay = 2 * time.Second
 
 		for attempt := 1; attempt <= maxRetries; attempt++ {
 			response, analysisErr = client.Analyze(ctx, analysisRequest)
@@ -237,7 +238,7 @@ func analyze(
 			).Warn("LLM analysis attempt failed")
 
 			if attempt < maxRetries {
-				timer := time.NewTimer(retryDelay)
+				timer := time.NewTimer(analysisRetryDelay)
 				select {
 				case <-timer.C:
 				case <-ctx.Done():

@@ -157,12 +157,45 @@ custom-console-url-pr-tasklog: "https://url/ns/{{ namespace }}/{{ pr }}/logs/{{ 
 
 {{< /param >}}
 
+{{< param name="custom-console-url-pr-steplog" type="string" id="param-custom-console-url-pr-steplog" >}}
+Defines the template URL for the logs of a single step, used by the step
+breakdown of the status report. The template must start with `http://` or
+`https://`. Supports variables: `{{ namespace }}`,
+`{{ pr }}`, `{{ task }}`, `{{ step }}`. When it is not set the step breakdown
+links to the task logs instead.
+
+```yaml
+custom-console-url-pr-steplog: "https://url/ns/{{ namespace }}/{{ pr }}/logs/{{ task }}/{{ step }}"
+```
+
+{{< /param >}}
+
 {{< param name="custom-console-url-namespace" type="string" id="param-custom-console-url-namespace" >}}
 Defines the template URL for namespace-level views in your custom console.
 Supports the `{{ namespace }}` variable.
 
 ```yaml
 custom-console-url-namespace: "https://url/ns/{{ namespace }}"
+```
+
+{{< /param >}}
+
+### Status Reporting
+
+{{< param name="status-show-steps" type="boolean" default="true" id="param-status-show-steps" >}}
+Controls whether the status reported back to the Git provider lists the steps
+of every task under the task itself. Each step links to its own logs on the
+console, which is useful when a task is built out of several StepActions and
+the task name alone does not say what ran.
+
+Steps that were skipped because an earlier step failed are left out, so a
+failing task shows the step that broke, and tasks that only have one step keep
+showing a single line. On GitHub, GitLab and Gitea the steps are nested in a
+collapsible block; the Bitbucket providers list them as extra rows because their
+comments do not render collapsible blocks.
+
+```yaml
+status-show-steps: "true"
 ```
 
 {{< /param >}}
@@ -312,6 +345,42 @@ auto-configure-repo-repository-template: "{{repo_owner}}-{{repo_name}}-repo-cr"
 
 ### Security and Authorization
 
+{{< param name="trusted-provider-hostnames" type="string" default="" id="param-trusted-provider-hostnames" >}}
+Comma-separated list of Git provider hostnames that Pipelines-as-Code is allowed to send credentials to.
+
+Pipelines-as-Code derives the provider API host it talks to from webhook data. This allowlist makes sure a crafted payload cannot redirect the controller, and its credentials, to a host an attacker controls.
+
+The key has two states:
+
+- **Controller managed** (the key is empty): the public hostnames `github.com`, `gitlab.com`, `bitbucket.org`, `gitea.com` and `codeberg.org` stay trusted, any other host is refused, and every request the provider itself authenticated adds its hostname to the `pipelinesascode.tekton.dev/auto-trusted-provider-hostnames` annotation. A default installation therefore needs no configuration, and a controller serving several instances learns all of them.
+- **Administrator configured** (the key is non-empty): the list is authoritative for every hostname, public ones included, and the controller stops learning hosts. Listing only `ghe.example.com` is how an administrator says "this controller must never talk to a public SaaS instance".
+
+The configuration key belongs only to administrators; the annotation belongs only to the controller. Keeping them separate makes the policy mode unambiguous even when both contain the same hostname.
+
+A hostname that is not routable on the public internet (loopback, link-local, a private range, or an in-cluster `.svc` name) is never recorded automatically, since a payload must not be able to point the controller at the cloud metadata endpoint or an internal service. List it explicitly to trust it.
+
+Paths that carry no provider signature, such as [incoming webhooks]({{< relref "/docs/advanced/incoming-webhooks.md" >}}), never record a hostname, so set this key explicitly on any self-hosted instance.
+
+A value holding only whitespace or separators counts as unset, so use a real
+hostname rather than a placeholder when you mean to configure the policy.
+
+Removing a hostname from a non-empty list immediately narrows the policy.
+Emptying the key returns to controller-managed mode, where previously learned
+hosts become effective again. To return to a clean managed policy, empty the key
+and delete the `pipelinesascode.tekton.dev/auto-trusted-provider-hostnames`
+annotation.
+
+Today the allowlist gates the GitHub provider; the other providers are being
+moved onto it.
+
+Each controller has its own ConfigMap and therefore its own allowlist.
+
+```yaml
+trusted-provider-hostnames: "ghe.example.com, gitlab.example.com"
+```
+
+{{< /param >}}
+
 {{< param name="remember-ok-to-test" type="boolean" default="false" id="param-remember-ok-to-test" >}}
 Controls whether Pipelines-as-Code remembers a previous `/ok-to-test` approval when new commits are pushed to a pull request. By default, users must issue `/ok-to-test` on each push. Set to `true` to persist the approval across push events.
 
@@ -330,6 +399,34 @@ require-ok-to-test-sha: "false"
 
 {{< /param >}}
 
+{{< tech_preview "Support for edited comments" >}}
+
+{{< param name="support-edited-comments" type="boolean" default="false" id="param-support-edited-comments" >}}
+
+Enables processing of edited comment events. When enabled, editing a comment that contains a GitOps command (such as `/test` or `/retest`) triggers the command as if it were a new comment. This is useful when you need to fix a typo in a command or change a PipelineRun name without posting a new comment.
+
+When disabled (the default), only newly created comments trigger PipelineRuns. Edited comments are ignored.
+
+Currently supported on GitHub only.
+
+```yaml
+support-edited-comments: "false"
+```
+
+{{< /param >}}
+
+{{< tech_preview "PipelineRun follow-ups" >}}
+
+{{< param name="enable-follow-up-runs" type="boolean" default="false" id="param-enable-follow-up-runs" >}}
+
+Enables the [PipelineRun follow-ups]({{< relref "/docs/guides/pipelinerun-followups" >}}), the `on-pipelinerun` annotation that chains PipelineRuns after their dependencies. When disabled (the default), the definitions carrying the annotation are left unmatched: they do not run, like definitions that do not match the event.
+
+```yaml
+enable-follow-up-runs: "false"
+```
+
+{{< /param >}}
+
 {{< param name="skip-push-event-for-pr-commits" type="boolean" default="true" id="param-skip-push-event-for-pr-commits" >}}
 Prevents duplicate PipelineRuns when a commit appears in both a push event and a pull request. When a push event arrives from a commit that belongs to an open pull request, Pipelines-as-Code skips the push event.
 
@@ -338,6 +435,80 @@ skip-push-event-for-pr-commits: "true"
 ```
 
 {{< /param >}}
+
+### API Retry
+
+{{< tech_preview "Provider API Retry for GitHub, GitLab, and Gitea/Forgejo" >}}
+
+{{< param name="enable-api-retry" type="boolean" default="false" id="param-enable-api-retry" >}}
+Enables retrying GitHub, GitLab, and Gitea/Forgejo API requests when Pipelines-as-Code
+encounters a temporary provider failure. This includes rate limits, temporary
+server errors, and selected network failures.
+
+Retries use backoff with jitter so multiple requests do not all retry at the
+same time. When the provider supplies a retry or reset time, Pipelines-as-Code
+uses that information as long as it does not exceed
+`api-retry-max-wait-seconds`.
+
+The setting is disabled by default. Enabling it affects API operations made
+while processing an event, including temporary clients and GitHub App setup.
+
+When disabled, the GitLab client keeps the retry behaviour built into the
+upstream GitLab Go client, the GitHub client performs no retries, and the
+Gitea/Forgejo client performs no retries except for a single specific transient
+error.
+
+Pipelines-as-Code only repeats an operation when it can do so safely. It does
+not repeat provider changes after an uncertain network or server failure when
+doing so could create duplicate comments, statuses, or other mutations.
+
+Independently of this setting, Pipelines-as-Code always retries a GitHub
+check-run update that returns a 404 when the check-run id comes from the
+annotation on a PipelineRun. Another reconcile may have created that check run
+moments earlier and GitHub can still report it as missing, so the update is
+retried a few times with a short backoff before the error is reported.
+
+```yaml
+enable-api-retry: "false"
+```
+
+{{< /param >}}
+
+{{< param name="api-retry-max-attempts" type="integer" default="4" id="param-api-retry-max-attempts" >}}
+Sets the maximum number of attempts when `enable-api-retry` is `true`. The
+initial request counts as the first attempt. For example, a value of `4`
+allows the initial request followed by up to three retries.
+
+```yaml
+api-retry-max-attempts: "4"
+```
+
+{{< /param >}}
+
+{{< param name="api-retry-max-wait-seconds" type="integer" default="120" id="param-api-retry-max-wait-seconds" >}}
+Sets the maximum time in seconds that Pipelines-as-Code waits between
+attempts. If a provider asks the client to wait longer than this value,
+Pipelines-as-Code stops retrying rather than holding the event for a long
+cooling period.
+
+```yaml
+api-retry-max-wait-seconds: "120"
+```
+
+{{< /param >}}
+
+#### Failure reporting and limitations
+
+If all attempts fail, Pipelines-as-Code reports the original provider error
+through its normal logs, events, and provider status handling. Reporting a
+failure status to GitHub or GitLab is best effort because a fully exhausted or
+unavailable provider API might also reject the status update.
+
+These settings are intended for short, temporary provider failures. They do
+not provide persistent queueing for long rate-limit windows and do not control
+how quickly a large backlog of PipelineRuns is admitted to the cluster.
+Long-duration queueing and workload admission should be handled separately at
+the pipeline or platform level.
 
 ## Complete Example
 

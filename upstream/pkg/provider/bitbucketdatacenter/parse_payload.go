@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/opscomments"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
@@ -111,25 +112,8 @@ func (v *Provider) ParsePayload(_ context.Context, _ *params.Run, request *http.
 			processedEvent.TriggerTarget = triggertype.PullRequest
 			processedEvent.EventType = triggertype.PullRequest.String()
 		} else if provider.Valid(eventType, []string{"pr:comment:added", "pr:comment:edited"}) {
-			switch {
-			case provider.IsTestRetestComment(e.Comment.Text):
-				processedEvent.TriggerTarget = triggertype.PullRequest
-				if strings.Contains(e.Comment.Text, "/test") {
-					processedEvent.EventType = "test-comment"
-				} else {
-					processedEvent.EventType = "retest-comment"
-				}
-				processedEvent.TargetTestPipelineRun = provider.GetPipelineRunFromTestComment(e.Comment.Text)
-			case provider.IsOkToTestComment(e.Comment.Text):
-				processedEvent.TriggerTarget = triggertype.PullRequest
-				processedEvent.EventType = "ok-to-test-comment"
-			case provider.IsCancelComment(e.Comment.Text):
-				processedEvent.TriggerTarget = triggertype.PullRequest
-				processedEvent.EventType = "cancel-comment"
-				processedEvent.CancelPipelineRuns = true
-				processedEvent.TargetCancelPipelineRun = provider.GetPipelineRunFromCancelComment(e.Comment.Text)
-			}
-			processedEvent.TriggerComment = e.Comment.Text
+			processedEvent.TriggerTarget = triggertype.PullRequest
+			opscomments.SetEventTypeAndTargetPR(processedEvent, e.Comment.Text, "/")
 		}
 
 		if err := checkValidPayload(e); err != nil {
@@ -210,8 +194,14 @@ func (v *Provider) ParsePayload(_ context.Context, _ *params.Run, request *http.
 	}
 
 	v.projectKey = processedEvent.Organization
+	processedEvent.BBDCProjectKey = processedEvent.Organization
 	processedEvent.Organization = sanitizeOwner(processedEvent.Organization)
 	processedEvent.URL = sanitizeEventURL(processedEvent.URL)
+
+	// Clone URL must share the repository's host before building git credentials.
+	if processedEvent.CloneURL != "" && !provider.CompareHostOfURLS(processedEvent.CloneURL, processedEvent.URL) {
+		return nil, fmt.Errorf("bitbucket clone URL %q does not match the host of repository URL %q", processedEvent.CloneURL, processedEvent.URL)
+	}
 
 	// TODO: is this the right way? I guess i have no way to know what is the
 	// baseURL of a bitbucket data center unless there is something in the API?

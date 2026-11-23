@@ -28,10 +28,13 @@ const (
 
 // MakeBasicAuthSecret Make a secret for git-clone basic-auth workspace.
 func MakeBasicAuthSecret(runevent *info.Event, secretName string) (*corev1.Secret, error) {
-	// Bitbucket Data Center have a different Clone URL than it's Repository URL, so we
-	// have to separate them
+	// Bitbucket Data Center has a different clone URL than its repository URL, so
+	// reuse the credential only when both share the same host.
 	cloneURL := runevent.URL
 	if runevent.CloneURL != "" {
+		if !provider.CompareHostOfURLS(runevent.CloneURL, runevent.URL) {
+			return nil, fmt.Errorf("clone URL %q does not match the host of repository URL %q", runevent.CloneURL, runevent.URL)
+		}
 		cloneURL = runevent.CloneURL
 	}
 
@@ -46,6 +49,9 @@ func MakeBasicAuthSecret(runevent *info.Event, secretName string) (*corev1.Secre
 	}
 	if strings.EqualFold(repoURL.Hostname(), "bitbucket.org") {
 		gitUser = bitbucketCloudGitUsername
+		if strings.HasPrefix(runevent.Provider.Token, "ATCT") {
+			gitUser = "x-token-auth"
+		}
 	}
 
 	// Bitbucket Data Center token have / into it, so unless we quote the URL them it's
